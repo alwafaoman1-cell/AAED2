@@ -1,0 +1,10 @@
+project_id = "rvnphafedylethmvqsyp"
+
+[functions.translate-strings]
+verify_jwt = true
+
+[functions.payment-webhook]
+verify_jwt = false
+
+[functions.supplement-public]
+verify_jwt = false

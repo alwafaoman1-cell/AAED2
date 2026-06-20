@@ -1,0 +1,1 @@
+ALTER VIEW public.vehicle_duplicates SET (security_invoker = on);

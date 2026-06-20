@@ -1,0 +1,187 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 20% 10%;
+    --foreground: 210 20% 92%;
+
+    --card: 222 18% 14%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 222 18% 14%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 42 90% 55%;
+    --primary-foreground: 222 20% 10%;
+
+    --secondary: 222 15% 20%;
+    --secondary-foreground: 210 20% 85%;
+
+    --muted: 222 15% 18%;
+    --muted-foreground: 215 15% 55%;
+
+    --accent: 42 70% 45%;
+    --accent-foreground: 222 20% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 70% 45%;
+    --success-foreground: 210 40% 98%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 20% 10%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 210 40% 98%;
+
+    --border: 222 15% 22%;
+    --input: 222 15% 22%;
+    --ring: 42 90% 55%;
+
+    --radius: 0.625rem;
+
+    --sidebar-background: 222 22% 8%;
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 42 90% 55%;
+    --sidebar-primary-foreground: 222 20% 10%;
+    --sidebar-accent: 222 15% 16%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 222 15% 18%;
+    --sidebar-ring: 42 90% 55%;
+
+    --gradient-gold: linear-gradient(135deg, hsl(42 90% 55%), hsl(38 85% 45%));
+    --gradient-card: linear-gradient(145deg, hsl(222 18% 16%), hsl(222 18% 12%));
+    --shadow-gold: 0 4px 20px -4px hsl(42 90% 55% / 0.2);
+    --shadow-card: 0 4px 24px -8px hsl(0 0% 0% / 0.4);
+  }
+
+  /* Light theme overrides — applied when <html class="light"> */
+  .light {
+    /* Soft warm off-white — easy on the eyes */
+    --background: 40 25% 96%;
+    --foreground: 222 25% 14%;
+
+    --card: 40 30% 99%;
+    --card-foreground: 222 25% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 25% 12%;
+
+    --primary: 42 90% 45%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 222 25% 18%;
+
+    --muted: 210 20% 94%;
+    --muted-foreground: 215 15% 40%;
+
+    --accent: 42 80% 92%;
+    --accent-foreground: 42 90% 25%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 70% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 45%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 199 89% 42%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 215 20% 88%;
+    --input: 215 20% 88%;
+    --ring: 42 90% 45%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 25% 18%;
+    --sidebar-primary: 42 90% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 20% 94%;
+    --sidebar-accent-foreground: 222 25% 18%;
+    --sidebar-border: 215 20% 88%;
+    --sidebar-ring: 42 90% 45%;
+
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(210 20% 96%));
+    --shadow-card: 0 4px 24px -8px hsl(222 25% 12% / 0.08);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    direction: rtl;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Segoe UI', 'SF Pro Display', 'Noto Sans Arabic', system-ui, sans-serif;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer utilities {
+  .gradient-gold {
+    background: var(--gradient-gold);
+  }
+  .gradient-card {
+    background: var(--gradient-card);
+  }
+  .shadow-gold {
+    box-shadow: var(--shadow-gold);
+  }
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  .text-gradient-gold {
+    background: var(--gradient-gold);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Safe-area padding for installed PWA / iOS notch / Android status bar */
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top), 0.5rem);
+  }
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 0rem);
+  }
+
+  /* إخفاء الأرقام الحسابية: يُفعَّل بإضافة class "hide-amounts" على html */
+  html.hide-amounts [data-amount],
+  html.hide-amounts .amount-value,
+  html.hide-amounts .tabular-nums {
+    filter: blur(7px);
+    user-select: none;
+    transition: filter 0.15s ease;
+  }
+  html.hide-amounts [data-amount]:hover,
+  html.hide-amounts .amount-value:hover {
+    filter: blur(0);
+  }
+}
+

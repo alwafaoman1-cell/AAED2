@@ -1,0 +1,1 @@
+ALTER TABLE public.insurance_estimates ADD COLUMN IF NOT EXISTS terms_text text;

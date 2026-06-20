@@ -1,0 +1,1 @@
+ALTER TABLE public.insurance_companies ADD COLUMN IF NOT EXISTS logo_url text;

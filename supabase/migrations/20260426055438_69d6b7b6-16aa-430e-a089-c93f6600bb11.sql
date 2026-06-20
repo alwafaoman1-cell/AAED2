@@ -1,0 +1,1 @@
+ALTER TABLE public.insurance_claims ALTER COLUMN vehicle_id DROP NOT NULL;
