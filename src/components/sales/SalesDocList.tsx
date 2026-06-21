@@ -48,7 +48,9 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
 
   useEffect(() => {
     const unsub = salesStore.subscribe(() => force((x) => x + 1));
-    return () => { unsub; };
+    return () => {
+      unsub();
+    };
   }, []);
 
   function exportCsv() {

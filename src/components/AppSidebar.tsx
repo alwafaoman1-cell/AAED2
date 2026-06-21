@@ -7,7 +7,7 @@ import {
   Car, Trash2, UserSquare, ChevronDown, MinusCircle, ReceiptText, Wallet, History, Database,
   FileText, Building2, DollarSign, RotateCcw, BarChart3, ArrowDownUp, FileBarChart, Wrench,
   UserCog, LogOut, Palette, Plus, Tags, KanbanSquare, Bell, List, FileSpreadsheet,
-  Smartphone, Download, Power, Key, Sparkles,
+  Smartphone, Download, Power, Key,
 } from "lucide-react";
 import { getModulesSettings, subscribeModulesSettings, type ModulesSettings } from "@/lib/modulesStore";
 import logo from "@/assets/logo.png";
@@ -34,7 +34,6 @@ const menuItems: MenuItem[] = [
   { path: "/customers", labelKey: "nav.customers", icon: UserSquare },
   { path: "/messages", labelKey: "nav.messages", icon: Bell },
   { path: "/admin/notifications", labelKey: "إشعارات المدير", icon: Bell, iconClass: "text-red-400" },
-  { path: "/admin/versions", labelKey: "تحديثات النظام", icon: Sparkles, iconClass: "text-emerald-400" },
   { path: "/inspection", labelKey: "nav.inspection", icon: Search },
   {
     path: "/insurance",
@@ -104,7 +103,6 @@ const menuItems: MenuItem[] = [
     icon: Settings,
     children: [
       { path: "/settings/modules", labelKey: "التطبيقات والوحدات", icon: Power },
-      { path: "/settings/template-update", labelKey: "تحديث القالب والتصميم", icon: Palette },
       { path: "/settings/print-templates", labelKey: "nav.printTemplates", icon: Palette },
       { path: "/settings/roles-permissions", labelKey: "nav.rolesPermissions", icon: Shield },
       { path: "/settings/quick-actions", labelKey: "nav.quickActionsSettings", icon: Plus },

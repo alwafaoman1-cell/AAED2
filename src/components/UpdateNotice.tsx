@@ -93,16 +93,6 @@ export default function UpdateNotice() {
     };
   }, [latest, now]);
 
-  // Auto-force apply when mandatory grace expires
-  useEffect(() => {
-    if (!latest?.mandatory || !graceInfo?.expired) return;
-    if (hasUnsavedWork()) {
-      toast.warning("انتهت مهلة التحديث الإجباري — يرجى حفظ عملك فوراً.");
-      return;
-    }
-    applyUpdateNow();
-  }, [latest?.id, graceInfo?.expired]);
-
   if (!latest) return null;
 
   async function handleUpdate(force = false) {
@@ -202,7 +192,7 @@ export default function UpdateNotice() {
                 <div className="text-xs">
                   <div className="font-medium text-destructive">تحديث إجباري</div>
                   <div className="text-muted-foreground mt-0.5">
-                    سيتم التحديث تلقائياً خلال: <span className="font-mono">{graceInfo.label}</span> — احفظ عملك الآن.
+                    تنتهي مهلة التحديث خلال: <span className="font-mono">{graceInfo.label}</span> — احفظ عملك ثم طبّق التحديث يدوياً.
                   </div>
                 </div>
               </div>

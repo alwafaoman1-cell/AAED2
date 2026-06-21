@@ -288,10 +288,10 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
                       navigate(`/insurance/${data.id}`);
                     } else {
                       toast.info("افتح المطالبة من قائمة التأمين لإصدار الفاتورة الضريبية");
-                      navigate("/insurance/claims");
+                      navigate("/insurance/list");
                     }
                   } catch {
-                    navigate("/insurance/claims");
+                    navigate("/insurance/list");
                   }
                 }}
                 variant="default"

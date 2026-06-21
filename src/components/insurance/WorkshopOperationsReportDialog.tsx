@@ -9,6 +9,7 @@ import { computeDays } from "@/lib/claimDurationStatus";
 import { useClaimPayments } from "@/hooks/useClaimPayments";
 import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
 import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
+import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "بانتظار الاعتماد",
@@ -74,6 +75,8 @@ interface Props {
 }
 
 export default function WorkshopOperationsReportDialog({ open, onOpenChange, claims, filterLabel }: Props) {
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [selected, setSelected] = useState<Record<FieldKey, boolean>>(
     () => Object.fromEntries(ALL_FIELDS.map((f) => [f.key, f.default])) as Record<FieldKey, boolean>,
   );
@@ -145,8 +148,10 @@ export default function WorkshopOperationsReportDialog({ open, onOpenChange, cla
     }).join("");
     return `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
-  @page { size: A4 landscape; margin: 10mm; }
+  @page { size: A4 landscape; margin: 0; }
+  html, body { margin:0; padding:0; background:#fff; }
   body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; color:#111; }
+  .page { width:297mm; min-height:210mm; box-sizing:border-box; background:#fff; }
   h1 { font-size: 16pt; margin: 0 0 4px; }
   .meta { font-size: 9pt; color:#555; margin-bottom: 10px; display:flex; justify-content:space-between; }
   table { width: 100%; border-collapse: collapse; font-size: 9pt; }
@@ -155,19 +160,16 @@ export default function WorkshopOperationsReportDialog({ open, onOpenChange, cla
   .num { width: 28px; text-align:center; color:#666; }
   tr:nth-child(even) td { background: #fafafa; }
   tfoot td { background:#f8fafc; font-weight:600; }
-</style></head><body>
+</style></head><body><div class="page">
 <h1>${escapeHtml(title)}</h1>
 <div class="meta"><div>الفلتر: ${escapeHtml(filterLabel)}</div><div>عدد السجلات: ${escapeHtml(toEnglishDigits(String(claims.length)))} · ${escapeHtml(now)}</div></div>
 <table><thead><tr><th class="num">#</th>${head}</tr></thead><tbody>${rows}</tbody></table>
-<script>window.onload=()=>setTimeout(()=>window.print(),200);</script>
-</body></html>`;
+</div></body></html>`;
   }
 
-  function openHtmlWindow() {
-    const w = window.open("", "_blank", "noopener,noreferrer");
-    if (!w) return;
-    w.document.write(buildHtml());
-    w.document.close();
+  function openPreview() {
+    setPreviewHtml(buildHtml());
+    setPreviewOpen(true);
   }
 
 
@@ -182,8 +184,9 @@ export default function WorkshopOperationsReportDialog({ open, onOpenChange, cla
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl" dir="rtl">
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-2xl" dir="rtl">
         <DialogHeader>
           <DialogTitle>تقرير عمليات الورشة</DialogTitle>
           <DialogDescription>
@@ -213,7 +216,7 @@ export default function WorkshopOperationsReportDialog({ open, onOpenChange, cla
         </div>
 
         <DialogFooter className="flex-row-reverse gap-2">
-          <Button onClick={openHtmlWindow} disabled={activeFields.length === 0} className="gap-2">
+          <Button onClick={openPreview} disabled={activeFields.length === 0} className="gap-2">
             <Printer size={16} /> طباعة / PDF
           </Button>
           <Button variant="outline" onClick={exportExcel} disabled={activeFields.length === 0} className="gap-2">
@@ -223,7 +226,16 @@ export default function WorkshopOperationsReportDialog({ open, onOpenChange, cla
             <FileDown size={16} className="opacity-0" /> إغلاق
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <PdfPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        htmlContent={previewHtml}
+        title="تقرير عمليات الورشة"
+        fileName={`workshop-operations-${new Date().toISOString().slice(0, 10)}`}
+      />
+    </>
   );
 }

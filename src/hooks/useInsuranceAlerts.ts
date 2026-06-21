@@ -6,7 +6,7 @@ import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
 export interface InsuranceAlert {
   id: string;
   severity: "critical" | "warning" | "info";
-  type: "lpo_overdue" | "policy_expiring" | "cheque_due" | "invoice_overdue" | "stale_pending" | "unpaid_approved";
+  type: "delivered_without_invoice" | "policy_expiring" | "cheque_due" | "invoice_overdue" | "stale_pending" | "unpaid_approved";
   title: string;
   description: string;
   href?: string;
@@ -42,18 +42,18 @@ export function useInsuranceAlerts() {
       }
     }
 
-    // 2) Approved but no invoice issued (LPO/invoice missing)
+    // 2) Delivered vehicle but no invoice issued
     for (const c of claims) {
-      if (c.status === "approved") {
+      if (c.delivered_at && c.status !== "paid" && c.status !== "cancelled" && c.status !== "rejected") {
         const invoice = invoices.find((i) => i.claim_id === c.id);
         if (!invoice) {
-          const age = daysBetween(now, new Date(c.approved_at || c.created_at));
-          if (age >= 3) {
+          const age = daysBetween(now, new Date(c.delivered_at));
+          if (age >= 1) {
             alerts.push({
-              id: `lpo-${c.id}`,
-              severity: age >= 10 ? "critical" : "warning",
-              type: "lpo_overdue",
-              title: "مطالبة معتمدة بدون فاتورة/LPO",
+              id: `delivered-no-invoice-${c.id}`,
+              severity: age >= 7 ? "critical" : "warning",
+              type: "delivered_without_invoice",
+              title: "مطالبة مسلّمة بدون فاتورة",
               description: `${c.claim_number} منذ ${age} يوم — ${c.insurance_company}`,
               href: `/insurance/${c.id}`,
             });

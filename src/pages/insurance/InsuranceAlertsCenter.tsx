@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { useInsuranceAlerts, type InsuranceAlert } from "@/hooks/useInsuranceAlerts";
 
 const typeIcons: Record<InsuranceAlert["type"], typeof Bell> = {
-  lpo_overdue: FileWarning,
+  delivered_without_invoice: FileWarning,
   policy_expiring: ShieldAlert,
   cheque_due: Banknote,
   invoice_overdue: AlertTriangle,

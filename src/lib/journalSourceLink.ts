@@ -12,11 +12,11 @@ export function getJournalSourceRoute(source: JournalSource, sourceId: string): 
     case "expense":
       return `/accounting`; // قائمة المصاريف (تبويب نظرة عامة)
     case "purchase_invoice":
-      return `/purchases/invoices`;
+      return `/inventory/purchase-invoices`;
     case "supplier_payment":
-      return `/purchases/payments`;
+      return `/inventory/supplier-payments`;
     case "purchase_return":
-      return `/purchases/returns`;
+      return `/inventory/purchase-returns`;
     case "insurance_claim":
       return `/insurance/${encodeURIComponent(sourceId)}`;
     case "insurance_payment":

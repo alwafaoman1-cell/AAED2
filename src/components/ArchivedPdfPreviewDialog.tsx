@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Download, ExternalLink, X, Loader2, AlertTriangle, FileText, MessageCircle } from "lucide-react";
+import { Download, ExternalLink, X, Loader2, AlertTriangle, FileText, MessageCircle, Printer } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { openWhatsAppShareLink } from "@/lib/whatsappShare";
 
@@ -80,6 +80,30 @@ export default function ArchivedPdfPreviewDialog({ open, onOpenChange, url, file
     window.open(blobUrl || url, "_blank", "noopener,noreferrer");
   };
 
+  const handlePrint = () => {
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.position = "fixed";
+    frame.style.width = "0";
+    frame.style.height = "0";
+    frame.style.border = "0";
+    frame.style.right = "0";
+    frame.style.bottom = "0";
+    frame.onload = () => {
+      setTimeout(() => {
+        try {
+          frame.contentWindow?.focus();
+          frame.contentWindow?.print();
+        } catch {
+          handleOpenInNewTab();
+        }
+      }, 250);
+    };
+    frame.src = blobUrl || url;
+    document.body.appendChild(frame);
+    setTimeout(() => frame.remove(), 60_000);
+  };
+
   const embedUrl = blobUrl
     ? (isPdf ? `${blobUrl}#toolbar=1&navpanes=0&view=FitH` : blobUrl)
     : "";
@@ -115,6 +139,10 @@ export default function ArchivedPdfPreviewDialog({ open, onOpenChange, url, file
                 فتح في تبويب
               </Button>
             )}
+            <Button size="sm" variant="outline" onClick={handlePrint} disabled={loading || !blobUrl}>
+              <Printer size={14} className="ml-1" />
+              طباعة
+            </Button>
             <Button size="sm" onClick={handleDownload} disabled={loading}>
               <Download size={14} className="ml-1" />
               تنزيل

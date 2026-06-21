@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Search, Download, Eye, Trash2, CheckCircle, Clock, XCircle, DollarSign, Ban, FileText, Zap, AlertTriangle, Columns, Settings2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,13 @@ import WorkshopOperationsReportDialog from "@/components/insurance/WorkshopOpera
 import BulkClaimsActionsMenu from "@/components/insurance/BulkClaimsActionsMenu";
 import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
 import { computeDays, durationLevel, durationBadgeClass } from "@/lib/claimDurationStatus";
+import {
+  claimVehicleLocationClass,
+  claimVehicleLocationLabels,
+  getClaimVehicleLocation,
+  isActiveClaim,
+} from "@/lib/claimVehicleLocation";
+import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/15 text-warning border-warning/30",
@@ -45,21 +52,24 @@ const QUICK_TEMPLATES = [
 
 export default function InsuranceClaimsList() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: claims = [], isLoading } = useInsuranceClaims();
   const deleteClaim = useDeleteClaim();
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => searchParams.get("q") || "");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<string>("all"); // all, 7d, 30d, 90d
   const [statusClaim, setStatusClaim] = useState<InsuranceClaim | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   // الافتراضي: المركبات قيد العمل داخل الورشة (وصلت فعلياً)
-  const [deliveryFilter, setDeliveryFilter] = useState<string>("all");
+  const [deliveryFilter, setDeliveryFilter] = useState<string>(() => searchParams.get("location") || "active");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePersistedState<number>("insurance_claims_page_size", 20);
   const [reportOpen, setReportOpen] = useState(false);
   const [visibleCols, setVisibleCols] = usePersistedState<Record<string, boolean>>("insurance_claims_columns_v2", {
     number: true, vehicle: true, customer: true, insurance_company: true,
-    estimated: true, approved: true, duration: true, status: true,
+    estimated: true, approved: true, duration: true, location: true, status: true,
     created_at: false, estimate_date: false, payment_status: false,
   });
   const toggleCol = (key: string) => setVisibleCols((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -85,17 +95,12 @@ export default function InsuranceClaimsList() {
     const now = Date.now();
     const ranges: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
     return claims.filter((c) => {
-      const arrival = (c as any).workshop_arrival_date;
-      const hasArrival = !!arrival;
-      const isDelivered = !!(c as any).delivered_at;
-      const isCancelled = c.status === "cancelled" || c.status === "rejected";
+      const location = getClaimVehicleLocation(c);
       if (statusFilter !== "all" && c.status !== statusFilter) return false;
       if (companyFilter !== "all" && c.insurance_company !== companyFilter) return false;
       // فلتر حالة الورشة (الافتراضي = قيد العمل = نشطة ولم تُسلَّم ولم تُلغَ)
-      if (deliveryFilter === "in_workshop" && (isDelivered || isCancelled)) return false;
-      if (deliveryFilter === "awaiting_arrival" && (hasArrival || isDelivered || isCancelled)) return false;
-      if (deliveryFilter === "delivered" && !isDelivered) return false;
-      if (deliveryFilter === "cancelled" && !isCancelled) return false;
+      if (deliveryFilter === "active" && !isActiveClaim(c)) return false;
+      if (deliveryFilter !== "all" && deliveryFilter !== "active" && location !== deliveryFilter) return false;
       // "all" → بدون فلتر
       if (dateRange !== "all" && ranges[dateRange]) {
         const age = (now - new Date(c.created_at).getTime()) / 86400000;
@@ -142,12 +147,28 @@ export default function InsuranceClaimsList() {
     return arr;
   }, [filtered, sortBy, sortDir]);
 
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const paginated = useMemo(
+    () => sorted.slice((page - 1) * pageSize, page * pageSize),
+    [sorted, page, pageSize],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, companyFilter, dateRange, deliveryFilter, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   const deliveryFilterLabel = useMemo(() => {
     const map: Record<string, string> = {
-      in_workshop: "قيد العمل داخل الورشة",
-      awaiting_arrival: "بانتظار وصول الورشة",
+      active: "المطالبات النشطة",
+      in_workshop: "وصلت إلى الورشة",
+      with_customer: "مع العميل",
       delivered: "تم التسليم",
-      cancelled: "ملغية",
+      paid_archive: "أرشيف المدفوع",
+      cancelled: "ملغاة / مرفوضة",
       all: "جميع المطالبات",
     };
     const parts = [map[deliveryFilter] || "جميع المطالبات"];
@@ -253,6 +274,7 @@ export default function InsuranceClaimsList() {
               <DropdownMenuCheckboxItem checked={visibleCols.estimated} onCheckedChange={() => toggleCol("estimated")}>المبلغ المقدر</DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem checked={visibleCols.approved} onCheckedChange={() => toggleCol("approved")}>المبلغ المعتمد</DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem checked={visibleCols.duration} onCheckedChange={() => toggleCol("duration")}>المدة</DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem checked={visibleCols.location} onCheckedChange={() => toggleCol("location")}>موقع المركبة</DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem checked={visibleCols.status} onCheckedChange={() => toggleCol("status")}>الحالة</DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem checked={visibleCols.created_at} onCheckedChange={() => toggleCol("created_at")}>تاريخ الإنشاء</DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem checked={visibleCols.estimate_date} onCheckedChange={() => toggleCol("estimate_date")}>تاريخ التقدير</DropdownMenuCheckboxItem>
@@ -299,10 +321,12 @@ export default function InsuranceClaimsList() {
           <Select value={deliveryFilter} onValueChange={setDeliveryFilter}>
             <SelectTrigger className="md:w-52"><SelectValue placeholder="حالة الورشة" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="in_workshop">قيد العمل داخل الورشة</SelectItem>
-              <SelectItem value="awaiting_arrival">بانتظار وصول الورشة</SelectItem>
+              <SelectItem value="active">المطالبات النشطة</SelectItem>
+              <SelectItem value="with_customer">مع العميل</SelectItem>
+              <SelectItem value="in_workshop">وصلت إلى الورشة</SelectItem>
               <SelectItem value="delivered">تم التسليم</SelectItem>
-              <SelectItem value="cancelled">ملغية</SelectItem>
+              <SelectItem value="paid_archive">أرشيف المدفوع</SelectItem>
+              <SelectItem value="cancelled">ملغاة / مرفوضة</SelectItem>
               <SelectItem value="all">جميع المطالبات</SelectItem>
             </SelectContent>
           </Select>
@@ -338,10 +362,10 @@ export default function InsuranceClaimsList() {
           <>
             {/* Mobile cards */}
             <div className="md:hidden divide-y divide-border">
-              {sorted.map((c) => {
+              {paginated.map((c) => {
                 const StatusIcon = statusIcons[c.status] || Clock;
-                const isDeliveredMobile = !!(c as any).delivered_at;
-                const noArrivalMobile = !(c as any).workshop_arrival_date;
+                const location = getClaimVehicleLocation(c);
+                const isDeliveredMobile = location === "delivered";
                 return (
                   <button key={c.id} onClick={() => navigate(`/insurance/${c.id}`)} className={`w-full p-3 text-right transition ${isDeliveredMobile ? "bg-emerald-50/70 hover:bg-emerald-100/70 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 border-r-4 border-r-emerald-500" : "hover:bg-secondary/40"}`}>
                     <div className="flex items-center justify-between mb-1.5">
@@ -362,11 +386,9 @@ export default function InsuranceClaimsList() {
                     </div>
                     <div className="flex items-center gap-1.5 mt-1.5">
                       <span className="text-xs font-mono" dir="ltr" data-amount="true">{toEnglishDigits(Number(c.estimated_amount).toLocaleString("en-US"))} OMR</span>
-                      {noArrivalMobile && (
-                        <Badge className="bg-destructive/15 text-destructive border-destructive/30 text-[10px] gap-1">
-                          <AlertTriangle size={10} /> لم يصل للورشة
-                        </Badge>
-                      )}
+                      <Badge className={`${claimVehicleLocationClass(location)} border text-[10px] gap-1`}>
+                        <AlertTriangle size={10} /> {claimVehicleLocationLabels[location]}
+                      </Badge>
                     </div>
                   </button>
                 );
@@ -386,6 +408,7 @@ export default function InsuranceClaimsList() {
                     {visibleCols.estimated && <th className="text-right py-3 px-4 text-xs font-medium text-muted-foreground">المقدر</th>}
                     {visibleCols.approved && <th className="text-right py-3 px-4 text-xs font-medium text-muted-foreground">المعتمد</th>}
                     {visibleCols.duration && <th className="text-right py-3 px-4 text-xs font-medium text-muted-foreground cursor-pointer select-none" onClick={() => toggleSort("duration")}>المدة <SortIcon k="duration" /></th>}
+                    {visibleCols.location && <th className="text-right py-3 px-4 text-xs font-medium text-muted-foreground">موقع المركبة</th>}
                     {visibleCols.status && <th className="text-right py-3 px-4 text-xs font-medium text-muted-foreground">الحالة</th>}
                     {visibleCols.created_at && <th className="text-right py-3 px-4 text-xs font-medium text-muted-foreground cursor-pointer select-none" onClick={() => toggleSort("created_at")}>تاريخ الإنشاء <SortIcon k="created_at" /></th>}
                     {visibleCols.estimate_date && <th className="text-right py-3 px-4 text-xs font-medium text-muted-foreground cursor-pointer select-none" onClick={() => toggleSort("estimate_date")}>تاريخ التقدير <SortIcon k="estimate_date" /></th>}
@@ -394,14 +417,15 @@ export default function InsuranceClaimsList() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map((c) => {
+                  {paginated.map((c) => {
                     const StatusIcon = statusIcons[c.status] || Clock;
                     const make = (c as any).vehicle_make ?? c.vehicle?.brand ?? "";
                     const model = (c as any).vehicle_model ?? c.vehicle?.model ?? "";
                     const plate = (c as any).vehicle_plate ?? c.vehicle?.plate_number ?? "";
                     const stop = (e: React.MouseEvent) => e.stopPropagation();
-                    const isDelivered = !!(c as any).delivered_at;
-                    const noArrival = !(c as any).workshop_arrival_date;
+                    const location = getClaimVehicleLocation(c);
+                    const isDelivered = location === "delivered";
+                    const noArrival = location === "with_customer";
                     return (
                       <tr
                         key={c.id}
@@ -441,6 +465,13 @@ export default function InsuranceClaimsList() {
                                 </span>
                               );
                             })()}
+                          </td>
+                        )}
+                        {visibleCols.location && (
+                          <td className="py-3 px-4">
+                            <Badge className={`${claimVehicleLocationClass(location)} border text-[10px]`}>
+                              {claimVehicleLocationLabels[location]}
+                            </Badge>
                           </td>
                         )}
                         {visibleCols.status && (
@@ -495,6 +526,13 @@ export default function InsuranceClaimsList() {
                 </tbody>
               </table>
             </div>
+            <TablePaginationControls
+              page={page}
+              pageSize={pageSize}
+              totalItems={sorted.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
           </>
         )}
       </div>

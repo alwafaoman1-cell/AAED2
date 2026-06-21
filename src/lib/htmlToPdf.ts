@@ -1,15 +1,16 @@
 // Unified HTML → PDF engine for Alwafa Pro (ERP-grade output).
 // Pipeline: render HTML inside an off-screen A4 iframe → html2canvas → jsPDF.
-// Guarantees:
-//   • Output A4 (210×297mm) matches print preview 1:1 (same .page wrapper).
-//   • Long content auto-splits across pages on whitespace rows (no text/table cuts).
-//   • Repeating running header / footer + vector page numbers + generation timestamp.
+// Shared behavior:
+//   • Preview, browser print, and PDF download use the same prepared `.page` DOM.
+//   • Long content is paginated at block/table-row boundaries before capture.
+//   • PDF download is rasterized by html2canvas, so it is visually aligned but
+//     is not described as pixel-perfect compared with native browser printing.
 //   • Full RTL Arabic support; numbers stay Latin.
-//   • Single entry point used by every document generator across the app.
 
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { buildHtmlWithPageMarginStyle } from "./pdfLayoutSettings";
+import { preparePagedPdfDocument, waitForPdfAssets } from "./pdfDocumentRenderer";
 
 export interface PdfMargins {
   top: number;    // mm
@@ -70,13 +71,13 @@ const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): 
   }
 };
 
-/** Universal print CSS injected into every PDF render — keeps tables/rows intact and unifies typography. */
+/** Universal export CSS injected into every PDF render. Template typography is preserved. */
 const PDF_EXPORT_CSS = `
   html.pdf-export, html.pdf-export body{background:#fff!important;margin:0!important;padding:0!important;overflow:hidden!important;color:#000!important}
-  html.pdf-export *{font-family:Arial,Tahoma,"Times New Roman",sans-serif!important;letter-spacing:0!important;text-rendering:geometricPrecision!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  html.pdf-export *{letter-spacing:0!important;text-rendering:geometricPrecision!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
   html.pdf-export .print-bar, html.pdf-export .no-print{display:none!important}
   /* Keep the template's own inner padding as the visible margin — do NOT force padding:0 here, otherwise content bleeds to the paper edges when the engine renders .page at offset 0,0. */
-  html.pdf-export .page{margin:0!important;box-shadow:none!important;outline:none!important;border:0!important;width:210mm!important;min-height:0!important}
+  html.pdf-export .page{margin:0!important;box-shadow:none!important;outline:none!important;border:0!important;min-height:0!important}
   /* Table integrity — never cut rows or headers across pages */
   html.pdf-export table{border-collapse:collapse!important;width:100%!important}
   html.pdf-export thead{display:table-header-group!important}
@@ -153,7 +154,7 @@ const fmtTimestamp = (d = new Date()) => {
 
 /** Draw the vector footer (page X/N + timestamp + company) on every PDF page. */
 const drawVectorFooter = (pdf: jsPDF, footer: PdfFooterContext | undefined) => {
-  if (footer?.enabled === false) return;
+  if (footer?.enabled !== true) return;
   const total = pdf.getNumberOfPages();
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
@@ -177,7 +178,7 @@ const drawVectorFooter = (pdf: jsPDF, footer: PdfFooterContext | undefined) => {
 
 export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
   const { htmlContent, fileName, download = true, margins = DEFAULT_MARGINS, orientation = "portrait", footer, metadata } = opts;
-  const fastHtmlContent = buildHtmlWithPageMarginStyle(htmlContent).replace(/@import\s+url\(['"]?https:\/\/fonts\.googleapis\.com[^;]+;/gi, "");
+  const fastHtmlContent = buildHtmlWithPageMarginStyle(htmlContent, orientation);
 
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
@@ -194,16 +195,11 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
     doc.open(); doc.write(fastHtmlContent); doc.close();
 
     await new Promise<void>((resolve) => {
-      const ready = () => setTimeout(() => resolve(), 350);
+      const ready = () => setTimeout(() => resolve(), 50);
       if (doc.readyState === "complete") ready();
       else iframe.addEventListener("load", ready, { once: true });
     });
-    try {
-      await Promise.race([
-        (doc as any).fonts?.ready ?? Promise.resolve(),
-        new Promise<void>((resolve) => setTimeout(resolve, 1200)),
-      ]);
-    } catch {}
+    await waitForPdfAssets(doc);
 
     doc.documentElement.classList.add("pdf-export");
     const exportStyle = doc.createElement("style");
@@ -213,8 +209,9 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
     // shares the same corners and margins as the print preview.
     try {
       const { injectPageMarginStyle } = await import("./pdfLayoutSettings");
-      injectPageMarginStyle(doc);
+      injectPageMarginStyle(doc, orientation);
     } catch { /* noop */ }
+    preparePagedPdfDocument(doc, orientation);
     await new Promise<void>((resolve) => iframe.contentWindow?.requestAnimationFrame(() => resolve()) ?? setTimeout(resolve, 0));
 
     const pageEls = Array.from(doc.querySelectorAll<HTMLElement>(".page"));
@@ -232,8 +229,9 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
     const pageHmm = pdf.internal.pageSize.getHeight();
     const printableWmm = pageWmm - margins.left - margins.right;
     const printableHmm = pageHmm - margins.top - margins.bottom;
-    // reserve bottom 8mm for vector footer when footer is enabled
-    const usableHmm = (footer?.enabled === false) ? pageHmm : pageHmm - 8;
+    // Reserve footer space only when the caller explicitly requests a generated footer.
+    // The default stays identical to the HTML preview.
+    const usableHmm = footer?.enabled === true ? pageHmm - 8 : pageHmm;
 
     const renderEl = async (el: HTMLElement) => {
       const siblings = pageEls.filter((p) => p !== el).map((p) => [p, p.style.display] as const);
@@ -258,7 +256,10 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
 
     const addSlicedCanvas = async (canvas: HTMLCanvasElement, targetWmm: number, targetMaxHmm: number, offsetX = 0, offsetY = 0, firstAlreadyExists = true) => {
       const pxPerMm = canvas.width / targetWmm;
-      const pageHpx = Math.floor(targetMaxHmm * pxPerMm);
+      let pageHpx = Math.floor(targetMaxHmm * pxPerMm);
+      // html2canvas can round an exact A4 page a few pixels taller than the
+      // calculated slice. Absorb that tiny difference to avoid a blank sliver page.
+      if (canvas.height <= pageHpx + 12) pageHpx = canvas.height;
       let renderedPx = 0;
       let isFirstSlice = true;
       while (renderedPx < canvas.height) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { smartBack } from "@/lib/smartBack";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -23,6 +23,8 @@ import UplItemsEditor, { type UplItem } from "@/components/insurance/UplItemsEdi
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import { toEnglishDigits } from "@/lib/numberUtils";
+import { useAuth } from "@/contexts/AuthContext";
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
 
 // ───────────────────── أنواع داخلية ─────────────────────
 // ⚠️ هذه الصفحة من منظور "الكراج": نستلم سيارة من شركة تأمين ونطالبها بالمستحقات.
@@ -81,6 +83,7 @@ const emptyDraft = (): Draft => ({
 // ───────────────────── المكون الرئيسي ─────────────────────
 export default function NewInsuranceClaim() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [params] = useSearchParams();
   const createClaim = useCreateClaim();
   const { data: companies = [] } = useInsuranceCompanies();
@@ -89,34 +92,81 @@ export default function NewInsuranceClaim() {
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [savedDraftAt, setSavedDraftAt] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const draftHydratedRef = useRef(false);
+  const skipNextDraftSaveRef = useRef(false);
+  const savedDraftAtRef = useRef<number | null>(null);
+  const cloudDraftKey = useMemo(() => `${DRAFT_KEY}:${user?.id || "anonymous"}`, [user?.id]);
 
   // ── استرجاع المسودة ──
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.savedAt && Date.now() - parsed.savedAt < 1000 * 60 * 60 * 24 * 3) {
-          setDraft({ ...emptyDraft(), ...parsed.data });
-          setSavedDraftAt(parsed.savedAt);
-        }
+    let cancelled = false;
+    draftHydratedRef.current = false;
+
+    const applyDraft = (stored: { savedAt: number; data: Draft } | null) => {
+      if (!stored?.savedAt || Date.now() - stored.savedAt >= 1000 * 60 * 60 * 24 * 3) return;
+      if (stored.savedAt <= (savedDraftAtRef.current || 0)) return;
+      setDraft({ ...emptyDraft(), ...stored.data });
+      setSavedDraftAt(stored.savedAt);
+      savedDraftAtRef.current = stored.savedAt;
+    };
+
+    void (async () => {
+      const cloudDraft = await readCloudSetting<{ savedAt: number; data: Draft } | null>(cloudDraftKey, null);
+      if (cancelled) return;
+      applyDraft(cloudDraft);
+
+      if (!cloudDraft) {
+        try {
+          const legacy = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+          applyDraft(legacy);
+          if (legacy) void writeCloudSetting(cloudDraftKey, legacy).catch(() => {});
+        } catch {}
       }
-    } catch {}
-    const c = params.get("company");
-    if (c) update({ company: c });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+      const c = params.get("company");
+      if (c) setDraft((current) => ({ ...current, company: c }));
+      draftHydratedRef.current = true;
+    })();
+
+    const unsubscribe = subscribeCloudSetting<{ savedAt: number; data: Draft } | null>(
+      cloudDraftKey,
+      (stored) => {
+        if (!cancelled) applyDraft(stored);
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [cloudDraftKey, params]);
 
   // ── حفظ المسودة تلقائياً ──
   useEffect(() => {
+    if (!draftHydratedRef.current) return;
+    if (skipNextDraftSaveRef.current) {
+      skipNextDraftSaveRef.current = false;
+      return;
+    }
     const t = setTimeout(() => {
+      const savedAt = Date.now();
+      const payload = { savedAt, data: draft };
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), data: draft }));
-        setSavedDraftAt(Date.now());
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
       } catch {}
+      void writeCloudSetting(cloudDraftKey, payload).catch(() => {});
+      savedDraftAtRef.current = savedAt;
+      setSavedDraftAt(savedAt);
     }, 600);
     return () => clearTimeout(t);
-  }, [draft]);
+  }, [cloudDraftKey, draft]);
+
+  const clearStoredDraft = () => {
+    skipNextDraftSaveRef.current = true;
+    savedDraftAtRef.current = null;
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+    void writeCloudSetting(cloudDraftKey, null).catch(() => {});
+  };
 
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -360,10 +410,10 @@ export default function NewInsuranceClaim() {
         status: "pending",
         notes: internalNotes || undefined,
         incident_date: draft.incidentDate ? new Date(draft.incidentDate).toISOString() : null,
-        // تاريخ التقدير = نفس التاريخ المُدخل، ويُعبَّأ به تلقائياً تاريخ وصول السيارة وبدء العمل (قابل للتعديل لاحقاً)
+        // تاريخ التقدير مستقل عن وصول المركبة؛ الوصول وبدء العمل يُسجلان فعليًا من صفحة المطالبة.
         estimate_date: draft.incidentDate || null,
-        workshop_arrival_date: draft.incidentDate || null,
-        work_started_at: draft.incidentDate ? new Date(draft.incidentDate).toISOString() : null,
+        workshop_arrival_date: null,
+        work_started_at: null,
         incident_location: null,
         incident_description: draft.damageDescription || null,
         deductible_amount: 0,
@@ -379,7 +429,7 @@ export default function NewInsuranceClaim() {
         upl_items: draft.estimationType === "upl" ? draft.uplItems : [],
       });
 
-      localStorage.removeItem(DRAFT_KEY);
+      clearStoredDraft();
 
       if (action === "save_and_open") {
         navigate(`/insurance/${created.id}`);
@@ -553,7 +603,7 @@ export default function NewInsuranceClaim() {
             size="sm"
             onClick={() => {
               setDraft(emptyDraft());
-              localStorage.removeItem(DRAFT_KEY);
+              clearStoredDraft();
               setSavedDraftAt(null);
               setStep(0);
               toast.info("تم تفريغ النموذج");

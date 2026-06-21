@@ -167,7 +167,7 @@ export default function NotificationsBell() {
                 <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive hover:text-destructive" onClick={() => notificationsStore.clear()}>
                   <Trash2 size={14} className="ml-1" /> مسح
                 </Button>
-                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => navigate("/audit-log")}>
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => navigate("/settings/audit-log")}>
                   السجل الكامل ←
                 </Button>
               </div>

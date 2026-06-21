@@ -43,6 +43,7 @@ import { addWorkOrder, type WorkOrder, type NeededPart } from "@/lib/workOrdersS
 import { inspectionsStore, type InspectionRecord } from "@/lib/inspectionsStore";
 import InsuranceInspectionDialog from "@/components/inspection/InsuranceInspectionDialog";
 import { insuranceInspectionStore } from "@/lib/insuranceInspectionStore";
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
 import { buildInsuranceInspectionHtml } from "@/lib/insuranceInspectionPdf";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompanyAutocomplete";
@@ -166,12 +167,29 @@ export default function InsuranceClaimDetail() {
     "أي قطع إضافية أو خدمات خارج البنود المُدرجة تُحتسب بشكل منفصل.",
     "مدة الإصلاح المقدّرة تبدأ من تاريخ توفر القطع المعتمدة.",
   ].join("\n");
-  const [estimateTerms, setEstimateTerms] = useState<string>(() => {
-    try { return localStorage.getItem("claim_estimate_terms") || DEFAULT_ESTIMATE_TERMS; }
-    catch { return DEFAULT_ESTIMATE_TERMS; }
-  });
+  const [estimateTerms, setEstimateTerms] = useState<string>(DEFAULT_ESTIMATE_TERMS);
+  const estimateTermsHydratedRef = useRef(false);
   useEffect(() => {
-    try { localStorage.setItem("claim_estimate_terms", estimateTerms); } catch {}
+    let cancelled = false;
+    void readCloudSetting("claim_estimate_terms", DEFAULT_ESTIMATE_TERMS).then((value) => {
+      if (cancelled) return;
+      setEstimateTerms(value);
+      estimateTermsHydratedRef.current = true;
+    });
+    const unsubscribe = subscribeCloudSetting<string>("claim_estimate_terms", (value) => {
+      if (!cancelled && typeof value === "string") setEstimateTerms(value);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+  useEffect(() => {
+    if (!estimateTermsHydratedRef.current) return;
+    const timer = setTimeout(() => {
+      void writeCloudSetting("claim_estimate_terms", estimateTerms).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timer);
   }, [estimateTerms]);
   const [showEstimateTerms, setShowEstimateTerms] = useState(false);
 

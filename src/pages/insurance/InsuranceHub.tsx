@@ -14,6 +14,7 @@ import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
 import { useInsuranceAlerts } from "@/hooks/useInsuranceAlerts";
 import { toEnglishDigits } from "@/lib/numberUtils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { getClaimVehicleLocation, isActiveClaim } from "@/lib/claimVehicleLocation";
 
 const fmt = (n: number) => toEnglishDigits(Math.round(n).toLocaleString("en-US"));
 
@@ -39,8 +40,9 @@ export default function InsuranceHub() {
 
     // KPIs مبنية على تاريخ الدخول وتاريخ التسليم الفعلي
     const now = Date.now();
-    const inWorkshop = claims.filter((c) => !(c as any).delivered_at && c.status !== "rejected" && c.status !== "cancelled").length;
-    const deliveredCount = claims.filter((c) => !!(c as any).delivered_at).length;
+    const inWorkshop = claims.filter((c) => getClaimVehicleLocation(c) === "in_workshop").length;
+    const withCustomer = claims.filter((c) => getClaimVehicleLocation(c) === "with_customer").length;
+    const deliveredCount = claims.filter((c) => getClaimVehicleLocation(c) === "delivered").length;
     const completedPendingCollection = invoices.filter((i) => i.status !== "paid" && i.status !== "cancelled" && Number(i.total) - Number(i.paid_amount || 0) > 0.01).length;
     const overdueClaims = claims.filter((c) => {
       const delivered = (c as any).delivered_at;
@@ -50,7 +52,7 @@ export default function InsuranceHub() {
     }).length;
 
     return { total, pending, approved, paid, rejected, estimatedTotal, approvedTotal, paidTotal, invoicedTotal, outstanding, approvalRate,
-      inWorkshop, deliveredCount, completedPendingCollection, overdueClaims };
+      inWorkshop, withCustomer, deliveredCount, completedPendingCollection, overdueClaims };
   }, [claims, payments, invoices]);
 
   // Top 5 insurance companies by claim count
@@ -112,7 +114,7 @@ export default function InsuranceHub() {
     return months;
   }, [claims]);
 
-  const recentClaims = claims.slice(0, 6);
+  const recentClaims = claims.filter(isActiveClaim).slice(0, 6);
   const criticalAlerts = alerts.filter((a) => a.severity === "critical").slice(0, 5);
 
   return (

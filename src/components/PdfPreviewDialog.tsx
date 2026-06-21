@@ -15,11 +15,13 @@ import {
   Maximize,
   ChevronUp,
   ChevronDown,
+  FileCode2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
 import WhatsAppShareButton from "@/components/whatsapp/WhatsAppShareButton";
 import { buildHtmlWithPageMarginStyle, injectPageMarginStyle, detectOrientation } from "@/lib/pdfLayoutSettings";
+import { getPdfPageDiagnostics, preparePagedPdfDocument, waitForPdfAssets } from "@/lib/pdfDocumentRenderer";
 
 interface PdfPreviewDialogProps {
   open: boolean;
@@ -70,6 +72,7 @@ export default function PdfPreviewDialog({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageCount, setPageCount] = useState(1);
   const [frameHeight, setFrameHeight] = useState(A4_PORTRAIT_H);
+  const [oversizedPages, setOversizedPages] = useState(0);
 
   const savedKeyRef = useRef<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -108,32 +111,22 @@ export default function PdfPreviewDialog({
       setPageCount(offsets.length);
       setFrameHeight(Math.ceil(height));
     });
-  }, []);
+  }, [PREVIEW_PAGE_HEIGHT]);
 
   const handlePreviewLoad = useCallback(() => {
     const doc = previewFrameRef.current?.contentDocument;
     if (!doc) return;
 
-    const settle = () => {
+    const settle = async () => {
+      await waitForPdfAssets(doc);
+      preparePagedPdfDocument(doc, orientation);
+      setOversizedPages(getPdfPageDiagnostics(doc).oversizedPages);
       measurePreview();
       setTimeout(measurePreview, 250);
     };
 
-    try {
-      (doc as any).fonts?.ready?.then(settle).catch(settle);
-    } catch {
-      settle();
-    }
-
-    const images = Array.from(doc.images || []);
-    images.forEach((img) => {
-      if (!img.complete) {
-        img.addEventListener("load", settle, { once: true });
-        img.addEventListener("error", settle, { once: true });
-      }
-    });
-    settle();
-  }, [measurePreview]);
+    void settle();
+  }, [measurePreview, orientation]);
 
   useEffect(() => {
     if (!open) return;
@@ -143,9 +136,10 @@ export default function PdfPreviewDialog({
     setZoom(FIT_ZOOM);
     setCurrentPage(1);
     setPageCount(1);
-    setFrameHeight(PREVIEW_PAGE_HEIGHT);// eslint-disable-line react-hooks/exhaustive-deps
+    setOversizedPages(0);
+    setFrameHeight(PREVIEW_PAGE_HEIGHT);
     pageOffsetsRef.current = [0];
-  }, [open, htmlContent]);
+  }, [open, htmlContent, PREVIEW_PAGE_HEIGHT]);
 
   useEffect(() => {
     if (!open) return;
@@ -161,7 +155,7 @@ export default function PdfPreviewDialog({
     const ro = new ResizeObserver(updateFit);
     ro.observe(root);
     return () => ro.disconnect();
-  }, [open]);
+  }, [open, PREVIEW_WIDTH]);
 
   // حفظ تلقائي للأرشيف — مستقل عن توليد PDF حتى لا يبطّئ المعاينة
   useEffect(() => {
@@ -245,6 +239,7 @@ export default function PdfPreviewDialog({
         download: false,
         margins: DEFAULT_MARGINS,
         orientation,
+        footer: { enabled: false },
       });
       setPdfBlob(blob);
       return blob;
@@ -281,7 +276,7 @@ export default function PdfPreviewDialog({
     doc.open();
     doc.write(previewHtml);
     doc.close();
-    try { injectPageMarginStyle(doc, orientation); } catch { /* noop */ }
+    try { injectPageMarginStyle(doc, orientation); } catch { void 0; }
 
     const waitUntilReady = () =>
       new Promise<void>((resolve) => {
@@ -308,6 +303,7 @@ export default function PdfPreviewDialog({
 
     try {
       await waitUntilReady();
+      preparePagedPdfDocument(doc, orientation);
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
     } catch (e) {
@@ -334,6 +330,20 @@ export default function PdfPreviewDialog({
     }
   };
 
+  const handleExportData = () => {
+    const blob = new Blob([previewHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeName}-data.html`;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    toast.success("تم تصدير بيانات المستند بصيغة HTML");
+  };
+
   const zoomLabel = zoom === FIT_ZOOM ? "ملاءمة" : `${Math.round(zoom * 100)}%`;
 
   return (
@@ -352,6 +362,11 @@ export default function PdfPreviewDialog({
                 <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-500 font-medium shrink-0">
                   <Loader2 size={11} className="animate-spin" />
                   تحضير PDF…
+                </span>
+              )}
+              {oversizedPages > 0 && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 font-medium shrink-0">
+                  {oversizedPages} صفحة تحتوي عنصراً أكبر من A4
                 </span>
               )}
               {autoSave &&
@@ -427,13 +442,17 @@ export default function PdfPreviewDialog({
               recipientName={recipientName}
               defaultMessage={recipientName ? `مرحباً ${recipientName}،\nإليك ${title}.` : ""}
             />
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handlePrint}>
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handlePrint} title="فتح نافذة الطباعة الخاصة بالمتصفح">
               <Printer size={14} />
-              <span className="text-xs">طباعة</span>
+              <span className="text-xs">معاينة طباعة المتصفح</span>
             </Button>
             <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handleDownload} disabled={pdfGenerating}>
               {pdfGenerating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              <span className="text-xs">تنزيل</span>
+              <span className="text-xs">تنزيل PDF</span>
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handleExportData} title="تنزيل محتوى المستند كملف HTML دون تحويله إلى صورة PDF">
+              <FileCode2 size={14} />
+              <span className="text-xs">تصدير البيانات فقط</span>
             </Button>
           </div>
         </div>

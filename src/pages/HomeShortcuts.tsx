@@ -184,7 +184,7 @@ export default function HomeShortcuts() {
               </h1>
             </div>
             <Link
-              to="/notifications"
+              to="/admin/notifications"
               className="hidden sm:inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border border-border bg-card/70 backdrop-blur hover:border-primary/40 text-muted-foreground hover:text-foreground transition"
             >
               <Bell size={13} /> {isAr ? "التنبيهات" : "Alerts"}
@@ -250,7 +250,7 @@ export default function HomeShortcuts() {
           {[
             { to: "/tech", label: isAr ? "تطبيق الفني" : "Technician" },
             { to: "/supervisor-app", label: isAr ? "المشرف" : "Supervisor" },
-            { to: "/apps/accountant", label: isAr ? "المحاسب" : "Accountant" },
+            { to: "/accountant-app", label: isAr ? "المحاسب" : "Accountant" },
             { to: "/install", label: isAr ? "تثبيت التطبيق" : "Install App" },
           ].map((a) => (
             <Link

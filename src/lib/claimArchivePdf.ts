@@ -269,23 +269,28 @@ async function buildPhotoSection(title: string, titleEn: string, files: ArchiveS
        </div>`
     : "";
 
-  return `
-    <section style="margin-bottom:16px;break-inside:avoid">
+  const chunks: string[][] = [];
+  for (let i = 0; i < imgsHtml.length; i += 8) chunks.push(imgsHtml.slice(i, i + 8));
+  if (!chunks.length) chunks.push([]);
+
+  return chunks.map((chunk, index) => `
+    <section class="pdf-keep" style="margin-bottom:16px;break-inside:avoid;page-break-inside:avoid">
       <h2 style="font-size:12px;font-weight:700;color:#1e3a8a;border-right:3px solid #1e3a8a;padding-right:6px;margin:0 0 6px 0">
         ${esc(title)} <span style="font-weight:400;color:#64748b">• ${esc(titleEn)}</span>
+        ${chunks.length > 1 ? `<span style="font-weight:400;color:#64748b">(${index + 1}/${chunks.length})</span>` : ""}
         <span style="float:left;background:#dbeafe;color:#1e3a8a;font-size:9px;padding:2px 8px;border-radius:10px;font-weight:600">${images.length + docs.length}</span>
       </h2>
-      ${images.length ? `
+      ${chunk.length ? `
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
-          ${imgsHtml.join("")}
+          ${chunk.join("")}
         </div>` : ""}
-      ${docsHtml}
+      ${index === chunks.length - 1 ? docsHtml : ""}
     </section>
-  `;
+  `).join("");
 }
 
-/** يبني HTML الكامل للأرشيف ثم يولّد PDF حقيقي */
-export async function generateClaimArchivePdf(data: ClaimArchivePdfData): Promise<Blob> {
+/** يبني HTML الكامل للأرشيف لاستخدامه نفسه في المعاينة والطباعة والتنزيل. */
+export async function buildClaimArchiveHtml(data: ClaimArchivePdfData): Promise<string> {
   const settings = getTemplateSettings();
 
   // ابنِ أقسام الصور/المستندات بالترتيب
@@ -337,7 +342,13 @@ export async function generateClaimArchivePdf(data: ClaimArchivePdfData): Promis
 </body>
 </html>`;
 
-  return await generatePdfFromHtml({
+  return html;
+}
+
+/** يولّد PDF من نفس HTML المستخدم في المعاينة. */
+export async function generateClaimArchivePdf(data: ClaimArchivePdfData): Promise<Blob> {
+  const html = await buildClaimArchiveHtml(data);
+  return generatePdfFromHtml({
     htmlContent: html,
     fileName: `Claim-Archive-${data.claim.claim_number}`,
     download: true,

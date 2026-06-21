@@ -235,8 +235,9 @@ export function useUpdateClaimStatus() {
       }
       if (status === "rejected" || status === "cancelled") removeInsuranceClaimJournal(id);
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["insurance_claims"] });
+      qc.invalidateQueries({ queryKey: ["insurance_claims", vars.id] });
       toast.success("تم تحديث حالة المطالبة");
     },
     onError: (e: any) => toast.error(e.message),

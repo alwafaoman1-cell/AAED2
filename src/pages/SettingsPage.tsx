@@ -212,21 +212,6 @@ export default function SettingsPage() {
           </div>
         </a>
         <a
-          href="/settings/browser-cache"
-          className="bg-card border border-border rounded-xl p-4 shadow-card hover:shadow-lg hover:border-primary/40 transition-all flex items-center gap-3"
-        >
-          <div className="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center">
-            <Cloud size={20} />
-          </div>
-          <div className="flex-1">
-            <div className="font-semibold text-sm">صيانة ذاكرة المتصفح</div>
-            <div className="text-xs text-muted-foreground">عرض الإعدادات المحلية، رفعها للسحابة، ومسح الكاش القديم</div>
-          </div>
-        </a>
-
-
-
-        <a
           href="/settings/public-access"
           className="bg-card border border-border rounded-xl p-4 shadow-card hover:shadow-lg hover:border-primary/40 transition-all flex items-center gap-3"
         >
@@ -284,18 +269,6 @@ export default function SettingsPage() {
           <div className="flex-1">
             <div className="font-semibold text-sm">بوابات الدفع الإلكتروني</div>
             <div className="text-xs text-muted-foreground">Stripe · Thawani · MyFatoorah · PayTabs · Tap — روابط دفع Apple/Google Pay</div>
-          </div>
-        </a>
-        <a
-          href="/settings/template-update"
-          className="bg-card border border-border rounded-xl p-4 shadow-card hover:shadow-lg hover:border-primary/40 transition-all flex items-center gap-3"
-        >
-          <div className="w-10 h-10 rounded-lg bg-fuchsia-500/10 text-fuchsia-500 flex items-center justify-center">
-            <Palette size={20} />
-          </div>
-          <div className="flex-1">
-            <div className="font-semibold text-sm">تحديث القالب والتصميم</div>
-            <div className="text-xs text-muted-foreground">ارفع ملف تحديث الستايل (لن تتأثر أي بيانات محفوظة)</div>
           </div>
         </a>
         <a

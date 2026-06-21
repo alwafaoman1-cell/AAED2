@@ -15,10 +15,11 @@ import {
   IdCard, FolderArchive, Search, Loader2, Lock,
 } from "lucide-react";
 import ArchivedPdfPreviewDialog from "@/components/ArchivedPdfPreviewDialog";
+import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import PhotoLightbox from "@/components/vehicles/PhotoLightbox";
 import { claimDocLabel, type ClaimDocCategory } from "@/lib/uploadHtmlAsPdf";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
-import { generateClaimArchivePdf, type ArchiveSectionFile } from "@/lib/claimArchivePdf";
+import { buildClaimArchiveHtml, type ArchiveSectionFile } from "@/lib/claimArchivePdf";
 import { refreshSignedUrls } from "@/lib/refreshSignedUrls";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -92,6 +93,8 @@ export default function ClaimArchivePage() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [includeVehiclePhotos, setIncludeVehiclePhotos] = useState(true);
   const [includeDocuments, setIncludeDocuments] = useState(true);
+  const [unifiedPreviewOpen, setUnifiedPreviewOpen] = useState(false);
+  const [unifiedPreviewHtml, setUnifiedPreviewHtml] = useState("");
 
   const settings = getTemplateSettings();
   const logo = settings.logoUrl;
@@ -292,12 +295,8 @@ export default function ClaimArchivePage() {
     }
   };
   const handlePrint = (f: ArchiveFile) => {
-    const w = window.open(f.url, "_blank");
-    if (!w) { toast.error("الرجاء السماح بالنوافذ المنبثقة"); return; }
-    if (f.kind === "pdf") {
-      // المتصفح يفتح الـ PDF مع شريط طباعة جاهز
-      setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 800);
-    }
+    if (f.kind === "pdf") setPreviewPdf(f);
+    else handlePreview(f);
   };
   const handleEmail = (f: ArchiveFile) => {
     const claim = data?.claim;
@@ -340,7 +339,7 @@ export default function ClaimArchivePage() {
               })),
           };
         });
-      await generateClaimArchivePdf({
+      const html = await buildClaimArchiveHtml({
         claim: data.claim as any,
         workOrder: data.workOrder as any,
         invoices: (data.invoices as any[]).map((i) => ({
@@ -360,7 +359,9 @@ export default function ClaimArchivePage() {
         })),
         sections: sectionsForPdf,
       });
-      toast.success("تم إنشاء ملف الأرشيف الموحّد");
+      setUnifiedPreviewHtml(html);
+      setUnifiedPreviewOpen(true);
+      toast.success("تم تجهيز معاينة الأرشيف الموحّد");
       setExportDialogOpen(false);
     } catch (e: any) {
       console.error(e);
@@ -543,6 +544,14 @@ export default function ClaimArchivePage() {
         />
       )}
 
+      <PdfPreviewDialog
+        open={unifiedPreviewOpen}
+        onOpenChange={setUnifiedPreviewOpen}
+        htmlContent={unifiedPreviewHtml}
+        title={`أرشيف المطالبة ${c.claim_number}`}
+        fileName={`Claim-Archive-${c.claim_number}`}
+      />
+
       {/* معاينة الصور */}
       {lightboxImages && (
         <PhotoLightbox
@@ -605,7 +614,7 @@ export default function ClaimArchivePage() {
               className="gap-1 bg-gradient-to-l from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white"
             >
               {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              {exporting ? "جارٍ التوليد…" : "تصدير الآن"}
+              {exporting ? "جارٍ التجهيز…" : "معاينة ثم طباعة / تنزيل"}
             </Button>
           </DialogFooter>
         </DialogContent>

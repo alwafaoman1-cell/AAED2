@@ -26,6 +26,8 @@ import { claimDocLabel, type ClaimDocCategory } from "@/lib/uploadHtmlAsPdf";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDateLatin } from "@/lib/numberUtils";
 import { toast } from "sonner";
+import { usePersistedState } from "@/hooks/usePersistedState";
+import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 
 const STATUS_LABEL: Record<string, string> = {
   issued: "صادرة",
@@ -54,6 +56,8 @@ export default function InsuranceAccounting() {
   const [companyFilter, setCompanyFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePersistedState<number>("insurance_invoices_page_size", 20);
 
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewTitle, setPreviewTitle] = useState("");
@@ -142,6 +146,19 @@ export default function InsuranceAccounting() {
       );
     });
   }, [invoices, search, statusFilter, companyFilter, dateFrom, dateTo]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginatedInvoices = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, companyFilter, dateFrom, dateTo, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   // KPIs
   const totalIssued = filtered.reduce((s, i) => s + Number(i.total || 0), 0);
@@ -333,7 +350,7 @@ export default function InsuranceAccounting() {
             <>
               {/* Mobile cards */}
               <div className="md:hidden space-y-2">
-                {filtered.map((inv) => (
+                {paginatedInvoices.map((inv) => (
                   <div key={inv.id} className="bg-card border border-border rounded-xl p-3 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -389,7 +406,7 @@ export default function InsuranceAccounting() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((inv) => (
+                      {paginatedInvoices.map((inv) => (
                         <tr key={inv.id} className="border-b border-border/50 hover:bg-secondary/20">
                           <td className="py-3 px-4 font-mono text-xs text-primary">{inv.invoice_number}</td>
                           <td className="py-3 px-4 text-muted-foreground" dir="ltr">
@@ -438,6 +455,13 @@ export default function InsuranceAccounting() {
                   </table>
                 </div>
               </div>
+              <TablePaginationControls
+                page={page}
+                pageSize={pageSize}
+                totalItems={filtered.length}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+              />
             </>
           )}
         </TabsContent>

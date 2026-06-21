@@ -110,9 +110,7 @@ const RolesPermissionsPage = lazy(() => import("./pages/settings/RolesPermission
 const VehiclesCleanupPage = lazy(() => import("./pages/settings/VehiclesCleanup"));
 const QuickActionsSettingsPage = lazy(() => import("./pages/settings/QuickActionsSettingsPage"));
 const ModulesSettingsPage = lazy(() => import("./pages/settings/ModulesSettingsPage"));
-const TemplateUpdatePage = lazy(() => import("./pages/settings/TemplateUpdatePage"));
 const DataMigrationPage = lazy(() => import("./pages/settings/DataMigrationPage"));
-const BrowserCacheAuditPage = lazy(() => import("./pages/settings/BrowserCacheAuditPage"));
 const PublicAccessSettingsPage = lazy(() => import("./pages/settings/PublicAccessSettingsPage"));
 const SmsSettingsPage = lazy(() => import("./pages/settings/SmsSettingsPage"));
 const TaxSettingsPage = lazy(() => import("./pages/settings/TaxSettingsPage"));
@@ -121,6 +119,7 @@ const PaymentGatewaysPage = lazy(() => import("./pages/settings/PaymentGatewaysP
 const BackupRestorePage = lazy(() => import("./pages/settings/BackupRestorePage"));
 const AiKeysSettingsPage = lazy(() => import("./pages/settings/AiKeysSettingsPage"));
 const PdfLayoutPage = lazy(() => import("./pages/settings/PdfLayoutPage"));
+const PdfQaPage = lazy(() => import("./pages/settings/PdfQaPage"));
 const NumberingSettingsPage = lazy(() => import("./pages/settings/NumberingSettingsPage"));
 const DailyTasks = lazy(() => import("./pages/DailyTasks"));
 const DailyLog = lazy(() => import("./pages/DailyLog"));
@@ -139,7 +138,6 @@ const VehicleBelongingsSettingsPage = lazy(() => import("./pages/settings/Vehicl
 const MessagesCenter = lazy(() => import("./pages/MessagesCenter"));
 const CustomerNotificationsSettingsPage = lazy(() => import("./pages/settings/CustomerNotificationsSettingsPage"));
 const AdminNotifications = lazy(() => import("./pages/AdminNotifications"));
-const AdminVersions = lazy(() => import("./pages/AdminVersions"));
 
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
@@ -305,10 +303,8 @@ const App = () => (
               <Route path="/settings/roles-permissions" element={<ProtectedRoute roles={["admin"]}><RolesPermissionsPage /></ProtectedRoute>} />
               <Route path="/settings/quick-actions" element={<QuickActionsSettingsPage />} />
               <Route path="/settings/data-migration" element={<ProtectedRoute roles={["admin"]}><DataMigrationPage /></ProtectedRoute>} />
-              <Route path="/settings/browser-cache" element={<ProtectedRoute roles={["admin","manager"]}><BrowserCacheAuditPage /></ProtectedRoute>} />
               <Route path="/settings/modules" element={<ProtectedRoute roles={["admin","manager"]}><ModulesSettingsPage /></ProtectedRoute>} />
               <Route path="/settings/vehicles-cleanup" element={<ProtectedRoute roles={["admin","manager"]}><VehiclesCleanupPage /></ProtectedRoute>} />
-              <Route path="/settings/template-update" element={<ProtectedRoute roles={["admin","manager"]}><TemplateUpdatePage /></ProtectedRoute>} />
               <Route path="/settings/public-access" element={<PublicAccessSettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/settings/tax" element={<TaxSettingsPage />} />
@@ -319,11 +315,11 @@ const App = () => (
               <Route path="/settings/backup" element={<ProtectedRoute roles={["admin"]}><BackupRestorePage /></ProtectedRoute>} />
               <Route path="/settings/ai-keys" element={<ProtectedRoute roles={["admin"]}><AiKeysSettingsPage /></ProtectedRoute>} />
               <Route path="/settings/pdf-layout" element={<PdfLayoutPage />} />
+              <Route path="/settings/pdf-qa" element={<ProtectedRoute roles={["admin","manager"]}><PdfQaPage /></ProtectedRoute>} />
               <Route path="/settings/numbering" element={<ProtectedRoute roles={["admin","manager"]}><NumberingSettingsPage /></ProtectedRoute>} />
               <Route path="/settings/vehicle-belongings" element={<ProtectedRoute roles={["admin","manager"]}><VehicleBelongingsSettingsPage /></ProtectedRoute>} />
               <Route path="/messages" element={<MessagesCenter />} />
               <Route path="/admin/notifications" element={<ProtectedRoute roles={["admin","manager"]}><AdminNotifications /></ProtectedRoute>} />
-              <Route path="/admin/versions" element={<ProtectedRoute roles={["admin","manager"]}><AdminVersions /></ProtectedRoute>} />
               <Route path="/settings/customer-notifications" element={<ProtectedRoute roles={["admin","manager"]}><CustomerNotificationsSettingsPage /></ProtectedRoute>} />
             </Route>
 

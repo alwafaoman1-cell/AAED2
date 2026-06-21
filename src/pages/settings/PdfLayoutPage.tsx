@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, RotateCcw, Save, FileText } from "lucide-react";
+import { ArrowLeft, RotateCcw, Save, FileText, FileCheck2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -136,6 +136,12 @@ export default function PdfLayoutPage() {
             <summary className="text-xs cursor-pointer text-muted-foreground">عرض قواعد CSS المُطبَّقة</summary>
             <pre className="mt-2 text-[10px] bg-muted/40 p-2 rounded overflow-auto">{previewCss || "/* فرض الهوامش معطل */"}</pre>
           </details>
+          <div className="mt-4 pt-4 border-t border-border">
+            <Button variant="outline" onClick={() => navigate("/settings/pdf-qa")} className="gap-2">
+              <FileCheck2 size={16} />
+              فتح صفحة فحص PDF الداخلية
+            </Button>
+          </div>
         </div>
       </div>
     </div>

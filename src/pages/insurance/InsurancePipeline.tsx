@@ -4,6 +4,7 @@ import { Plus, Clock, CheckCircle, XCircle, DollarSign, Ban, Search, CalendarDay
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { useInsuranceClaims, useUpdateClaimStatus, type InsuranceClaim } from "@/hooks/useInsuranceClaims";
@@ -12,13 +13,17 @@ import { computeDays, durationLevel, durationBadgeClass } from "@/lib/claimDurat
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
+import {
+  claimVehicleLocationClass,
+  claimVehicleLocationLabels,
+  getClaimVehicleLocation,
+} from "@/lib/claimVehicleLocation";
 
 type Status = "pending" | "approved" | "paid" | "rejected" | "cancelled";
 
 const COLUMNS: { key: Status; label: string; color: string; icon: typeof Clock }[] = [
   { key: "pending", label: "بانتظار الاعتماد", color: "border-warning/40 bg-warning/5", icon: Clock },
   { key: "approved", label: "معتمدة", color: "border-success/40 bg-success/5", icon: CheckCircle },
-  { key: "paid", label: "مدفوعة", color: "border-info/40 bg-info/5", icon: DollarSign },
   { key: "rejected", label: "مرفوضة", color: "border-destructive/40 bg-destructive/5", icon: XCircle },
   { key: "cancelled", label: "ملغاة", color: "border-muted bg-muted/20", icon: Ban },
 ];
@@ -31,6 +36,7 @@ export default function InsurancePipeline() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
+  const [locationFilter, setLocationFilter] = useState("active");
 
   const filtered = useMemo(() => {
     let result = claims;
@@ -60,8 +66,18 @@ export default function InsurancePipeline() {
         return d <= to;
       });
     }
+    if (locationFilter === "active") {
+      result = result.filter((c) => c.status !== "paid");
+    } else if (locationFilter !== "all") {
+      result = result.filter((c) => getClaimVehicleLocation(c) === locationFilter);
+    }
     return result;
-  }, [claims, search, dateFrom, dateTo]);
+  }, [claims, search, dateFrom, dateTo, locationFilter]);
+
+  const paidArchive = useMemo(
+    () => claims.filter((claim) => getClaimVehicleLocation(claim) === "paid_archive"),
+    [claims],
+  );
 
   const grouped = useMemo(() => {
     const g: Record<Status, InsuranceClaim[]> = { pending: [], approved: [], paid: [], rejected: [], cancelled: [] };
@@ -109,6 +125,20 @@ export default function InsurancePipeline() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Select value={locationFilter} onValueChange={setLocationFilter}>
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="موقع المركبة" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">المطالبات النشطة</SelectItem>
+              <SelectItem value="with_customer">مع العميل</SelectItem>
+              <SelectItem value="in_workshop">وصلت إلى الورشة</SelectItem>
+              <SelectItem value="delivered">تم التسليم</SelectItem>
+              <SelectItem value="paid_archive">أرشيف المدفوع</SelectItem>
+              <SelectItem value="cancelled">ملغاة / مرفوضة</SelectItem>
+              <SelectItem value="all">الكل</SelectItem>
+            </SelectContent>
+          </Select>
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5">
@@ -156,7 +186,7 @@ export default function InsurancePipeline() {
       {isLoading ? (
         <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 overflow-x-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 overflow-x-auto">
           {COLUMNS.map((col) => {
             const Icon = col.icon;
             const items = grouped[col.key];
@@ -216,6 +246,9 @@ export default function InsurancePipeline() {
                             );
                           })()}
                         </div>
+                        <Badge className={`${claimVehicleLocationClass(getClaimVehicleLocation(c))} border text-[9px] mt-2`}>
+                          {claimVehicleLocationLabels[getClaimVehicleLocation(c)]}
+                        </Badge>
                       </div>
                     ))
                   )}
@@ -225,6 +258,25 @@ export default function InsurancePipeline() {
           })}
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => navigate("/insurance/list?location=paid_archive")}
+        className="w-full rounded-xl border border-violet-500/30 bg-violet-500/5 p-4 text-right transition hover:bg-violet-500/10"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <DollarSign size={18} className="text-violet-600" />
+            <div>
+              <div className="font-semibold">أرشيف المطالبات المدفوعة</div>
+              <div className="text-xs text-muted-foreground">تُنقل المطالبة هنا تلقائيًا عند تسجيلها كمدفوعة</div>
+            </div>
+          </div>
+          <Badge className="bg-violet-500/15 text-violet-700 border-violet-500/30 border">
+            {toEnglishDigits(String(paidArchive.length))}
+          </Badge>
+        </div>
+      </button>
     </div>
   );
 }

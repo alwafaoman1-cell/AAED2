@@ -9,10 +9,13 @@ const AR_REGEX = /[\u0600-\u06FF]/;
  * Walks the DOM and translates Arabic text nodes/attributes to English using the dictionary.
  * Uses MutationObserver to handle dynamic content.
  *
- * Activated only when language is "en". Restoring to "ar" requires page reload (we set originals).
+ * Activated only when language is "en". Original DOM values are kept in memory
+ * so switching back to Arabic never requires a page reload.
  */
 
 const ORIGINAL_ATTR = "data-ar-original";
+const originalText = new Map<Text, string>();
+const originalAttributes = new Map<HTMLElement, Map<string, string>>();
 
 function translateNode(node: Node) {
   if (node.nodeType === Node.TEXT_NODE) {
@@ -22,7 +25,7 @@ function translateNode(node: Node) {
     if (!trimmed) return;
     const translated = translateAr(trimmed);
     if (translated !== trimmed) {
-      // Save original on parent for restore
+      if (!originalText.has(node as Text)) originalText.set(node as Text, text);
       const parent = node.parentElement;
       if (parent && !parent.hasAttribute(ORIGINAL_ATTR)) {
         parent.setAttribute(ORIGINAL_ATTR, "1");
@@ -36,7 +39,15 @@ function translateNode(node: Node) {
       const v = el.getAttribute(attr);
       if (v && AR_REGEX.test(v)) {
         const t = translateAr(v.trim());
-        if (t !== v.trim()) el.setAttribute(attr, t);
+        if (t !== v.trim()) {
+          let attrs = originalAttributes.get(el);
+          if (!attrs) {
+            attrs = new Map();
+            originalAttributes.set(el, attrs);
+          }
+          if (!attrs.has(attr)) attrs.set(attr, v);
+          el.setAttribute(attr, t);
+        }
       }
     });
     // Recurse children
@@ -69,11 +80,23 @@ export function startAutoTranslate() {
   });
 }
 
-export function stopAutoTranslate() {
+export function stopAutoTranslate(restore = false) {
   if (observer) {
     observer.disconnect();
     observer = null;
   }
+  if (!restore) return;
+
+  originalText.forEach((value, node) => {
+    if (node.isConnected) node.nodeValue = value;
+  });
+  originalAttributes.forEach((attrs, el) => {
+    if (!el.isConnected) return;
+    attrs.forEach((value, attr) => el.setAttribute(attr, value));
+    el.removeAttribute(ORIGINAL_ATTR);
+  });
+  originalText.clear();
+  originalAttributes.clear();
 }
 
 /**
@@ -86,19 +109,14 @@ export function useAutoTranslate() {
       if (lng === "en") {
         startAutoTranslate();
       } else {
-        stopAutoTranslate();
-        // Reload to restore original Arabic (simpler than tracking every change)
-        // Only reload if previously translated
-        if (document.querySelector(`[${ORIGINAL_ATTR}]`)) {
-          window.location.reload();
-        }
+        stopAutoTranslate(true);
       }
     };
     apply(i18n.language);
     i18n.on("languageChanged", apply);
     return () => {
       i18n.off("languageChanged", apply);
-      stopAutoTranslate();
+      stopAutoTranslate(true);
     };
   }, []);
 }

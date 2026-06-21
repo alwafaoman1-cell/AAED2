@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Search, Filter, Eye, Edit, Printer, Car, FileText, Workflow, QrCode, Camera, Trash2, MoreHorizontal, Search as SearchIcon, Receipt, FilePlus2, FolderOpen, Package, MessageCircle, Shield, Copy, FileSpreadsheet, FilePlus, Phone, Send } from "lucide-react";
@@ -45,6 +45,8 @@ import { canDelete, canEdit } from "@/lib/permissions";
 import { logActivity } from "@/lib/auditLogStore";
 import { toast } from "sonner";
 import { computeDays, durationLevel } from "@/lib/claimDurationStatus";
+import { usePersistedState } from "@/hooks/usePersistedState";
+import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 
 const DURATION_BAR_HEX: Record<string, string> = {
   red: "#ef4444",
@@ -138,6 +140,8 @@ export default function WorkOrders() {
   const [expenseOrder, setExpenseOrder] = useState<WorkOrder | null>(null);
   const [partsOnlyFilter, setPartsOnlyFilter] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePersistedState<number>("work_orders_page_size", 20);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const allowEdit = canEdit();
   const allowDelete = canDelete();
@@ -180,6 +184,19 @@ export default function WorkOrders() {
     const matchesParts = !partsOnlyFilter || (o.partsNeeded && o.partsNeeded.some(isPartStillNeeded));
     return matchesSearch && matchesStatus && matchesOwnership && matchesParts;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginatedOrders = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, statusFilter, ownershipFilter, partsOnlyFilter, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   // الأوامر التي تحتاج قطع غيار (لأي زر طباعة جماعي)
   const ordersNeedingParts = orders.filter(o => (o.partsNeeded || []).some(isPartStillNeeded));
@@ -400,7 +417,7 @@ export default function WorkOrders() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((order) => {
+              {paginatedOrders.map((order) => {
                 const delay = getOrderDelayStyle(order);
                 const isInsurance = isInsuranceOrder(order);
                 const insuranceLabel = insuranceReason(order);
@@ -632,6 +649,15 @@ export default function WorkOrders() {
         {filtered.length === 0 && (
           <div className="text-center py-12 text-muted-foreground"><Car size={40} className="mx-auto mb-3 opacity-30" /><p>لا توجد نتائج</p></div>
         )}
+        {filtered.length > 0 && (
+          <TablePaginationControls
+            page={page}
+            pageSize={pageSize}
+            totalItems={filtered.length}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        )}
       </div>
 
       <PdfPreviewDialog open={showPreview} onOpenChange={setShowPreview} htmlContent={previewHtml} title={previewTitle} />
@@ -790,4 +816,3 @@ export default function WorkOrders() {
     </div>
   );
 }
-

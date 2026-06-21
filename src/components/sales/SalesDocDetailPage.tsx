@@ -71,17 +71,6 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
   const doc = useMemo(() => salesStore.get(id), [id, tick]);
 
-  if (!doc) {
-    return (
-      <div className="text-center py-16">
-        <p className="text-muted-foreground">{isAr ? "المستند غير موجود" : "Document not found"}</p>
-        <Button className="mt-4" onClick={() => smartBack(navigate, listRoute)}>{isAr ? "عودة" : "Back"}</Button>
-      </div>
-    );
-  }
-
-  const currency = doc.currency === "OMR" ? "ر.ع" : doc.currency;
-
   function doDelete() {
     salesStore.remove(doc.id);
     toast.success(isAr ? "تم النقل للمحذوفات" : "Moved to trash");
@@ -101,6 +90,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   }
 
   async function buildHtml(): Promise<string> {
+    if (!doc) return "";
     const tpl = getTemplateSettings();
     const items = doc.items.map((it) => {
       const line = it.quantity * it.unitPrice;
@@ -166,11 +156,27 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
   // Build the live in-page preview HTML using the same template
   useEffect(() => {
+    if (!doc) {
+      setPreviewHtml("");
+      return;
+    }
     let cancelled = false;
     buildHtml().then((h) => { if (!cancelled) setPreviewHtml(h); }).catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, tick]);
+
+  if (!doc) {
+    return (
+      <div className="text-center py-16">
+        <p className="text-muted-foreground">{isAr ? "المستند غير موجود" : "Document not found"}</p>
+        <Button className="mt-4" onClick={() => smartBack(navigate, listRoute)}>{isAr ? "عودة" : "Back"}</Button>
+      </div>
+    );
+  }
+
+  const currency = doc.currency === "OMR" ? "ر.ع" : doc.currency;
+
   return (
     <div className="space-y-3" dir={isRtl ? "rtl" : "ltr"}>
       {/* Top bar with status + nav */}

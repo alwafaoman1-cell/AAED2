@@ -207,7 +207,7 @@ export default function ArchivedVehicleDetails({ plate }: Props) {
                     <div key={c.id} className="bg-card border border-border rounded p-2 text-[11px] space-y-1.5">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="flex items-center gap-2 min-w-0">
-                          <Link to={`/insurance/claim/${c.id}`} className="font-mono text-primary hover:underline">{c.claim_number}</Link>
+                          <Link to={`/insurance/${c.id}`} className="font-mono text-primary hover:underline">{c.claim_number}</Link>
                           <span className="text-muted-foreground truncate">{c.insurance_company || "—"}</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">{c.status}</span>
                         </div>
