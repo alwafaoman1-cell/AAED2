@@ -1,10 +1,9 @@
 // Unified helper: upload a PDF blob to Storage, then send/share via WhatsApp.
-// - Tries Meta Cloud API edge function (whatsapp-meta-send) if integration enabled.
-// - Falls back to opening wa.me with the message + signed URL.
+// All sending is performed by the whatsapp-meta-send Edge Function.
 
 import { supabase } from "@/integrations/supabase/client";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
-import { normalizePhone, buildWhatsAppUrl } from "@/lib/phoneUtils";
+import { normalizePhone } from "@/lib/phoneUtils";
 
 const BUCKET = "invoices-pdf";
 const SIGNED_TTL = 60 * 60 * 24 * 30; // 30 days
@@ -50,13 +49,10 @@ export async function isMetaWhatsAppEnabled(): Promise<boolean> {
   try {
     const { data } = await supabase
       .from("tenant_integrations")
-      .select("enabled, config, secrets")
+      .select("enabled")
       .eq("provider", "meta_whatsapp")
       .maybeSingle();
-    if (!data?.enabled) return false;
-    const cfg = (data.config || {}) as Record<string, string>;
-    const sec = (data.secrets || {}) as Record<string, string>;
-    return !!(cfg.phone_number_id && sec.access_token);
+    return !!data?.enabled;
   } catch { return false; }
 }
 
@@ -89,11 +85,16 @@ export async function sendPdfViaMetaCloud(args: {
 
 /** Open wa.me composer with caption + signed URL appended. */
 export function openWhatsAppShareLink(args: { phone?: string; caption?: string; pdfUrl: string }) {
-  const text = `${(args.caption || "").trim()}\n${args.pdfUrl}`.trim();
-  window.open(buildWhatsAppUrl(text, args.phone), "_blank", "noopener,noreferrer");
+  if (!args.phone) throw new Error("رقم الهاتف مطلوب للإرسال الآمن");
+  return sendPdfViaMetaCloud({
+    to: args.phone,
+    pdfUrl: args.pdfUrl,
+    fileName: "document.pdf",
+    caption: args.caption,
+  });
 }
 
-/** End-to-end: upload PDF → try Meta Cloud → otherwise open wa.me. */
+/** End-to-end: upload PDF then send through Meta Cloud Edge Function only. */
 export async function shareBlobViaWhatsApp(args: {
   blob: Blob;
   fileBaseName: string;
@@ -105,14 +106,10 @@ export async function shareBlobViaWhatsApp(args: {
   const uploaded = await uploadPdfBlob(args.blob, args.fileBaseName, args.subFolder || "shared");
   if (!uploaded?.url) return { ok: false, channel: "none", error: "upload_failed" };
 
-  if (args.preferMeta && args.phone && (await isMetaWhatsAppEnabled())) {
-    const r = await sendPdfViaMetaCloud({
-      to: args.phone, pdfUrl: uploaded.url, fileName: uploaded.fileName, caption: args.caption,
-    });
-    if (r.ok) return { ok: true, channel: "meta", url: uploaded.url };
-    // fall through to wa.me on failure
-  }
-
-  openWhatsAppShareLink({ phone: args.phone, caption: args.caption, pdfUrl: uploaded.url });
-  return { ok: true, channel: "wa.me", url: uploaded.url };
+  if (!args.phone) return { ok: false, channel: "none", error: "phone_required" };
+  const r = await sendPdfViaMetaCloud({
+    to: args.phone, pdfUrl: uploaded.url, fileName: uploaded.fileName, caption: args.caption,
+  });
+  if (r.ok) return { ok: true, channel: "meta", url: uploaded.url };
+  return { ok: false, channel: "none", url: uploaded.url, error: r.error };
 }

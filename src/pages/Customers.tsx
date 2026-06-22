@@ -17,6 +17,7 @@ import { customersStore, type Customer, type CustomerTag } from "@/lib/customers
 import { moveToTrash, registerRestoreHandler } from "@/lib/trashStore";
 import { canDelete, canEdit } from "@/lib/permissions";
 import { toast } from "sonner";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 const TAG_LABEL: Record<CustomerTag, string> = { vip: "VIP", regular: "عادي", new: "جديد" };
 const TAG_STYLE: Record<CustomerTag, string> = {
@@ -93,9 +94,14 @@ export default function Customers() {
     setDeleting(null);
   }
 
-  function whatsapp(phone: string) {
+  async function whatsapp(phone: string) {
     if (!phone) { toast.error("لا يوجد رقم جوال"); return; }
-    import("@/lib/phoneUtils").then(({ openWhatsApp }) => openWhatsApp("", phone));
+    try {
+      await sendWhatsAppMessage({ message: "مرحباً، نتواصل معك من ورشة الوفاء.", phone, recipientType: "customer" });
+      toast.success("تم إرسال الرسالة");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+    }
   }
 
   return (

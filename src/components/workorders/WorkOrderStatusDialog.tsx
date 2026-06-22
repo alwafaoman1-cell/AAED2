@@ -6,6 +6,7 @@ import { Check, ChevronLeft, Camera, Image as ImageIcon, Send, Save, Trash2, Loa
 import { WORK_ORDER_STATUSES, updateWorkOrder, type WorkOrder, type StagePhase, type StagePhoto } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 interface Props {
   order: WorkOrder | null;
@@ -167,8 +168,15 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
       if (portalToken) {
         text += `\n\n🔗 تابع حالة الإصلاح: ${window.location.origin}/p/${portalToken}`;
       }
-      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank");
-      toast.success("تم الحفظ وفتح واتساب ✓");
+      await sendWhatsAppMessage({
+        message: text,
+        phone,
+        workOrderId: cloudJobOrderId || order!.id,
+        kind: "custom",
+        recipientName: order!.customer,
+        recipientType: "customer",
+      });
+      toast.success("تم الحفظ والإرسال عبر واتساب ✓");
       onUpdated?.();
       onOpenChange(false);
     } finally { setSaving(null); }

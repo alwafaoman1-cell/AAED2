@@ -1,7 +1,8 @@
 // نظام المبيعات الموحد — تخزين محلي لكل أنواع المستندات
 // (الفواتير، عروض الأسعار، الإشعارات الدائنة، الفواتير المرتجعة، الفواتير الدورية، دفعات العملاء)
 import { resolveSeriesByPrefix } from "@/lib/numberingSettings";
-
+import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 export type SalesDocType =
   | "invoice"
@@ -122,32 +123,134 @@ export interface SalesDoc {
   isDeleted?: boolean;
 }
 
-const STORAGE_KEY = "alwafa_sales_docs_v1";
-
-let cache: SalesDoc[] | null = null;
+let cache: SalesDoc[] = [];
 const subscribers = new Set<() => void>();
 
 function read(): SalesDoc[] {
-  if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    cache = raw ? (JSON.parse(raw) as SalesDoc[]) : [];
-  } catch {
-    cache = [];
-  }
   return cache;
 }
 
 function write(next: SalesDoc[]) {
   cache = next;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {}
   subscribers.forEach((cb) => cb());
 }
 
 function notify() {
   subscribers.forEach((cb) => cb());
+}
+
+function rowToSalesDoc(r: any): SalesDoc {
+  const m = (r.metadata || {}) as Partial<SalesDoc>;
+  return {
+    id: r.id,
+    number: r.doc_number,
+    type: r.doc_type as SalesDocType,
+    status: r.status as SalesDocStatus,
+    customerId: r.customer_id || undefined,
+    customerName: r.customer_name || "",
+    customerAddress: m.customerAddress,
+    customerTaxNo: m.customerTaxNo,
+    date: r.date,
+    dueDate: r.due_date || undefined,
+    currency: m.currency || "OMR",
+    items: Array.isArray(r.items) ? r.items : [],
+    notes: r.notes || undefined,
+    terms: m.terms,
+    subtotal: Number(r.subtotal || 0),
+    discountTotal: Number(r.discount_total || 0),
+    taxTotal: Number(r.tax_total || 0),
+    total: Number(r.total || 0),
+    paidTotal: Number(r.paid_amount || 0),
+    balanceDue: Number(r.balance_due || 0),
+    costCenter: m.costCenter,
+    fromDocId: r.converted_invoice_id || m.fromDocId,
+    fromDocType: m.fromDocType,
+    payments: Array.isArray(m.payments) ? m.payments : [],
+    attachments: Array.isArray(m.attachments) ? m.attachments : [],
+    noteEntries: Array.isArray(m.noteEntries) ? m.noteEntries : [],
+    appointments: Array.isArray(m.appointments) ? m.appointments : [],
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    activity: Array.isArray(m.activity) ? m.activity : [],
+    recurrence: m.recurrence,
+    vehicle: {
+      plate: r.vehicle_plate || undefined,
+      make: r.vehicle_make || undefined,
+      model: r.vehicle_model || undefined,
+      year: m.vehicle?.year,
+      vin: m.vehicle?.vin,
+    },
+    source: m.source,
+    salesperson: m.salesperson,
+    customField: m.customField,
+    paymentTerms: m.paymentTerms,
+    headerLines: m.headerLines,
+    isDeleted: r.status === "cancelled" && !!m.isDeleted,
+  };
+}
+
+async function refreshSalesFromCloud() {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) return;
+  const { data, error } = await (supabase.from("sales_documents") as any)
+    .select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
+  if (error) {
+    console.warn("[salesStore] cloud fetch failed", error);
+    return;
+  }
+  cache = (data || []).map(rowToSalesDoc);
+  notify();
+}
+
+async function upsertSalesCloud(doc: SalesDoc) {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) return;
+  const { error } = await (supabase.from("sales_documents") as any).upsert({
+    id: doc.id,
+    tenant_id: tenantId,
+    doc_number: doc.number,
+    doc_type: doc.type,
+    status: doc.isDeleted ? "cancelled" : doc.status,
+    customer_id: doc.customerId || null,
+    customer_name: doc.customerName || null,
+    date: doc.date,
+    due_date: doc.dueDate || null,
+    items: doc.items,
+    notes: doc.notes || null,
+    subtotal: doc.subtotal,
+    discount_total: doc.discountTotal,
+    tax_total: doc.taxTotal,
+    total: doc.total,
+    paid_amount: doc.paidTotal,
+    balance_due: doc.balanceDue,
+    converted_invoice_id: doc.fromDocId || null,
+    vehicle_plate: doc.vehicle?.plate || null,
+    vehicle_make: doc.vehicle?.make || null,
+    vehicle_model: doc.vehicle?.model || null,
+    metadata: {
+      customerAddress: doc.customerAddress,
+      customerTaxNo: doc.customerTaxNo,
+      currency: doc.currency,
+      terms: doc.terms,
+      costCenter: doc.costCenter,
+      fromDocId: doc.fromDocId,
+      fromDocType: doc.fromDocType,
+      payments: doc.payments,
+      attachments: doc.attachments,
+      noteEntries: doc.noteEntries,
+      appointments: doc.appointments,
+      activity: doc.activity,
+      recurrence: doc.recurrence,
+      vehicle: doc.vehicle,
+      source: doc.source,
+      salesperson: doc.salesperson,
+      customField: doc.customField,
+      paymentTerms: doc.paymentTerms,
+      headerLines: doc.headerLines,
+      isDeleted: doc.isDeleted,
+    },
+  });
+  if (error) console.warn("[salesStore] cloud upsert failed", error);
 }
 
 export const salesStore = {
@@ -196,6 +299,7 @@ export const salesStore = {
       all.unshift(finalDoc);
     }
     write([...all]);
+    void upsertSalesCloud(finalDoc);
     // ─── ترحيل محاسبي تلقائي لفواتير المبيعات ───
     try {
       if (finalDoc.type === "invoice" && !finalDoc.isDeleted) {
@@ -219,6 +323,8 @@ export const salesStore = {
   remove(id: string) {
     const all = read().map((d) => (d.id === id ? { ...d, isDeleted: true } : d));
     write(all);
+    const removed = all.find((d) => d.id === id);
+    if (removed) void upsertSalesCloud(removed);
     // إزالة القيود المحاسبية المرتبطة للحفاظ على تطابق الأرصدة
     try {
       import("./salesAccounting").then(({ removeSalesInvoiceJournal }) => {
@@ -229,6 +335,7 @@ export const salesStore = {
   },
   hardRemove(id: string) {
     write(read().filter((d) => d.id !== id));
+    void supabase.from("sales_documents").delete().eq("id", id);
     try {
       import("./salesAccounting").then(({ removeSalesInvoiceJournal }) => {
         removeSalesInvoiceJournal(id, "sales_invoice");
@@ -237,7 +344,10 @@ export const salesStore = {
     } catch {}
   },
   restore(id: string) {
-    write(read().map((d) => (d.id === id ? { ...d, isDeleted: false } : d)));
+    const next = read().map((d) => (d.id === id ? { ...d, isDeleted: false } : d));
+    write(next);
+    const restored = next.find((d) => d.id === id);
+    if (restored) void upsertSalesCloud(restored);
   },
   duplicate(id: string): SalesDoc | null {
     const src = salesStore.get(id);
@@ -423,6 +533,20 @@ export const salesStore = {
     return inv;
   },
 };
+
+if (typeof window !== "undefined") {
+  setTimeout(() => void refreshSalesFromCloud(), 0);
+  supabase.auth.onAuthStateChange((_event, session) => {
+    cache = [];
+    notify();
+    if (session?.user) void refreshSalesFromCloud();
+  });
+  supabase.channel("sales_documents_store_sync")
+    .on("postgres_changes", { event: "*", schema: "public", table: "sales_documents" }, () => {
+      void refreshSalesFromCloud();
+    })
+    .subscribe();
+}
 
 export function numberPrefix(type: SalesDocType): string {
   switch (type) {

@@ -27,6 +27,7 @@ import { getVehicleCardHtml, getWorkOrderHtml, getStagePhotosAlbumHtml } from "@
 import { canEdit } from "@/lib/permissions";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import PlateInput from "@/components/vehicles/PlateInput";
 
 export default function VehicleDetail() {
@@ -245,7 +246,7 @@ export default function VehicleDetail() {
     setPdfOpen(true);
   }
 
-  function shareWhatsApp() {
+  async function shareWhatsApp() {
     const text =
       `🚗 *بطاقة سيارة - ${vehicle.plate}*\n` +
       `الموديل: ${vehicle.type}\n` +
@@ -254,8 +255,12 @@ export default function VehicleDetail() {
       `عدد الزيارات: ${orders.length}\n` +
       `إجمالي الإنفاق: ${(vehicle.totalSpent || totalRepairCost).toLocaleString()} ر.ع\n` +
       `آخر زيارة: ${vehicle.lastVisit}`;
-    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, "_blank");
+    try {
+      await sendWhatsAppMessage({ message: text, phone: vehicle.ownerPhone, vehicleId: vehicle.id, recipientName: vehicle.owner });
+      toast.success("تم إرسال بطاقة السيارة عبر واتساب");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+    }
   }
 
   // Open lightbox for a single order's photos

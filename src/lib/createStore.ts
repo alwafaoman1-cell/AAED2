@@ -8,10 +8,12 @@ export interface BaseEntity {
 interface StoreOptions<T extends BaseEntity> {
   key: string;
   seed: T[];
+  storage?: boolean;
 }
 
-export function createStore<T extends BaseEntity>({ key, seed }: StoreOptions<T>) {
+export function createStore<T extends BaseEntity>({ key, storage = true }: StoreOptions<T>) {
   let cache: T[] | null = null;
+  let mutationHandler: ((event: { type: "add" | "update" | "remove" | "restore"; item: T; previous?: T }) => void) | null = null;
   const listeners = new Set<() => void>();
   const channel: BroadcastChannel | null =
     typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(`store:${key}`) : null;
@@ -23,6 +25,11 @@ export function createStore<T extends BaseEntity>({ key, seed }: StoreOptions<T>
   }
 
   function reloadFromStorage() {
+    if (!storage) {
+      cache = [];
+      notify();
+      return;
+    }
     try {
       const raw = localStorage.getItem(key);
       cache = raw ? JSON.parse(raw) : [];
@@ -33,12 +40,12 @@ export function createStore<T extends BaseEntity>({ key, seed }: StoreOptions<T>
   }
 
   // Cross-tab: BroadcastChannel
-  if (channel) {
+  if (channel && storage) {
     channel.onmessage = () => reloadFromStorage();
   }
 
   // Cross-tab fallback: storage event (fires only in OTHER tabs)
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && storage) {
     window.addEventListener("storage", (e) => {
       if (e.key === key) reloadFromStorage();
     });
@@ -46,25 +53,30 @@ export function createStore<T extends BaseEntity>({ key, seed }: StoreOptions<T>
 
   function load(): T[] {
     if (cache) return cache;
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        cache = JSON.parse(raw);
-        return cache!;
-      }
-    } catch {}
-    cache = [...seed];
+    if (storage) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          cache = JSON.parse(raw);
+          return cache!;
+        }
+      } catch {}
+    }
+    // Production starts empty. Demo seed arrays are intentionally ignored.
+    cache = [];
     persist(false);
     return cache;
   }
 
   function persist(broadcast = true) {
     if (!cache) return;
-    try {
-      localStorage.setItem(key, JSON.stringify(cache));
-    } catch {}
+    if (storage) {
+      try {
+        localStorage.setItem(key, JSON.stringify(cache));
+      } catch {}
+    }
     notify();
-    if (broadcast && channel) {
+    if (broadcast && channel && storage) {
       try { channel.postMessage({ ts: Date.now() }); } catch {}
     }
   }
@@ -80,13 +92,16 @@ export function createStore<T extends BaseEntity>({ key, seed }: StoreOptions<T>
       const list = load();
       list.unshift(item);
       persist();
+      mutationHandler?.({ type: "add", item });
     },
     update(id: string, patch: Partial<T>) {
       const list = load();
       const idx = list.findIndex((i) => i.id === id);
       if (idx >= 0) {
+        const previous = list[idx];
         list[idx] = { ...list[idx], ...patch };
         persist();
+        mutationHandler?.({ type: "update", item: list[idx], previous });
       }
     },
     remove(id: string): T | undefined {
@@ -95,6 +110,7 @@ export function createStore<T extends BaseEntity>({ key, seed }: StoreOptions<T>
       if (idx === -1) return undefined;
       const [removed] = list.splice(idx, 1);
       persist();
+      mutationHandler?.({ type: "remove", item: removed });
       return removed;
     },
     restore(item: T) {
@@ -102,6 +118,7 @@ export function createStore<T extends BaseEntity>({ key, seed }: StoreOptions<T>
       if (list.some((i) => i.id === item.id)) return;
       list.unshift(item);
       persist();
+      mutationHandler?.({ type: "restore", item });
     },
     subscribe(cb: () => void): () => void {
       listeners.add(cb);
@@ -109,9 +126,12 @@ export function createStore<T extends BaseEntity>({ key, seed }: StoreOptions<T>
         listeners.delete(cb);
       };
     },
-    /** يفرض إعادة تحميل من localStorage (مفيد بعد عمليات مجمّعة خارجية) */
+    /** يعيد تهيئة الذاكرة من التخزين للإعدادات المحلية فقط. */
     refresh() {
       reloadFromStorage();
+    },
+    setMutationHandler(handler: typeof mutationHandler) {
+      mutationHandler = handler;
     },
   };
 }

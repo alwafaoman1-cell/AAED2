@@ -2,9 +2,7 @@
 import { getWorkOrders } from "./workOrdersStore";
 import { depositsStore } from "./depositsStore";
 import { getCustomerCreditNotes } from "./creditNotesStore";
-
-const RECEIPTS_KEY = "alwafa_receipts_v1";
-const SALES_DOCS_KEY = "alwafa_sales_docs_v1"; // قد لا يكون موجوداً (Sales يحتفظ بالحالة في الذاكرة)
+import { salesStore } from "./salesStore";
 
 function norm(s: string) { return (s || "").trim().toLowerCase().replace(/\s+/g, " "); }
 
@@ -48,23 +46,24 @@ interface RawReceipt {
   notes?: string;
 }
 
-interface RawSalesDoc {
-  id: string;
-  type: "invoice" | "quote";
-  customer: string;
-  total: number;
-  date: string;
-  status: string;
-}
-
 function loadReceipts(): RawReceipt[] {
-  try { return JSON.parse(localStorage.getItem(RECEIPTS_KEY) ?? "[]"); }
-  catch { return []; }
+  return salesStore.list({ type: "invoice" }).flatMap((doc) =>
+    (doc.payments || []).map((payment) => ({
+      id: payment.id,
+      number: payment.reference,
+      date: payment.date,
+      amount: payment.amount,
+      payerName: doc.customerName,
+      notes: payment.note,
+    }))
+  );
 }
 
-function loadSalesDocs(): RawSalesDoc[] {
-  try { return JSON.parse(localStorage.getItem(SALES_DOCS_KEY) ?? "[]"); }
-  catch { return []; }
+function loadSalesDocs() {
+  return salesStore.list({ type: "invoice" }).map((doc) => ({
+    ...doc,
+    customer: doc.customerName,
+  }));
 }
 
 export function getCustomerLedger(customer: string): CustomerLedger {

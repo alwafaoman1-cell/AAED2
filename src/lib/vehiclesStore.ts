@@ -57,6 +57,7 @@ export function unarchiveVehicle(id: string) {
 
 export const vehiclesStore = createStore<Vehicle>({
   key: "alwafa_vehicles_v2",
+  storage: false,
   seed: [
     {
       id: "أ ب ج 1234", plate: "أ ب ج 1234", type: "تويوتا كامري 2023", vin: "1HGBH41JXMN109186",
@@ -106,6 +107,68 @@ let cloudBootstrapped = false;
 let cloudFetchTimer: ReturnType<typeof setTimeout> | null = null;
 // plate (normalized) → cloud row id
 const KNOWN_CLOUD: Map<string, string> = new Map();
+
+async function pushVehicleToCloud(v: Vehicle) {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId || !v.plate) return;
+  const { extractPlateLetters, extractPlateDigits } = await import("@/lib/plateUtils");
+  const plateLetters = extractPlateLetters(v.plate);
+  const plateNumber = extractPlateDigits(v.plate);
+  if (!plateNumber) return;
+
+  let customerId: string | null = null;
+  if (v.owner) {
+    const { data: existing } = await supabase.from("customers").select("id")
+      .eq("tenant_id", tenantId).ilike("name", v.owner.trim()).limit(1).maybeSingle();
+    customerId = existing?.id || null;
+    if (!customerId) {
+      const { data: created, error } = await supabase.from("customers").insert({
+        tenant_id: tenantId,
+        name: v.owner.trim(),
+        phone: v.ownerPhone || null,
+      }).select("id").single();
+      if (error) {
+        console.warn("[vehiclesStore] customer create failed", error);
+        return;
+      }
+      customerId = created.id;
+    }
+  }
+  if (!customerId) return;
+
+  const cloudId = KNOWN_CLOUD.get(normPlate(v.plate));
+  const payload = {
+    tenant_id: tenantId,
+    customer_id: customerId,
+    plate_letters: plateLetters || null,
+    plate_number: plateNumber,
+    plate_country: "OM",
+    brand: v.type.split(" ")[0] || "غير محدد",
+    model: v.type.split(" ").slice(1).join(" ") || "غير محدد",
+    year: v.year ? Number(v.year) || null : null,
+    color: v.color || null,
+    mileage: v.mileage ? Number(String(v.mileage).replace(/\D/g, "")) || null : null,
+    vin: v.vin || null,
+    vin_number: v.vin || null,
+    archived: !!v.archived,
+    archived_at: v.archivedAt || null,
+    archived_reason: v.archivedReason || null,
+  };
+  const query = cloudId
+    ? supabase.from("vehicles").update(payload).eq("id", cloudId)
+    : supabase.from("vehicles").upsert(payload, { onConflict: "tenant_id,plate_letters,plate_number,plate_country" });
+  const { error } = await query;
+  if (error) console.warn("[vehiclesStore] cloud write failed", error);
+}
+
+vehiclesStore.setMutationHandler((event) => {
+  if (event.type === "remove") {
+    const cloudId = KNOWN_CLOUD.get(normPlate(event.item.plate));
+    if (cloudId) void supabase.from("vehicles").delete().eq("id", cloudId);
+    return;
+  }
+  void pushVehicleToCloud(event.item);
+});
 
 export async function refreshVehiclesFromCloud(): Promise<void> {
   return fetchVehiclesFromCloud();

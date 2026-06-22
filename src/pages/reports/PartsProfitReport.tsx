@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { printCurrentPageAsPdf } from "@/lib/safePdfWindow";
 import { ArrowRight, Printer, Download, Search, TrendingUp, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,7 +141,7 @@ export default function PartsProfitReport() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <Button onClick={exportPdf} className="gap-1 bg-destructive hover:bg-destructive/90"><FileDown size={14} /> PDF أفقي تفصيلي</Button>
-          <Button variant="outline" onClick={() => window.print()} className="gap-1"><Printer size={14} /> طباعة</Button>
+          <Button variant="outline" onClick={() => void printCurrentPageAsPdf("parts-profit-report")} className="gap-1"><Printer size={14} /> طباعة PDF</Button>
           <Button variant="outline" onClick={exportCsv} className="gap-1"><Download size={14} /> Excel</Button>
           <Button variant="outline" onClick={() => navigate(-1)} className="gap-1"><ArrowRight size={14} /> رجوع</Button>
         </div>

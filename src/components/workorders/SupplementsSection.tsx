@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { openWhatsApp, normalizePhone } from "@/lib/phoneUtils";
+import { normalizePhone } from "@/lib/phoneUtils";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 interface Supplement {
   id: string;
@@ -299,7 +300,19 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
               <Button size="sm" variant="outline" onClick={() => window.open(linkDialog!.link, "_blank")}>
                 <ExternalLink size={14}/>
               </Button>
-              <Button size="sm" variant="outline" onClick={() => openWhatsApp(`رابط موافقتك على الأعمال الإضافية:\n${linkDialog!.link}\n(صالح 24 ساعة)`, customerPhone)}>
+              <Button size="sm" variant="outline" onClick={async () => {
+                try {
+                  await sendWhatsAppMessage({
+                    message: `رابط موافقتك على الأعمال الإضافية:\n${linkDialog!.link}\n(صالح 24 ساعة)`,
+                    phone: customerPhone,
+                    workOrderId: jobOrderId,
+                    recipientType: "customer",
+                  });
+                  toast.success("تم إرسال رابط الموافقة");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "تعذر إرسال الرابط");
+                }
+              }}>
                 <MessageCircle size={14}/>
               </Button>
             </div>

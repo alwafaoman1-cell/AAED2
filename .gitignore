@@ -13,6 +13,11 @@ dist
 dist-ssr
 *.tsbuildinfo
 *.local
+.env
+.env.*
+!.env.example
+*.zip
+deliverables/مجلد جديد/
 
 # Editor directories and files
 .vscode/*

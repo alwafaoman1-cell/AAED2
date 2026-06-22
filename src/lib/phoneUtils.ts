@@ -25,15 +25,3 @@ export function toE164(input?: string | null, defaultCountry?: string): string {
 export function isValidE164(e164: string): boolean {
   return /^\+[1-9]\d{7,14}$/.test(e164);
 }
-
-/** بناء رابط واتساب — إن لم يُمرَّر رقم يفتح اختيار جهة الاتصال */
-export function buildWhatsAppUrl(message: string, phone?: string | null): string {
-  const encoded = encodeURIComponent(message || "");
-  const cleaned = normalizePhone(phone);
-  return cleaned ? `https://wa.me/${cleaned}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
-}
-
-/** فتح واتساب مباشرة */
-export function openWhatsApp(message: string, phone?: string | null) {
-  window.open(buildWhatsAppUrl(message, phone), "_blank", "noopener,noreferrer");
-}

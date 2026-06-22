@@ -49,6 +49,7 @@ import { getAccountStatementHtml } from "@/lib/accountStatementPdf";
 import { canEdit, canDelete } from "@/lib/permissions";
 import { logActivity } from "@/lib/auditLogStore";
 import { toast } from "sonner";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 const TAG_LABEL = { vip: "VIP", regular: "عادي", new: "جديد" } as const;
 const TAG_STYLE = {
@@ -192,9 +193,14 @@ export default function CustomerDetail() {
 
 
   // ====== actions ======
-  function whatsapp() {
+  async function whatsapp() {
     if (!customer.phone) { toast.error("لا يوجد رقم جوال"); return; }
-    import("@/lib/phoneUtils").then(({ openWhatsApp }) => openWhatsApp("", customer.phone));
+    try {
+      await sendWhatsAppMessage({ message: `مرحباً ${customer.name}، نتواصل معك من ورشة الوفاء.`, phone: customer.phone, recipientName: customer.name, recipientType: "customer" });
+      toast.success("تم إرسال الرسالة");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+    }
   }
   function callPhone() {
     if (!customer.phone) { toast.error("لا يوجد رقم جوال"); return; }
@@ -274,9 +280,8 @@ export default function CustomerDetail() {
       const a = document.createElement("a");
       a.href = url; a.download = fileName; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      const { openWhatsApp } = await import("@/lib/phoneUtils");
-      openWhatsApp(msg, customer.phone);
-      toast.success("تم تنزيل الملف — أرفقه في محادثة الواتساب");
+      await sendWhatsAppMessage({ message: msg, phone: customer.phone, recipientName: customer.name, recipientType: "customer" });
+      toast.success("تم تنزيل الملف وإرسال الرسالة عبر واتساب");
     } catch (e: any) {
       toast.error(e?.message || "تعذّر إنشاء الملف");
     }
@@ -723,8 +728,14 @@ export default function CustomerDetail() {
                             <button onClick={() => navigate(`/work-orders/${encodeURIComponent(o.id)}?print=1`)} title="طباعة"
                               className="p-1 rounded hover:bg-info/10 text-info"><FileDown size={12} /></button>
                             <button
-                              onClick={() => import("@/lib/phoneUtils").then(({ openWhatsApp }) =>
-                                openWhatsApp(`فاتورة رقم ${o.id} بمبلغ ${o.totalCost.toLocaleString()} ر.ع — تفاصيل أمر العمل: ${o.serviceType}`, customer.phone))}
+                              onClick={() => sendWhatsAppMessage({
+                                message: `فاتورة رقم ${o.id} بمبلغ ${o.totalCost.toLocaleString()} ر.ع — تفاصيل أمر العمل: ${o.serviceType}`,
+                                phone: customer.phone,
+                                workOrderId: o.id,
+                                recipientName: customer.name,
+                                recipientType: "customer",
+                              }).then(() => toast.success("تم إرسال الرسالة")).catch((error) =>
+                                toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة"))}
                               title="إرسال واتساب"
                               className="p-1 rounded hover:bg-success/10 text-success"><MessageCircle size={12} /></button>
                           </div>

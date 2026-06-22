@@ -1,0 +1,13 @@
+﻿Phase 1 - Stabilize Project Foundation
+
+Apply from the repository root:
+  git apply --binary phase1-stabilize-foundation.patch
+
+Verify:
+  npm install
+  npm run typecheck
+  npm run lint
+  npm run test
+  npm run build
+
+This patch does not include Phase 2 changes.

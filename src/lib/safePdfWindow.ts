@@ -2,6 +2,34 @@
 // Mitigates stored XSS from user-controlled fields interpolated into PDF templates.
 import DOMPurify from "dompurify";
 import { injectPageMarginStyle } from "./pdfLayoutSettings";
+import { generatePdfFromHtml, DEFAULT_MARGINS } from "./htmlToPdf";
+
+export async function printPdfBlob(blob: Blob): Promise<void> {
+  const url = URL.createObjectURL(blob);
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.position = "fixed";
+  frame.style.width = "0";
+  frame.style.height = "0";
+  frame.style.border = "0";
+  frame.style.right = "0";
+  frame.style.bottom = "0";
+  frame.src = url;
+  frame.onload = () => {
+    setTimeout(() => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } finally {
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
+          frame.remove();
+        }, 60_000);
+      }
+    }, 300);
+  };
+  document.body.appendChild(frame);
+}
 
 export function openSanitizedPdfWindow(html: string): Window | null {
   const clean = DOMPurify.sanitize(html, {
@@ -31,39 +59,27 @@ export function openSanitizedPdfWindow(html: string): Window | null {
  * is fully loaded (images, fonts, layout). Prevents the "blank print preview"
  * race that happens with a fixed setTimeout.
  */
-export function openAndPrintWindow(html: string): Window | null {
-  const win = openSanitizedPdfWindow(html);
-  if (!win) return null;
+export async function openAndPrintWindow(html: string): Promise<void> {
+  const clean = DOMPurify.sanitize(html, {
+    WHOLE_DOCUMENT: true,
+    ADD_TAGS: ["style", "link", "meta"],
+    ADD_ATTR: ["target", "dir", "lang"],
+  });
+  const blob = await generatePdfFromHtml({
+    htmlContent: clean,
+    fileName: `print-${Date.now()}`,
+    download: false,
+    margins: DEFAULT_MARGINS,
+  });
+  await printPdfBlob(blob);
+}
 
-  const tryPrint = () => {
-    try {
-      // Wait for web fonts to load (Arial/Tahoma fallback if not loaded)
-      const fontsReady: Promise<unknown> =
-        (win.document as any).fonts?.ready ?? Promise.resolve();
-      fontsReady
-        .catch(() => undefined)
-        .finally(() => {
-          // Microtask delay so the browser paints first
-          setTimeout(() => {
-            try {
-              win.focus();
-              win.print();
-            } catch {
-              /* user closed window */
-            }
-          }, 100);
-        });
-    } catch {
-      /* noop */
-    }
-  };
-
-  if (win.document.readyState === "complete") {
-    tryPrint();
-  } else {
-    win.addEventListener("load", tryPrint, { once: true });
-    // Hard fallback in case 'load' never fires (e.g., long-failing image)
-    setTimeout(tryPrint, 2500);
-  }
-  return win;
+export async function printCurrentPageAsPdf(fileName = "report"): Promise<void> {
+  const blob = await generatePdfFromHtml({
+    htmlContent: document.documentElement.outerHTML,
+    fileName,
+    download: false,
+    margins: DEFAULT_MARGINS,
+  });
+  await printPdfBlob(blob);
 }

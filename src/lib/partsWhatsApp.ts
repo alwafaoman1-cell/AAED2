@@ -1,7 +1,8 @@
 // مساعد لإرسال رسائل واتساب جاهزة + تسجيلها في سجل الأمر
 import { isPartStillNeeded, NEEDED_PART_STATUS_LABELS, type WorkOrder } from "./workOrdersStore";
-import { logWaMessage, type WaMessageKind } from "./waMessageLogStore";
+import type { WaMessageKind } from "./waMessageLogStore";
 import { normalizePhone } from "./phoneUtils";
+import { supabase } from "@/integrations/supabase/client";
 
 function digits(s: string | undefined | null): string {
   return normalizePhone(s);
@@ -153,17 +154,18 @@ export function buildCustomGreeting(order: WorkOrder): string {
 // ============================================================
 
 /** يفتح واتساب برسالة جاهزة. إن لم يُمرَّر رقم، يفتح اختيار جهة الاتصال. */
-export function openWhatsAppWithMessage(message: string, phone?: string) {
-  const encoded = encodeURIComponent(message);
+export async function openWhatsAppWithMessage(message: string, phone?: string) {
   const cleaned = digits(phone);
-  const url = cleaned
-    ? `https://wa.me/${cleaned}?text=${encoded}`
-    : `https://wa.me/?text=${encoded}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+  if (!cleaned) throw new Error("رقم الهاتف غير صالح");
+  const { data, error } = await supabase.functions.invoke("whatsapp-meta-send", {
+    body: { to: cleaned, type: "text", text: message, messageKind: "custom" },
+  });
+  if (error) throw error;
+  if (!data?.ok) throw new Error(data?.error || "فشل إرسال واتساب");
 }
 
-/** يفتح واتساب + يسجل المراسلة في سجل الأمر */
-export function sendWhatsAppAndLog(args: {
+/** يرسل عبر Edge Function؛ التسجيل يتم داخل الخادم في whatsapp_logs. */
+export async function sendWhatsAppAndLog(args: {
   message: string;
   phone?: string;
   workOrderId: string;
@@ -171,14 +173,44 @@ export function sendWhatsAppAndLog(args: {
   recipientName: string;
   recipientType: "customer" | "supplier" | "other";
 }) {
-  openWhatsAppWithMessage(args.message, args.phone);
-  logWaMessage({
+  return sendWhatsAppMessage({
+    message: args.message,
+    phone: args.phone,
     workOrderId: args.workOrderId,
     kind: args.kind,
     recipientName: args.recipientName,
-    recipientPhone: args.phone || "",
     recipientType: args.recipientType,
-    fullText: args.message,
-    preview: args.message.slice(0, 120),
   });
+}
+
+export async function sendWhatsAppMessage(args: {
+  message: string;
+  phone?: string;
+  workOrderId?: string;
+  customerId?: string;
+  vehicleId?: string;
+  insuranceClaimId?: string;
+  kind?: WaMessageKind;
+  recipientName?: string;
+  recipientType?: "customer" | "supplier" | "other";
+}) {
+  const cleaned = digits(args.phone);
+  if (!cleaned) throw new Error("رقم الهاتف غير صالح");
+  const { data, error } = await supabase.functions.invoke("whatsapp-meta-send", {
+    body: {
+      to: cleaned,
+      type: "text",
+      text: args.message,
+      jobOrderId: args.workOrderId,
+      customerId: args.customerId,
+      vehicleId: args.vehicleId,
+      insuranceClaimId: args.insuranceClaimId,
+      messageKind: args.kind || "custom",
+      recipientName: args.recipientName || "",
+      recipientType: args.recipientType || "other",
+    },
+  });
+  if (error) throw error;
+  if (!data?.ok) throw new Error(data?.error || "فشل إرسال واتساب");
+  return data;
 }

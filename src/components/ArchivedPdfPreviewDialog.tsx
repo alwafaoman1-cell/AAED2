@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button";
 import { Download, ExternalLink, X, Loader2, AlertTriangle, FileText, MessageCircle, Printer } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { openWhatsAppShareLink } from "@/lib/whatsappShare";
+import { toast } from "sonner";
 
 interface Props {
   open: boolean;
@@ -127,7 +127,9 @@ export default function ArchivedPdfPreviewDialog({ open, onOpenChange, url, file
               size="sm"
               variant="outline"
               className="text-emerald-600 border-emerald-500/40 hover:bg-emerald-500/10"
-              onClick={() => openWhatsAppShareLink({ pdfUrl: url, caption: fileName })}
+              onClick={() => {
+                toast.error("اختر المستند من ملف العميل أو أمر العمل لإرساله عبر واتساب بأمان");
+              }}
               title="مشاركة عبر واتساب"
             >
               <MessageCircle size={14} className="ml-1" />

@@ -8,7 +8,7 @@ import { ResponsiveDialog, ResponsiveDialogHeader, ResponsiveDialogTitle, Respon
 import { CreditCard, Copy, MessageCircle, Mail, Loader2, ExternalLink, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { openWhatsApp } from "@/lib/phoneUtils";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 type Gateway = "stripe" | "thawani" | "myfatoorah" | "paytabs" | "tap";
 const LABELS: Record<Gateway, string> = {
@@ -89,10 +89,15 @@ export default function CreatePaymentLinkDialog(props: Props) {
     navigator.clipboard.writeText(link.url);
     toast.success("نُسخ الرابط");
   }
-  function shareWa() {
+  async function shareWa() {
     if (!link) return;
     const msg = `مرحباً ${props.customerName}،\nرابط دفع فاتورتك ${props.sourceReference || ""} بقيمة ${props.amount} ${props.currency || "OMR"}:\n${link.url}\nشكراً — ورشة الوفاء`;
-    openWhatsApp(msg, props.customerPhone);
+    try {
+      await sendWhatsAppMessage({ message: msg, phone: props.customerPhone, recipientName: props.customerName, recipientType: "customer" });
+      toast.success("تم إرسال رابط الدفع عبر واتساب");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرابط");
+    }
   }
   function shareEmail() {
     if (!link || !props.customerEmail) { toast.error("لا يوجد بريد للعميل"); return; }

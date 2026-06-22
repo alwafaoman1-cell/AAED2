@@ -120,38 +120,14 @@ export const WORK_ORDER_STATUSES = [
   "مغلق",
 ];
 
-const STORAGE_KEY = "alwafa_work_orders";
-
-const seed: WorkOrder[] = [
-  { id: "WO-2024-001", customer: "أحمد محمد", phone: "0551234567", plate: "أ ب ج 1234", vehicleType: "تويوتا", model: "كامري", year: "2023", vin: "1HGBH41JXMN109186", color: "أبيض", mileage: "45,000", insurance: "ظفار للتأمين", claimNumber: "CLM-001", entryDate: "2024-03-25", technician: "عبدالله الغامدي", serviceType: "حادث", status: "تحت الإصلاح", totalCost: 1550, laborCost: 600, partsCost: 950, diagnosis: "تلف الصدام الأمامي والمصابيح" },
-  { id: "WO-2024-002", customer: "خالد العتيبي", phone: "0559876543", plate: "ه و ز 5678", vehicleType: "هوندا", model: "أكورد", year: "2022", vin: "2HGBH41JXMN109187", color: "أسود", mileage: "62,000", insurance: "الأهلية للتأمين", claimNumber: "CLM-002", entryDate: "2024-03-26", technician: "يوسف القحطاني", serviceType: "صيانة", status: "بانتظار الموافقة", totalCost: 320, laborCost: 120, partsCost: 200, diagnosis: "صيانة دورية شاملة" },
-  { id: "WO-2024-003", customer: "سعد الحربي", phone: "0553456789", plate: "ط ي ك 9012", vehicleType: "نيسان", model: "باترول", year: "2024", vin: "3HGBH41JXMN109188", color: "فضي", mileage: "12,000", insurance: "-", claimNumber: "-", entryDate: "2024-03-27", technician: "ماجد الدوسري", serviceType: "فحص", status: "جاهز للتسليم", totalCost: 50, laborCost: 50, partsCost: 0, diagnosis: "فحص قبل الشراء" },
-  { id: "WO-2024-004", customer: "فهد السبيعي", phone: "0557654321", plate: "ل م ن 3456", vehicleType: "لكزس", model: "ES", year: "2023", vin: "4HGBH41JXMN109189", color: "رمادي", mileage: "28,000", insurance: "ميثاق للتأمين", claimNumber: "CLM-003", entryDate: "2024-03-27", technician: "عبدالله الغامدي", serviceType: "كهرباء", status: "تحت الفحص", totalCost: 280, laborCost: 180, partsCost: 100, diagnosis: "خلل في النظام الكهربائي" },
-  { id: "WO-2024-005", customer: "محمد الشمري", phone: "0552345678", plate: "س ع ف 7890", vehicleType: "شيفروليه", model: "تاهو", year: "2024", vin: "5HGBH41JXMN109190", color: "أبيض لؤلؤي", mileage: "8,500", insurance: "الأمانة للتأمين", claimNumber: "CLM-004", entryDate: "2024-03-28", technician: "يوسف القحطاني", serviceType: "حادث", status: "تحت الإصلاح", totalCost: 2800, laborCost: 1100, partsCost: 1700, diagnosis: "تصادم جانبي - تلف باب وقاعدة" },
-];
-
-let cache: WorkOrder[] | null = null;
+let cache: WorkOrder[] = [];
 const listeners = new Set<() => void>();
 
 function load(): WorkOrder[] {
-  if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      cache = JSON.parse(raw);
-      return cache!;
-    }
-  } catch {}
-  cache = [...seed];
-  persist();
   return cache;
 }
 
 function persist() {
-  if (!cache) return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
-  } catch {}
   listeners.forEach(l => l());
 }
 
@@ -279,7 +255,7 @@ export function subscribeWorkOrders(cb: () => void): () => void {
 }
 
 // ============================================================
-// ☁️  Cloud sync layer — keeps localStorage cache fresh from
+// ☁️  Cloud source layer — keeps the in-memory view fresh from
 // Supabase `job_orders` and propagates changes via realtime so
 // every device shows the same data within seconds.
 // ============================================================
@@ -341,6 +317,16 @@ function mapCloudRow(
     photos: Array.isArray(r.photos) ? r.photos : [],
     partsNeeded: Array.isArray(r.parts_needed) ? r.parts_needed : [],
     workItems: Array.isArray(r.work_items) ? r.work_items : [],
+    extraExpenses: Array.isArray(r.metadata?.extraExpenses) ? r.metadata.extraExpenses : [],
+    linkedExpenseVoucherIds: Array.isArray(r.metadata?.linkedExpenseVoucherIds) ? r.metadata.linkedExpenseVoucherIds : [],
+    depositApplied: Number(r.metadata?.depositApplied || 0),
+    trackPassword: r.metadata?.trackPassword || undefined,
+    mileage: r.metadata?.mileage || undefined,
+    odometerKm: r.odometer_km ?? undefined,
+    fuelLevelPct: r.fuel_level_pct ?? undefined,
+    receptionNotes: r.reception_notes || undefined,
+    vehicleBelongings: r.vehicle_belongings || undefined,
+    receivedAt: r.received_at || undefined,
   };
 }
 
@@ -373,37 +359,11 @@ async function fetchFromCloud(): Promise<void> {
     KNOWN_CLOUD_NUMBERS.clear();
     cloudOrders.forEach((o) => KNOWN_CLOUD_NUMBERS.add(o.id));
 
-    // Merge: cloud takes precedence by id; keep local-only items (not yet synced) afterwards.
-    const local = load();
-    const cloudIds = new Set(cloudOrders.map((o) => o.id));
-    const localOnly = local.filter((o) => !cloudIds.has(o.id));
-    // Preserve local-only fields (extraExpenses, mileage, deposit) by merging onto cloud rows.
-    // IMPORTANT: cloud is the source of truth for `photos` and `partsNeeded` so all devices
-    // see the same data. Local-only photos (data: URLs from offline uploads) are kept ONLY
-    // when the cloud row has no photos yet — they will be migrated to Storage shortly after.
-    const localById = new Map(local.map((o) => [o.id, o]));
-    const merged = cloudOrders.map((co) => {
-      const lo = localById.get(co.id);
-      if (!lo) return co;
-      const cloudPhotos = Array.isArray(co.photos) ? co.photos : [];
-      const localPhotos = Array.isArray(lo.photos) ? lo.photos : [];
-      return {
-        ...co,
-        photos: cloudPhotos.length ? cloudPhotos : localPhotos,
-        partsNeeded: co.partsNeeded?.length ? co.partsNeeded : lo.partsNeeded,
-        extraExpenses: lo.extraExpenses,
-        mileage: lo.mileage || co.mileage,
-        trackPassword: lo.trackPassword,
-        depositApplied: lo.depositApplied,
-        linkedExpenseVoucherIds: lo.linkedExpenseVoucherIds,
-      };
-    });
-    cache = [...merged, ...localOnly];
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cache)); } catch {}
+    cache = cloudOrders;
     listeners.forEach((l) => l());
 
     // Kick off background migration of legacy base64 photos to Storage (non-blocking).
-    setTimeout(() => migrateLegacyPhotosInBackground(cache!), 1000);
+    setTimeout(() => migrateLegacyPhotosInBackground(cache), 1000);
   } catch (e) {
     console.warn("[workOrdersStore] cloud fetch failed:", e);
   }
@@ -475,7 +435,6 @@ if (typeof window !== "undefined") {
     const uid = session?.user?.id ?? null;
     if (uid !== lastUid) {
       lastUid = uid;
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
       cache = [];
       KNOWN_CLOUD_NUMBERS.clear();
       listeners.forEach((l) => l());
@@ -555,7 +514,7 @@ async function pushOrderToCloud(o: WorkOrder) {
     const ctx = await tenantContext(); if (!ctx) return;
     const custId = await ensureCustomer(ctx.tenantId, o.customer, o.phone); if (!custId) return;
     const vehId = await ensureVehicle(ctx.tenantId, custId, o); if (!vehId) return;
-    const { error } = await supabase.from("job_orders").insert({
+    const { error } = await (supabase.from("job_orders") as any).insert({
       tenant_id: ctx.tenantId,
       customer_id: custId,
       vehicle_id: vehId,
@@ -575,6 +534,18 @@ async function pushOrderToCloud(o: WorkOrder) {
       parts_needed: (o.partsNeeded || []) as any,
       work_items: (o.workItems || []) as any,
       photos: (o.photos || []) as any,
+      odometer_km: o.odometerKm ?? null,
+      fuel_level_pct: o.fuelLevelPct ?? null,
+      reception_notes: o.receptionNotes || null,
+      vehicle_belongings: (o.vehicleBelongings || {}) as any,
+      received_at: o.receivedAt || null,
+      metadata: {
+        extraExpenses: o.extraExpenses || [],
+        linkedExpenseVoucherIds: o.linkedExpenseVoucherIds || [],
+        depositApplied: o.depositApplied || 0,
+        trackPassword: o.trackPassword || null,
+        mileage: o.mileage || null,
+      } as any,
     });
     if (error) console.warn("[pushOrderToCloud]", error);
     else KNOWN_CLOUD_NUMBERS.add(o.id);
@@ -608,6 +579,27 @@ async function _flushPatch(orderNumber: string) {
     if (patch.workItems !== undefined) updates.work_items = patch.workItems as any;
     if (patch.photos !== undefined) updates.photos = patch.photos as any;
     if (patch.entryDate !== undefined) updates.entry_date = patch.entryDate;
+    if (patch.odometerKm !== undefined) updates.odometer_km = patch.odometerKm;
+    if (patch.fuelLevelPct !== undefined) updates.fuel_level_pct = patch.fuelLevelPct;
+    if (patch.receptionNotes !== undefined) updates.reception_notes = patch.receptionNotes;
+    if (patch.vehicleBelongings !== undefined) updates.vehicle_belongings = patch.vehicleBelongings;
+    if (patch.receivedAt !== undefined) updates.received_at = patch.receivedAt;
+    if (
+      patch.extraExpenses !== undefined ||
+      patch.linkedExpenseVoucherIds !== undefined ||
+      patch.depositApplied !== undefined ||
+      patch.trackPassword !== undefined ||
+      patch.mileage !== undefined
+    ) {
+      const current = getWorkOrderById(orderNumber);
+      updates.metadata = {
+        extraExpenses: patch.extraExpenses ?? current?.extraExpenses ?? [],
+        linkedExpenseVoucherIds: patch.linkedExpenseVoucherIds ?? current?.linkedExpenseVoucherIds ?? [],
+        depositApplied: patch.depositApplied ?? current?.depositApplied ?? 0,
+        trackPassword: patch.trackPassword ?? current?.trackPassword ?? null,
+        mileage: patch.mileage ?? current?.mileage ?? null,
+      };
+    }
     if (Object.keys(updates).length === 0) return;
     const { error } = await supabase.from("job_orders")
       .update(updates).eq("tenant_id", ctx.tenantId).eq("order_number", orderNumber);
@@ -683,4 +675,3 @@ listeners.add(() => {
   }
   _lastSnapshot = currentMap;
 });
-

@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2, Circle, Clock, Flag, Plus, Printer, Trash2, ListTodo } from "lucide-react";
 import { useDailyTasks, useCreateTask, useUpdateTask, useDeleteTask, type TaskPriority, type TaskStatus, type DailyTask } from "@/hooks/useDailyTasks";
 import { buildHtmlWithPageMarginStyle } from "@/lib/pdfLayoutSettings";
+import { openAndPrintWindow } from "@/lib/safePdfWindow";
 
 const priorityMeta: Record<TaskPriority, { label: string; cls: string }> = {
   urgent: { label: "عاجل", cls: "bg-destructive/15 text-destructive border-destructive/30" },
@@ -49,8 +50,6 @@ export default function DailyTasks() {
   };
 
   const handlePrint = () => {
-    const win = window.open("", "_blank");
-    if (!win) return;
     const rows = tasks.map((t, i) => `
       <tr>
         <td style="text-align:center">${i + 1}</td>
@@ -61,7 +60,7 @@ export default function DailyTasks() {
         <td style="text-align:center">${t.due_date}</td>
         <td style="width:60px;border:1px solid #999;height:24px"></td>
       </tr>`).join("");
-    win.document.write(buildHtmlWithPageMarginStyle(`
+    const html = buildHtmlWithPageMarginStyle(`
       <html dir="rtl" lang="ar"><head><meta charset="utf-8"/><title>مهام ${filterDate}</title>
       <style>
         @page{size:A4;margin:0}
@@ -84,9 +83,8 @@ export default function DailyTasks() {
         <thead><tr><th>#</th><th>العنوان</th><th>الوصف</th><th>الأولوية</th><th>الحالة</th><th>التاريخ</th><th>توقيع</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px">لا توجد مهام</td></tr>'}</tbody>
       </table>
-      <script>setTimeout(()=>window.print(),300)</script>
-      </div></body></html>`));
-    win.document.close();
+      </div></body></html>`);
+    void openAndPrintWindow(html);
   };
 
   const submit = () => {

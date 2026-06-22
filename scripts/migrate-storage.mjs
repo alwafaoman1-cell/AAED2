@@ -7,7 +7,8 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-const OLD_URL = process.env.OLD_SUPABASE_URL || "https://rvnphafedylethmvqsyp.supabase.co";
+const OLD_URL = process.env.OLD_SUPABASE_URL;
+if (!OLD_URL) throw new Error("Set OLD_SUPABASE_URL explicitly before running this one-time migration script");
 const OLD_KEY = process.env.OLD_SERVICE_ROLE_KEY || "<OLD_SERVICE_ROLE_KEY>";
 const NEW_URL = process.env.NEW_SUPABASE_URL || "<NEW_SUPABASE_URL>";
 const NEW_KEY = process.env.NEW_SERVICE_ROLE_KEY || "<NEW_SERVICE_ROLE_KEY>";

@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { MessageCircle, Send, Phone, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { toE164, isValidE164, openWhatsApp } from "@/lib/phoneUtils";
+import { toE164, isValidE164 } from "@/lib/phoneUtils";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 interface Props {
   open: boolean;
@@ -30,11 +31,16 @@ export default function SmsDialog({ open, onOpenChange, customer }: Props) {
     setText(t.replace("{name}", customer.name));
   }
 
-  function sendWhatsApp() {
+  async function sendWhatsApp() {
     if (!customer.phone) { toast.error("لا يوجد رقم جوال"); return; }
     if (!text.trim()) { toast.error("اكتب نص الرسالة"); return; }
-    openWhatsApp(text, customer.phone);
-    onOpenChange(false);
+    try {
+      await sendWhatsAppMessage({ message: text, phone: customer.phone, recipientName: customer.name, recipientType: "customer" });
+      toast.success("تم إرسال الرسالة عبر واتساب");
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+    }
   }
 
   function sendSmsNative() {

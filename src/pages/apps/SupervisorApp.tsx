@@ -9,7 +9,7 @@ import { ResponsiveDialog, ResponsiveDialogHeader, ResponsiveDialogTitle } from 
 import NeededPartsManager from "@/components/workorders/NeededPartsManager";
 import { getNeededPartsRequestHtml } from "@/lib/pdfGenerator";
 import { openSanitizedPdfWindow } from "@/lib/safePdfWindow";
-import { buildPartsRequestMessage, openWhatsAppWithMessage } from "@/lib/partsWhatsApp";
+import { buildPartsRequestMessage, sendWhatsAppAndLog } from "@/lib/partsWhatsApp";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -111,7 +111,15 @@ export default function SupervisorApp() {
       toast.error(isAr ? "لا توجد قطع غيار مطلوبة" : "No parts needed");
       return;
     }
-    openWhatsAppWithMessage(buildPartsRequestMessage(o), o.phone);
+    void sendWhatsAppAndLog({
+      message: buildPartsRequestMessage(o),
+      phone: o.phone,
+      workOrderId: o.id,
+      kind: "parts_request",
+      recipientName: o.customer,
+      recipientType: "customer",
+    }).then(() => toast.success(isAr ? "تم الإرسال" : "Sent"))
+      .catch((error) => toast.error(error?.message || (isAr ? "فشل الإرسال" : "Send failed")));
   }
   const [search, setSearch] = useState("");
   const workOrders = getWorkOrders();

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Send, Image as ImgIcon, Bell, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 interface Props {
   jobOrderId: string;          // cloud uuid
@@ -11,11 +12,6 @@ interface Props {
   status: string;
   customerName?: string;
   customerPhone?: string;
-}
-
-function buildWaUrl(phone: string, text: string): string {
-  const digits = (phone || "").replace(/\D/g, "");
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 
 export default function SmartCustomerSendBar({ jobOrderId, orderNumber, status, customerName, customerPhone }: Props) {
@@ -40,7 +36,7 @@ export default function SmartCustomerSendBar({ jobOrderId, orderNumber, status, 
     return `${window.location.origin}/p/${token}`;
   }
 
-  function send(kind: "status" | "photo" | "both") {
+  async function send(kind: "status" | "photo" | "both") {
     if (!customerPhone) { toast.error("لا يوجد رقم هاتف للعميل"); return; }
     setBusy(kind);
     try {
@@ -55,7 +51,17 @@ export default function SmartCustomerSendBar({ jobOrderId, orderNumber, status, 
       }
       const link = trackUrl();
       if (link) msg += `\n\n🔗 تابع التفاصيل: ${link}`;
-      window.open(buildWaUrl(customerPhone, msg), "_blank");
+      await sendWhatsAppMessage({
+        message: msg,
+        phone: customerPhone,
+        workOrderId: jobOrderId,
+        kind: "custom",
+        recipientName: customerName,
+        recipientType: "customer",
+      });
+      toast.success("تم إرسال التحديث عبر واتساب");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
     } finally {
       setBusy(null);
     }

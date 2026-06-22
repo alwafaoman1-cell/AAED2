@@ -5,7 +5,7 @@
 
 set -e
 
-OLD_DB_URL="${OLD_DB_URL:-postgresql://postgres.rvnphafedylethmvqsyp:OLD_PWD@aws-0-eu-central-1.pooler.supabase.com:6543/postgres}"
+: "${OLD_DB_URL:?Set OLD_DB_URL explicitly before running this one-time migration script}"
 NEW_DB_URL="${NEW_DB_URL:-postgresql://postgres:NEW_PWD@db.NEW_REF.supabase.co:5432/postgres}"
 DUMP_FILE="${DUMP_FILE:-./data.sql}"
 

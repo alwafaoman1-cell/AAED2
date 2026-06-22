@@ -15,6 +15,7 @@ import {
 import { vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import { openSanitizedPdfWindow, openAndPrintWindow } from "@/lib/safePdfWindow";
 import { buildPublicUrl } from "@/lib/publicAccessSettingsStore";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import { toast } from "sonner";
 
 interface Props {
@@ -78,12 +79,17 @@ export default function ShareVehicleDialog({ vehicle, open, onOpenChange }: Prop
     }
   }
 
-  function shareWhatsApp() {
+  async function shareWhatsApp() {
     const text =
       `🚗 *بطاقة السيارة - ${vehicle.plate}*\n` +
       `${vehicle.type}\n` +
       `يمكنك الاطلاع على البطاقة الكاملة (الصور قبل/بعد، سجل الإصلاح، المطالبات) من خلال الرابط:\n${publicUrl}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+    try {
+      await sendWhatsAppMessage({ message: text, phone: vehicle.ownerPhone, vehicleId: vehicle.id, recipientName: vehicle.owner });
+      toast.success("تم إرسال بطاقة السيارة عبر واتساب");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+    }
   }
 
   function downloadQr() {

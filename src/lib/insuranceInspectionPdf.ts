@@ -224,7 +224,6 @@ body{font-family:'Inter',sans-serif;direction:ltr;color:#000;background:#e9ecef;
 </head>
 <body>
 <div class="print-bar">
-<button class="btn-p" onclick="window.print()">🖨️ Print</button>
 <button class="btn-c" onclick="window.close()">✕ Close</button>
 </div>
 

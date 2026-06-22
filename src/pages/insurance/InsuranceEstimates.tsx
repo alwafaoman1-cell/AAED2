@@ -353,7 +353,7 @@ export default function InsuranceEstimates() {
         } as any);
         return `<div style="page-break-after: always;">${html}</div>`;
       });
-      const fullHtml = buildHtmlWithPageMarginStyle(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"><title>طباعة تقديرات</title></head><body>${parts.join("")}<script>window.onload=()=>setTimeout(()=>window.print(),300);<\/script></body></html>`);
+    const fullHtml = buildHtmlWithPageMarginStyle(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"><title>طباعة تقديرات</title></head><body>${parts.join("")}</body></html>`);
       const w = openAndPrintWindow(fullHtml);
       if (!w) { toast.error("متصفحك يمنع النوافذ المنبثقة"); return; }
     } catch (e: any) {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { smartBack } from "@/lib/smartBack";
+import { printCurrentPageAsPdf } from "@/lib/safePdfWindow";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -206,7 +207,7 @@ export default function RolesPermissionsPage() {
   }
 
   function exportPrint() {
-    window.print();
+    void printCurrentPageAsPdf("roles-permissions");
   }
 
   return (

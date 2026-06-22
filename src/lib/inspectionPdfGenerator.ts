@@ -208,7 +208,6 @@ body{font-family:'Noto Sans Arabic','Inter',sans-serif;direction:rtl;color:#1a1a
 </head>
 <body>
 <div class="print-bar">
-<button class="btn-p" onclick="window.print()">🖨️ طباعة / Print</button>
 <button class="btn-c" onclick="window.close()">✕ إغلاق / Close</button>
 </div>
 

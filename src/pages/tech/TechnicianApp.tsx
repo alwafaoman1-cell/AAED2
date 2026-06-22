@@ -23,6 +23,7 @@ import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { toEnglishDigits, formatPlateLatin } from "@/lib/numberUtils";
 import { toast } from "sonner";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import { requestNotifyPermission, startTechNotifications, canNotify } from "@/lib/techNotifications";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import {
@@ -306,13 +307,26 @@ export default function TechnicianApp() {
                   <CheckCircle2 className="h-3.5 w-3.5 mx-1" /> {t("tech.btnReady")}
                 </Button>
                 {o.phone ? (
-                  <a
-                    href={`https://wa.me/${o.phone.replace(/\D/g, "")}`}
-                    target="_blank" rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await sendWhatsAppMessage({
+                          message: `مرحباً ${o.customer}، نتواصل معك بخصوص أمر العمل ${o.id}.`,
+                          phone: o.phone,
+                          workOrderId: o.id,
+                          recipientName: o.customer,
+                          recipientType: "customer",
+                        });
+                        toast.success("تم إرسال الرسالة عبر واتساب");
+                      } catch (error) {
+                        toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+                      }
+                    }}
                     className="inline-flex items-center justify-center h-9 text-[11px] rounded-md hover:bg-secondary text-success"
                   >
                     <MessageCircle className="h-3.5 w-3.5 mx-1" /> {t("tech.btnWa")}
-                  </a>
+                  </button>
                 ) : <span />}
               </div>
 

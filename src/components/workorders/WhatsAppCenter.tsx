@@ -19,7 +19,6 @@ import {
   buildPaymentFollowupMessage,
   buildCustomGreeting,
   sendWhatsAppAndLog,
-  openWhatsAppWithMessage,
 } from "@/lib/partsWhatsApp";
 import {
   getWaLogsForOrder,
@@ -102,24 +101,28 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
     setter(next);
   }
 
-  function handleSendTemplate() {
+  async function handleSendTemplate() {
     if (!draft.trim()) {
       toast.error("النص فارغ");
       return;
     }
     const tpl = TEMPLATES.find((t) => t.key === activeTpl);
-    sendWhatsAppAndLog({
-      message: draft,
-      phone: order!.phone,
-      workOrderId: order!.id,
-      kind: tpl?.kind || "custom",
-      recipientName: order!.customer,
-      recipientType: "customer",
-    });
-    toast.success(`تم فتح واتساب — تم تسجيل الرسالة في سجل الأمر`);
+    try {
+      await sendWhatsAppAndLog({
+        message: draft,
+        phone: order!.phone,
+        workOrderId: order!.id,
+        kind: tpl?.kind || "custom",
+        recipientName: order!.customer,
+        recipientType: "customer",
+      });
+      toast.success("تم إرسال الرسالة وتسجيلها");
+    } catch (error: any) {
+      toast.error(error?.message || "فشل إرسال الرسالة");
+    }
   }
 
-  function handleSendToSuppliers() {
+  async function handleSendToSuppliers() {
     if (selectedSuppliers.size === 0) {
       toast.error("اختر مورداً واحداً على الأقل");
       return;
@@ -131,15 +134,14 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
     const targets = suppliers.filter((s) => selectedSuppliers.has(s.id));
     const partsList = partsForSupplier.map((p) => ({ name: p.name, quantity: p.quantity, notes: p.notes }));
 
-    targets.forEach((sup, idx) => {
+    try {
+      await Promise.all(targets.map(async (sup) => {
       const msg = buildSupplierPartsRequest({
         supplierName: sup.name,
         parts: partsList,
         workOrder: order!,
       });
-      // stagger window.open so popups open reliably
-      setTimeout(() => {
-        sendWhatsAppAndLog({
+        await sendWhatsAppAndLog({
           message: msg,
           phone: sup.phone,
           workOrderId: order!.id,
@@ -147,14 +149,27 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
           recipientName: sup.name,
           recipientType: "supplier",
         });
-      }, idx * 250);
-    });
-    toast.success(`جارٍ فتح ${targets.length} نافذة واتساب — تأكد من السماح بالنوافذ المنبثقة`);
+      }));
+      toast.success(`تم إرسال ${targets.length} رسالة وتسجيلها`);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر إرسال رسائل الموردين");
+    }
   }
 
-  function handleResendLog(log: WaMessageLog) {
-    openWhatsAppWithMessage(log.fullText, log.recipientPhone);
-    toast.info(`فتح واتساب لإعادة إرسال للـ ${log.recipientName}`);
+  async function handleResendLog(log: WaMessageLog) {
+    try {
+      await sendWhatsAppAndLog({
+        message: log.fullText,
+        phone: log.recipientPhone,
+        workOrderId: order!.id,
+        kind: log.kind,
+        recipientName: log.recipientName,
+        recipientType: log.recipientType === "insurance" ? "other" : log.recipientType,
+      });
+      toast.success(`تمت إعادة الإرسال إلى ${log.recipientName}`);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذرت إعادة الإرسال");
+    }
   }
 
   return (

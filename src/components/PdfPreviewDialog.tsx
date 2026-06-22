@@ -20,7 +20,7 @@ import {
 import { toast } from "sonner";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
 import WhatsAppShareButton from "@/components/whatsapp/WhatsAppShareButton";
-import { buildHtmlWithPageMarginStyle, injectPageMarginStyle, detectOrientation } from "@/lib/pdfLayoutSettings";
+import { buildHtmlWithPageMarginStyle, detectOrientation } from "@/lib/pdfLayoutSettings";
 import { getPdfPageDiagnostics, preparePagedPdfDocument, waitForPdfAssets } from "@/lib/pdfDocumentRenderer";
 
 interface PdfPreviewDialogProps {
@@ -254,8 +254,9 @@ export default function PdfPreviewDialog({
     }
   }, [previewHtml, pdfBlob, safeName, orientation]);
 
-  // طباعة مباشرة من HTML الجاهز للطباعة — أسرع وأعلى جودة من صور canvas
+  // اطبع نفس ملف PDF المستخدم في التنزيل لضمان تطابق الطباعة والتنزيل.
   const handlePrint = async () => {
+    let url: string | null = null;
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
     iframe.style.position = "fixed";
@@ -264,54 +265,34 @@ export default function PdfPreviewDialog({
     iframe.style.width = "0";
     iframe.style.height = "0";
     iframe.style.border = "0";
-    document.body.appendChild(iframe);
 
-    const doc = iframe.contentDocument;
-    if (!doc) {
+    try {
+      const blob = await ensurePdfBlob();
+      url = URL.createObjectURL(blob);
+      iframe.src = url;
+      iframe.onload = () => {
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch {
+            window.open(url!, "_blank", "noopener,noreferrer");
+          }
+        }, 300);
+      };
+      document.body.appendChild(iframe);
+    } catch (e) {
+      console.error(e);
+      toast.error("تعذّرت طباعة ملف PDF");
       iframe.remove();
-      toast.error("تعذّرت الطباعة");
+      if (url) URL.revokeObjectURL(url);
       return;
     }
 
-    doc.open();
-    doc.write(previewHtml);
-    doc.close();
-    try { injectPageMarginStyle(doc, orientation); } catch { void 0; }
-
-    const waitUntilReady = () =>
-      new Promise<void>((resolve) => {
-        let done = false;
-        const finish = async () => {
-          if (done) return;
-          done = true;
-          try { await (doc as any).fonts?.ready; } catch {}
-          const images = Array.from(doc.images || []);
-          await Promise.all(images.map((img) => {
-            if (img.complete) return Promise.resolve();
-            return new Promise<void>((res) => {
-              img.addEventListener("load", () => res(), { once: true });
-              img.addEventListener("error", () => res(), { once: true });
-            });
-          }));
-          resolve();
-        };
-
-        if (doc.readyState === "complete") setTimeout(finish, 50);
-        else iframe.addEventListener("load", () => setTimeout(finish, 50), { once: true });
-        setTimeout(finish, 2500);
-      });
-
-    try {
-      await waitUntilReady();
-      preparePagedPdfDocument(doc, orientation);
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    } catch (e) {
-      console.error(e);
-      toast.error("تعذّرت الطباعة المباشرة");
-    } finally {
-      setTimeout(() => iframe.remove(), 60_000);
-    }
+    setTimeout(() => {
+      iframe.remove();
+      if (url) URL.revokeObjectURL(url);
+    }, 60_000);
   };
 
   const handleDownload = async () => {
@@ -442,9 +423,9 @@ export default function PdfPreviewDialog({
               recipientName={recipientName}
               defaultMessage={recipientName ? `مرحباً ${recipientName}،\nإليك ${title}.` : ""}
             />
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handlePrint} title="فتح نافذة الطباعة الخاصة بالمتصفح">
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handlePrint} disabled={pdfGenerating} title="إنشاء ملف PDF ثم طباعته">
               <Printer size={14} />
-              <span className="text-xs">معاينة طباعة المتصفح</span>
+              <span className="text-xs">طباعة PDF</span>
             </Button>
             <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handleDownload} disabled={pdfGenerating}>
               {pdfGenerating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}

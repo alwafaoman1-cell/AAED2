@@ -2,12 +2,10 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
 import "./i18n";
-import { runDemoSeederIfNeeded } from "./lib/demoSeeder";
 import { registerTechPwa } from "./lib/registerPwa";
 import { ensureCacheVersion } from "./lib/cacheVersion";
 
 ensureCacheVersion();
-runDemoSeederIfNeeded();
 registerTechPwa();
 
 // Recovery for stale PWA chunks after a new deploy.

@@ -127,7 +127,6 @@ export function getPurchaseInvoiceHtml(inv: PurchaseInvoice, supplier?: Supplier
   </div>
 
   <div class="no-print" style="text-align:center;margin-top:18px">
-    <button onclick="window.print()">طباعة / حفظ PDF</button>
     <button onclick="window.close()" style="background:#777">إغلاق</button>
   </div>
 </body>
@@ -280,7 +279,6 @@ export function getSupplierBalanceReportHtml(report: SupplierBalanceReport): str
   <div class="footer">نظام الوفاء برو • تقرير محاسبي تلقائي</div>
 
   <div class="no-print" style="text-align:center;margin-top:18px">
-    <button onclick="window.print()">طباعة / حفظ PDF</button>
     <button onclick="window.close()" style="background:#777">إغلاق</button>
   </div>
 </body>

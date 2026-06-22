@@ -19,4 +19,10 @@ REVOKE EXECUTE ON FUNCTION public.has_role(uuid, app_role) FROM anon, PUBLIC;
 GRANT EXECUTE ON FUNCTION public.has_role(uuid, app_role) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.sync_profile_role_to_user_roles() FROM anon, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.log_claim_date_changes() FROM anon, PUBLIC;
+DO $$
+BEGIN
+  IF to_regprocedure('public.log_claim_date_changes()') IS NOT NULL THEN
+    REVOKE EXECUTE ON FUNCTION public.log_claim_date_changes() FROM anon, PUBLIC;
+  END IF;
+END
+$$;

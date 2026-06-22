@@ -65,7 +65,7 @@ supabase db push
 
 ```bash
 # تصدير البيانات فقط (بدون البنية)
-pg_dump "postgresql://postgres.rvnphafedylethmvqsyp:[OLD_PWD]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres" \
+pg_dump "$OLD_DB_URL" \
   --data-only \
   --schema=public \
   --no-owner \
@@ -104,7 +104,7 @@ import { createClient } from '@supabase/supabase-js';
 import fs from 'fs/promises';
 
 const OLD = createClient(
-  'https://rvnphafedylethmvqsyp.supabase.co',
+  process.env.OLD_SUPABASE_URL,
   'OLD_SERVICE_ROLE_KEY'
 );
 const NEW = createClient(

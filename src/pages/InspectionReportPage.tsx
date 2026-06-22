@@ -8,6 +8,7 @@ import { getInspectionHtml } from "@/lib/pdfGenerator";
 import { buildInsuranceInspectionHtml, generateInsuranceInspectionPdfBlob } from "@/lib/insuranceInspectionPdf";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
 import { toast } from "sonner";
+import { printPdfBlob } from "@/lib/safePdfWindow";
 
 /**
  * صفحة كاملة لتقرير الفحص — الافتراضي بدلاً من النوافذ المنبثقة.
@@ -74,24 +75,34 @@ export default function InspectionReportPage() {
     });
   }, [ins, isInsurance, insurancePayload]);
 
-  const handlePrint = () => {
-    const iframe = document.getElementById("ins-report-frame") as HTMLIFrameElement | null;
-    iframe?.contentWindow?.focus();
-    iframe?.contentWindow?.print();
+  const createPdf = async (download: boolean) => {
+    if (!ins) throw new Error("التقرير غير موجود");
+    return insurancePayload
+      ? generateInsuranceInspectionPdfBlob(insurancePayload, `Inspection_${ins.id}`, download)
+      : generatePdfFromHtml({
+          htmlContent: html,
+          fileName: `Inspection_${ins.id}`,
+          download,
+          margins: DEFAULT_MARGINS,
+        });
+  };
+
+  const handlePrint = async () => {
+    setBusy(true);
+    try {
+      await printPdfBlob(await createPdf(false));
+    } catch (error: any) {
+      toast.error(error?.message || "تعذرت طباعة PDF");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleDownload = async () => {
     if (!ins) return;
     setBusy(true);
     try {
-      const blob = insurancePayload
-        ? await generateInsuranceInspectionPdfBlob(insurancePayload, `Inspection_${ins.id}`, true)
-        : await generatePdfFromHtml({
-            htmlContent: html,
-            fileName: `Inspection_${ins.id}`,
-            download: true,
-            margins: DEFAULT_MARGINS,
-          });
+      const blob = await createPdf(true);
       if (blob.size === 0) throw new Error("ملف PDF فارغ");
       toast.success("تم تنزيل ملف PDF");
     } catch (e) {

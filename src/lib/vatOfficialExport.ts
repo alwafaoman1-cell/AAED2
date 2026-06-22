@@ -3,6 +3,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { formatMoney } from "@/lib/pdfGenerator";
 import { buildHtmlWithPageMarginStyle } from "@/lib/pdfLayoutSettings";
+import { generatePdfFromHtml } from "@/lib/htmlToPdf";
 
 export interface VatExportRange { from: string; to: string }
 
@@ -126,8 +127,10 @@ ${data.rows.filter(r=>r.kind==="input").map(r=>`<tr><td>${esc(r.source)}</td><td
 </table>
 <div style="clear:both"></div>
 <p style="margin-top:30px;font-size:10px;color:#666">هذا التقرير مُولّد آلياً من النظام للأغراض المحاسبية والتقديم لجهاز الضرائب.</p>
-<div style="text-align:center;margin-top:20px" class="no-print"><button onclick="window.print()">طباعة / حفظ PDF</button></div>
 </div></body></html>`;
-  const w = window.open("", "_blank");
-  if (w) { w.document.write(buildHtmlWithPageMarginStyle(html)); w.document.close(); }
+  await generatePdfFromHtml({
+    htmlContent: buildHtmlWithPageMarginStyle(html),
+    fileName: `VAT-${range.from}_to_${range.to}`,
+    download: true,
+  });
 }

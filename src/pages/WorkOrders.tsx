@@ -38,7 +38,7 @@ import {
   type WorkOrder,
 } from "@/lib/workOrdersStore";
 import { staffStore } from "@/lib/staffStore";
-import { buildPartsRequestMessage, buildBulkPartsRequestMessage, openWhatsAppWithMessage } from "@/lib/partsWhatsApp";
+import { buildPartsRequestMessage, sendWhatsAppAndLog } from "@/lib/partsWhatsApp";
 import { inspectionsStore } from "@/lib/inspectionsStore";
 import { moveToTrash } from "@/lib/trashStore";
 import { canDelete, canEdit } from "@/lib/permissions";
@@ -307,7 +307,7 @@ export default function WorkOrders() {
                 toast.error("لا توجد سيارات تحتاج قطع غيار");
                 return;
               }
-              openWhatsAppWithMessage(buildBulkPartsRequestMessage(ordersNeedingParts));
+              toast.info("استخدم مركز واتساب داخل كل أمر عمل لاختيار المستلم وتسجيل الربط الكامل");
             }}
             disabled={ordersNeedingParts.length === 0}
             className="h-9 gap-1.5 border-success/40 text-success hover:bg-success/10 disabled:opacity-50"
@@ -549,7 +549,15 @@ export default function WorkOrders() {
                               toast.error("لا توجد قطع غيار لهذا الأمر");
                               return;
                             }
-                            openWhatsAppWithMessage(buildPartsRequestMessage(order), order.phone);
+                            void sendWhatsAppAndLog({
+                              message: buildPartsRequestMessage(order),
+                              phone: order.phone,
+                              workOrderId: order.id,
+                              kind: "parts_request",
+                              recipientName: order.customer,
+                              recipientType: "customer",
+                            }).then(() => toast.success("تم الإرسال"))
+                              .catch((error) => toast.error(error?.message || "فشل الإرسال"));
                           }}
                           className="gap-2 cursor-pointer"
                         >
@@ -566,7 +574,15 @@ export default function WorkOrders() {
                         <DropdownMenuItem
                           onClick={() => {
                             const msg = `مرحباً ${order.customer}،\nحالة سيارتكم (${order.plate}) في الورشة الآن: ${order.status}\nأمر العمل: ${order.id}\nشكراً لكم — شركة الوفاء للأعمال المتكاملة.`;
-                            openWhatsAppWithMessage(msg, order.phone);
+                            void sendWhatsAppAndLog({
+                              message: msg,
+                              phone: order.phone,
+                              workOrderId: order.id,
+                              kind: "custom",
+                              recipientName: order.customer,
+                              recipientType: "customer",
+                            }).then(() => toast.success("تم الإرسال"))
+                              .catch((error) => toast.error(error?.message || "فشل الإرسال"));
                           }}
                           className="gap-2 cursor-pointer"
                         >

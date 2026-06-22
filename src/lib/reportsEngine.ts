@@ -12,6 +12,7 @@ import { expensesStore, getExpensesTotalForWorkOrder, getExpensePartProfit, getE
 import { depositsStore } from "./depositsStore";
 import { journalStore } from "./journalStore";
 import { vehiclesStore } from "./vehiclesStore";
+import { salesStore } from "./salesStore";
 
 // ===== أنواع موحدة =====
 export interface DateRange {
@@ -74,14 +75,18 @@ export interface SalesReport {
 }
 
 const PAID_STATUSES = ["تم التسليم", "مغلق"];
-const RECEIPTS_KEY = "alwafa_receipts_v1";
-
 interface RawReceipt { id: string; date: string; amount: number; payerName?: string }
 function loadReceiptsInRange(r: DateRange): RawReceipt[] {
-  try {
-    const arr: RawReceipt[] = JSON.parse(localStorage.getItem(RECEIPTS_KEY) ?? "[]");
-    return arr.filter((x) => inRange(x.date, r));
-  } catch { return []; }
+  return salesStore.list({ type: "invoice" }).flatMap((doc) =>
+    (doc.payments || [])
+      .filter((payment) => inRange(payment.date, r))
+      .map((payment) => ({
+        id: payment.id,
+        date: payment.date,
+        amount: payment.amount,
+        payerName: doc.customerName,
+      }))
+  );
 }
 
 const normName = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");

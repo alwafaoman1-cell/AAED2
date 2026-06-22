@@ -17,7 +17,7 @@ SET search_path TO 'public'
 AS $$
 BEGIN
   IF NEW.secure_token IS NULL OR NEW.secure_token = '' THEN
-    NEW.secure_token := encode(gen_random_bytes(24), 'hex');
+    NEW.secure_token := encode(extensions.gen_random_bytes(24), 'hex');
   END IF;
   RETURN NEW;
 END $$;
@@ -29,7 +29,7 @@ FOR EACH ROW EXECUTE FUNCTION public.generate_invoice_secure_token();
 
 -- 3) backfill existing rows
 UPDATE public.insurance_invoices
-   SET secure_token = encode(gen_random_bytes(24), 'hex')
+   SET secure_token = encode(extensions.gen_random_bytes(24), 'hex')
  WHERE secure_token IS NULL;
 
 -- 4) public viewer RPC

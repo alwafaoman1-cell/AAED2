@@ -5,6 +5,8 @@
 
 import { getWorkOrders } from "./workOrdersStore";
 import { vehiclesStore } from "./vehiclesStore";
+import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 export type CustomerTag = "vip" | "regular" | "new";
 export type CustomerType = "individual" | "company";
@@ -38,12 +40,8 @@ export interface CustomerStats {
   lastVisit?: string;
 }
 
-const STORAGE_KEY = "alwafa_customers_v1";
-
-let cache: Customer[] | null = null;
+let cache: Customer[] = [];
 const listeners = new Set<() => void>();
-const channel: BroadcastChannel | null =
-  typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(`store:${STORAGE_KEY}`) : null;
 
 function normalize(s: string): string {
   return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -53,70 +51,63 @@ function notify() {
   listeners.forEach((l) => { try { l(); } catch {} });
 }
 
-function reloadFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    cache = raw ? JSON.parse(raw) : [];
-  } catch { cache = []; }
-  notify();
-}
-
-if (channel) channel.onmessage = () => reloadFromStorage();
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key === STORAGE_KEY) reloadFromStorage();
-  });
-}
-
 function persist() {
-  if (!cache) return;
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cache)); } catch {}
   notify();
-  if (channel) { try { channel.postMessage({ ts: Date.now() }); } catch {} }
-}
-
-function migrateFromExistingData(): Customer[] {
-  // Build initial set from work orders + vehicles
-  const map = new Map<string, Customer>();
-  const now = new Date().toISOString();
-
-  const upsert = (name: string, phone: string) => {
-    const key = normalize(name);
-    if (!key) return;
-    const existing = map.get(key);
-    if (existing) {
-      if (!existing.phone && phone) existing.phone = phone;
-      return;
-    }
-    map.set(key, {
-      id: `CUST-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      name: name.trim(),
-      phone: phone || "",
-      tag: "regular",
-      createdAt: now,
-    });
-  };
-
-  try {
-    getWorkOrders().forEach((o) => upsert(o.customer, o.phone));
-    vehiclesStore.getAll().forEach((v) => upsert(v.owner, v.ownerPhone || ""));
-  } catch {}
-
-  return Array.from(map.values());
 }
 
 function load(): Customer[] {
-  if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      cache = JSON.parse(raw);
-      return cache!;
-    }
-  } catch {}
-  cache = migrateFromExistingData();
-  persist();
   return cache;
+}
+
+function rowToCustomer(r: any): Customer {
+  return {
+    id: r.id,
+    name: r.name,
+    phone: r.phone || "",
+    email: r.email || undefined,
+    address: r.address || undefined,
+    idNumber: r.id_number || undefined,
+    notes: r.notes || undefined,
+    tag: "regular",
+    type: r.type || "individual",
+    contactPerson: r.contact_person || undefined,
+    commercialRegistration: r.commercial_registration || undefined,
+    taxNumber: r.tax_number || undefined,
+    createdAt: r.created_at,
+  };
+}
+
+async function refreshCustomersFromCloud() {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) return;
+  const { data, error } = await supabase.from("customers").select("*")
+    .eq("tenant_id", tenantId).order("created_at", { ascending: false });
+  if (error) {
+    console.warn("[customersStore] cloud fetch failed", error);
+    return;
+  }
+  cache = (data || []).map(rowToCustomer);
+  persist();
+}
+
+async function upsertCustomerCloud(c: Customer) {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) return;
+  const { error } = await supabase.from("customers").upsert({
+    id: c.id,
+    tenant_id: tenantId,
+    name: c.name,
+    phone: c.phone || null,
+    email: c.email || null,
+    address: c.address || null,
+    id_number: c.idNumber || null,
+    notes: c.notes || null,
+    type: c.type || "individual",
+    contact_person: c.contactPerson || null,
+    commercial_registration: c.commercialRegistration || null,
+    tax_number: c.taxNumber || null,
+  });
+  if (error) console.warn("[customersStore] cloud upsert failed", error);
 }
 
 export const customersStore = {
@@ -149,7 +140,7 @@ export const customersStore = {
     const existing = customersStore.findByName(pendingName);
     if (existing) return existing;
     const c: Customer = {
-      id: `CUST-IP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: crypto.randomUUID(),
       name: pendingName,
       phone: "",
       type: "company",
@@ -172,7 +163,7 @@ export const customersStore = {
       return customersStore.findByName(name)!;
     }
     const created: Customer = {
-      id: `CUST-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: crypto.randomUUID(),
       name: name.trim(),
       phone,
       tag: "new",
@@ -186,6 +177,7 @@ export const customersStore = {
     const list = load();
     list.unshift(c);
     persist();
+    void upsertCustomerCloud(c);
   },
 
   update(id: string, patch: Partial<Customer>) {
@@ -194,6 +186,7 @@ export const customersStore = {
     if (idx >= 0) {
       list[idx] = { ...list[idx], ...patch };
       persist();
+      void upsertCustomerCloud(list[idx]);
     }
   },
 
@@ -203,6 +196,7 @@ export const customersStore = {
     if (idx === -1) return undefined;
     const [removed] = list.splice(idx, 1);
     persist();
+    void supabase.from("customers").delete().eq("id", id);
     return removed;
   },
 
@@ -211,6 +205,7 @@ export const customersStore = {
     if (list.some((x) => x.id === c.id)) return;
     list.unshift(c);
     persist();
+    void upsertCustomerCloud(c);
   },
 
   subscribe(cb: () => void): () => void {
@@ -252,3 +247,17 @@ export const customersStore = {
     return "regular";
   },
 };
+
+if (typeof window !== "undefined") {
+  setTimeout(() => void refreshCustomersFromCloud(), 0);
+  supabase.auth.onAuthStateChange((_event, session) => {
+    cache = [];
+    persist();
+    if (session?.user) void refreshCustomersFromCloud();
+  });
+  supabase.channel("customers_store_sync")
+    .on("postgres_changes", { event: "*", schema: "public", table: "customers" }, () => {
+      void refreshCustomersFromCloud();
+    })
+    .subscribe();
+}

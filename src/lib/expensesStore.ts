@@ -47,23 +47,13 @@ export function getExpensePartRevenue(e: ExpenseRecord): number {
 }
 
 // ---------------- in-memory cache + sync ----------------
-const LS_KEY = "alwafa_expenses_v1";
 let cache: ExpenseRecord[] = [];
 let hydrated = false;
 const listeners = new Set<() => void>();
 
 function notify() { listeners.forEach((l) => { try { l(); } catch {} }); }
 
-function persistLocal() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(cache)); } catch {}
-}
-function loadLocal(): ExpenseRecord[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw) as ExpenseRecord[];
-  } catch {}
-  return [];
-}
+function persistLocal() {}
 
 function rowToRecord(r: any): ExpenseRecord {
   const meta = (r.meta || {}) as Record<string, any>;
@@ -146,25 +136,17 @@ async function hydrateFromCloud() {
       .order("date", { ascending: false });
     if (error) throw error;
     const cloud = (data || []).map(rowToRecord);
-    const cloudIds = new Set(cloud.map((r) => r.id));
-    // Preserve legacy local-only records (non-uuid ids that never synced) so we don't lose data.
-    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const legacyLocal = cache.filter((r) => !uuidRe.test(r.id) && !cloudIds.has(r.id));
-    cache = [...cloud, ...legacyLocal];
+    cache = cloud;
     hydrated = true;
     persistLocal();
     notify();
   } catch (e) {
-    if (!hydrated) {
-      cache = loadLocal();
-      notify();
-    }
+    if (!hydrated) notify();
   }
 }
 
-// Initial hydration: load local cache instantly, then refresh from cloud.
+// Initial hydration is Supabase-only.
 if (typeof window !== "undefined") {
-  cache = loadLocal();
   hydrateFromCloud();
 
   // Refresh after sign-in.

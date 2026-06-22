@@ -3,6 +3,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 const VAT_RATE = 0.05;
 
@@ -293,8 +294,8 @@ export function bulkExportClaimsCSV(claims: InsuranceClaim[]) {
   toast.success(`تم تصدير ${claims.length} مطالبة`);
 }
 
-/** فتح روابط واتساب لكل عميل تباعاً (لا يمكن إرسال جماعي حقيقي من المتصفح). */
-export function bulkOpenWhatsAppToCustomers(
+/** إرسال الرسائل تباعاً عبر Edge Function مع ربطها بالمطالبة. */
+export async function bulkOpenWhatsAppToCustomers(
   claims: InsuranceClaim[],
   buildMessage: (c: InsuranceClaim) => string,
 ) {
@@ -303,11 +304,21 @@ export function bulkOpenWhatsAppToCustomers(
   for (const c of claims) {
     const phone = (c.customer?.phone || "").replace(/\D/g, "");
     if (!phone) { skipped++; continue; }
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(buildMessage(c))}`;
-    window.open(url, "_blank", "noopener");
-    opened++;
+    try {
+      await sendWhatsAppMessage({
+        message: buildMessage(c),
+        phone,
+        insuranceClaimId: c.id,
+        customerId: c.customer_id || undefined,
+        recipientName: c.customer?.name,
+        recipientType: "customer",
+      });
+      opened++;
+    } catch {
+      skipped++;
+    }
   }
-  if (opened) toast.success(`فُتحت ${opened} محادثة واتساب`);
+  if (opened) toast.success(`تم إرسال ${opened} رسالة واتساب`);
   if (skipped) toast.warning(`تم تخطي ${skipped} مطالبة بدون رقم هاتف`);
 }
 

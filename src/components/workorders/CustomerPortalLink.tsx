@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Copy, Link2, MessageCircle, Loader2, ShieldCheck, PenLine, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { getWorkOrderById, type WorkItem } from "@/lib/workOrdersStore";
+import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 
 interface Props {
   jobOrderId: string;
@@ -56,20 +57,26 @@ export default function CustomerPortalLink({ jobOrderId, customerPhone, orderNum
     return nameLine + orderLine + itemsBlock + signLine + trackLine + "\nشكراً لثقتك بنا.";
   }
 
-  function shareWelcomeWhatsApp() {
+  async function shareWelcomeWhatsApp() {
     if (!token) return;
     const msg = buildWelcomeMessage();
-    const phone = (customerPhone || "").replace(/\D/g, "");
-    const target = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-    window.open(target, "_blank");
+    try {
+      await sendWhatsAppMessage({ message: msg, phone: customerPhone, workOrderId: jobOrderId, recipientName: customerName });
+      toast.success("تم إرسال رسالة الترحيب");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+    }
   }
 
-  function shareTrackOnly() {
+  async function shareTrackOnly() {
     if (!trackUrl) return;
     const msg = `مرحباً، يمكنك متابعة حالة إصلاح مركبتك ${orderNumber ? `(${orderNumber})` : ""} عبر الرابط التالي:\n${trackUrl}`;
-    const phone = (customerPhone || "").replace(/\D/g, "");
-    const target = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-    window.open(target, "_blank");
+    try {
+      await sendWhatsAppMessage({ message: msg, phone: customerPhone, workOrderId: jobOrderId, recipientName: customerName });
+      toast.success("تم إرسال رابط المتابعة");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+    }
   }
 
   return (

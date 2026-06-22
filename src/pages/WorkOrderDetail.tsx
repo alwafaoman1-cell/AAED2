@@ -48,7 +48,7 @@ import { canDelete, canEdit } from "@/lib/permissions";
 import { moveToTrash } from "@/lib/trashStore";
 import { logActivity } from "@/lib/auditLogStore";
 import { getNeededPartsRequestHtml, getWorkOrderHtml } from "@/lib/pdfGenerator";
-import { buildPartsRequestMessage, openWhatsAppWithMessage } from "@/lib/partsWhatsApp";
+import { buildPartsRequestMessage } from "@/lib/partsWhatsApp";
 
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import WorkOrderForm from "@/components/workorders/WorkOrderForm";

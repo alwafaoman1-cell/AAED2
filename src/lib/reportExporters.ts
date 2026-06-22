@@ -6,6 +6,7 @@ import * as XLSX from "xlsx";
 import { generatePdfFromHtml } from "./htmlToPdf";
 import { getTemplateSettings, STAMP_SIZE_PX } from "./pdfGenerator";
 import { buildHtmlWithPageMarginStyle } from "./pdfLayoutSettings";
+import { printPdfBlob } from "./safePdfWindow";
 
 export interface ReportColumn {
   key: string;
@@ -36,7 +37,7 @@ export function formatCellValue(v: any, col: ReportColumn): string {
 }
 
 // ============== HTML قابل للطباعة (مشترك بين PDF والطباعة المباشرة) ==============
-function buildReportHtml(p: ReportExportPayload, opts: { forPrint?: boolean } = {}): string {
+function buildReportHtml(p: ReportExportPayload): string {
   const headRow = p.columns
     .map((c) => `<th style="text-align:${c.align || "right"}">${escapeHtml(c.label)}</th>`)
     .join("");
@@ -236,11 +237,6 @@ function buildReportHtml(p: ReportExportPayload, opts: { forPrint?: boolean } = 
       <span>نظام إدارة الورش — الوفاء</span>
     </div>
   </div>
-  ${
-    opts.forPrint
-      ? `<script>window.onload=()=>{setTimeout(()=>{window.print();},250);};</script>`
-      : ""
-  }
 </body>
 </html>`;
 }
@@ -323,10 +319,13 @@ export function exportReportToCsv(p: ReportExportPayload, filename = "report.csv
 
 // ============== طباعة مباشرة (نافذة منفصلة RTL) ==============
 // @page { margin: 0 } يلغي header/footer الافتراضي للمتصفح (الرابط والتاريخ)
-export function printReport(p: ReportExportPayload) {
-  const win = window.open("", "_blank", "width=1100,height=800");
-  if (!win) return;
-  const html = buildHtmlWithPageMarginStyle(buildReportHtml(p, { forPrint: true }));
-  win.document.write(html);
-  win.document.close();
+export async function printReport(p: ReportExportPayload) {
+  const html = buildHtmlWithPageMarginStyle(buildReportHtml(p));
+  const blob = await generatePdfFromHtml({
+    htmlContent: html,
+    fileName: `report-${Date.now()}`,
+    download: false,
+    margins: { top: 0, right: 0, bottom: 0, left: 0 },
+  });
+  await printPdfBlob(blob);
 }

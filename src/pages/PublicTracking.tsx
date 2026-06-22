@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { CheckCircle2, Clock, Wrench, ShieldCheck, PackageCheck, Car, Calendar, ShieldAlert, Lock, KeyRound, Loader2 } from "lucide-react";
-import { getWorkOrderById, STAGE_LABELS, StagePhase } from "@/lib/workOrdersStore";
+import { STAGE_LABELS, StagePhase } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { getMasterPasswordNormalized } from "@/lib/publicAccessSettingsStore";
 
 /** Public-safe shape — minimal fields returned by RPC OR derived from local store */
 interface PublicWO {
@@ -54,33 +53,8 @@ function statusToPhase(status: string): StagePhase {
   return "in_progress";
 }
 
-const sessionKey = (id: string) => `wo_track_auth_${id}`;
-
 async function fetchPublicWO(key: string, password?: string): Promise<{ wo: PublicWO | null; requiresPassword: boolean; notFound: boolean }> {
-  // Try local store first (owner/admin viewing on same device)
-  const local = getWorkOrderById(key);
-  if (local) {
-    return {
-      wo: {
-        id: local.id,
-        orderNumber: local.id,
-        status: local.status,
-        entryDate: local.entryDate,
-        customer: local.customer,
-        technician: local.technician,
-        vehicleType: local.vehicleType,
-        model: local.model,
-        year: local.year,
-        plate: local.plate,
-        color: local.color,
-        photos: local.photos,
-      },
-      requiresPassword: false,
-      notFound: false,
-    };
-  }
-
-  // Fallback to Supabase RPC for public scans
+  // Public access is server-authorized only. Never trust a browser-local copy.
   const { data, error } = await supabase.rpc("get_public_work_order" as any, {
     p_key: key,
     p_password: password ?? null,
@@ -129,14 +103,12 @@ export default function PublicTracking() {
     if (!id) return;
     (async () => {
       setLoading(true);
-      const cached = sessionStorage.getItem(sessionKey(id));
-      const res = await fetchPublicWO(id, cached || undefined);
+      const res = await fetchPublicWO(id);
       if (cancelled) return;
       setWo(res.wo);
       setRequiresPassword(res.requiresPassword);
       setNotFound(res.notFound);
       if (res.wo && !res.requiresPassword) setAuthed(true);
-      if (res.wo && cached) setAuthed(true);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -146,18 +118,6 @@ export default function PublicTracking() {
     e.preventDefault();
     if (!id) return;
     const entered = normalize(pwd);
-    const master = getMasterPasswordNormalized();
-    // Master password short-circuit (still requires data)
-    if (master && entered === master) {
-      const res = await fetchPublicWO(id, ""); // master allows; but server enforces; try without
-      // If server still gated, we accept locally as master is system-wide
-      if (res.wo) {
-        setWo(res.wo);
-        setAuthed(true);
-        try { sessionStorage.setItem(sessionKey(id), entered); } catch {}
-        return;
-      }
-    }
     const res = await fetchPublicWO(id, entered);
     if (res.notFound) {
       setNotFound(true);
@@ -169,7 +129,6 @@ export default function PublicTracking() {
     }
     setWo(res.wo);
     setAuthed(true);
-    try { sessionStorage.setItem(sessionKey(id), entered); } catch {}
   }
 
   if (loading) {
