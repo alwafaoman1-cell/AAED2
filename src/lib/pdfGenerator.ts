@@ -7,15 +7,17 @@ import QRCode from "qrcode";
 import { openSanitizedPdfWindow } from "./safePdfWindow";
 import { buildPublicUrl } from "./publicAccessSettingsStore";
 
-/** بناء رابط تتبع عام لأمر عمل — يعتمد الدومين المعتمد للإنتاج (Settings → Public Access) */
-export function getTrackingUrl(orderKey: string): string {
-  return buildPublicUrl(`/track/${encodeURIComponent(orderKey)}`);
+/** رابط تتبع عام آمن. المفتاح يجب أن يكون tracking_token وليس رقم الأمر أو UUID الداخلي. */
+export function getTrackingUrl(trackingToken?: string): string {
+  if (!trackingToken) return "";
+  return buildPublicUrl(`/track/${encodeURIComponent(trackingToken)}`);
 }
 
 /** يبني QR كـ dataURL متزامناً (cache بسيط لتفادي إعادة التوليد) */
 const _qrCache: Record<string, string> = {};
-export async function buildTrackingQrDataUrl(orderNumber: string): Promise<string> {
-  const url = getTrackingUrl(orderNumber);
+export async function buildTrackingQrDataUrl(trackingToken?: string): Promise<string> {
+  const url = getTrackingUrl(trackingToken);
+  if (!url) return "";
   if (_qrCache[url]) return _qrCache[url];
   try {
     const dataUrl = await QRCode.toDataURL(url, {
@@ -32,8 +34,9 @@ export async function buildTrackingQrDataUrl(orderNumber: string): Promise<strin
 }
 
 /** نسخة sync تستخدم الـ cache فقط — للقوالب التي لا تستطيع await */
-export function getTrackingQrFromCache(orderNumber: string): string {
-  return _qrCache[getTrackingUrl(orderNumber)] || "";
+export function getTrackingQrFromCache(trackingToken?: string): string {
+  const url = getTrackingUrl(trackingToken);
+  return url ? (_qrCache[url] || "") : "";
 }
 
 /** Try custom template first; if no active template found, returns null and caller uses legacy generator. */
@@ -69,6 +72,8 @@ interface InvoiceData {
 
 interface WorkOrderData {
   orderNumber: string;
+  workOrderType?: "general_customer" | "insurance";
+  trackingToken?: string;
   date: string;
   customerName: string;
   customerPhone: string;
@@ -587,8 +592,12 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
     </tr>
   `).join('');
 
-  const trackUrl = getTrackingUrl(data.orderNumber);
-  const qrDataUrl = getTrackingQrFromCache(data.orderNumber);
+  const orderType = data.workOrderType === "insurance" ? "insurance" : "general_customer";
+  const typeBadge = orderType === "insurance"
+    ? `<span style="display:inline-block;padding:5px 10px;border-radius:999px;background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;font-size:10px;font-weight:700;">🛡 INSURANCE</span>`
+    : `<span style="display:inline-block;padding:5px 10px;border-radius:999px;background:#dcfce7;color:#047857;border:1px solid #86efac;font-size:10px;font-weight:700;">🚗 GENERAL / CASH</span>`;
+  const trackUrl = getTrackingUrl(data.trackingToken);
+  const qrDataUrl = getTrackingQrFromCache(data.trackingToken);
   const qrCardHtml = qrDataUrl ? `
     <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;margin:0 0 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
       <img src="${qrDataUrl}" alt="QR" style="width:90px;height:90px;flex-shrink:0;border-radius:6px;background:#fff;padding:4px;border:1px solid #e2e8f0;" />
@@ -602,6 +611,7 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
   const body = `<div class="page">
     ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
     ${headerHtml(s, 'أمر عمل', 'WORK ORDER', data.orderNumber, data.date)}
+    <div style="display:flex;justify-content:flex-end;margin:-4px 0 10px;">${typeBadge}</div>
     ${qrCardHtml}
 
     ${sectionTitle('مسار حالة الإصلاح', 'Repair Status Timeline')}
@@ -627,8 +637,10 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
     <div class="info-grid">
       <div class="info-row">${lbl('نوع الخدمة:', 'Service Type')}<span class="value">${data.serviceType}</span></div>
       <div class="info-row">${lbl('الفني المسؤول:', 'Technician')}<span class="value">${data.technician}</span></div>
+      ${orderType === "insurance" ? `
       <div class="info-row">${lbl('شركة التأمين:', 'Insurance Co.')}<span class="value">${data.insurance}</span></div>
-      <div class="info-row">${lbl('رقم المطالبة:', 'Claim No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${data.claimNumber}</span></div>
+      <div class="info-row">${lbl('رقم المطالبة:', 'Claim No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${data.claimNumber}</span></div>` : `
+      <div class="info-row">${lbl('نوع الأمر:', 'Order Type')}<span class="value">عميل عام / General Customer</span></div>`}
       <div class="info-row">${lbl('الحالة الحالية:', 'Current Status')}<span class="value"><span class="status-badge ${statusClass}">${data.status}<span class="en">${statusEn}</span></span></span></div>
     </div>
 
@@ -715,7 +727,7 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
 
 export async function generateWorkOrderPdf(data: WorkOrderData) {
   // ابنِ QR التتبع مسبقاً قبل توليد الـ HTML
-  await buildTrackingQrDataUrl(data.orderNumber);
+  await buildTrackingQrDataUrl(data.trackingToken);
   const html = getWorkOrderHtml(data);
   openSanitizedPdfWindow(html);
 }
@@ -1769,4 +1781,3 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
   </div>`;
   return wrapHtml(`Delivery Receipt ${data.receiptNumber}`, getBaseStyles(s), body);
 }
-

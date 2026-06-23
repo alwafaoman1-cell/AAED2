@@ -73,6 +73,8 @@ import { Label } from "@/components/ui/label";
 import WhatsAppCenter from "@/components/workorders/WhatsAppCenter";
 import QuickEmailButton from "@/components/QuickEmailButton";
 import { salesStore, statusLabel, type SalesDoc } from "@/lib/salesStore";
+import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
+import { resolveWorkOrderType } from "@/lib/workOrderType";
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
 
@@ -180,7 +182,8 @@ export default function WorkOrderDetail() {
           .select(`
             id, order_number, status, description, diagnosis,
             labor_cost, parts_cost, final_total, created_at,
-            insurance_claim_number, insurance_approved,
+            insurance_claim_number, insurance_company, insurance_approved,
+            work_order_type, claim_id, tracking_token, tracking_expires_at, archived_at,
             customer:customers(name, phone),
             vehicle:vehicles(brand, model, plate_number, year, color, vin_number)
           `);
@@ -194,8 +197,14 @@ export default function WorkOrderDetail() {
           const v: any = (data as any).vehicle || {};
           const c: any = (data as any).customer || {};
           const adapted: WorkOrder = {
-            id: (data as any).id,
+            id: (data as any).order_number || (data as any).id,
+            cloudId: (data as any).id,
             displayNumber: (data as any).order_number || undefined,
+            workOrderType: (data as any).work_order_type || ((data as any).claim_id ? "insurance" : "general_customer"),
+            claimId: (data as any).claim_id || undefined,
+            trackingToken: (data as any).tracking_token || undefined,
+            trackingExpiresAt: (data as any).tracking_expires_at || undefined,
+            archivedAt: (data as any).archived_at || undefined,
             customer: c.name || "—",
             phone: c.phone || "",
             plate: v.plate_number || "—",
@@ -205,7 +214,7 @@ export default function WorkOrderDetail() {
             vin: v.vin_number || "",
             color: v.color || "",
             mileage: "",
-            insurance: (data as any).insurance_approved ? "تأمين" : "-",
+            insurance: (data as any).insurance_company || ((data as any).insurance_approved ? "تأمين" : "-"),
             claimNumber: (data as any).insurance_claim_number || "-",
             entryDate: ((data as any).created_at || "").slice(0, 10),
             technician: "",
@@ -322,7 +331,7 @@ export default function WorkOrderDetail() {
   async function handlePrintWorkOrder() {
     // Pre-build tracking QR into the cache before sync HTML render
     const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
-    await buildTrackingQrDataUrl(order!.id);
+    if (order!.trackingToken) await buildTrackingQrDataUrl(order!.trackingToken);
 
     // Fetch customer signature if available (from portal token)
     let customerSignatureDataUrl: string | undefined;
@@ -344,6 +353,8 @@ export default function WorkOrderDetail() {
 
     const html = getWorkOrderHtml({
       orderNumber: order!.displayNumber || (UUID_RE.test(order!.id) ? `WO-${order!.id.slice(0, 8).toUpperCase()}` : order!.id),
+      workOrderType: resolveWorkOrderType(order!),
+      trackingToken: order!.trackingToken,
       date: order!.entryDate,
       customerName: order!.customer,
       customerPhone: order!.phone,
@@ -413,6 +424,31 @@ export default function WorkOrderDetail() {
 
   return (
     <div className="space-y-5">
+      <div className={`rounded-xl border p-4 ${
+        resolveWorkOrderType(order) === "insurance"
+          ? "border-sky-500/35 bg-gradient-to-l from-sky-500/15 to-card"
+          : "border-emerald-500/35 bg-gradient-to-l from-emerald-500/15 to-card"
+      }`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-foreground">
+              {resolveWorkOrderType(order) === "insurance" ? "🛡 Insurance Work Order" : "🚗 General Customer Work Order"}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {resolveWorkOrderType(order) === "insurance"
+                ? `مرتبط بمسار التأمين${order.claimNumber && order.claimNumber !== "-" ? ` — مطالبة ${order.claimNumber}` : ""}`
+                : "أمر عميل عام / كاش — لا ينشئ مطالبة تأمين"}
+            </p>
+          </div>
+          <WorkOrderTypeBadge
+            workOrderType={order.workOrderType}
+            claimId={order.claimId}
+            claimNumber={order.claimNumber}
+            insurance={order.insurance}
+          />
+        </div>
+      </div>
+
       {/* Header bar */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div className="flex items-center gap-3">

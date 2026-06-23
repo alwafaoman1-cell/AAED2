@@ -50,8 +50,15 @@ export function isPartStillNeeded(p: NeededPart): boolean {
 
 export interface WorkOrder {
   id: string;
+  /** UUID الداخلي في Supabase. لا يُستخدم في الروابط العامة. */
+  cloudId?: string;
   /** رقم عرض احترافي للأمر (مثل WO-2026-00012). إن لم يُحدّد يُستخدم id كرقم. */
   displayNumber?: string;
+  workOrderType?: import("@/lib/workOrderType").WorkOrderType;
+  claimId?: string;
+  trackingToken?: string;
+  trackingExpiresAt?: string;
+  archivedAt?: string;
   customer: string;
   phone: string;
   plate: string;
@@ -294,7 +301,13 @@ function mapCloudRow(
   const v = r.vehicle_id ? vehMap.get(r.vehicle_id) : undefined;
   return {
     id: r.order_number || r.id,
+    cloudId: r.id,
     displayNumber: r.order_number || undefined,
+    workOrderType: r.work_order_type || (r.claim_id ? "insurance" : "general_customer"),
+    claimId: r.claim_id || undefined,
+    trackingToken: r.tracking_token || undefined,
+    trackingExpiresAt: r.tracking_expires_at || undefined,
+    archivedAt: r.archived_at || undefined,
     customer: c?.name || "",
     phone: c?.phone || "",
     plate: v?.plate || "",
@@ -530,6 +543,9 @@ async function pushOrderToCloud(o: WorkOrder) {
       parts_cost: o.partsCost || 0,
       insurance_company: o.insurance && o.insurance !== "-" ? o.insurance : null,
       insurance_claim_number: o.claimNumber && o.claimNumber !== "-" ? o.claimNumber : null,
+      claim_id: o.claimId || null,
+      work_order_type: o.claimId ? "insurance" : (o.workOrderType || "general_customer"),
+      archived_at: o.archivedAt || null,
       notes: o.description || null,
       parts_needed: (o.partsNeeded || []) as any,
       work_items: (o.workItems || []) as any,
@@ -579,6 +595,12 @@ async function _flushPatch(orderNumber: string) {
     if (patch.workItems !== undefined) updates.work_items = patch.workItems as any;
     if (patch.photos !== undefined) updates.photos = patch.photos as any;
     if (patch.entryDate !== undefined) updates.entry_date = patch.entryDate;
+    if (patch.workOrderType !== undefined) updates.work_order_type = patch.claimId ? "insurance" : patch.workOrderType;
+    if (patch.claimId !== undefined) updates.claim_id = patch.claimId || null;
+    if (patch.insurance !== undefined) updates.insurance_company = patch.insurance === "-" ? null : patch.insurance;
+    if (patch.claimNumber !== undefined) updates.insurance_claim_number = patch.claimNumber === "-" ? null : patch.claimNumber;
+    if (patch.trackingExpiresAt !== undefined) updates.tracking_expires_at = patch.trackingExpiresAt || null;
+    if (patch.archivedAt !== undefined) updates.archived_at = patch.archivedAt || null;
     if (patch.odometerKm !== undefined) updates.odometer_km = patch.odometerKm;
     if (patch.fuelLevelPct !== undefined) updates.fuel_level_pct = patch.fuelLevelPct;
     if (patch.receptionNotes !== undefined) updates.reception_notes = patch.receptionNotes;

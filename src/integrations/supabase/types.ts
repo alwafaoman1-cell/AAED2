@@ -1172,6 +1172,7 @@ export type Database = {
           incident_date: string | null
           incident_description: string | null
           insurance_company: string | null
+          claim_id: string | null
           insurance_company_id: string | null
           lump_sum_amount: number
           notes: string | null
@@ -1568,6 +1569,8 @@ export type Database = {
       }
       job_orders: {
         Row: {
+          archived_at: string | null
+          claim_id: string | null
           completed_at: string | null
           created_at: string
           customer_id: string
@@ -1586,6 +1589,9 @@ export type Database = {
           notes: string | null
           odometer_km: number | null
           order_number: string
+          tracking_expires_at: string | null
+          tracking_token: string
+          work_order_type: string
           parts_cost: number
           parts_needed: Json
           photos: Json
@@ -1606,6 +1612,7 @@ export type Database = {
           work_items: Json
         }
         Insert: {
+          archived_at?: string | null
           completed_at?: string | null
           created_at?: string
           customer_id: string
@@ -1620,10 +1627,14 @@ export type Database = {
           insurance_approved?: boolean | null
           insurance_claim_number?: string | null
           insurance_company?: string | null
+          claim_id?: string | null
           labor_cost?: number
           notes?: string | null
           odometer_km?: number | null
           order_number: string
+          tracking_expires_at?: string | null
+          tracking_token?: string
+          work_order_type?: string
           parts_cost?: number
           parts_needed?: Json
           photos?: Json
@@ -1644,6 +1655,7 @@ export type Database = {
           work_items?: Json
         }
         Update: {
+          archived_at?: string | null
           completed_at?: string | null
           created_at?: string
           customer_id?: string
@@ -1658,10 +1670,14 @@ export type Database = {
           insurance_approved?: boolean | null
           insurance_claim_number?: string | null
           insurance_company?: string | null
+          claim_id?: string | null
           labor_cost?: number
           notes?: string | null
           odometer_km?: number | null
           order_number?: string
+          tracking_expires_at?: string | null
+          tracking_token?: string
+          work_order_type?: string
           parts_cost?: number
           parts_needed?: Json
           photos?: Json

@@ -20,6 +20,7 @@ interface PublicWO {
   year?: string;
   plate?: string;
   color?: string;
+  workOrderType?: "general_customer" | "insurance";
   photos?: Array<{ id: string; phase: StagePhase; dataUrl: string; caption?: string }>;
 }
 
@@ -53,7 +54,7 @@ function statusToPhase(status: string): StagePhase {
   return "in_progress";
 }
 
-async function fetchPublicWO(key: string, password?: string): Promise<{ wo: PublicWO | null; requiresPassword: boolean; notFound: boolean }> {
+async function fetchPublicWO(key: string, password?: string): Promise<{ wo: PublicWO | null; requiresPassword: boolean; notFound: boolean; expired: boolean }> {
   // Public access is server-authorized only. Never trust a browser-local copy.
   const { data, error } = await supabase.rpc("get_public_work_order" as any, {
     p_key: key,
@@ -61,14 +62,17 @@ async function fetchPublicWO(key: string, password?: string): Promise<{ wo: Publ
   });
   if (error) {
     console.warn("[PublicTracking] RPC error:", error.message);
-    return { wo: null, requiresPassword: false, notFound: true };
+    return { wo: null, requiresPassword: false, notFound: true, expired: false };
   }
   const row: any = Array.isArray(data) ? data[0] : data;
-  if (!row) return { wo: null, requiresPassword: false, notFound: true };
+  if (!row) return { wo: null, requiresPassword: false, notFound: true, expired: false };
+  if (row.access_state === "expired") {
+    return { wo: null, requiresPassword: false, notFound: false, expired: true };
+  }
 
   // Status fields are null when password is required but not provided/correct
   if (!row.status) {
-    return { wo: null, requiresPassword: !!row.requires_password, notFound: false };
+    return { wo: null, requiresPassword: !!row.requires_password, notFound: false, expired: false };
   }
 
   return {
@@ -83,9 +87,11 @@ async function fetchPublicWO(key: string, password?: string): Promise<{ wo: Publ
       year: row.vehicle_year ? String(row.vehicle_year) : "",
       plate: row.vehicle_plate,
       color: row.vehicle_color,
+      workOrderType: row.work_order_type,
     },
     requiresPassword: !!row.requires_password,
     notFound: false,
+    expired: false,
   };
 }
 
@@ -94,6 +100,7 @@ export default function PublicTracking() {
   const [wo, setWo] = useState<PublicWO | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [expired, setExpired] = useState(false);
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [authed, setAuthed] = useState(false);
   const [pwd, setPwd] = useState("");
@@ -108,6 +115,7 @@ export default function PublicTracking() {
       setWo(res.wo);
       setRequiresPassword(res.requiresPassword);
       setNotFound(res.notFound);
+      setExpired(res.expired);
       if (res.wo && !res.requiresPassword) setAuthed(true);
       setLoading(false);
     })();
@@ -121,6 +129,10 @@ export default function PublicTracking() {
     const res = await fetchPublicWO(id, entered);
     if (res.notFound) {
       setNotFound(true);
+      return;
+    }
+    if (res.expired) {
+      setExpired(true);
       return;
     }
     if (!res.wo) {
@@ -145,6 +157,18 @@ export default function PublicTracking() {
         <div className="bg-card border border-border rounded-xl p-8 max-w-md text-center">
           <h1 className="text-xl font-bold text-foreground mb-2">أمر العمل غير موجود</h1>
           <p className="text-sm text-muted-foreground">تأكد من صحة الرابط أو الرمز / Work Order Not Found</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (expired) {
+    return (
+      <div dir="rtl" className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="bg-card border border-border rounded-xl p-8 max-w-md text-center">
+          <ShieldAlert className="mx-auto mb-3 text-warning" size={34} />
+          <h1 className="text-xl font-bold text-foreground mb-2">انتهت صلاحية رابط المتابعة</h1>
+          <p className="text-sm text-muted-foreground">اطلب رابطًا جديدًا من الورشة. لا توجد مشكلة في أمر العمل نفسه.</p>
         </div>
       </div>
     );
@@ -206,6 +230,9 @@ export default function PublicTracking() {
             <div className="text-right">
               <p className="text-[10px] text-muted-foreground">رقم أمر العمل</p>
               <p className="font-mono text-primary font-bold">{wo.orderNumber || wo.id}</p>
+              <p className="mt-1 text-[10px] font-semibold text-muted-foreground">
+                {wo.workOrderType === "insurance" ? "🛡 INSURANCE" : "🚗 GENERAL / CASH"}
+              </p>
             </div>
           </div>
         </div>

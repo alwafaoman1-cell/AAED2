@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Plus, Trash2, Link as LinkIcon, Wallet, Package, Car } from "lucide-react";
+import { Plus, Trash2, Link as LinkIcon, Wallet, Package, Car, Shield } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,9 @@ import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicke
 import { getExpensesForWorkOrder } from "@/lib/expensesStore";
 import { getCustomerDepositBalance, getVehicleDepositBalance } from "@/lib/depositsStore";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { getCurrentRole } from "@/lib/permissions";
+import type { WorkOrderType } from "@/lib/workOrderType";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
@@ -36,6 +39,7 @@ const DEFAULT_BELONGINGS: { key: string; label: string }[] = [
 
 const empty: WorkOrder = {
   id: "",
+  workOrderType: "general_customer",
   customer: "", phone: "", plate: "", vehicleType: "", model: "", year: "", vin: "",
   color: "", mileage: "",
   insurance: "-", claimNumber: "-",
@@ -70,6 +74,16 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     extraExpenses: initial?.extraExpenses || [],
     partsNeeded: initial?.partsNeeded || [],
   }));
+  const [claims, setClaims] = useState<Array<{
+    id: string;
+    claim_number: string;
+    insurance_company: string | null;
+    customer_id: string | null;
+    vehicle_id: string | null;
+  }>>([]);
+  const [cloudInsuranceCompanies, setCloudInsuranceCompanies] = useState<string[]>([]);
+  const role = getCurrentRole();
+  const canChooseInsurance = role === "admin" || role === "manager" || role === "supervisor";
 
   useEffect(() => {
     setForm({
@@ -82,6 +96,65 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       partsNeeded: initial?.partsNeeded || [],
     });
   }, [initial, prefillCustomer, prefillPhone, prefillPlate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      supabase
+        .from("insurance_claims")
+        .select("id,claim_number,insurance_company,customer_id,vehicle_id")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      supabase
+        .from("insurance_companies")
+        .select("name")
+        .order("name")
+        .limit(500),
+    ]).then(([claimResult, companyResult]) => {
+      if (cancelled) return;
+      setClaims((claimResult.data || []) as typeof claims);
+      setCloudInsuranceCompanies(
+        (companyResult.data || [])
+          .map((row: { name?: string | null }) => row.name || "")
+          .filter(Boolean),
+      );
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const selectedType: WorkOrderType = form.claimId ? "insurance" : (form.workOrderType || "general_customer");
+  const companyOptions = Array.from(new Set([...cloudInsuranceCompanies, ...insuranceCompanies]));
+
+  function selectOrderType(type: WorkOrderType) {
+    if (type === "insurance" && !canChooseInsurance) {
+      toast.error("إنشاء أمر تأمين يدوي متاح للمدير أو المشرف فقط");
+      return;
+    }
+    setForm((prev) => type === "general_customer"
+      ? {
+          ...prev,
+          workOrderType: type,
+          claimId: undefined,
+          insurance: "-",
+          claimNumber: "-",
+        }
+      : { ...prev, workOrderType: type });
+  }
+
+  function selectClaim(claimId: string) {
+    const claim = claims.find((item) => item.id === claimId);
+    if (!claim) {
+      setForm((prev) => ({ ...prev, claimId: undefined }));
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      workOrderType: "insurance",
+      claimId: claim.id,
+      claimNumber: claim.claim_number,
+      insurance: claim.insurance_company || prev.insurance,
+    }));
+  }
 
   const set = <K extends keyof WorkOrder>(k: K, v: WorkOrder[K]) =>
     setForm(prev => ({ ...prev, [k]: v }));
@@ -172,6 +245,20 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       toast.error("الرجاء إدخال رقم اللوحة");
       return;
     }
+    if (selectedType === "insurance") {
+      if (!canChooseInsurance && !form.claimId) {
+        toast.error("يجب ربط أمر التأمين بمطالبة موجودة");
+        return;
+      }
+      if (!form.insurance || form.insurance === "-") {
+        toast.error("الرجاء اختيار شركة التأمين");
+        return;
+      }
+      if (!form.claimNumber || form.claimNumber === "-") {
+        toast.error("الرجاء إدخال رقم المطالبة أو اختيار مطالبة موجودة");
+        return;
+      }
+    }
     // قاعدة التسليم: لا يُسمح بإغلاق التسليم على عميل افتراضي (Insurance Pending)
     const isPending = customersStore.isInsurancePending(form.customer);
     const isDeliveryStatus = ["تم التسليم", "مغلق", "جاهز للتسليم"].includes(form.status);
@@ -216,6 +303,10 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     } catch {}
     const payload: WorkOrder = {
       ...form,
+      workOrderType: form.claimId ? "insurance" : selectedType,
+      claimId: selectedType === "insurance" ? form.claimId : undefined,
+      insurance: selectedType === "insurance" ? form.insurance : "-",
+      claimNumber: selectedType === "insurance" ? form.claimNumber : "-",
       customerId,
       depositApplied: deposit,
       totalCost: finalTotal,
@@ -234,6 +325,40 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
   return (
     <div className="space-y-4 py-2">
+      <div className="rounded-xl border border-border bg-card p-3">
+        <div className="mb-3">
+          <h4 className="text-sm font-semibold text-foreground">نوع أمر العمل *</h4>
+          <p className="text-[11px] text-muted-foreground">حدد المسار قبل إدخال البيانات. الأمر المرتبط بمطالبة يُصنّف تأمين تلقائيًا.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => selectOrderType("general_customer")}
+            className={`rounded-xl border p-4 text-right transition-all ${
+              selectedType === "general_customer"
+                ? "border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/15"
+                : "border-border hover:border-emerald-500/50"
+            }`}
+          >
+            <span className="flex items-center gap-2 font-semibold text-foreground"><Car size={18} className="text-emerald-600" /> عميل عام</span>
+            <span className="mt-1 block text-[11px] text-muted-foreground">General Customer / Cash</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => selectOrderType("insurance")}
+            disabled={!canChooseInsurance && !form.claimId}
+            className={`rounded-xl border p-4 text-right transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+              selectedType === "insurance"
+                ? "border-sky-500 bg-sky-500/10 ring-2 ring-sky-500/15"
+                : "border-border hover:border-sky-500/50"
+            }`}
+          >
+            <span className="flex items-center gap-2 font-semibold text-foreground"><Shield size={18} className="text-sky-600" /> شركة تأمين</span>
+            <span className="mt-1 block text-[11px] text-muted-foreground">Insurance Work Order</span>
+          </button>
+        </div>
+      </div>
+
       {/* تعبئة تلقائية بالذكاء الاصطناعي من صورة مَلكية/استمارة/رخصة */}
       <div className="flex items-center justify-between gap-2 bg-primary/5 border border-primary/20 rounded-lg p-3">
         <div className="text-xs">
@@ -265,7 +390,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         <h4 className="text-sm font-semibold text-foreground">العميل</h4>
         <p className="text-[10px] text-muted-foreground">
           ابحث بالهاتف أو الاسم. لو لم يوجد سيظهر زر «إضافة عميل جديد (إلزامي)».
-          {form.insurance && form.insurance !== "-" && (
+          {selectedType === "insurance" && (
             <span className="text-amber-600"> — في حالة التأمين يمكن ترك العميل افتراضياً «Insurance Pending» وتحديده عند التسليم.</span>
           )}
         </p>
@@ -284,7 +409,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
             }
           }}
         />
-        {form.insurance && form.insurance !== "-" && !((form as WorkOrder & { customerId?: string }).customerId) && (
+        {selectedType === "insurance" && !((form as WorkOrder & { customerId?: string }).customerId) && (
           <button
             type="button"
             onClick={() => {
@@ -352,20 +477,43 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
               <SelectContent className="bg-card border-border">{technicians.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
             </Select>
           </div>
-          <div className="space-y-1.5">
+          {selectedType === "insurance" && <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">شركة التأمين</label>
             <Select value={form.insurance} onValueChange={v => set("insurance", v)}>
               <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="اختر" /></SelectTrigger>
               <SelectContent className="bg-card border-border">
                 <SelectItem value="-">-</SelectItem>
-                {insuranceCompanies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                {companyOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground">رقم المطالبة</label>
-            <Input value={form.claimNumber} onChange={e => set("claimNumber", e.target.value)} className="bg-secondary border-border text-foreground" />
-          </div>
+          </div>}
+          {selectedType === "insurance" && (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">ربط مطالبة موجودة</label>
+                <Select value={form.claimId || "manual"} onValueChange={selectClaim}>
+                  <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="اختر مطالبة" /></SelectTrigger>
+                  <SelectContent className="bg-card border-border">
+                    <SelectItem value="manual">رقم مطالبة يدوي — بدون إنشاء مطالبة</SelectItem>
+                    {claims.map((claim) => (
+                      <SelectItem key={claim.id} value={claim.id}>
+                        {claim.claim_number} — {claim.insurance_company || "بدون شركة"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">رقم المطالبة *</label>
+                <Input
+                  value={form.claimNumber === "-" ? "" : form.claimNumber}
+                  onChange={e => set("claimNumber", e.target.value)}
+                  disabled={!!form.claimId}
+                  className="bg-secondary border-border text-foreground"
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
 

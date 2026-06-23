@@ -11,6 +11,7 @@ import { getWorkOrders } from "@/lib/workOrdersStore";
 import { getExpensesForWorkOrder, getExpensePartProfit } from "@/lib/expensesStore";
 import { exportLandscapePdf } from "@/lib/landscapePdf";
 import { toast } from "@/hooks/use-toast";
+import { resolveWorkOrderType, workOrderTypeLabel } from "@/lib/workOrderType";
 
 /** كشف حساب أوامر الشغل المفصل — يحاكي الجدول التقليدي:
  * رقم البطاقة | التاريخ | اسم العميل | الهاتف | رقم السيارة | نوع السيارة |
@@ -72,9 +73,9 @@ export default function WorkOrdersStatement() {
   }, [rows]);
 
   const exportCsv = () => {
-    const header = ["#", "رقم البطاقة", "التاريخ", "العميل", "الهاتف", "رقم السيارة", "نوع السيارة", "نوع الصيانة", "تكلفة كاملة", "أجر العمل", "أجر الزبون", "الربح", "ملاحظات"];
+    const header = ["#", "رقم البطاقة", "نوع الأمر", "التاريخ", "العميل", "الهاتف", "رقم السيارة", "نوع السيارة", "نوع الصيانة", "تكلفة كاملة", "أجر العمل", "أجر الزبون", "الربح", "ملاحظات"];
     const lines = rows.map((r, i) => [
-      i + 1, r.o.id, r.o.entryDate, r.o.customer, r.o.phone, r.o.plate, r.o.vehicleType,
+      i + 1, r.o.id, workOrderTypeLabel(resolveWorkOrderType(r.o), true), r.o.entryDate, r.o.customer, r.o.phone, r.o.plate, r.o.vehicleType,
       r.o.serviceType, r.totalCost, r.labor, r.customerCharge, r.profit,
       (r.o.description || "").replace(/[,\n]/g, " "),
     ].join(","));
@@ -114,6 +115,7 @@ export default function WorkOrdersStatement() {
           columns: [
             { key: "n", label: "م", align: "center", width: "3%" },
             { key: "id", label: "رقم البطاقة", align: "center", mono: true, color: "primary" },
+            { key: "type", label: "نوع الأمر", align: "center" },
             { key: "date", label: "التاريخ", align: "center", mono: true },
             { key: "customer", label: "العميل" },
             { key: "phone", label: "الهاتف", align: "center", mono: true },
@@ -131,6 +133,7 @@ export default function WorkOrdersStatement() {
           rows: rows.map((r, i) => ({
             n: i + 1,
             id: r.o.id,
+            type: workOrderTypeLabel(resolveWorkOrderType(r.o), true),
             date: r.o.entryDate,
             customer: r.o.customer,
             phone: r.o.phone || "—",
@@ -144,7 +147,7 @@ export default function WorkOrdersStatement() {
             notes: (r.o.description || "—").slice(0, 60),
           })),
           totals: {
-            n: "", id: "", date: "", customer: "الإجمالي", phone: "", plate: "", vehicle: "", service: "",
+            n: "", id: "", type: "", date: "", customer: "الإجمالي", phone: "", plate: "", vehicle: "", service: "",
             cost: totals.cost.toLocaleString(),
             labor: totals.labor.toLocaleString(),
             charge: totals.charge.toLocaleString(),
@@ -214,6 +217,7 @@ export default function WorkOrdersStatement() {
           <TableHeader>
             <TableRow className="bg-primary/10">
               <TableHead className="text-center">رقم البطاقة</TableHead>
+              <TableHead className="text-center">نوع الأمر</TableHead>
               <TableHead className="text-center">التاريخ</TableHead>
               <TableHead className="text-right">اسم العميل</TableHead>
               <TableHead className="text-center">الهاتف</TableHead>
@@ -229,10 +233,11 @@ export default function WorkOrdersStatement() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow><TableCell colSpan={12} className="text-center text-muted-foreground py-10">لا توجد بيانات</TableCell></TableRow>
+              <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground py-10">لا توجد بيانات</TableCell></TableRow>
             ) : rows.map((r) => (
               <TableRow key={r.o.id} className="hover:bg-muted/40 cursor-pointer" onClick={() => navigate(`/work-orders/${r.o.id}`)}>
                 <TableCell className="text-center font-mono font-bold text-primary text-xs">{r.o.id}</TableCell>
+                <TableCell className="text-center text-[10px] font-semibold">{workOrderTypeLabel(resolveWorkOrderType(r.o), true)}</TableCell>
                 <TableCell className="text-center font-mono text-xs">{r.o.entryDate}</TableCell>
                 <TableCell className="text-xs font-medium">{r.o.customer}</TableCell>
                 <TableCell className="text-center font-mono text-xs">{r.o.phone || "—"}</TableCell>
@@ -262,7 +267,7 @@ export default function WorkOrdersStatement() {
           {rows.length > 0 && (
             <tfoot>
               <tr className="bg-primary/15 font-bold">
-                <td colSpan={7} className="px-3 py-2 text-right">الإجمالي</td>
+                <td colSpan={8} className="px-3 py-2 text-right">الإجمالي</td>
                 <td className="text-center font-mono text-xs text-destructive">{totals.cost.toLocaleString()}</td>
                 <td className="text-center font-mono text-xs text-warning">{totals.labor.toLocaleString()}</td>
                 <td className="text-center font-mono text-xs text-info">{totals.charge.toLocaleString()}</td>

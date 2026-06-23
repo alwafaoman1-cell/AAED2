@@ -47,6 +47,8 @@ import { toast } from "sonner";
 import { computeDays, durationLevel } from "@/lib/claimDurationStatus";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
+import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
+import { isInsuranceWorkOrder, resolveWorkOrderType } from "@/lib/workOrderType";
 
 const DURATION_BAR_HEX: Record<string, string> = {
   red: "#ef4444",
@@ -90,11 +92,11 @@ const STATUS_GROUPS: Record<string, string[]> = {
   repair: ["تحت الإصلاح", "تحت الفحص"],
   waiting: ["بانتظار الموافقة", "بانتظار قطع الغيار"],
   ready: ["جاهز للتسليم"],
+  delivered: ["تم التسليم", "مغلق"],
 };
 
 const hasOrderValue = (value?: string) => !!(value && value.trim() !== "" && value.trim() !== "-");
-const isInsuranceOrder = (order: WorkOrder) =>
-  hasOrderValue(order.insurance) || hasOrderValue(order.claimNumber) || (order.serviceType || "").trim() === "حادث";
+const isInsuranceOrder = (order: WorkOrder) => isInsuranceWorkOrder(order);
 
 function insuranceReason(order: WorkOrder) {
   if (hasOrderValue(order.insurance)) return order.insurance;
@@ -107,6 +109,7 @@ function insuranceReason(order: WorkOrder) {
 function buildWorkOrderHtml(order: WorkOrder) {
   return getWorkOrderHtml({
     orderNumber: order.id, date: order.entryDate, customerName: order.customer,
+    workOrderType: resolveWorkOrderType(order), trackingToken: order.trackingToken,
     customerPhone: order.phone, vehicleType: order.vehicleType, model: order.model,
     year: order.year, plateNumber: order.plate, vin: order.vin, insurance: order.insurance,
     claimNumber: order.claimNumber, serviceType: order.serviceType, technician: order.technician,
@@ -127,6 +130,10 @@ export default function WorkOrders() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [ownershipFilter, setOwnershipFilter] = useState("all");
+  const [technicianFilter, setTechnicianFilter] = useState("all");
+  const [entryFrom, setEntryFrom] = useState("");
+  const [entryTo, setEntryTo] = useState("");
+  const [archiveFilter, setArchiveFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [editOrder, setEditOrder] = useState<WorkOrder | null>(null);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -177,12 +184,24 @@ export default function WorkOrders() {
   };
 
   const filtered = orders.filter((o) => {
-    const matchesSearch = o.customer.includes(searchTerm) || o.plate.includes(searchTerm) || o.id.includes(searchTerm) || o.phone.includes(searchTerm);
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const matchesSearch = !normalizedSearch || [
+      o.customer, o.plate, o.id, o.phone, o.claimNumber, o.insurance, o.technician,
+    ].some((value) => (value || "").toLowerCase().includes(normalizedSearch));
     const statusGroup = STATUS_GROUPS[statusFilter];
-    const matchesStatus = statusFilter === "all" || (statusGroup ? statusGroup.includes(o.status) : o.status === statusFilter);
+    const delay = getOrderDelayStyle(o);
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "overdue"
+        ? delay.days !== null && delay.level !== "green"
+        : (statusGroup ? statusGroup.includes(o.status) : o.status === statusFilter));
     const matchesOwnership = ownershipFilter === "all" || (ownershipFilter === "insurance" ? isInsuranceOrder(o) : !isInsuranceOrder(o));
     const matchesParts = !partsOnlyFilter || (o.partsNeeded && o.partsNeeded.some(isPartStillNeeded));
-    return matchesSearch && matchesStatus && matchesOwnership && matchesParts;
+    const matchesTechnician = technicianFilter === "all" || o.technician === technicianFilter;
+    const matchesEntryFrom = !entryFrom || (o.entryDate || "") >= entryFrom;
+    const matchesEntryTo = !entryTo || (o.entryDate || "") <= entryTo;
+    const matchesArchive = archiveFilter === "all" || (archiveFilter === "archived" ? !!o.archivedAt : !o.archivedAt);
+    return matchesSearch && matchesStatus && matchesOwnership && matchesParts && matchesTechnician && matchesEntryFrom && matchesEntryTo && matchesArchive;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginatedOrders = useMemo(
@@ -192,7 +211,7 @@ export default function WorkOrders() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, statusFilter, ownershipFilter, partsOnlyFilter, pageSize]);
+  }, [searchTerm, statusFilter, ownershipFilter, technicianFilter, entryFrom, entryTo, archiveFilter, partsOnlyFilter, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -203,7 +222,7 @@ export default function WorkOrders() {
 
   async function handlePreview(order: WorkOrder) {
     const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
-    await buildTrackingQrDataUrl(order.id);
+    await buildTrackingQrDataUrl(order.trackingToken);
     setPreviewHtml(buildWorkOrderHtml(order));
     setPreviewTitle(`أمر عمل ${order.id}`);
     setShowPreview(true);
@@ -216,7 +235,7 @@ export default function WorkOrders() {
     }
     const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
     // Pre-build QR for every order in the batch
-    await Promise.all(filtered.map(o => buildTrackingQrDataUrl(o.id)));
+    await Promise.all(filtered.map(o => buildTrackingQrDataUrl(o.trackingToken)));
     // Print stack: each order on its own page
     const combined = filtered.map(o => {
       const html = buildWorkOrderHtml(o);
@@ -272,6 +291,11 @@ export default function WorkOrders() {
   const waiting = orders.filter(o => o.status === "بانتظار الموافقة" || o.status === "بانتظار قطع الغيار").length;
   const insuranceCount = orders.filter(isInsuranceOrder).length;
   const cashCount = orders.length - insuranceCount;
+  const delivered = orders.filter(o => o.status === "تم التسليم" || o.status === "مغلق").length;
+  const overdue = orders.filter(o => {
+    const delay = getOrderDelayStyle(o);
+    return delay.days !== null && delay.level !== "green";
+  }).length;
 
   return (
     <div className="space-y-6">
@@ -328,7 +352,7 @@ export default function WorkOrders() {
       </div>
 
       {/* Quick stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
         <button
           type="button"
           onClick={() => setStatusFilter("all")}
@@ -361,9 +385,29 @@ export default function WorkOrders() {
           <p className="text-[10px] text-muted-foreground">جاهز للتسليم</p>
           <p className="text-lg font-bold text-success">{ready}</p>
         </button>
+        <button type="button" onClick={() => setStatusFilter("بانتظار قطع الغيار")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-warning/40">
+          <p className="text-[10px] text-muted-foreground">بانتظار القطع</p>
+          <p className="text-lg font-bold text-warning">{orders.filter(o => o.status === "بانتظار قطع الغيار").length}</p>
+        </button>
+        <button type="button" onClick={() => setStatusFilter("delivered")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-success/40">
+          <p className="text-[10px] text-muted-foreground">تم التسليم</p>
+          <p className="text-lg font-bold text-success">{delivered}</p>
+        </button>
+        <button type="button" onClick={() => setOwnershipFilter("insurance")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-sky-500/40">
+          <p className="text-[10px] text-muted-foreground">تأمين</p>
+          <p className="text-lg font-bold text-sky-600">{insuranceCount}</p>
+        </button>
+        <button type="button" onClick={() => setOwnershipFilter("cash")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-emerald-500/40">
+          <p className="text-[10px] text-muted-foreground">كاش / عام</p>
+          <p className="text-lg font-bold text-emerald-600">{cashCount}</p>
+        </button>
+        <button type="button" onClick={() => setStatusFilter("overdue")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-destructive/40">
+          <p className="text-[10px] text-muted-foreground">متأخرة</p>
+          <p className="text-lg font-bold text-destructive">{overdue}</p>
+        </button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <div className="relative flex-1">
           <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="بحث برقم الأمر، اسم العميل، رقم اللوحة، أو الهاتف..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pr-9 bg-card border-border text-foreground placeholder:text-muted-foreground" />
@@ -392,9 +436,44 @@ export default function WorkOrders() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={technicianFilter} onValueChange={setTechnicianFilter}>
+          <SelectTrigger className="w-full bg-card border-border text-foreground"><SelectValue placeholder="الفني / المشرف" /></SelectTrigger>
+          <SelectContent className="bg-card border-border">
+            <SelectItem value="all">كل الفنيين</SelectItem>
+            {Array.from(new Set(orders.map(o => o.technician).filter(Boolean))).map((name) => (
+              <SelectItem key={name} value={name}>{name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input type="date" value={entryFrom} onChange={(e) => setEntryFrom(e.target.value)} className="bg-card border-border" aria-label="تاريخ الدخول من" />
+        <Input type="date" value={entryTo} onChange={(e) => setEntryTo(e.target.value)} className="bg-card border-border" aria-label="تاريخ الدخول إلى" />
+        <Select value={archiveFilter} onValueChange={setArchiveFilter}>
+          <SelectTrigger className="w-full bg-card border-border text-foreground"><SelectValue placeholder="الأرشيف" /></SelectTrigger>
+          <SelectContent className="bg-card border-border">
+            <SelectItem value="all">الحالي والأرشيف</SelectItem>
+            <SelectItem value="current">الحالي فقط</SelectItem>
+            <SelectItem value="archived">الأرشيف فقط</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
-      <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
+      <div className="flex flex-wrap gap-2">
+        {[
+          ["insurance", "Insurance Only", () => setOwnershipFilter("insurance")],
+          ["cash", "Cash Only", () => setOwnershipFilter("cash")],
+          ["repair", "In Workshop", () => setStatusFilter("repair")],
+          ["ready", "Ready", () => setStatusFilter("ready")],
+          ["delivered", "Delivered", () => setStatusFilter("delivered")],
+          ["overdue", "Overdue", () => setStatusFilter("overdue")],
+        ].map(([key, label, action]) => (
+          <Button key={key as string} size="sm" variant="outline" className="h-8 rounded-full text-xs" onClick={action as () => void}>{label as string}</Button>
+        ))}
+        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => {
+          setSearchTerm(""); setStatusFilter("all"); setOwnershipFilter("all"); setTechnicianFilter("all"); setEntryFrom(""); setEntryTo(""); setArchiveFilter("all"); setPartsOnlyFilter(false);
+        }}>مسح الفلاتر</Button>
+      </div>
+
+      <div className="hidden md:block bg-card border border-border rounded-xl shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -405,6 +484,7 @@ export default function WorkOrders() {
                     onCheckedChange={(v) => setSelectedIds(v ? new Set(filtered.map(o => o.id)) : new Set())}
                   />
                 </th>
+                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">Order Type</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">رقم الأمر</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">العميل</th>
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs hidden md:table-cell">السيارة</th>
@@ -435,10 +515,20 @@ export default function WorkOrders() {
                       onCheckedChange={(v) => {
                         setSelectedIds((s) => {
                           const n = new Set(s);
-                          v ? n.add(order.id) : n.delete(order.id);
+                          if (v) n.add(order.id);
+                          else n.delete(order.id);
                           return n;
                         });
                       }}
+                    />
+                  </td>
+                  <td className="py-3 px-4">
+                    <WorkOrderTypeBadge
+                      compact
+                      workOrderType={order.workOrderType}
+                      claimId={order.claimId}
+                      claimNumber={order.claimNumber}
+                      insurance={order.insurance}
                     />
                   </td>
                   <td className="py-3 px-4 font-mono text-xs text-primary">
@@ -542,7 +632,7 @@ export default function WorkOrders() {
                         <DropdownMenuItem onClick={() => handlePreview(order)} className="gap-2 cursor-pointer">
                           <Printer size={14} className="text-primary" /> طباعة / PDF
                         </DropdownMenuItem>
-                        <DropdownMenuItem
+                        {resolveWorkOrderType(order) === "insurance" && <DropdownMenuItem
                           onClick={() => {
                             const parts = order.partsNeeded || [];
                             if (parts.length === 0) {
@@ -567,7 +657,7 @@ export default function WorkOrders() {
                               {(order.partsNeeded || []).filter(isPartStillNeeded).length}
                             </span>
                           )}
-                        </DropdownMenuItem>
+                        </DropdownMenuItem>}
 
                         {/* === المزيد من الإجراءات === */}
                         <DropdownMenuSeparator />
@@ -673,6 +763,55 @@ export default function WorkOrders() {
             onPageChange={setPage}
             onPageSizeChange={setPageSize}
           />
+        )}
+      </div>
+
+      <div className="grid gap-3 md:hidden">
+        {paginatedOrders.map((order) => {
+          const delay = getOrderDelayStyle(order);
+          return (
+            <article
+              key={order.id}
+              onClick={() => navigate(`/work-orders/${encodeURIComponent(order.id)}`)}
+              className="rounded-xl border border-border bg-card p-4 shadow-sm"
+              style={{ boxShadow: delay.boxShadow, backgroundColor: delay.backgroundColor }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-mono text-sm font-bold text-primary">{toEnglishDigits(order.id)}</p>
+                  <p className="mt-1 font-semibold text-foreground">{order.customer}</p>
+                  <p className="text-xs text-muted-foreground">{formatPlateLatin(order.plate)} · {order.vehicleType} {order.model}</p>
+                </div>
+                <Checkbox
+                  checked={selectedIds.has(order.id)}
+                  onClick={(event) => event.stopPropagation()}
+                  onCheckedChange={(checked) => setSelectedIds((current) => {
+                    const next = new Set(current);
+                    if (checked) next.add(order.id);
+                    else next.delete(order.id);
+                    return next;
+                  })}
+                />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <WorkOrderTypeBadge
+                  workOrderType={order.workOrderType}
+                  claimId={order.claimId}
+                  claimNumber={order.claimNumber}
+                  insurance={order.insurance}
+                />
+                <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${statusColors[order.status] || "bg-muted"}`}>{order.status}</span>
+                {delay.level !== "green" && delay.days !== null && <span className="rounded-full bg-destructive/10 px-2 py-1 text-[10px] font-semibold text-destructive">{delay.days} يوم</span>}
+              </div>
+              <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-xs">
+                <span className="text-muted-foreground">{order.technician || "غير مسند"}</span>
+                <span className="font-semibold text-foreground">{order.totalCost.toLocaleString("en-US")} OMR</span>
+              </div>
+            </article>
+          );
+        })}
+        {filtered.length > 0 && (
+          <TablePaginationControls page={page} pageSize={pageSize} totalItems={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
         )}
       </div>
 
@@ -783,7 +922,7 @@ export default function WorkOrders() {
             const ords = orders.filter(o => ids.includes(o.id));
             if (ords.length === 0) return;
             const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
-            await Promise.all(ords.map(o => buildTrackingQrDataUrl(o.id)));
+            await Promise.all(ords.map(o => buildTrackingQrDataUrl(o.trackingToken)));
             const combined = ords.map(o => {
               const html = buildWorkOrderHtml(o);
               const m = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
@@ -798,6 +937,19 @@ export default function WorkOrders() {
           }}
         >
           <Printer size={14} /> طباعة
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1"
+          onClick={() => {
+            const archivedAt = new Date().toISOString();
+            selectedIds.forEach((id) => updateWorkOrder(id, { archivedAt, status: "مغلق" }));
+            toast.success(`تم نقل ${selectedIds.size} أمر إلى الأرشيف`);
+            setSelectedIds(new Set());
+          }}
+        >
+          <FolderOpen size={14} /> للأرشيف
         </Button>
         {allowDelete && (
           <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={() => setShowBulkDelete(true)}>
