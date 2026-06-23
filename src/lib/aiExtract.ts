@@ -14,7 +14,8 @@ export type ExtractSchema =
   | "insurance_claim"
   | "expense_receipt"
   | "spare_part"
-  | "delivery_receipt";
+  | "delivery_receipt"
+  | "diagnostic_report";
 
 const MAX_PDF_PAGES = 8;
 

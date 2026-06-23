@@ -59,7 +59,6 @@ import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
 import QrLabel from "@/components/workorders/QrLabel";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import NeededPartsManager from "@/components/workorders/NeededPartsManager";
-import VehicleReceptionSection from "@/components/workorders/VehicleReceptionSection";
 import SupplementsSection from "@/components/workorders/SupplementsSection";
 import ApprovalHistoryTab from "@/components/workorders/ApprovalHistoryTab";
 import CustomerPortalLink from "@/components/workorders/CustomerPortalLink";
@@ -882,8 +881,6 @@ export default function WorkOrderDetail() {
       {/* Approval history (customer signature log) */}
       {cloudJobOrderId && <ApprovalHistoryTab jobOrderId={cloudJobOrderId} />}
 
-      {/* Vehicle reception (KM, fuel, belongings, photos) */}
-      {cloudJobOrderId && <VehicleReceptionSection jobOrderId={cloudJobOrderId} />}
       <div className="bg-card border border-border rounded-xl p-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">

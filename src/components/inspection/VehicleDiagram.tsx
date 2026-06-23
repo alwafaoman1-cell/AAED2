@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-interface DamageMarker {
+export interface DamageMarker {
   x: number;
   y: number;
   type: string;

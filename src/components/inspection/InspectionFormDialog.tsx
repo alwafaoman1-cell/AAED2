@@ -4,12 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import VehicleDiagram from "./VehicleDiagram";
-import { ChevronLeft, ChevronRight, Save, FileText, Link as LinkIcon } from "lucide-react";
+import { BrainCircuit, ChevronLeft, ChevronRight, Save, FileText, Link as LinkIcon, Loader2, Upload } from "lucide-react";
 import { generateInspectionReportPdf } from "@/lib/inspectionPdfGenerator";
 import { getWorkOrders, getWorkOrderById } from "@/lib/workOrdersStore";
 import { inspectionsStore, findInspectionByPlate } from "@/lib/inspectionsStore";
 import { logActivity } from "@/lib/auditLogStore";
 import { toast } from "sonner";
+import { extractFromFile } from "@/lib/aiExtract";
+import { uploadTenantFile } from "@/lib/saasAdmin";
 
 interface DamageMarker {
   x: number;
@@ -131,6 +133,10 @@ export default function InspectionFormDialog({ open, onOpenChange, preselectOrde
   const [notes, setNotes] = useState("");
   const [recommendation, setRecommendation] = useState("");
   const [overallRating, setOverallRating] = useState("good");
+  const [computerReport, setComputerReport] = useState<File | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<Record<string, string> | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const workOrders = getWorkOrders();
 
@@ -167,6 +173,7 @@ export default function InspectionFormDialog({ open, onOpenChange, preselectOrde
       setVehicleInfo({ brand: "", model: "", year: "", plate: "", vin: "", color: "", mileage: "", customerName: "", customerPhone: "" });
       setBodyChecks({}); setMechChecks({}); setElecChecks({});
       setDamageMarkers([]); setNotes(""); setRecommendation(""); setOverallRating("good");
+      setComputerReport(null); setAiAnalysis(null); setAnalyzing(false); setSaving(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, preselectOrderId]);
@@ -180,7 +187,21 @@ export default function InspectionFormDialog({ open, onOpenChange, preselectOrde
   };
 
   /** حفظ تقرير الفحص في المخزن وربطه بأمر العمل */
-  const handleSaveReport = () => {
+  async function analyzeComputerReport() {
+    if (!computerReport) return;
+    setAnalyzing(true);
+    try {
+      const result = await extractFromFile(computerReport, "diagnostic_report");
+      setAiAnalysis(result);
+      toast.success("تم تحليل تقرير الكمبيوتر");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تحليل التقرير");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  const handleSaveReport = async () => {
     if (!vehicleInfo.customerName.trim() || !vehicleInfo.plate.trim()) {
       toast.error("اسم العميل ورقم اللوحة مطلوبان");
       return;
@@ -195,6 +216,18 @@ export default function InspectionFormDialog({ open, onOpenChange, preselectOrde
     // منع التكرار: إذا كان هناك فحص قائم لنفس اللوحة → نحدّثه بدل إنشاء فحص جديد
     const existing = findInspectionByPlate(vehicleInfo.plate, "general");
     const id = existing?.id || `INS-${Date.now().toString().slice(-6)}`;
+    setSaving(true);
+    let computerReportFileId: string | null = null;
+    if (computerReport) {
+      try {
+        const uploaded = await uploadTenantFile(computerReport, "inspection_reports");
+        computerReportFileId = uploaded.id;
+      } catch (error: any) {
+        toast.error(error?.message || "تعذر رفع تقرير الكمبيوتر");
+        setSaving(false);
+        return;
+      }
+    }
     const record = {
       id,
       workOrder: linkedOrderId || existing?.workOrder || "—",
@@ -206,6 +239,18 @@ export default function InspectionFormDialog({ open, onOpenChange, preselectOrde
       status: overallRating === "excellent" ? "مكتمل" : "قيد الفحص",
       plate: vehicleInfo.plate,
       kind: "general" as const,
+      overallRating,
+      details: {
+        vehicleInfo,
+        bodyChecks,
+        mechChecks,
+        elecChecks,
+        damageMarkers,
+        notes,
+        recommendation,
+        computerReportFileId,
+      },
+      aiAnalysis: aiAnalysis || undefined,
     };
     if (existing) {
       inspectionsStore.update(id, record);
@@ -228,6 +273,7 @@ export default function InspectionFormDialog({ open, onOpenChange, preselectOrde
     } else {
       toast.success(`تم حفظ تقرير الفحص ${id}${linkedOrderId ? ` وربطه بـ ${linkedOrderId}` : ""}`);
     }
+    setSaving(false);
     onOpenChange(false);
   };
 
@@ -379,6 +425,30 @@ export default function InspectionFormDialog({ open, onOpenChange, preselectOrde
                 placeholder="التوصيات والإصلاحات المطلوبة..."
               />
             </div>
+            <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
+              <div>
+                <h4 className="flex items-center gap-2 text-sm font-semibold"><BrainCircuit size={16} className="text-primary" /> تحليل تقرير فحص الكمبيوتر</h4>
+                <p className="mt-1 text-[10px] text-muted-foreground">يستخرج الأكواد ووصف الأعطال والخطورة فقط، بدون طريقة الإصلاح.</p>
+              </div>
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-card p-4 text-xs">
+                <Upload size={15} /> {computerReport?.name || "رفع تقرير PDF أو صورة"}
+                <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(event) => {
+                  setComputerReport(event.target.files?.[0] || null);
+                  setAiAnalysis(null);
+                }} />
+              </label>
+              <Button type="button" size="sm" variant="outline" disabled={!computerReport || analyzing} onClick={() => void analyzeComputerReport()}>
+                {analyzing ? <Loader2 size={14} className="animate-spin" /> : <BrainCircuit size={14} />}
+                {analyzing ? "جارٍ التحليل…" : "تحليل بالذكاء الاصطناعي"}
+              </Button>
+              {aiAnalysis && (
+                <div className="grid gap-2 rounded-lg border border-border bg-card p-3 text-xs sm:grid-cols-2">
+                  <div><span className="font-semibold">الأكواد</span><p className="mt-1 whitespace-pre-wrap text-muted-foreground" dir="ltr">{aiAnalysis.fault_codes || "—"}</p></div>
+                  <div><span className="font-semibold">الخطورة</span><p className="mt-1 text-muted-foreground">{aiAnalysis.severity || "—"}</p></div>
+                  <div className="sm:col-span-2"><span className="font-semibold">وصف المشاكل</span><p className="mt-1 whitespace-pre-wrap text-muted-foreground">{aiAnalysis.problems || aiAnalysis.summary || "—"}</p></div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -402,9 +472,9 @@ export default function InspectionFormDialog({ open, onOpenChange, preselectOrde
                   <FileText size={14} />
                   تصدير PDF
                 </Button>
-                <Button size="sm" onClick={handleSaveReport} className="gradient-gold text-primary-foreground gap-1">
-                  <Save size={14} />
-                  حفظ التقرير
+                <Button size="sm" disabled={saving} onClick={() => void handleSaveReport()} className="gradient-gold text-primary-foreground gap-1">
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {saving ? "جارٍ الحفظ…" : "حفظ التقرير"}
                 </Button>
               </>
             ) : (

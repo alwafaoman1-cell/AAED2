@@ -7,8 +7,9 @@ const corsHeaders = {
 };
 
 interface Body {
-  action: "create" | "update" | "delete" | "list";
+  action: "create" | "update" | "delete" | "list" | "invite" | "login_link" | "reset_access" | "disable" | "enable" | "assign_tenant";
   id?: string;
+  tenant_id?: string;
   email?: string;
   password?: string;
   full_name?: string;
@@ -60,24 +61,36 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const { data: callerProfile } = await admin
       .from("profiles")
-      .select("tenant_id, role")
+      .select("tenant_id, role, is_platform_admin, account_status")
       .eq("user_id", callerUserId)
       .maybeSingle();
 
-    if (!callerProfile || !["admin", "manager"].includes(callerProfile.role)) {
+    if (!callerProfile || callerProfile.account_status === "disabled" || !["admin", "manager"].includes(callerProfile.role)) {
       return new Response(JSON.stringify({ error: "Forbidden — admin only" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const tenant_id = callerProfile.tenant_id;
     const body: Body = await req.json();
+    const tenant_id = callerProfile.is_platform_admin && body.tenant_id
+      ? body.tenant_id
+      : callerProfile.tenant_id;
+
+    const audit = async (action: string, targetUserId?: string | null, details: Record<string, unknown> = {}) => {
+      await admin.from("admin_user_events").insert({
+        tenant_id,
+        actor_user_id: callerUserId,
+        target_user_id: targetUserId || null,
+        action,
+        details,
+      });
+    };
 
     // 3) Dispatch
     if (body.action === "list") {
       const { data, error } = await admin
         .from("profiles")
-        .select("id, user_id, full_name, phone, role, avatar_url, created_at")
+        .select("id, user_id, tenant_id, full_name, phone, role, avatar_url, account_status, last_sign_in_at, last_seen_at, invited_at, disabled_at, created_at, tenant:tenants(name,slug)")
         .eq("tenant_id", tenant_id)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -85,7 +98,13 @@ Deno.serve(async (req) => {
       const out = [];
       for (const p of data || []) {
         const { data: u } = await admin.auth.admin.getUserById(p.user_id);
-        out.push({ ...p, email: u?.user?.email || null });
+        out.push({
+          ...p,
+          email: u?.user?.email || null,
+          last_sign_in_at: u?.user?.last_sign_in_at || p.last_sign_in_at,
+          email_confirmed_at: u?.user?.email_confirmed_at || null,
+          banned_until: u?.user?.banned_until || null,
+        });
       }
       return new Response(JSON.stringify({ users: out }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -128,10 +147,59 @@ Deno.serve(async (req) => {
           phone: body.phone || null,
           role: body.role,
           avatar_url: body.avatar_url || null,
+          account_status: "active",
         },
         { onConflict: "user_id" }
       );
+      await audit("user_created", created.user!.id, { email: body.email, role: body.role });
       return new Response(JSON.stringify({ ok: true, user_id: created.user!.id }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (body.action === "invite" && !body.id) {
+      if (!body.email || !body.full_name || !body.role) {
+        return new Response(JSON.stringify({ error: "email, full_name and role are required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const siteUrl = Deno.env.get("SITE_URL") || "https://aaed-2.vercel.app";
+      const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(body.email, {
+        redirectTo: `${siteUrl}/reset-password`,
+        data: { full_name: body.full_name, tenant_id, role: body.role },
+      });
+      if (inviteError) throw inviteError;
+      if (invited.user) {
+        await admin.from("profiles").upsert({
+          user_id: invited.user.id,
+          tenant_id,
+          full_name: body.full_name,
+          phone: body.phone || null,
+          role: body.role,
+          account_status: "invited",
+          invited_at: new Date().toISOString(),
+        }, { onConflict: "user_id" });
+        await audit("user_invited", invited.user.id, { email: body.email, role: body.role });
+      }
+      return new Response(JSON.stringify({ ok: true, user_id: invited.user?.id }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (body.action === "assign_tenant") {
+      if (!callerProfile.is_platform_admin || !body.id || !body.tenant_id) {
+        return new Response(JSON.stringify({ error: "Platform admin access required" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: target } = await admin.from("profiles").select("user_id,tenant_id").eq("id", body.id).maybeSingle();
+      if (!target) throw new Error("user_not_found");
+      const { error } = await admin.from("profiles").update({ tenant_id: body.tenant_id }).eq("id", body.id);
+      if (error) throw error;
+      await audit("tenant_assigned", target.user_id, { from_tenant_id: target.tenant_id, to_tenant_id: body.tenant_id });
+      return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -176,6 +244,70 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (["invite", "login_link", "reset_access", "disable", "enable"].includes(body.action)) {
+      if (!body.id) throw new Error("id required");
+      const { data: target } = await admin
+        .from("profiles")
+        .select("id, tenant_id, user_id, role, full_name")
+        .eq("id", body.id)
+        .maybeSingle();
+      if (!target || target.tenant_id !== tenant_id) {
+        return new Response(JSON.stringify({ error: "Not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (target.user_id === callerUserId && body.action === "disable") {
+        return new Response(JSON.stringify({ error: "You cannot disable your own account" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: targetAuth } = await admin.auth.admin.getUserById(target.user_id);
+      const email = targetAuth.user?.email;
+      if (!email) throw new Error("Target email not found");
+      const siteUrl = Deno.env.get("SITE_URL") || "https://aaed-2.vercel.app";
+
+      if (body.action === "disable" || body.action === "enable") {
+        const disabled = body.action === "disable";
+        const { error } = await admin.auth.admin.updateUserById(target.user_id, {
+          ban_duration: disabled ? "876000h" : "none",
+        });
+        if (error) throw error;
+        await admin.from("profiles").update({
+          account_status: disabled ? "disabled" : "active",
+          disabled_at: disabled ? new Date().toISOString() : null,
+          disabled_by: disabled ? callerUserId : null,
+        }).eq("id", target.id);
+        await audit(disabled ? "user_disabled" : "user_enabled", target.user_id);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const linkType = body.action === "reset_access" ? "recovery" : "magiclink";
+      const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
+        type: linkType,
+        email,
+        options: { redirectTo: body.action === "reset_access" ? `${siteUrl}/reset-password` : siteUrl },
+      });
+      if (linkError) throw linkError;
+      const profileUpdates: Record<string, unknown> = {
+        account_status: body.action === "invite" ? "invited" : targetAuth.user?.banned_until ? "disabled" : "active",
+      };
+      if (body.action === "invite") {
+        profileUpdates.invited_at = new Date().toISOString();
+      }
+      await admin.from("profiles").update(profileUpdates).eq("id", target.id);
+      await audit(body.action, target.user_id, { email });
+      return new Response(JSON.stringify({
+        ok: true,
+        action_link: linkData.properties?.action_link || null,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (body.action === "delete") {
       if (!body.id) throw new Error("id required");
       const { data: target } = await admin
@@ -199,6 +331,7 @@ Deno.serve(async (req) => {
       await admin.auth.admin.deleteUser(target.user_id);
       // profile will be removed by FK cascade if set; otherwise:
       await admin.from("profiles").delete().eq("id", body.id);
+      await audit("user_deleted", target.user_id);
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

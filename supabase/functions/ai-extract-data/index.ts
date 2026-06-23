@@ -127,6 +127,28 @@ const SCHEMAS: Record<string, { description: string; system: string; parameters:
       additionalProperties: false,
     },
   },
+  diagnostic_report: {
+    description: "Analyze an automotive computer diagnostic report and extract fault codes, problem descriptions, and severity only.",
+    system: [
+      "You analyze automotive computer diagnostic reports for a professional workshop.",
+      "Extract only fault codes and problems explicitly supported by the report.",
+      "Classify severity as low, medium, high, or critical.",
+      "Do not provide repair instructions, procedures, parts recommendations, or troubleshooting steps.",
+      "The report can be Arabic or English. Keep fault codes exactly as printed.",
+      "If a value is not visible, return an empty string. Never invent a code or diagnosis.",
+    ].join(" "),
+    parameters: {
+      type: "object",
+      properties: {
+        fault_codes: { type: "string", description: "Comma-separated diagnostic trouble codes exactly as printed" },
+        problems: { type: "string", description: "Concise problem descriptions only, one per line, without repair advice" },
+        severity: { type: "string", description: "Overall severity: low, medium, high, or critical" },
+        summary: { type: "string", description: "Short factual summary of the report without repair instructions" },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
 };
 
 Deno.serve(async (req) => {
@@ -155,6 +177,17 @@ Deno.serve(async (req) => {
       if (!userData?.user) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: tenantId } = await sb.rpc("get_user_tenant_id");
+      const { data: aiFeature } = await sb.from("tenant_features")
+        .select("enabled")
+        .eq("tenant_id", tenantId)
+        .eq("feature_key", "ai_assistant")
+        .maybeSingle();
+      if (aiFeature?.enabled === false) {
+        return new Response(JSON.stringify({ error: "AI feature is disabled for this workshop" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     } catch (_) {

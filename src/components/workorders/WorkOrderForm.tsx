@@ -18,6 +18,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentRole } from "@/lib/permissions";
 import type { WorkOrderType } from "@/lib/workOrderType";
+import { getCurrentTenantId } from "@/lib/saasAdmin";
+import ReceptionIntakePanel from "@/components/workorders/ReceptionIntakePanel";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
@@ -74,6 +76,8 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     extraExpenses: initial?.extraExpenses || [],
     partsNeeded: initial?.partsNeeded || [],
   }));
+  const [receptionFiles, setReceptionFiles] = useState<File[]>([]);
+  const [saving, setSaving] = useState(false);
   const [claims, setClaims] = useState<Array<{
     id: string;
     claim_number: string;
@@ -235,7 +239,34 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   const finalTotal = baseSubtotal; // الإجمالي = القيمة الكاملة (لا يُخصم منها الدفعة)
   const balanceDue = Math.max(0, baseSubtotal - deposit); // للعرض فقط
 
-  function handleSubmit() {
+  async function uploadReceptionPhotos(orderNumber: string) {
+    if (receptionFiles.length === 0) return form.photos || [];
+    const tenantId = await getCurrentTenantId();
+    const uploaded = [...(form.photos || [])];
+    for (const file of receptionFiles) {
+      const safeName = file.name.replace(/[^\w.\-\u0600-\u06FF]+/g, "_");
+      const storagePath = `${tenantId}/${orderNumber}/received/${crypto.randomUUID()}-${safeName}`;
+      const { error: uploadError } = await supabase.storage
+        .from("work-order-photos")
+        .upload(storagePath, file, { contentType: file.type || "image/jpeg", upsert: false });
+      if (uploadError) throw uploadError;
+      const { data: signed, error: signedError } = await supabase.storage
+        .from("work-order-photos")
+        .createSignedUrl(storagePath, 60 * 60 * 24 * 30);
+      if (signedError || !signed?.signedUrl) throw signedError || new Error("تعذر إنشاء رابط الصورة");
+      uploaded.push({
+        id: crypto.randomUUID(),
+        phase: "received",
+        dataUrl: signed.signedUrl,
+        storagePath,
+        caption: "صورة استلام المركبة",
+        uploadedAt: new Date().toISOString(),
+      });
+    }
+    return uploaded;
+  }
+
+  async function handleSubmit() {
     const customerId = (form as WorkOrder & { customerId?: string }).customerId;
     if (!customerId || !form.customer) {
       toast.error("الرجاء اختيار العميل أو إنشاؤه (إلزامي)");
@@ -301,8 +332,19 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         }
       }
     } catch {}
+    const targetOrderNumber = isEdit ? form.id : nextWorkOrderNumber();
+    setSaving(true);
+    let receptionPhotos = form.photos || [];
+    try {
+      receptionPhotos = await uploadReceptionPhotos(targetOrderNumber);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر رفع صور الاستلام");
+      setSaving(false);
+      return;
+    }
     const payload: WorkOrder = {
       ...form,
+      photos: receptionPhotos,
       workOrderType: form.claimId ? "insurance" : selectedType,
       claimId: selectedType === "insurance" ? form.claimId : undefined,
       insurance: selectedType === "insurance" ? form.insurance : "-",
@@ -316,10 +358,10 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       updateWorkOrder(form.id, payload);
       toast.success(`تم تحديث ${form.id}`);
     } else {
-      const newId = nextWorkOrderNumber();
-      addWorkOrder({ ...payload, id: newId });
-      toast.success(`تم إنشاء ${newId}`);
+      addWorkOrder({ ...payload, id: targetOrderNumber });
+      toast.success(`تم إنشاء ${targetOrderNumber}`);
     }
+    setSaving(false);
     onClose();
   }
 
@@ -607,9 +649,15 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
             className="bg-card border-border text-sm"
           />
         </div>
-        <p className="text-[10px] text-muted-foreground">
-          💡 لرفع صور المركبة عند الاستلام، افتح أمر العمل بعد الحفظ من قائمة أوامر العمل.
-        </p>
+        <ReceptionIntakePanel
+          files={receptionFiles}
+          onFilesChange={setReceptionFiles}
+          markers={form.receptionDamageMarkers || []}
+          onMarkersChange={(markers) => set("receptionDamageMarkers", markers)}
+          signatureDataUrl={form.receptionSignatureDataUrl}
+          onSignatureChange={(signature) => set("receptionSignatureDataUrl", signature)}
+          showDamageMap={form.serviceType === "حادث" || selectedType === "insurance"}
+        />
       </div>
 
 
@@ -864,8 +912,8 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         <textarea value={form.diagnosis || ""} onChange={e => set("diagnosis", e.target.value)} className="w-full rounded-lg bg-secondary border border-border text-foreground p-3 text-sm min-h-[80px] resize-none focus:outline-none focus:ring-2 focus:ring-ring" />
       </div>
       <div className="flex gap-3 pt-2">
-        <Button onClick={handleSubmit} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
-          {isEdit ? "حفظ التعديلات" : "حفظ أمر العمل"}
+        <Button onClick={() => void handleSubmit()} disabled={saving} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
+          {saving ? "جارٍ الحفظ والرفع…" : isEdit ? "حفظ التعديلات" : "حفظ أمر العمل"}
         </Button>
         <Button onClick={onClose} variant="outline" className="border-border text-foreground hover:bg-secondary">إلغاء</Button>
       </div>

@@ -5,6 +5,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { FeatureProvider } from "@/contexts/FeatureContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import AppLayout from "./components/AppLayout";
@@ -138,6 +139,8 @@ const VehicleBelongingsSettingsPage = lazy(() => import("./pages/settings/Vehicl
 const MessagesCenter = lazy(() => import("./pages/MessagesCenter"));
 const CustomerNotificationsSettingsPage = lazy(() => import("./pages/settings/CustomerNotificationsSettingsPage"));
 const AdminNotifications = lazy(() => import("./pages/AdminNotifications"));
+const SaasAdminConsole = lazy(() => import("./pages/admin/SaasAdminConsole"));
+const TenantFiles = lazy(() => import("./pages/admin/TenantFiles"));
 
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
@@ -179,6 +182,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <FeatureProvider>
           <AutoTranslateBoot />
           <KeyboardShortcuts />
           <Suspense fallback={<RouteFallback />}>
@@ -320,12 +324,15 @@ const App = () => (
               <Route path="/settings/vehicle-belongings" element={<ProtectedRoute roles={["admin","manager"]}><VehicleBelongingsSettingsPage /></ProtectedRoute>} />
               <Route path="/messages" element={<MessagesCenter />} />
               <Route path="/admin/notifications" element={<ProtectedRoute roles={["admin","manager"]}><AdminNotifications /></ProtectedRoute>} />
+              <Route path="/admin/saas" element={<ProtectedRoute roles={["admin","manager"]}><SaasAdminConsole /></ProtectedRoute>} />
+              <Route path="/admin/files" element={<ProtectedRoute roles={["admin","manager"]}><TenantFiles /></ProtectedRoute>} />
               <Route path="/settings/customer-notifications" element={<ProtectedRoute roles={["admin","manager"]}><CustomerNotificationsSettingsPage /></ProtectedRoute>} />
             </Route>
 
             <Route path="*" element={<NotFound />} />
           </Routes>
           </Suspense>
+          </FeatureProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

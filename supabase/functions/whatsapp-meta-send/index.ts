@@ -42,6 +42,13 @@ Deno.serve(async (req) => {
     if (!body.to) throw new Error("to_required");
     const { data: tenantId, error: tenantError } = await supabase.rpc("get_user_tenant_id");
     if (tenantError || !tenantId) throw new Error("tenant_not_found");
+    const { data: whatsappFeature } = await supabase
+      .from("tenant_features")
+      .select("enabled")
+      .eq("tenant_id", tenantId)
+      .eq("feature_key", "whatsapp")
+      .maybeSingle();
+    if (whatsappFeature?.enabled === false) throw new Error("feature_disabled");
 
     let jobOrderId = body.jobOrderId || null;
     let customerId = body.customerId || null;
@@ -87,6 +94,10 @@ Deno.serve(async (req) => {
 
     const to = String(body.to).replace(/\D/g, "");
     const type = body.type || "text";
+    if (type === "image") throw new Error("secure_link_required");
+    if (type === "document" && !/^https:\/\//i.test(body.mediaUrl || "")) {
+      throw new Error("secure_https_link_required");
+    }
     const messageBody = type === "text"
       ? (body.text || "")
       : (body.caption || body.filename || body.template?.name || "");

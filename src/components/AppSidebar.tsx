@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,11 +7,11 @@ import {
   Car, Trash2, UserSquare, ChevronDown, MinusCircle, ReceiptText, Wallet, History, Database,
   FileText, Building2, DollarSign, RotateCcw, BarChart3, ArrowDownUp, FileBarChart, Wrench,
   UserCog, LogOut, Palette, Plus, Tags, KanbanSquare, Bell, List, FileSpreadsheet,
-  Smartphone, Download, Power, Key,
+  Smartphone, Download, Power, Key, ServerCog, FolderLock,
 } from "lucide-react";
-import { getModulesSettings, subscribeModulesSettings, type ModulesSettings } from "@/lib/modulesStore";
 import logo from "@/assets/logo.png";
 import { useAuth } from "@/contexts/AuthContext";
+import { featureForPath, useFeatures } from "@/contexts/FeatureContext";
 import { canAccessPath } from "@/lib/rbac";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
@@ -94,6 +94,8 @@ const menuItems: MenuItem[] = [
     children: [
       { path: "/staff", labelKey: "nav.staff", icon: Users },
       { path: "/users", labelKey: "nav.users", icon: UserCog },
+      { path: "/admin/saas", labelKey: "لوحة إدارة SaaS", icon: ServerCog },
+      { path: "/admin/files", labelKey: "مدير ملفات الورشة", icon: FolderLock },
     ],
   },
   { path: "/media-studio", labelKey: "استوديو الوسائط", icon: Palette, iconClass: "text-fuchsia-400" },
@@ -124,26 +126,12 @@ export default function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isRtl = i18n.dir() === "rtl";
-  const [modules, setModules] = useState<ModulesSettings>(getModulesSettings());
+  const { isEnabled } = useFeatures();
 
-  useEffect(() => {
-    const unsub = subscribeModulesSettings(setModules);
-    return () => { unsub(); };
-  }, []);
-
-  // خرائط المسارات إلى مفاتيح الوحدات للتصفية
-  const pathToModule: Record<string, keyof ModulesSettings["enabled"]> = {
-    "/tech": "tech",
-    "/supervisor-app": "supervisor",
-    "/manager-app": "manager",
-    "/accountant-app": "accountant",
-    "/install": "install",
-    "/insurance": "insurance",
-  };
   const isPathEnabled = (path: string): boolean => {
-    const key = pathToModule[path];
+    const key = featureForPath(path);
     if (!key) return true;
-    return modules.enabled[key] !== false;
+    return isEnabled(key);
   };
 
   async function handleLogout() {

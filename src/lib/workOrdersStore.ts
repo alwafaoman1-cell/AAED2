@@ -94,6 +94,8 @@ export interface WorkOrder {
   odometerKm?: number;
   fuelLevelPct?: number;
   receptionNotes?: string;
+  receptionDamageMarkers?: import("@/components/inspection/VehicleDiagram").DamageMarker[];
+  receptionSignatureDataUrl?: string;
   vehicleBelongings?: Record<string, boolean | string>;
   receivedAt?: string;
   /** بنود الأعمال المطلوبة من العميل (تظهر له في رابط التوقيع) */
@@ -338,6 +340,8 @@ function mapCloudRow(
     odometerKm: r.odometer_km ?? undefined,
     fuelLevelPct: r.fuel_level_pct ?? undefined,
     receptionNotes: r.reception_notes || undefined,
+    receptionDamageMarkers: Array.isArray(r.reception_damage_markers) ? r.reception_damage_markers : [],
+    receptionSignatureDataUrl: r.reception_signature_data_url || undefined,
     vehicleBelongings: r.vehicle_belongings || undefined,
     receivedAt: r.received_at || undefined,
   };
@@ -553,6 +557,8 @@ async function pushOrderToCloud(o: WorkOrder) {
       odometer_km: o.odometerKm ?? null,
       fuel_level_pct: o.fuelLevelPct ?? null,
       reception_notes: o.receptionNotes || null,
+      reception_damage_markers: (o.receptionDamageMarkers || []) as any,
+      reception_signature_data_url: o.receptionSignatureDataUrl || null,
       vehicle_belongings: (o.vehicleBelongings || {}) as any,
       received_at: o.receivedAt || null,
       metadata: {
@@ -604,6 +610,8 @@ async function _flushPatch(orderNumber: string) {
     if (patch.odometerKm !== undefined) updates.odometer_km = patch.odometerKm;
     if (patch.fuelLevelPct !== undefined) updates.fuel_level_pct = patch.fuelLevelPct;
     if (patch.receptionNotes !== undefined) updates.reception_notes = patch.receptionNotes;
+    if (patch.receptionDamageMarkers !== undefined) updates.reception_damage_markers = patch.receptionDamageMarkers;
+    if (patch.receptionSignatureDataUrl !== undefined) updates.reception_signature_data_url = patch.receptionSignatureDataUrl || null;
     if (patch.vehicleBelongings !== undefined) updates.vehicle_belongings = patch.vehicleBelongings;
     if (patch.receivedAt !== undefined) updates.received_at = patch.receivedAt;
     if (
