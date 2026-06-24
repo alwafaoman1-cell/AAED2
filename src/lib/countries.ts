@@ -37,13 +37,6 @@ export const COUNTRY_DIALS: CountryDial[] = [
 
 /** قراءة البادئة الافتراضية من إعدادات القالب أو Fallback إلى عُمان. */
 export function getDefaultCountryCode(): string {
-  try {
-    const raw = localStorage.getItem("pdf_template_settings");
-    if (raw) {
-      const o = JSON.parse(raw);
-      if (o?.defaultCountryCode) return String(o.defaultCountryCode).replace(/\D/g, "");
-    }
-  } catch {}
   return "968";
 }
 

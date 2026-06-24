@@ -14,6 +14,7 @@ import { customersStore, type Customer, type CustomerTag, type CustomerType } fr
 import { vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import { toast } from "sonner";
 import { AlertTriangle, Car, Building2, User, Plus, X } from "lucide-react";
+import { normalizePhone, toE164 } from "@/lib/phoneUtils";
 
 interface Props {
   open: boolean;
@@ -64,16 +65,18 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
     setVehicles((arr) => (arr.length <= 1 ? arr : arr.filter((_, i) => i !== idx)));
 
   function performSave() {
+    const normalizedPhone = toE164(form.phone);
+    const saveForm = { ...form, phone: normalizedPhone };
     if (isEdit && initial) {
-      customersStore.update(initial.id, form);
-      toast.success(`تم تحديث ${form.name}`);
+      customersStore.update(initial.id, saveForm);
+      toast.success(`تم تحديث ${saveForm.name}`);
     } else {
       customersStore.add({
-        ...form,
+        ...saveForm,
         id: `CUST-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         createdAt: new Date().toISOString(),
       });
-      toast.success(isCompany ? `تمت إضافة الشركة ${form.name}` : `تم إضافة ${form.name}`);
+      toast.success(isCompany ? `تمت إضافة الشركة ${saveForm.name}` : `تم إضافة ${saveForm.name}`);
       if (addVehicle) {
         let added = 0;
         let skipped = 0;
@@ -87,8 +90,8 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
             plate,
             type: `${vd.type} ${vd.model}`.trim() || "-",
             vin: vd.vin.trim(),
-            owner: form.name,
-            ownerPhone: form.phone || "",
+            owner: saveForm.name,
+            ownerPhone: saveForm.phone || "",
             year: vd.year, color: vd.color, mileage: vd.mileage,
             visits: 0,
             lastVisit: new Date().toISOString().slice(0, 10),
@@ -112,7 +115,7 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
       return;
     }
     if (form.phone && form.phone.trim()) {
-      const cleanPhone = form.phone.replace(/\s/g, "");
+      const cleanPhone = normalizePhone(form.phone);
       const dup = customersStore.findByPhone(cleanPhone);
       if (dup && (!isEdit || dup.id !== initial?.id)) {
         setDupWarn(dup);
@@ -172,7 +175,7 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
 
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">رقم الجوال</Label>
-            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} dir="ltr" />
+            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} onBlur={() => set("phone", toE164(form.phone))} dir="ltr" placeholder="+968" />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">البريد الإلكتروني</Label>

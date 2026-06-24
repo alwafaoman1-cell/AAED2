@@ -79,6 +79,7 @@ const menuItems: MenuItem[] = [
     ],
   },
   { path: "/daily-log", labelKey: "nav.dailyLog", icon: FileSpreadsheet },
+  { path: "/import-export", labelKey: "مركز الاستيراد والتصدير", icon: Download, iconClass: "text-emerald-400" },
   { path: "/tasks", labelKey: "nav.tasks", icon: ClipboardList },
   {
     path: "/apps",

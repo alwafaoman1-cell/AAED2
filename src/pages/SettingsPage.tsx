@@ -12,6 +12,7 @@ import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { usersStore, ROLE_LABELS, ROLE_DESCRIPTIONS, type AppUser } from "@/lib/usersStore";
 import { canEdit, canDelete, getCurrentRole, type Role } from "@/lib/permissions";
 import { COUNTRY_DIALS } from "@/lib/countries";
+import { useSystemPreferences, type SystemThemePreset } from "@/lib/systemPreferences";
 
 const colorPresets = [
   { label: "ذهبي", value: "#d4a537" },
@@ -49,6 +50,8 @@ export default function SettingsPage() {
   const currentRole: Role = getCurrentRole();
   const allowEdit = canEdit();
   const allowDelete = canDelete();
+  const { preferences: systemPreferences, save: saveSystemPreferences } = useSystemPreferences();
+  const [savingSystemPreferences, setSavingSystemPreferences] = useState(false);
 
   useEffect(() => usersStore.subscribe(() => setUsers([...usersStore.getAll()])), []);
   // عند وصول نسخة من قاعدة البيانات (بعد تسجيل الدخول أو على جهاز جديد) حدّث النموذج
@@ -166,11 +169,123 @@ export default function SettingsPage() {
   }
   // Role switching removed — role comes from the authenticated profile only.
 
+  async function handleSaveSystemPreferences() {
+    setSavingSystemPreferences(true);
+    try {
+      await saveSystemPreferences(systemPreferences);
+      toast.success("تم حفظ إعدادات الهاتف والقالب");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ إعدادات النظام");
+    } finally {
+      setSavingSystemPreferences(false);
+    }
+  }
+
+  function updateSystemTheme(themeId: string, patch: Partial<SystemThemePreset>) {
+    void saveSystemPreferences({
+      ...systemPreferences,
+      themes: systemPreferences.themes.map((theme) => theme.id === themeId ? { ...theme, ...patch } : theme),
+    });
+  }
+
+  function addSystemTheme() {
+    const id = `theme-${Date.now()}`;
+    void saveSystemPreferences({
+      ...systemPreferences,
+      activeThemeId: id,
+      themes: [
+        ...systemPreferences.themes,
+        { id, name: "قالب جديد", primary: settings.primaryColor || "#d4a537", accent: "#0ea5e9" },
+      ],
+    });
+  }
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">الإعدادات</h1>
         <p className="text-sm text-muted-foreground">إعدادات النظام وتخصيص قوالب المستخرجات</p>
+      </div>
+
+      <div className="bg-card border border-primary/25 rounded-xl p-4 shadow-card space-y-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Palette size={16} className="text-primary" /> إعدادات التشغيل العامة
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              تحفظ لكل ورشة / tenant وتطبّق على أرقام الهاتف، واتساب، ألوان الواجهة، الأزرار، البطاقات، والشريط الجانبي.
+            </p>
+          </div>
+          <Button onClick={handleSaveSystemPreferences} disabled={savingSystemPreferences} className="gradient-gold text-primary-foreground">
+            {savingSystemPreferences ? "جارٍ الحفظ..." : "حفظ إعدادات التشغيل"}
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground">بادئة الدولة الافتراضية للهاتف</label>
+            <Select
+              value={systemPreferences.defaultCountryCode}
+              onValueChange={(value) => void saveSystemPreferences({ ...systemPreferences, defaultCountryCode: value })}
+            >
+              <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-[300px]">
+                {COUNTRY_DIALS.map((country) => (
+                  <SelectItem key={country.iso} value={country.code}>
+                    {country.flag} +{country.code} — {country.nameAr} ({country.nameEn})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">أي رقم بدون بادئة سيُحفظ ويُرسل بصيغة +{systemPreferences.defaultCountryCode} تلقائيًا.</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground">القالب النشط</label>
+            <Select
+              value={systemPreferences.activeThemeId}
+              onValueChange={(value) => void saveSystemPreferences({ ...systemPreferences, activeThemeId: value })}
+            >
+              <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {systemPreferences.themes.map((theme) => (
+                  <SelectItem key={theme.id} value={theme.id}>{theme.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">التبديل يطبق الألوان مباشرة على الواجهة.</p>
+          </div>
+
+          <div className="flex items-end">
+            <Button type="button" variant="outline" onClick={addSystemTheme} className="w-full gap-2">
+              <Plus size={14} /> إنشاء قالب لون جديد
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {systemPreferences.themes.map((theme) => (
+            <div key={theme.id} className={`rounded-xl border p-3 ${theme.id === systemPreferences.activeThemeId ? "border-primary bg-primary/5" : "border-border bg-secondary/20"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <Input
+                  value={theme.name}
+                  onChange={(event) => updateSystemTheme(theme.id, { name: event.target.value })}
+                  className="h-9 bg-card"
+                />
+                <div className="flex items-center gap-2">
+                  <Input type="color" value={theme.primary} onChange={(event) => updateSystemTheme(theme.id, { primary: event.target.value })} className="h-9 w-12 p-1" />
+                  <Input type="color" value={theme.accent || theme.primary} onChange={(event) => updateSystemTheme(theme.id, { accent: event.target.value })} className="h-9 w-12 p-1" />
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full bg-primary/15 px-2 py-1 text-[10px] text-primary">Badge</span>
+                <Button size="sm" className="h-7 gradient-gold text-primary-foreground">Button</Button>
+                <div className="rounded-lg border border-border bg-card px-3 py-1 text-xs">Card header</div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Quick links */}

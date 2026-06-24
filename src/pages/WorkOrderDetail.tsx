@@ -39,6 +39,7 @@ import {
   type WorkOrder,
   type StagePhase,
   addWorkOrder,
+  isPartStillNeeded,
 } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
 import { inspectionsStore } from "@/lib/inspectionsStore";
@@ -768,6 +769,98 @@ export default function WorkOrderDetail() {
       {/* (دُمج زر الإرسال داخل نافذة تحديث الحالة) */}
 
 
+
+      <div
+        data-testid="work-order-control-center"
+        className="rounded-2xl border border-border bg-card/95 shadow-sm overflow-hidden"
+      >
+        <div className="grid gap-0 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="p-4 sm:p-5 border-b lg:border-b-0 lg:border-l border-border bg-gradient-to-br from-primary/10 via-card to-secondary/40">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                    {resolveWorkOrderType(order) === "insurance" ? <ShieldCheck size={20} /> : <Car size={20} />}
+                  </span>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">مركز تحكم أمر العمل</p>
+                    <h2 className="text-lg sm:text-xl font-bold text-foreground font-mono">{displayNo}</h2>
+                  </div>
+                  <span className={`text-[11px] px-2.5 py-1 rounded-full font-semibold ${statusColors[order.status] || "bg-muted text-muted-foreground"}`}>
+                    {order.status}
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {order.customer} · {order.vehicleType} {order.model} · <span className="font-mono">{order.plate}</span>
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 min-w-[180px]">
+                <div className="rounded-xl border border-border bg-card/75 p-3">
+                  <p className="text-[10px] text-muted-foreground">التكلفة</p>
+                  <p className="text-sm font-bold text-primary">{order.totalCost.toLocaleString()} ر.ع</p>
+                </div>
+                <div className="rounded-xl border border-border bg-card/75 p-3">
+                  <p className="text-[10px] text-muted-foreground">القطع المفتوحة</p>
+                  <p className="text-sm font-bold text-warning">{(order.partsNeeded || []).filter(isPartStillNeeded).length}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <Button onClick={() => { setWaTab("templates"); setWaOpen(true); }} className="h-11 gap-2 bg-success text-success-foreground hover:bg-success/90">
+                <MessageCircle size={16} /> واتساب
+              </Button>
+              <Button variant="outline" onClick={() => { statusDirtyRef.current = true; setStatusOpen(true); }} className="h-11 gap-2">
+                <Workflow size={16} /> الحالة
+              </Button>
+              <Button variant="outline" onClick={() => { photoDirtyRef.current = true; setPhotosOpen(true); }} className="h-11 gap-2">
+                <Camera size={16} /> الصور
+              </Button>
+              <Button onClick={handlePrintWorkOrder} className="h-11 gap-2 gradient-gold text-primary-foreground">
+                <Printer size={16} /> PDF / طباعة
+              </Button>
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5 space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setQrOpen(true)} className="rounded-xl border border-border bg-secondary/25 p-3 text-right hover:border-primary/40 transition-colors">
+                <QrCode size={16} className="text-primary mb-2" />
+                <p className="text-xs font-semibold text-foreground">QR العميل</p>
+                <p className="text-[10px] text-muted-foreground">متابعة وتوقيع</p>
+              </button>
+              <button type="button" onClick={() => setExpenseOpen(true)} className="rounded-xl border border-border bg-secondary/25 p-3 text-right hover:border-warning/40 transition-colors">
+                <Receipt size={16} className="text-warning mb-2" />
+                <p className="text-xs font-semibold text-foreground">مصروف</p>
+                <p className="text-[10px] text-muted-foreground">سحب / نقل / خارجي</p>
+              </button>
+              <button type="button" onClick={() => navigate(`/sales/invoices/new?fromWorkOrder=${order.id}`)} className="rounded-xl border border-border bg-secondary/25 p-3 text-right hover:border-success/40 transition-colors">
+                <FilePlus2 size={16} className="text-success mb-2" />
+                <p className="text-xs font-semibold text-foreground">فاتورة</p>
+                <p className="text-[10px] text-muted-foreground">{linkedInvoice ? linkedInvoice.number : "إنشاء جديدة"}</p>
+              </button>
+              <button type="button" onClick={() => navigate(`/sales/quotes/new?fromWorkOrder=${order.id}`)} className="rounded-xl border border-border bg-secondary/25 p-3 text-right hover:border-info/40 transition-colors">
+                <FileText size={16} className="text-info mb-2" />
+                <p className="text-xs font-semibold text-foreground">عرض سعر</p>
+                <p className="text-[10px] text-muted-foreground">{linkedQuote ? linkedQuote.number : "إنشاء / متابعة"}</p>
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-border bg-muted/20 p-3">
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-2">
+                <span>تقدم العمل</span>
+                <span>{Math.max(currentIdx + 1, 1)} / {WORK_ORDER_STATUSES.length}</span>
+              </div>
+              <div className="h-2 rounded-full bg-secondary overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.max(((currentIdx + 1) / WORK_ORDER_STATUSES.length) * 100, 8)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Status timeline */}
       <div className="bg-card border border-border rounded-xl p-4">

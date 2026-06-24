@@ -3,9 +3,11 @@ import { isPartStillNeeded, NEEDED_PART_STATUS_LABELS, type WorkOrder } from "./
 import type { WaMessageKind } from "./waMessageLogStore";
 import { normalizePhone } from "./phoneUtils";
 import { supabase } from "@/integrations/supabase/client";
+import { readSystemPreferences } from "@/lib/systemPreferences";
 
-function digits(s: string | undefined | null): string {
-  return normalizePhone(s);
+async function digits(s: string | undefined | null): Promise<string> {
+  const prefs = await readSystemPreferences();
+  return normalizePhone(s, prefs.defaultCountryCode);
 }
 
 /** اسم الورشة من إعدادات PDF (إن وجدت) */
@@ -155,7 +157,7 @@ export function buildCustomGreeting(order: WorkOrder): string {
 
 /** يفتح واتساب برسالة جاهزة. إن لم يُمرَّر رقم، يفتح اختيار جهة الاتصال. */
 export async function openWhatsAppWithMessage(message: string, phone?: string) {
-  const cleaned = digits(phone);
+  const cleaned = await digits(phone);
   if (!cleaned) throw new Error("رقم الهاتف غير صالح");
   const { data, error } = await supabase.functions.invoke("whatsapp-meta-send", {
     body: { to: cleaned, type: "text", text: message, messageKind: "custom" },
@@ -194,7 +196,7 @@ export async function sendWhatsAppMessage(args: {
   recipientName?: string;
   recipientType?: "customer" | "supplier" | "other";
 }) {
-  const cleaned = digits(args.phone);
+  const cleaned = await digits(args.phone);
   if (!cleaned) throw new Error("رقم الهاتف غير صالح");
   const { data, error } = await supabase.functions.invoke("whatsapp-meta-send", {
     body: {

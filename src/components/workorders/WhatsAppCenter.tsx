@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageCircle, Send, Truck, History, FileText, Package, BellRing, CreditCard, Pencil, Trash2 } from "lucide-react";
+import { AlertTriangle, Copy, Eye, Link2, MessageCircle, Send, Truck, History, FileText, Package, BellRing, CreditCard, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { WorkOrder, NeededPart } from "@/lib/workOrdersStore";
@@ -27,6 +27,9 @@ import {
   WA_KIND_LABELS,
   type WaMessageLog,
 } from "@/lib/waMessageLogStore";
+import { useFeatures } from "@/contexts/FeatureContext";
+import { toE164 } from "@/lib/phoneUtils";
+import { useSystemPreferences } from "@/lib/systemPreferences";
 
 interface Props {
   order: WorkOrder | null;
@@ -36,7 +39,49 @@ interface Props {
   defaultTab?: "templates" | "suppliers" | "history";
 }
 
-type TemplateKey = "parts_request" | "ready_for_pickup" | "payment_followup" | "custom";
+type TemplateKey =
+  | "parts_request"
+  | "ready_for_pickup"
+  | "payment_followup"
+  | "tracking_link"
+  | "signature_link"
+  | "invoice_link"
+  | "custom";
+
+function appOrigin() {
+  if (typeof window === "undefined") return "";
+  return window.location.origin;
+}
+
+function buildTrackingLinkMessage(o: WorkOrder) {
+  const link = o.trackingToken ? `${appOrigin()}/p/${o.trackingToken}` : "";
+  return [
+    `مرحباً ${o.customer || ""}`,
+    `يمكنك متابعة حالة السيارة ${o.plate || ""} من الرابط التالي:`,
+    link || "سيتم إنشاء رابط المتابعة بعد حفظ رمز التتبع.",
+    "مع تحيات مركز الوفاء.",
+  ].join("\n");
+}
+
+function buildSignatureLinkMessage(o: WorkOrder) {
+  const link = o.trackingToken ? `${appOrigin()}/sign/${o.trackingToken}` : "";
+  return [
+    `مرحباً ${o.customer || ""}`,
+    "يرجى مراجعة الأعمال المطلوبة واعتمادها بالتوقيع من الرابط التالي:",
+    link || "سيتم إنشاء رابط التوقيع بعد توفر رمز العميل.",
+    "شكراً لتعاونكم.",
+  ].join("\n");
+}
+
+function buildInvoiceLinkMessage(o: WorkOrder) {
+  const link = `${appOrigin()}/sales/invoices/new?fromWorkOrder=${encodeURIComponent(o.id)}`;
+  return [
+    `مرحباً ${o.customer || ""}`,
+    `تم تجهيز رابط الفاتورة/المتابعة لأمر العمل ${o.displayNumber || o.id}:`,
+    link,
+    "إذا احتجتم أي توضيح نحن في خدمتكم.",
+  ].join("\n");
+}
 
 const TEMPLATES: { key: TemplateKey; label: string; icon: any; build: (o: WorkOrder) => string; kind: any }[] = [
   { key: "parts_request", label: "طلب قطع غيار", icon: Package, build: buildPartsRequestMessage, kind: "parts_request" },
@@ -45,10 +90,21 @@ const TEMPLATES: { key: TemplateKey; label: string; icon: any; build: (o: WorkOr
   { key: "custom", label: "رسالة مخصصة", icon: Pencil, build: buildCustomGreeting, kind: "custom" },
 ];
 
+const LINK_TEMPLATES: { key: TemplateKey; label: string; icon: any; build: (o: WorkOrder) => string; kind: any }[] = [
+  { key: "tracking_link", label: "رابط متابعة السيارة", icon: Link2, build: buildTrackingLinkMessage, kind: "custom" },
+  { key: "signature_link", label: "رابط التوقيع", icon: FileText, build: buildSignatureLinkMessage, kind: "custom" },
+  { key: "invoice_link", label: "رابط الفاتورة", icon: CreditCard, build: buildInvoiceLinkMessage, kind: "payment_followup" },
+];
+
+const ALL_TEMPLATES = [...TEMPLATES, ...LINK_TEMPLATES];
+
 export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab = "templates" }: Props) {
+  const { isEnabled } = useFeatures();
+  const { preferences } = useSystemPreferences();
   const [tab, setTab] = useState<string>(defaultTab);
   const [activeTpl, setActiveTpl] = useState<TemplateKey>("parts_request");
   const [draft, setDraft] = useState("");
+  const [recipientPhone, setRecipientPhone] = useState("");
   const [logs, setLogs] = useState<WaMessageLog[]>([]);
 
   // Suppliers tab
@@ -60,9 +116,14 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
   // sync template draft when order or template changes
   useEffect(() => {
     if (!order) return;
-    const tpl = TEMPLATES.find((t) => t.key === activeTpl);
+    const tpl = ALL_TEMPLATES.find((t) => t.key === activeTpl);
     if (tpl) setDraft(tpl.build(order));
   }, [order, activeTpl, open]);
+
+  useEffect(() => {
+    if (!order) return;
+    setRecipientPhone(toE164(order.phone, preferences.defaultCountryCode));
+  }, [order, open, preferences.defaultCountryCode]);
 
   // load logs + subscribe
   useEffect(() => {
@@ -90,6 +151,8 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
   if (!order) return null;
 
   const partsForSupplier: NeededPart[] = (order.partsNeeded || []).filter((p) => selectedParts.has(p.id));
+  const normalizedRecipientPhone = toE164(recipientPhone || order.phone, preferences.defaultCountryCode);
+  const whatsappEnabled = isEnabled("whatsapp");
   const filteredSuppliers = suppliers.filter(
     (s) => !supplierSearch.trim() || s.name.includes(supplierSearch) || (s.notes || "").includes(supplierSearch)
   );
@@ -102,15 +165,23 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
   }
 
   async function handleSendTemplate() {
+    if (!whatsappEnabled) {
+      toast.error("واتساب غير مفعل لهذه الورشة");
+      return;
+    }
     if (!draft.trim()) {
       toast.error("النص فارغ");
       return;
     }
-    const tpl = TEMPLATES.find((t) => t.key === activeTpl);
+    if (!normalizedRecipientPhone) {
+      toast.error("أدخل رقم المستلم قبل الإرسال");
+      return;
+    }
+    const tpl = ALL_TEMPLATES.find((t) => t.key === activeTpl);
     try {
       await sendWhatsAppAndLog({
         message: draft,
-        phone: order!.phone,
+        phone: normalizedRecipientPhone,
         workOrderId: order!.id,
         kind: tpl?.kind || "custom",
         recipientName: order!.customer,
@@ -123,6 +194,10 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
   }
 
   async function handleSendToSuppliers() {
+    if (!whatsappEnabled) {
+      toast.error("واتساب غير مفعل لهذه الورشة");
+      return;
+    }
     if (selectedSuppliers.size === 0) {
       toast.error("اختر مورداً واحداً على الأقل");
       return;
@@ -157,6 +232,10 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
   }
 
   async function handleResendLog(log: WaMessageLog) {
+    if (!whatsappEnabled) {
+      toast.error("واتساب غير مفعل لهذه الورشة");
+      return;
+    }
     try {
       await sendWhatsAppAndLog({
         message: log.fullText,
@@ -174,7 +253,7 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden bg-card border-border flex flex-col">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden bg-card border-border flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-foreground">
             <MessageCircle size={18} className="text-success" />
@@ -182,6 +261,13 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
             <span className="text-xs text-muted-foreground font-normal">({order.customer})</span>
           </DialogTitle>
         </DialogHeader>
+
+        {!whatsappEnabled && (
+          <div className="rounded-lg border border-warning/35 bg-warning/10 p-3 text-xs text-warning flex items-start gap-2">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <span>واتساب غير مفعل حالياً لهذه الورشة. يمكن تجهيز الرسائل ومعاينتها، لكن الإرسال متوقف حتى تفعيل الميزة والتكامل.</span>
+          </div>
+        )}
 
         <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col overflow-hidden">
           <TabsList className="grid grid-cols-3 w-full bg-secondary">
@@ -202,8 +288,8 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
 
           {/* ===== Templates ===== */}
           <TabsContent value="templates" className="flex-1 overflow-y-auto mt-3 space-y-3">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {TEMPLATES.map((t) => {
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+              {ALL_TEMPLATES.map((t) => {
                 const Icon = t.icon;
                 const active = activeTpl === t.key;
                 return (
@@ -224,6 +310,70 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
               })}
             </div>
 
+            <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
+              <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">رقم المستلم</label>
+                <Input
+                  value={recipientPhone}
+                  onChange={(e) => setRecipientPhone(e.target.value)}
+                  onBlur={() => setRecipientPhone(toE164(recipientPhone, preferences.defaultCountryCode))}
+                  placeholder={`+${preferences.defaultCountryCode}`}
+                  dir="ltr"
+                  className="bg-card border-border font-mono"
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px]"
+                    onClick={() => setRecipientPhone(toE164(order.phone, preferences.defaultCountryCode))}
+                  >
+                    رقم العميل
+                  </Button>
+                  {logs.slice(0, 3).map((log) => (
+                    <Button
+                      key={log.id}
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11px] font-mono"
+                      onClick={() => setRecipientPhone(toE164(log.recipientPhone, preferences.defaultCountryCode))}
+                    >
+                      {log.recipientPhone}
+                    </Button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  الرقم النهائي: <span dir="ltr" className="font-mono">{normalizedRecipientPhone || "—"}</span>
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-info/25 bg-info/5 p-3">
+                <p className="text-xs font-semibold text-info flex items-center gap-1.5 mb-2">
+                  <Eye size={13} /> معاينة قبل الإرسال
+                </p>
+                <div className="rounded-lg bg-card border border-border p-3 text-sm whitespace-pre-wrap min-h-[92px]" dir="auto">
+                  {draft || "اكتب الرسالة أو اختر قالباً لعرض المعاينة هنا."}
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                  <span>{draft.length} حرف · المستلم: <span dir="ltr">{normalizedRecipientPhone || "—"}</span></span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1 text-[11px]"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(draft);
+                      toast.success("تم نسخ نص الرسالة");
+                    }}
+                  >
+                    <Copy size={12} /> نسخ
+                  </Button>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
                 نص الرسالة (يمكنك تعديله قبل الإرسال)
@@ -231,17 +381,21 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
               <Textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                rows={12}
+                rows={9}
                 className="bg-secondary border-border text-sm font-mono leading-relaxed"
                 dir="auto"
               />
               <p className="text-[10px] text-muted-foreground">
-                {draft.length} حرف · سيُرسل إلى {order.customer} ({order.phone || "بدون رقم"})
+                {draft.length} حرف · سيُرسل إلى {order.customer} ({normalizedRecipientPhone || "بدون رقم"})
               </p>
             </div>
 
-            <Button onClick={handleSendTemplate} className="w-full gap-2 gradient-gold text-primary-foreground">
-              <Send size={14} /> فتح واتساب وإرسال
+            <Button
+              onClick={handleSendTemplate}
+              disabled={!whatsappEnabled || !normalizedRecipientPhone || !draft.trim()}
+              className="w-full gap-2 gradient-gold text-primary-foreground disabled:opacity-50"
+            >
+              <Send size={14} /> إرسال عبر Edge Function وتسجيل الرسالة
             </Button>
           </TabsContent>
 

@@ -126,6 +126,7 @@ const DailyTasks = lazy(() => import("./pages/DailyTasks"));
 const DailyLog = lazy(() => import("./pages/DailyLog"));
 const ExpensesImport = lazy(() => import("./pages/ExpensesImport"));
 const MediaStudio = lazy(() => import("./pages/MediaStudio"));
+const ImportExportCenter = lazy(() => import("./pages/ImportExportCenter"));
 const TechnicianApp = lazy(() => import("./pages/tech/TechnicianApp"));
 const TechQrScanPage = lazy(() => import("./pages/tech/TechQrScanPage"));
 const ManagerApp = lazy(() => import("./pages/apps/ManagerApp"));
@@ -145,6 +146,7 @@ const TenantFiles = lazy(() => import("./pages/admin/TenantFiles"));
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
 import KeyboardShortcuts from "@/components/KeyboardShortcuts";
+import SystemPreferencesBoot from "@/components/SystemPreferencesBoot";
 
 // كاش حيّ — يعيد الجلب فور الدخول للصفحة لمنع عرض بيانات قديمة بين التنقّلات.
 // المستخدم كان يضطر لـ Ctrl+Shift+R لأن staleTime كان 30s.
@@ -184,6 +186,7 @@ const App = () => (
         <AuthProvider>
           <FeatureProvider>
           <AutoTranslateBoot />
+          <SystemPreferencesBoot />
           <KeyboardShortcuts />
           <Suspense fallback={<RouteFallback />}>
           <Routes>
@@ -299,6 +302,7 @@ const App = () => (
               <Route path="/reports/cloud-advanced" element={<ProtectedRoute roles={["admin", "manager", "accountant", "insurance"]}><CloudAdvancedReports /></ProtectedRoute>} />
               <Route path="/dashboard/executive" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><ExecutiveDashboard /></ProtectedRoute>} />
               <Route path="/media-studio" element={<MediaStudio />} />
+              <Route path="/import-export" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ImportExportCenter /></ProtectedRoute>} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/print-templates" element={<PrintTemplates />} />
               <Route path="/settings/print-templates/:docType" element={<PrintTemplateVariants />} />

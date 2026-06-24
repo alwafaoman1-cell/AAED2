@@ -7,6 +7,7 @@ import { getWorkOrders } from "./workOrdersStore";
 import { vehiclesStore } from "./vehiclesStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { normalizePhone } from "@/lib/phoneUtils";
 
 export type CustomerTag = "vip" | "regular" | "new";
 export type CustomerType = "individual" | "company";
@@ -63,7 +64,7 @@ function rowToCustomer(r: any): Customer {
   return {
     id: r.id,
     name: r.name,
-    phone: r.phone || "",
+    phone: normalizePhone(r.phone || ""),
     email: r.email || undefined,
     address: r.address || undefined,
     idNumber: r.id_number || undefined,
@@ -97,7 +98,7 @@ async function upsertCustomerCloud(c: Customer) {
     id: c.id,
     tenant_id: tenantId,
     name: c.name,
-    phone: c.phone || null,
+    phone: normalizePhone(c.phone) || null,
     email: c.email || null,
     address: c.address || null,
     id_number: c.idNumber || null,
@@ -120,9 +121,9 @@ export const customersStore = {
   },
 
   findByPhone(phone: string): Customer | undefined {
-    const p = (phone || "").replace(/\s/g, "");
+    const p = normalizePhone(phone);
     if (!p) return undefined;
-    return load().find((c) => (c.phone || "").replace(/\s/g, "") === p);
+    return load().find((c) => normalizePhone(c.phone) === p);
   },
 
   /** هل اسم العميل يمثّل "Insurance Pending" (عميل افتراضي للتأمين)؟ */
@@ -158,14 +159,14 @@ export const customersStore = {
     const found = customersStore.findByName(name);
     if (found) {
       if (phone && !found.phone) {
-        customersStore.update(found.id, { phone });
+        customersStore.update(found.id, { phone: normalizePhone(phone) });
       }
       return customersStore.findByName(name)!;
     }
     const created: Customer = {
       id: crypto.randomUUID(),
       name: name.trim(),
-      phone,
+      phone: normalizePhone(phone),
       tag: "new",
       createdAt: new Date().toISOString(),
     };
@@ -175,16 +176,17 @@ export const customersStore = {
 
   add(c: Customer) {
     const list = load();
-    list.unshift(c);
+    const normalized = { ...c, phone: normalizePhone(c.phone) };
+    list.unshift(normalized);
     persist();
-    void upsertCustomerCloud(c);
+    void upsertCustomerCloud(normalized);
   },
 
   update(id: string, patch: Partial<Customer>) {
     const list = load();
     const idx = list.findIndex((c) => c.id === id);
     if (idx >= 0) {
-      list[idx] = { ...list[idx], ...patch };
+      list[idx] = { ...list[idx], ...patch, phone: patch.phone !== undefined ? normalizePhone(patch.phone) : list[idx].phone };
       persist();
       void upsertCustomerCloud(list[idx]);
     }

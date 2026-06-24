@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { customersStore, type Customer, type CustomerType } from "@/lib/customersStore";
 import { User, Building2 } from "lucide-react";
 import { toast } from "sonner";
+import { toE164 } from "@/lib/phoneUtils";
 
 interface Props {
   open: boolean;
@@ -60,10 +61,11 @@ export default function NewCustomerDialog({ open, onOpenChange, initialPhone, in
         setSaving(false);
         return;
       }
+      const normalizedPhone = toE164(phone);
       const c: Customer = {
         id: `CUST-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         name: name.trim(),
-        phone: phone.trim(),
+        phone: normalizedPhone,
         email: email.trim() || undefined,
         idNumber: idNumber.trim() || undefined,
         type,
@@ -126,7 +128,7 @@ export default function NewCustomerDialog({ open, onOpenChange, initialPhone, in
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">رقم الهاتف *</Label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} dir="ltr" />
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} onBlur={() => setPhone(toE164(phone))} dir="ltr" placeholder="+968" />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">البريد الإلكتروني</Label>

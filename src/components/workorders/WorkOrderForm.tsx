@@ -20,6 +20,7 @@ import { getCurrentRole } from "@/lib/permissions";
 import type { WorkOrderType } from "@/lib/workOrderType";
 import { getCurrentTenantId } from "@/lib/saasAdmin";
 import ReceptionIntakePanel from "@/components/workorders/ReceptionIntakePanel";
+import { toE164 } from "@/lib/phoneUtils";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
@@ -305,7 +306,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         if (existing) {
           vehiclesStore.update(existing.id, {
             owner: form.customer,
-            ownerPhone: form.phone || existing.ownerPhone,
+            ownerPhone: toE164(form.phone) || existing.ownerPhone,
             type: existing.type || `${form.vehicleType || ""} ${form.model || ""}`.trim(),
             vin: existing.vin || form.vin,
             year: existing.year || form.year,
@@ -319,7 +320,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
             type: `${form.vehicleType || ""} ${form.model || ""}`.trim() || "-",
             vin: form.vin || "",
             owner: form.customer,
-            ownerPhone: form.phone || "",
+            ownerPhone: toE164(form.phone) || "",
             year: form.year,
             color: form.color,
             mileage: form.mileage,
@@ -344,6 +345,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     }
     const payload: WorkOrder = {
       ...form,
+      phone: toE164(form.phone),
       photos: receptionPhotos,
       workOrderType: form.claimId ? "insurance" : selectedType,
       claimId: selectedType === "insurance" ? form.claimId : undefined,
