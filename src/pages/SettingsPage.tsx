@@ -13,6 +13,8 @@ import { usersStore, ROLE_LABELS, ROLE_DESCRIPTIONS, type AppUser } from "@/lib/
 import { canEdit, canDelete, getCurrentRole, type Role } from "@/lib/permissions";
 import { COUNTRY_DIALS } from "@/lib/countries";
 import { useSystemPreferences, type SystemThemePreset } from "@/lib/systemPreferences";
+import SecurityDangerZone from "@/components/settings/SecurityDangerZone";
+import AccountingSettingsPanel from "@/components/settings/AccountingSettingsPanel";
 
 const colorPresets = [
   { label: "ذهبي", value: "#d4a537" },
@@ -287,6 +289,10 @@ export default function SettingsPage() {
           ))}
         </div>
       </div>
+
+      <AccountingSettingsPanel />
+
+      <SecurityDangerZone />
 
       {/* Quick links */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

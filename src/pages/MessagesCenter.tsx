@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -9,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { MessageCircle, Mail, Phone, RefreshCw, Send, Loader2, Inbox, MessageSquare, Check, X } from "lucide-react";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 interface Row {
   id: string;
@@ -63,6 +64,10 @@ export default function MessagesCenter() {
   const [channelF, setChannelF] = useState("all");
   const [busyId, setBusyId] = useState<string | null>(null);
   const nav = useNavigate();
+  const [params] = useSearchParams();
+  const composeType = params.get("compose");
+  const invoiceId = params.get("invoiceId");
+  const draftMessage = params.get("message") || "";
 
   async function load() {
     setLoading(true);
@@ -144,6 +149,33 @@ export default function MessagesCenter() {
         <h1 className="text-lg font-bold">المراسلات</h1>
         <Button size="sm" variant="ghost" onClick={load} className="mr-auto"><RefreshCw size={14} /></Button>
       </div>
+
+      {composeType === "payment_reminder" && (
+        <Card className="p-4 mb-4 border-warning/40 bg-warning/5">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <Badge className="mb-2 bg-warning/20 text-warning border-warning/30">Payment Reminder</Badge>
+              <h2 className="font-bold">مسودة تذكير دفع</h2>
+              <p className="text-xs text-muted-foreground">
+                الفاتورة: <span className="font-mono" dir="ltr">{invoiceId || "—"}</span> — راجع النص ثم أرسله عبر قناة واتساب المفعّلة.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                navigator.clipboard.writeText(draftMessage);
+                toast.success("تم نسخ نص التذكير");
+              }}
+            >
+              نسخ النص
+            </Button>
+          </div>
+          <div className="mt-3 rounded-lg bg-background border border-border p-3 text-sm whitespace-pre-wrap">
+            {draftMessage || "لا توجد رسالة جاهزة."}
+          </div>
+        </Card>
+      )}
 
       <Tabs defaultValue="messages" className="w-full">
         <TabsList className="mb-3">

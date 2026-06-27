@@ -7,6 +7,7 @@ import { WORK_ORDER_STATUSES, updateWorkOrder, type WorkOrder, type StagePhase, 
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
+import WorkOrderClosingReview, { isClosingStatus } from "@/components/workorders/WorkOrderClosingReview";
 
 interface Props {
   order: WorkOrder | null;
@@ -60,6 +61,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   const [pendingPhotos, setPendingPhotos] = useState<StagePhoto[]>([]);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState<null | "save" | "send">(null);
+  const [closingReview, setClosingReview] = useState<WorkOrder["closingReview"] | null>(null);
   const [portalToken, setPortalToken] = useState<string | null>(null);
   const [isSigned, setIsSigned] = useState<boolean>(false);
   const cameraInput = useRef<HTMLInputElement>(null);
@@ -86,12 +88,14 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
       setSelected(order.status);
       setMessage(defaultMessage(order.status, order.customer || "", order.id));
       setPendingPhotos([]);
+      setClosingReview(null);
     }
   }, [open, order?.id]);
 
   useEffect(() => {
     if (open && order) {
       setMessage(defaultMessage(selected || order.status, order.customer || "", order.id));
+      setClosingReview(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
@@ -101,6 +105,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   const currentIdx = WORK_ORDER_STATUSES.indexOf(order.status);
   const statusChanged = selected && selected !== order.status;
   const hasPhotos = pendingPhotos.length > 0;
+  const requiresClosingReview = !!statusChanged && isClosingStatus(selected);
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -137,6 +142,13 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   async function persist(): Promise<boolean> {
     const patch: Partial<WorkOrder> = {};
     if (statusChanged) patch.status = selected;
+    if (requiresClosingReview) {
+      if (!closingReview) {
+        toast.error("يجب اعتماد Work Order Closing Review قبل حفظ الحالة النهائية.");
+        return false;
+      }
+      patch.closingReview = closingReview;
+    }
     if (hasPhotos) patch.photos = [...(order!.photos || []), ...pendingPhotos];
     if (Object.keys(patch).length === 0) return true;
     updateWorkOrder(order!.id, patch);
@@ -147,7 +159,8 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     if (!statusChanged && !hasPhotos) { onOpenChange(false); return; }
     setSaving("save");
     try {
-      await persist();
+      const saved = await persist();
+      if (!saved) return;
       toast.success("تم الحفظ ✓");
       onUpdated?.();
       onOpenChange(false);
@@ -163,7 +176,8 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     }
     setSaving("send");
     try {
-      await persist();
+      const saved = await persist();
+      if (!saved) return;
       let text = message.trim();
       if (portalToken) {
         text += `\n\n🔗 تابع حالة الإصلاح: ${window.location.origin}/p/${portalToken}`;
@@ -231,6 +245,18 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
               })}
             </div>
           </div>
+
+          {requiresClosingReview && (
+            <WorkOrderClosingReview
+              order={order}
+              targetStatus={selected}
+              onCancel={() => setSelected(order.status)}
+              onConfirm={(review) => {
+                setClosingReview(review);
+                toast.success("تم اعتماد مراجعة الإغلاق. اضغط حفظ لإتمام تغيير الحالة.");
+              }}
+            />
+          )}
 
           {/* 2) Optional photos */}
           <div className="border border-dashed border-border rounded-lg p-3 bg-secondary/20 space-y-2">
@@ -320,3 +346,5 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     </Dialog>
   );
 }
+
+

@@ -102,6 +102,8 @@ const WorkOrdersStatement = lazy(() => import("./pages/reports/WorkOrdersStateme
 const PartsProfitReport = lazy(() => import("./pages/reports/PartsProfitReport"));
 const MonthlyReport = lazy(() => import("./pages/reports/MonthlyReport"));
 const CloudAdvancedReports = lazy(() => import("./pages/reports/CloudAdvancedReports"));
+const CompletedWithoutInvoice = lazy(() => import("./pages/reports/CompletedWithoutInvoice"));
+const OverdueInvoices = lazy(() => import("./pages/reports/OverdueInvoices"));
 const ExecutiveDashboard = lazy(() => import("./pages/dashboard/ExecutiveDashboard"));
 const PrintTemplates = lazy(() => import("./pages/settings/PrintTemplates"));
 const PrintTemplateVariants = lazy(() => import("./pages/settings/PrintTemplateVariants"));
@@ -299,6 +301,8 @@ const App = () => (
               <Route path="/reports/work-orders-statement" element={<WorkOrdersStatement />} />
               <Route path="/reports/parts-profit" element={<PartsProfitReport />} />
               <Route path="/reports/monthly" element={<MonthlyReport />} />
+              <Route path="/reports/completed-without-invoice" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><CompletedWithoutInvoice /></ProtectedRoute>} />
+              <Route path="/reports/overdue-invoices" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><OverdueInvoices /></ProtectedRoute>} />
               <Route path="/reports/cloud-advanced" element={<ProtectedRoute roles={["admin", "manager", "accountant", "insurance"]}><CloudAdvancedReports /></ProtectedRoute>} />
               <Route path="/dashboard/executive" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><ExecutiveDashboard /></ProtectedRoute>} />
               <Route path="/media-studio" element={<MediaStudio />} />

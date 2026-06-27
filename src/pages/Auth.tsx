@@ -26,12 +26,47 @@ export default function AuthPage() {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [sendingReset, setSendingReset] = useState(false);
+  const [loginOtpOpen, setLoginOtpOpen] = useState(false);
+  const [loginOtp, setLoginOtp] = useState("");
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [checkingOtpSetting, setCheckingOtpSetting] = useState(false);
 
   useEffect(() => {
     if (!loading && session && profile) {
+      if (checkingOtpSetting || loginOtpOpen) return;
+      if (!otpVerified) {
+        setCheckingOtpSetting(true);
+        void (async () => {
+          try {
+            const { data } = await supabase
+              .from("tenant_security_settings" as any)
+              .select("login_otp_enabled")
+              .eq("tenant_id", profile.tenant_id)
+              .maybeSingle();
+            if ((data as any)?.login_otp_enabled) {
+              const { data: otpData } = await supabase.functions.invoke("request-security-otp", {
+                body: { action: "login_otp" },
+              });
+              if (otpData?.error === "email_provider_not_configured") {
+                toast.error("OTP مفعل لكن مزود البريد غير مفعّل على الخادم");
+                await supabase.auth.signOut();
+                return;
+              }
+              setLoginOtpOpen(true);
+              toast.info("تم إرسال رمز تحقق إلى بريدك");
+              return;
+            }
+            setOtpVerified(true);
+            navigate(homeForRole(profile.role), { replace: true });
+          } finally {
+            setCheckingOtpSetting(false);
+          }
+        })();
+        return;
+      }
       navigate(homeForRole(profile.role), { replace: true });
     }
-  }, [session, profile, loading, navigate]);
+  }, [session, profile, loading, navigate, otpVerified, loginOtpOpen, checkingOtpSetting]);
 
   if (session && profile) return <Navigate to={homeForRole(profile.role)} replace />;
 
@@ -70,6 +105,24 @@ export default function AuthPage() {
     toast.success("تم إرسال رابط استعادة كلمة المرور إلى بريدك");
     setForgotOpen(false);
     setForgotEmail("");
+  }
+
+  async function verifyLoginOtp() {
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("verify-security-otp", {
+        body: { action: "login_otp", otp: loginOtp },
+      });
+      if (error || !data?.ok) throw error || new Error(data?.error || "otp_failed");
+      setOtpVerified(true);
+      setLoginOtpOpen(false);
+      toast.success("تم التحقق من رمز الدخول");
+      if (profile) navigate(homeForRole(profile.role), { replace: true });
+    } catch (error: any) {
+      toast.error(error?.message || "رمز التحقق غير صحيح أو منتهي");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -158,6 +211,36 @@ export default function AuthPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={loginOtpOpen} onOpenChange={(open) => {
+        setLoginOtpOpen(open);
+        if (!open && !otpVerified) void supabase.auth.signOut();
+      }}>
+        <DialogContent dir="rtl">
+          <DialogHeader>
+            <DialogTitle>رمز تحقق تسجيل الدخول</DialogTitle>
+            <DialogDescription>
+              أدخل رمز OTP المكوّن من 6 أرقام المرسل إلى بريدك الإلكتروني لإكمال تسجيل الدخول.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              inputMode="numeric"
+              maxLength={6}
+              value={loginOtp}
+              onChange={(e) => setLoginOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="123456"
+              dir="ltr"
+            />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => void supabase.auth.signOut()}>إلغاء</Button>
+              <Button type="button" disabled={submitting || loginOtp.length !== 6} onClick={verifyLoginOtp}>
+                تحقق ودخول
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

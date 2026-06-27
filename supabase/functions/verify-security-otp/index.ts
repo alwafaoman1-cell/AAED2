@@ -1,0 +1,63 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+async function sha256(input: string) {
+  const bytes = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const authHeader = req.headers.get("Authorization") || "";
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data: userData, error: userError } = await userClient.auth.getUser();
+    if (userError || !userData.user) throw new Error("unauthorized");
+    const body = await req.json().catch(() => ({}));
+    const action = body.action === "cloud_reset" ? "cloud_reset" : "login_otp";
+    const code = String(body.otp || "");
+    if (!/^\d{6}$/.test(code)) throw new Error("invalid_otp_format");
+
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("tenant_id")
+      .eq("user_id", userData.user.id)
+      .maybeSingle();
+    if (!profile?.tenant_id) throw new Error("profile_not_found");
+
+    const expectedHash = await sha256(`${profile.tenant_id}:${userData.user.id}:${action}:${code}`);
+    const { data: otpRow } = await admin
+      .from("security_action_otps")
+      .select("id")
+      .eq("tenant_id", profile.tenant_id)
+      .eq("user_id", userData.user.id)
+      .eq("action", action)
+      .eq("code_hash", expectedHash)
+      .is("consumed_at", null)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!otpRow?.id) throw new Error("otp_invalid_or_expired");
+    await admin.from("security_action_otps").update({ consumed_at: new Date().toISOString() }).eq("id", otpRow.id);
+
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ ok: false, error: String(error?.message || error) }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

@@ -140,7 +140,12 @@ export function detectDuplicates(entity: ImportExportEntity, rows: Record<string
 }
 
 export async function normalizePhonesInRows(rows: Record<string, string>[]) {
-  const prefs = await readSystemPreferences();
+  const prefs = await Promise.race([
+    readSystemPreferences(),
+    new Promise<Awaited<ReturnType<typeof readSystemPreferences>>>((resolve) => {
+      setTimeout(() => resolve({ defaultCountryCode: "968", activeThemeId: "gold", themes: [] }), 1200);
+    }),
+  ]);
   return rows.map((row) => {
     const next = { ...row };
     ["phone", "customer_phone", "owner_phone"].forEach((field) => {

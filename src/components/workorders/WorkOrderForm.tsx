@@ -21,6 +21,7 @@ import type { WorkOrderType } from "@/lib/workOrderType";
 import { getCurrentTenantId } from "@/lib/saasAdmin";
 import ReceptionIntakePanel from "@/components/workorders/ReceptionIntakePanel";
 import { toE164 } from "@/lib/phoneUtils";
+import { ensureVehicleForCustomer, findExistingVehicle, normalizeVehiclePlate, normalizeVin, type VehicleIdentityMatch } from "@/lib/vehicleIdentity";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
@@ -87,6 +88,9 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     vehicle_id: string | null;
   }>>([]);
   const [cloudInsuranceCompanies, setCloudInsuranceCompanies] = useState<string[]>([]);
+  const [vehicleMatch, setVehicleMatch] = useState<VehicleIdentityMatch | null>(null);
+  const [vehicleLookupLoading, setVehicleLookupLoading] = useState(false);
+  const [useExistingVehicle, setUseExistingVehicle] = useState(false);
   const role = getCurrentRole();
   const canChooseInsurance = role === "admin" || role === "manager" || role === "supervisor";
 
@@ -129,6 +133,41 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
   const selectedType: WorkOrderType = form.claimId ? "insurance" : (form.workOrderType || "general_customer");
   const companyOptions = Array.from(new Set([...cloudInsuranceCompanies, ...insuranceCompanies]));
+  const currentCustomerId = (form as WorkOrder & { customerId?: string }).customerId;
+  const vehicleOwnershipConflict = !!vehicleMatch?.customer_id && !!currentCustomerId && vehicleMatch.customer_id !== currentCustomerId;
+
+  useEffect(() => {
+    let cancelled = false;
+    const vin = normalizeVin(form.vin);
+    const plate = normalizeVehiclePlate({ plate: form.plate });
+    if (!vin && (!plate.letters || !plate.digits)) {
+      setVehicleMatch(null);
+      setUseExistingVehicle(false);
+      return;
+    }
+    setVehicleLookupLoading(true);
+    const timer = setTimeout(() => {
+      void findExistingVehicle({
+        vehicleId: form.vehicleId,
+        plate: form.plate,
+        vin: form.vin,
+        make: form.vehicleType,
+        model: form.model,
+        year: form.year,
+        color: form.color,
+      }).then((match) => {
+        if (cancelled) return;
+        setVehicleMatch(match);
+        setUseExistingVehicle(!!match?.id && match.source !== "vin" && (!!form.vehicleId || !(match.customer_id && currentCustomerId && match.customer_id !== currentCustomerId)));
+      }).finally(() => {
+        if (!cancelled) setVehicleLookupLoading(false);
+      });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [form.vehicleId, form.plate, form.vin, form.vehicleType, form.model, form.year, form.color, currentCustomerId]);
 
   function selectOrderType(type: WorkOrderType) {
     if (type === "insurance" && !canChooseInsurance) {
@@ -298,41 +337,55 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       toast.error("يجب تحديد العميل الحقيقي قبل تسليم المركبة (استبدل Insurance Pending)");
       return;
     }
-    // اربط/أنشئ السيارة لنفس العميل تلقائياً
+    let resolvedVehicleId = form.vehicleId;
     try {
-      const plateKey = form.plate.trim();
-      if (plateKey) {
-        const existing = vehiclesStore.getAll().find((v) => v.plate === plateKey || v.id === plateKey);
-        if (existing) {
-          vehiclesStore.update(existing.id, {
-            owner: form.customer,
-            ownerPhone: toE164(form.phone) || existing.ownerPhone,
-            type: existing.type || `${form.vehicleType || ""} ${form.model || ""}`.trim(),
-            vin: existing.vin || form.vin,
-            year: existing.year || form.year,
-            color: existing.color || form.color,
-            mileage: existing.mileage || form.mileage,
-          });
-        } else {
-          const v: Vehicle = {
-            id: plateKey,
-            plate: plateKey,
-            type: `${form.vehicleType || ""} ${form.model || ""}`.trim() || "-",
-            vin: form.vin || "",
-            owner: form.customer,
-            ownerPhone: toE164(form.phone) || "",
-            year: form.year,
-            color: form.color,
-            mileage: form.mileage,
-            visits: 0,
-            lastVisit: form.entryDate || new Date().toISOString().split("T")[0],
-            totalSpent: 0,
-            photoPairs: [],
-          };
-          vehiclesStore.add(v);
-        }
+      const resolved = await ensureVehicleForCustomer({
+        customerId,
+        vehicleId: useExistingVehicle ? vehicleMatch?.id || form.vehicleId : form.vehicleId,
+        plate: form.plate,
+        vin: form.vin,
+        make: form.vehicleType,
+        model: form.model,
+        year: form.year,
+        color: form.color,
+        allowVinCandidate: useExistingVehicle,
+      });
+      resolvedVehicleId = resolved.vehicleId;
+      if (resolved.ownershipConflict && !useExistingVehicle) {
+        toast.error("هذه المركبة موجودة ومرتبطة بعميل آخر. استخدم المركبة الحالية أو اطلب تأكيد المدير للنقل.");
+        return;
       }
-    } catch {}
+      if (resolved.created && form.plate.trim()) {
+        const plateKey = form.plate.trim();
+        const v: Vehicle = {
+          id: plateKey,
+          plate: plateKey,
+          type: `${form.vehicleType || ""} ${form.model || ""}`.trim() || "-",
+          vin: normalizeVin(form.vin),
+          owner: form.customer,
+          ownerPhone: toE164(form.phone) || "",
+          year: form.year,
+          color: form.color,
+          mileage: form.mileage,
+          visits: 0,
+          lastVisit: form.entryDate || new Date().toISOString().split("T")[0],
+          totalSpent: 0,
+          photoPairs: [],
+        };
+        vehiclesStore.add(v);
+      }
+    } catch (error: any) {
+      if (String(error?.message || "").includes("vin_candidate_requires_user_confirmation")) {
+        toast.error("تم العثور على مركبة محتملة عبر VIN فقط. يجب تأكيد استخدام المركبة الموجودة قبل الحفظ.");
+      } else {
+        toast.error(error?.message || "تعذر ربط المركبة أو إنشاؤها");
+      }
+      return;
+    }
+    if (!resolvedVehicleId) {
+      toast.error("لا يمكن حفظ أمر العمل بدون vehicle_id");
+      return;
+    }
     const targetOrderNumber = isEdit ? form.id : nextWorkOrderNumber();
     setSaving(true);
     let receptionPhotos = form.photos || [];
@@ -352,6 +405,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       insurance: selectedType === "insurance" ? form.insurance : "-",
       claimNumber: selectedType === "insurance" ? form.claimNumber : "-",
       customerId,
+      vehicleId: resolvedVehicleId,
       depositApplied: deposit,
       totalCost: finalTotal,
       receivedAt: form.receivedAt || new Date().toISOString(),
@@ -497,6 +551,50 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           <label className="text-xs font-medium text-muted-foreground">الكيلومترات</label>
           <Input value={form.mileage || ""} onChange={e => set("mileage", e.target.value)} className="bg-secondary border-border text-foreground" />
         </div>
+        <div className="rounded-lg border border-border bg-card p-3 text-xs">
+          {vehicleLookupLoading ? (
+            <p className="text-muted-foreground">جاري البحث عن المركبة داخل نفس الورشة...</p>
+          ) : vehicleMatch ? (
+            <div className="space-y-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <p className="font-semibold text-foreground">
+                    {vehicleMatch.source === "vin" ? "تم العثور على مركبة محتملة عبر VIN" : "تم العثور على مركبة موجودة"}
+                  </p>
+                  {vehicleMatch.source === "vin" && (
+                    <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
+                      لم يتم العثور على تطابق كامل باللوحة والحروف والدولة. هذه نتيجة محتملة عبر VIN فقط، ولن يتم ربطها تلقائيًا إلا بعد الضغط على Use Existing Vehicle.
+                    </p>
+                  )}
+                  <p className="text-muted-foreground">
+                    اللوحة: {[vehicleMatch.plate_letters, vehicleMatch.plate_number].filter(Boolean).join(" ") || "—"} · VIN: {vehicleMatch.vin_number || vehicleMatch.vin || "—"}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {vehicleMatch.brand || "—"} {vehicleMatch.model || ""} {vehicleMatch.year || ""} · العميل: {vehicleMatch.customer_name || "—"}
+                  </p>
+                  {vehicleOwnershipConflict && (
+                    <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
+                      هذه المركبة موجودة ومرتبطة بعميل آخر. لن يتم تغيير مالك المركبة تلقائيًا.
+                    </p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={useExistingVehicle ? "default" : "outline"}
+                  onClick={() => {
+                    setUseExistingVehicle(true);
+                    setForm((prev) => ({ ...prev, vehicleId: vehicleMatch.id }));
+                  }}
+                >
+                  Use Existing Vehicle
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">لم يتم العثور على مركبة مطابقة. سيتم إنشاء مركبة جديدة وربطها بالعميل الصحيح عند الحفظ.</p>
+          )}
+        </div>
       </div>
 
       {/* ===== 3) بيانات الخدمة ===== */}
@@ -561,16 +659,19 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         </div>
       </div>
 
-      {/* ===== 4) التكاليف ===== */}
+      {/* ===== 4) التكاليف التقديرية ===== */}
       <div className="border border-border rounded-lg bg-card/50 p-3 space-y-3">
-        <h4 className="text-sm font-semibold text-foreground">التكاليف</h4>
+        <h4 className="text-sm font-semibold text-foreground">التكاليف التقديرية / Estimated Costs</h4>
+        <p className="rounded-md border border-info/30 bg-info/5 p-2 text-xs text-muted-foreground">
+          هذه القيم تقديرية وتخص الاتفاق المبدئي مع العميل. التكلفة النهائية تعتمد عند إغلاق أمر العمل من المصروفات الفعلية أو من اختيار مصدر التكلفة النهائي، ولا يتم جمع التقديري مع الفعلي.
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">أجور العمالة (ر.ع)</label>
+            <label className="text-xs font-medium text-muted-foreground">تكلفة العمالة التقديرية / Estimated Labour Cost (ر.ع)</label>
             <Input type="number" value={form.laborCost ?? 0} onChange={e => set("laborCost", Number(e.target.value))} className="bg-secondary border-border text-foreground" />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">قطع الغيار (ر.ع)</label>
+            <label className="text-xs font-medium text-muted-foreground">تكلفة قطع الغيار التقديرية / Estimated Spare Parts Cost (ر.ع)</label>
             <Input type="number" value={form.partsCost ?? 0} onChange={e => set("partsCost", Number(e.target.value))} className="bg-secondary border-border text-foreground" />
           </div>
           {isEdit && (
@@ -842,8 +943,8 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
       {/* ملخص التكلفة */}
       <div className="border-2 border-primary/30 rounded-lg bg-primary/5 p-3 space-y-1 text-sm">
-        <div className="flex justify-between text-muted-foreground"><span>أجور العمالة</span><span>{(Number(form.laborCost) || 0).toLocaleString()} ر.ع</span></div>
-        <div className="flex justify-between text-muted-foreground"><span>قطع الغيار</span><span>{(Number(form.partsCost) || 0).toLocaleString()} ر.ع</span></div>
+        <div className="flex justify-between text-muted-foreground"><span>تكلفة العمالة التقديرية</span><span>{(Number(form.laborCost) || 0).toLocaleString()} ر.ع</span></div>
+        <div className="flex justify-between text-muted-foreground"><span>تكلفة قطع الغيار التقديرية</span><span>{(Number(form.partsCost) || 0).toLocaleString()} ر.ع</span></div>
         {extraTotal > 0 && <div className="flex justify-between text-muted-foreground"><span>مصروفات إضافية</span><span>{extraTotal.toLocaleString()} ر.ع</span></div>}
         <div className="flex justify-between text-foreground font-bold border-t border-border pt-1">
           <span>إجمالي الفاتورة</span>

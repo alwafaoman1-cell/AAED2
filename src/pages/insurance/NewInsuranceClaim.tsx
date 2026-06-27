@@ -25,6 +25,7 @@ import AiWriteButton from "@/components/ai/AiWriteButton";
 import { toEnglishDigits } from "@/lib/numberUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
+import { ensureVehicleForCustomer } from "@/lib/vehicleIdentity";
 
 // ───────────────────── أنواع داخلية ─────────────────────
 // ⚠️ هذه الصفحة من منظور "الكراج": نستلم سيارة من شركة تأمين ونطالبها بالمستحقات.
@@ -361,34 +362,22 @@ export default function NewInsuranceClaim() {
 
       // ── إنشاء المركبة تلقائياً إن لم تكن مرتبطة ──
       let vehicleId = draft.vehicleId;
-      if (!vehicleId && draft.vehiclePlate.trim()) {
-        const { extractPlateLetters, extractPlateDigits, findVehicleByPlate } = await import("@/lib/plateUtils");
-        const L = extractPlateLetters(draft.vehiclePlate);
-        const D = extractPlateDigits(draft.vehiclePlate);
-        const found = (L && D) ? await findVehicleByPlate(L, D, "OM") : null;
-        if (found?.id) {
-          vehicleId = found.id;
-        } else {
-          const { data: newVeh, error: vErr } = await supabase
-            .from("vehicles")
-            .insert({
-              tenant_id: tenantId as string,
-              customer_id: customerId,
-              plate_number: D || draft.vehiclePlate.trim(),
-              plate_letters: L,
-              plate_country: "OM",
-              brand: draft.vehicleMake.trim() || null,
-              model: draft.vehicleModel.trim() || null,
-              year: draft.vehicleYear ? Number(draft.vehicleYear) : null,
-              color: draft.vehicleColor.trim() || null,
-              vin: draft.vehicleVin.trim() || null,
-            } as any)
-            .select("id")
-            .single();
-          if (vErr) throw vErr;
-          vehicleId = (newVeh as any).id;
+      if (!vehicleId && (draft.vehiclePlate.trim() || draft.vehicleVin.trim())) {
+        const resolved = await ensureVehicleForCustomer({
+          customerId: customerId!,
+          plate: draft.vehiclePlate,
+          vin: draft.vehicleVin,
+          make: draft.vehicleMake,
+          model: draft.vehicleModel,
+          year: draft.vehicleYear,
+          color: draft.vehicleColor,
+        });
+        vehicleId = resolved.vehicleId;
+        if (resolved.ownershipConflict) {
+          toast.warning("هذه المركبة موجودة ومرتبطة بعميل آخر. تم ربط المطالبة بالمركبة الموجودة بدون تغيير المالك.");
         }
       }
+      if (!vehicleId) throw new Error("لا يمكن حفظ مطالبة بدون vehicle_id");
 
 
 
@@ -440,7 +429,11 @@ export default function NewInsuranceClaim() {
         navigate("/insurance/list");
       }
     } catch (e: any) {
-      toast.error(e?.message ?? "فشل إنشاء المطالبة");
+      if (String(e?.message || "").includes("vin_candidate_requires_user_confirmation")) {
+        toast.error("تم العثور على مركبة محتملة عبر VIN فقط. اربط مركبة موجودة يدويًا أو أكمل بيانات اللوحة والحروف والدولة قبل حفظ المطالبة.");
+      } else {
+        toast.error(e?.message ?? "فشل إنشاء المطالبة");
+      }
     } finally {
       setSubmitting(false);
     }

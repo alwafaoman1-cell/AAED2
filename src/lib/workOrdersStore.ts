@@ -57,6 +57,7 @@ export interface WorkOrder {
   workOrderType?: import("@/lib/workOrderType").WorkOrderType;
   claimId?: string;
   trackingToken?: string;
+  vehicleId?: string;
   trackingExpiresAt?: string;
   archivedAt?: string;
   customer: string;
@@ -102,6 +103,16 @@ export interface WorkOrder {
   workItems?: WorkItem[];
   /** معرّف العميل الفعلي في customersStore (مرجع موحّد). */
   customerId?: string;
+  closingReview?: {
+    status: string;
+    finalCostSource: "Actual Expenses" | "Estimated Costs" | "Manual Final Cost";
+    snapshot: Record<string, number | string | boolean | null>;
+    invoiceSkipped?: boolean;
+    skipInvoiceReason?: string;
+    manualReason?: string;
+    approvedByRole?: string;
+    approvedAt: string;
+  };
 }
 
 export interface WorkItem {
@@ -485,6 +496,28 @@ async function ensureCustomer(tenantId: string, name: string, phone?: string): P
 }
 
 async function ensureVehicle(tenantId: string, customerId: string, o: WorkOrder): Promise<string | null> {
+  if (o.vehicleId) return o.vehicleId;
+  try {
+    const { ensureVehicleForCustomer } = await import("@/lib/vehicleIdentity");
+    const resolved = await ensureVehicleForCustomer({
+      customerId,
+      plate: o.plate,
+      vin: o.vin,
+      make: o.vehicleType,
+      model: o.model,
+      year: o.year,
+      color: o.color,
+    });
+    if (resolved.ownershipConflict) {
+      console.warn("[ensureVehicle] existing vehicle belongs to another customer; using existing id without auto-transfer", resolved.vehicleId);
+    }
+    return resolved.vehicleId;
+  } catch (e) {
+    console.warn("[ensureVehicle:identity]", e);
+    if (String((e as any)?.message || e).includes("vin_candidate_requires_user_confirmation")) {
+      return null;
+    }
+  }
   const plate = (o.plate || "").trim();
   const { extractPlateLetters, extractPlateDigits } = await import("@/lib/plateUtils");
   const L = extractPlateLetters(plate);
