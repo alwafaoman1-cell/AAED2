@@ -72,7 +72,7 @@ const ITEMS: ExportItem[] = [
   { key: "acc-vehicle-profit", title: "ربح/خسارة لكل سيارة", description: "تحليل تفصيلي لربحية كل أمر شغل", icon: Car, group: "accounting", route: "/reports?tab=financial&report=perVehicle", format: "excel", badge: "Excel" },
   { key: "acc-journal", title: "دفتر اليومية", description: "كل القيود المرحّلة", icon: BookOpen, group: "accounting", route: "/reports?tab=accounting&report=journal", format: "excel", badge: "Excel" },
   { key: "acc-trial", title: "ميزان المراجعة", description: "أرصدة كل الحسابات", icon: BookCheck, group: "accounting", route: "/reports?tab=accounting&report=trialBalance", format: "excel", badge: "Excel" },
-  { key: "acc-expenses", title: "تقرير المصروفات", description: "كل سندات الصرف + توزيع التصنيفات", icon: MinusCircle, group: "accounting", route: "/accounting/expenses/new", format: "report" },
+  { key: "acc-expenses", title: "تقرير المصروفات", description: "كل سندات الصرف + توزيع التصنيفات", icon: MinusCircle, group: "accounting", route: "/accounting/expenses", format: "report" },
   { key: "acc-expenses-import", title: "استيراد المصروفات من Excel", description: "ارفع ملف مصروفات قديمة — يوزَّع تلقائياً حسب البند والتصنيف", icon: Upload, group: "accounting", route: "/expenses/import", format: "excel", badge: "جديد ⭐" },
 
   // ===== العملاء والموردون =====

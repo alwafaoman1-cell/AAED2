@@ -58,7 +58,17 @@ export interface InsuranceClaim {
   delivered_at: string | null;
   // joined
   customer?: { name: string; phone: string | null };
-  vehicle?: { brand: string; model: string; plate_number: string; year: number | null };
+  vehicle?: {
+    brand: string;
+    model: string;
+    plate_number: string;
+    plate_letters?: string | null;
+    plate_country?: string | null;
+    year: number | null;
+    vin_number?: string | null;
+    vehicle_cover_image_url?: string | null;
+    vehicle_thumbnail_url?: string | null;
+  };
   job_order?: { order_number: string; status: string };
 }
 
@@ -114,7 +124,7 @@ export function useInsuranceClaims() {
         .select(`
           *,
           customer:customers(name, phone),
-          vehicle:vehicles(brand, model, plate_number, year),
+          vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
           job_order:job_orders(order_number, status)
         `)
         .order("created_at", { ascending: false });
@@ -154,7 +164,7 @@ export function useClaim(id: string | undefined) {
         .select(`
           *,
           customer:customers(name, phone),
-          vehicle:vehicles(brand, model, plate_number, year),
+          vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
           job_order:job_orders(order_number, status)
         `)
         .eq("id", id!)
@@ -332,16 +342,26 @@ export function useCustomers() {
 }
 
 export function useVehiclesByCustomer(customerId: string | null) {
-  return useQuery({
+  type CustomerVehicleRow = {
+    id: string;
+    brand: string | null;
+    model: string | null;
+    plate_number: string | null;
+    year: number | null;
+    vin_number?: string | null;
+    vehicle_cover_image_url?: string | null;
+    vehicle_thumbnail_url?: string | null;
+  };
+  return useQuery<CustomerVehicleRow[]>({
     queryKey: ["vehicles", customerId],
     enabled: !!customerId,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("vehicles")
-        .select("id, brand, model, plate_number, year")
+        .from("vehicles" as any)
+        .select("id, brand, model, plate_number, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url")
         .eq("customer_id", customerId!);
       if (error) throw error;
-      return data;
+      return ((data || []) as unknown) as CustomerVehicleRow[];
     },
   });
 }

@@ -20,6 +20,10 @@ export interface ExpenseRecord {
   description?: string;
   photo?: string | null;
   linkedWorkOrderId?: string;
+  customerId?: string;
+  vehicleId?: string;
+  claimId?: string;
+  invoiceId?: string;
   linkedVehiclePlate?: string;
   linkedVehicleName?: string;
   reference?: string;
@@ -79,6 +83,10 @@ function rowToRecord(r: any): ExpenseRecord {
     description: r.description || undefined,
     photo,
     linkedWorkOrderId: r.linked_work_order_id || undefined,
+    customerId: r.customer_id || meta.customerId || undefined,
+    vehicleId: r.vehicle_id || meta.vehicleId || undefined,
+    claimId: r.claim_id || meta.claimId || undefined,
+    invoiceId: r.invoice_id || meta.invoiceId || undefined,
     linkedVehiclePlate: r.linked_vehicle_plate || undefined,
     linkedVehicleName: r.linked_vehicle_name || undefined,
     reference: meta.reference,
@@ -119,6 +127,10 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
   if (e.unitBuyPrice != null) meta.unitBuyPrice = e.unitBuyPrice;
   if (e.unitSellPrice != null) meta.unitSellPrice = e.unitSellPrice;
   if (e.requiredPartId) meta.requiredPartId = e.requiredPartId;
+  if (e.customerId) meta.customerId = e.customerId;
+  if (e.vehicleId) meta.vehicleId = e.vehicleId;
+  if (e.claimId) meta.claimId = e.claimId;
+  if (e.invoiceId) meta.invoiceId = e.invoiceId;
   if (e.sourceWorkOrderId) meta.sourceWorkOrderId = e.sourceWorkOrderId;
   if (e.sourceClaimId) meta.sourceClaimId = e.sourceClaimId;
   if (e.convertedFromRequiredPart !== undefined) meta.convertedFromRequiredPart = e.convertedFromRequiredPart;
@@ -142,6 +154,10 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     beneficiary: e.beneficiary || null,
     description: e.description || null,
     linked_work_order_id: e.linkedWorkOrderId || null,
+    customer_id: e.customerId || null,
+    vehicle_id: e.vehicleId || null,
+    claim_id: e.claimId || null,
+    invoice_id: e.invoiceId || null,
     linked_vehicle_plate: e.linkedVehiclePlate || null,
     linked_vehicle_name: e.linkedVehicleName || null,
     attachments,
@@ -157,6 +173,7 @@ async function hydrateFromCloud() {
       .from("expenses")
       .select("*")
       .is("deleted_at", null)
+      .is("archived_at", null)
       .order("date", { ascending: false });
     if (error) throw error;
     const cloud = (data || []).map(rowToRecord);
@@ -191,6 +208,12 @@ if (typeof window !== "undefined") {
           const ev = payload.eventType;
           if (ev === "INSERT" || ev === "UPDATE") {
             const rec = rowToRecord(payload.new);
+            if (rec.deletedAt || rec.archivedAt) {
+              cache = cache.filter((x) => x.id !== rec.id);
+              persistLocal();
+              notify();
+              return;
+            }
             const idx = cache.findIndex((x) => x.id === rec.id);
             if (idx >= 0) cache[idx] = rec;
             else cache.unshift(rec);
@@ -255,20 +278,23 @@ export const expensesStore = {
   async remove(id: string): Promise<ExpenseRecord | undefined> {
     const idx = cache.findIndex((e) => e.id === id);
     if (idx === -1) return undefined;
-    const [removed] = cache.splice(idx, 1);
-    persistLocal();
-    notify();
+    const removed = cache[idx];
+    const deletedAt = new Date().toISOString();
     try {
       const { error } = await supabase
         .from("expenses")
         .update({
-          deleted_at: new Date().toISOString(),
-          meta: { ...(recordToRow(removed, "unused").meta as any), deletedAt: new Date().toISOString(), deleteReason: removed.deleteReason || "soft delete" },
+          deleted_at: deletedAt,
+          meta: { ...(recordToRow(removed, "unused").meta as any), deletedAt, deleteReason: removed.deleteReason || "soft delete" },
         } as any)
         .eq("id", id);
-      if (error) console.warn("[expensesStore.remove] supabase error:", error.message);
+      if (error) throw error;
+      cache = cache.filter((e) => e.id !== id);
+      persistLocal();
+      notify();
     } catch (e) {
       console.warn("[expensesStore.remove] failed", e);
+      throw e;
     }
     return removed;
   },
@@ -298,9 +324,16 @@ export const expensesStore = {
 export function getExpensesForWorkOrder(workOrderId: string): ExpenseRecord[] {
   return expensesStore
     .getAll()
-    .filter((e) => e.linkedWorkOrderId === workOrderId && !e.deletedAt && !e.archivedAt)
+    .filter((e) => (e.linkedWorkOrderId === workOrderId || e.sourceWorkOrderId === workOrderId) && !e.deletedAt && !e.archivedAt)
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 export function getExpensesTotalForWorkOrder(workOrderId: string): number {
   return getExpensesForWorkOrder(workOrderId).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+}
+
+export function getExpensesForClaim(claimId: string): ExpenseRecord[] {
+  return expensesStore
+    .getAll()
+    .filter((e) => (e.claimId === claimId || e.sourceClaimId === claimId) && !e.deletedAt && !e.archivedAt)
+    .sort((a, b) => b.date.localeCompare(a.date));
 }

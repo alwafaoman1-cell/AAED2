@@ -62,6 +62,8 @@ import SendInsuranceEmailDialog from "@/components/insurance/SendInsuranceEmailD
 import { useClaimDocuments } from "@/hooks/useClaimDocuments";
 import { Mail, Send } from "lucide-react";
 import Can from "@/components/Can";
+import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
+import { expensesStore } from "@/lib/expensesStore";
 
 
 const insuranceCompanies = [
@@ -855,6 +857,26 @@ export default function InsuranceClaimDetail() {
   // ── ملخص شامل للمطالبة (مختلف عن "تقدير المطالبة") ──
   const { data: claimPayments = [] } = usePaymentsByClaim(id);
   const { data: claimDocs = [] } = useClaimDocuments(isNew ? undefined : id);
+  const [, refreshExpenses] = useState(0);
+  useEffect(() => expensesStore.subscribe(() => refreshExpenses((n) => n + 1)), []);
+  const claimExpenses = useMemo(() => {
+    if (!existing?.id && !linkedWorkOrderId) return [];
+    const seen = new Set<string>();
+    return expensesStore.getAll().filter((expense) => {
+      if (expense.deletedAt || expense.archivedAt) return false;
+      const linked =
+        expense.claimId === existing?.id ||
+        expense.sourceClaimId === existing?.id ||
+        (!!linkedWorkOrderId && (expense.linkedWorkOrderId === linkedWorkOrderId || expense.sourceWorkOrderId === linkedWorkOrderId));
+      if (!linked || seen.has(expense.id)) return false;
+      seen.add(expense.id);
+      return true;
+    });
+  }, [existing?.id, linkedWorkOrderId]);
+  const claimExpensesTotal = useMemo(
+    () => claimExpenses.reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0),
+    [claimExpenses],
+  );
   const buildSummaryPdf = useMemo(() => () => {
     const tpl = getTemplateSettings();
     const fmt = (n: number) => new Intl.NumberFormat("ar-OM", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(n || 0);
@@ -1318,6 +1340,67 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       </div>
 
       {/* ── Header Identity Card (Insurance + Owner) ── */}
+      {!isNew && (
+        <Card className="p-4 bg-card/95 border-primary/15">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <VehicleAvatar
+                size="lg"
+                imageUrl={(vehicle as any)?.vehicle_thumbnail_url || (vehicle as any)?.vehicle_cover_image_url}
+                fallbackPhotos={damagePhotos}
+                label={`${vehicle?.brand || vehicleMake} ${vehicle?.model || vehicleModel}`.trim() || claimNumber}
+              />
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-primary">Claim Management Center</div>
+                <div className="text-lg font-bold truncate">{vehicle?.brand || vehicleMake || "—"} {vehicle?.model || vehicleModel || ""}</div>
+                <div className="text-xs text-muted-foreground font-mono" dir="ltr">
+                  {(vehicle?.plate_number || vehiclePlate || "—")} · {(vehicle as any)?.vin_number || vehicleVin || "VIN —"}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 flex-1">
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <div className="text-[11px] text-muted-foreground">Customer ID</div>
+                <div className="font-mono text-xs truncate" dir="ltr">{customerId || "—"}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <div className="text-[11px] text-muted-foreground">Vehicle ID</div>
+                <div className="font-mono text-xs truncate" dir="ltr">{vehicleId || "—"}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <div className="text-[11px] text-muted-foreground">Expenses</div>
+                <div className="font-semibold" dir="ltr">{claimExpensesTotal.toFixed(3)} OMR</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <div className="text-[11px] text-muted-foreground">Work Order</div>
+                <div className="font-mono text-xs truncate" dir="ltr">{linkedWorkOrderId || "—"}</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {linkedWorkOrderId && (
+                <Button variant="outline" size="sm" onClick={() => navigate(`/work-orders/${linkedWorkOrderId}`)}>
+                  <Wrench size={14} className="ml-1" /> Work Order
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const params = new URLSearchParams();
+                  if (existing?.id) params.set("claim_id", existing.id);
+                  if (linkedWorkOrderId) params.set("work_order_id", linkedWorkOrderId);
+                  if (customerId) params.set("customer_id", customerId);
+                  if (vehicleId) params.set("vehicle_id", vehicleId);
+                  navigate(`/accounting/expenses?${params.toString()}`);
+                }}
+              >
+                <DollarSign size={14} className="ml-1" /> Expenses
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       <Card className="p-5 grid md:grid-cols-2 gap-5 bg-gradient-to-l from-primary/5 to-transparent">
         {/* Insurance company (primary) */}
         <div className="space-y-3">

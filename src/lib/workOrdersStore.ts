@@ -62,6 +62,8 @@ export interface WorkOrder {
   claimId?: string;
   trackingToken?: string;
   vehicleId?: string;
+  vehicleImageUrl?: string;
+  vehicleThumbnailUrl?: string;
   trackingExpiresAt?: string;
   archivedAt?: string;
   customer: string;
@@ -312,7 +314,7 @@ type CloudRow = any;
 function mapCloudRow(
   r: CloudRow,
   custMap: Map<string, { name: string; phone?: string | null }>,
-  vehMap: Map<string, { plate?: string | null; brand?: string | null; model?: string | null; year?: number | null; vin?: string | null; color?: string | null }>,
+  vehMap: Map<string, { plate?: string | null; brand?: string | null; model?: string | null; year?: number | null; vin?: string | null; color?: string | null; imageUrl?: string | null; thumbnailUrl?: string | null }>,
 ): WorkOrder {
   const c = r.customer_id ? custMap.get(r.customer_id) : undefined;
   const v = r.vehicle_id ? vehMap.get(r.vehicle_id) : undefined;
@@ -323,6 +325,9 @@ function mapCloudRow(
     workOrderType: r.work_order_type || (r.claim_id ? "insurance" : "general_customer"),
     claimId: r.claim_id || undefined,
     trackingToken: r.tracking_token || undefined,
+    vehicleId: r.vehicle_id || undefined,
+    vehicleImageUrl: v?.imageUrl || undefined,
+    vehicleThumbnailUrl: v?.thumbnailUrl || undefined,
     trackingExpiresAt: r.tracking_expires_at || undefined,
     archivedAt: r.archived_at || undefined,
     customer: c?.name || "",
@@ -375,7 +380,7 @@ async function fetchFromCloud(): Promise<void> {
     const [{ data: rows }, { data: custs }, { data: vehs }] = await Promise.all([
       supabase.from("job_orders").select("*").eq("tenant_id", tenantId).is("archived_at", null).is("deleted_at", null).order("created_at", { ascending: false }).limit(5000),
       supabase.from("customers").select("id,name,phone").eq("tenant_id", tenantId).limit(10000),
-      supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin_number,color").eq("tenant_id", tenantId).limit(10000),
+      supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url").eq("tenant_id", tenantId).limit(10000),
     ]);
     if (!rows) return;
 
@@ -385,7 +390,13 @@ async function fetchFromCloud(): Promise<void> {
     const vehMap = new Map<string, any>();
     (vehs || []).forEach((v: any) => vehMap.set(v.id, {
       plate: [v.plate_letters, v.plate_number].filter(Boolean).join(" ").trim(),
-      brand: v.brand, model: v.model, year: v.year, vin: v.vin_number, color: v.color,
+      brand: v.brand,
+      model: v.model,
+      year: v.year,
+      vin: v.vin_number,
+      color: v.color,
+      imageUrl: v.vehicle_cover_image_url,
+      thumbnailUrl: v.vehicle_thumbnail_url,
     }));
 
     const cloudOrders: WorkOrder[] = rows.map((r) => mapCloudRow(r, custMap, vehMap));

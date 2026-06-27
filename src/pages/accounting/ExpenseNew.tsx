@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { smartBack } from "@/lib/smartBack";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { openSanitizedPdfWindow, openAndPrintWindow } from "@/lib/safePdfWindow";
 import {
   ArrowRight, MinusCircle, Save, Search, FileText, Printer, Mail, Pencil, Trash2,
@@ -43,6 +43,7 @@ type ReportPeriod = "all" | "day" | "month" | "year";
 
 export default function ExpenseNew() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [, force] = useState(0);
   useEffect(() => {
     const subs = [
@@ -58,6 +59,13 @@ export default function ExpenseNew() {
   const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
   const defaultCashbox = useMemo(() => cashboxes.find((c) => c.isDefault) ?? cashboxes[0], [cashboxes]);
+  const linkContext = useMemo(() => ({
+    claimId: searchParams.get("claim_id") || undefined,
+    linkedWorkOrderId: searchParams.get("work_order_id") || searchParams.get("workOrder") || undefined,
+    customerId: searchParams.get("customer_id") || undefined,
+    vehicleId: searchParams.get("vehicle_id") || undefined,
+    invoiceId: searchParams.get("invoice_id") || undefined,
+  }), [searchParams]);
 
   // Form state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -145,6 +153,7 @@ export default function ExpenseNew() {
           supplierTaxNumber: supplierTaxNumber || undefined,
           supplierInvoiceNumber: supplierInvoiceNumber || undefined,
           ...(supplierCompany ? { beneficiary: beneficiary || supplierCompany } : {}),
+          ...linkContext,
           ...vehicleFields,
         });
         logActivity({
@@ -173,6 +182,7 @@ export default function ExpenseNew() {
       description, photo,
       supplierTaxNumber: supplierTaxNumber || undefined,
       supplierInvoiceNumber: supplierInvoiceNumber || undefined,
+      ...linkContext,
       ...vehicleFields,
       createdAt: new Date().toISOString(),
     };
@@ -204,14 +214,14 @@ export default function ExpenseNew() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteId) return;
     const rec = expensesStore.getById(deleteId);
     if (rec) {
+      await expensesStore.remove(deleteId);
       // Refund cashbox
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === rec.cashboxId);
       if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance + rec.amount });
-      expensesStore.remove(deleteId);
       logActivity({
         action: "delete", entity: "expense", entityId: rec.voucherNumber,
         label: `${rec.categoryName || "مصروف"}`,
@@ -252,10 +262,14 @@ export default function ExpenseNew() {
   const filtered = useMemo(() => {
     const all = expensesStore.getAll();
     return all.filter((r) => {
+      if (linkContext.claimId && r.claimId !== linkContext.claimId && r.sourceClaimId !== linkContext.claimId) return false;
+      if (linkContext.linkedWorkOrderId && r.linkedWorkOrderId !== linkContext.linkedWorkOrderId && r.sourceWorkOrderId !== linkContext.linkedWorkOrderId) return false;
+      if (linkContext.vehicleId && r.vehicleId !== linkContext.vehicleId) return false;
+      if (linkContext.customerId && r.customerId !== linkContext.customerId) return false;
       if (filterCategory !== "all" && r.categoryId !== filterCategory) return false;
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
-        const hay = `${r.voucherNumber} ${r.beneficiary || ""} ${r.description || ""} ${r.categoryName || ""} ${r.cashboxName || ""}`.toLowerCase();
+        const hay = `${r.voucherNumber} ${r.beneficiary || ""} ${r.description || ""} ${r.categoryName || ""} ${r.cashboxName || ""} ${r.claimId || ""} ${r.linkedWorkOrderId || ""} ${r.vehicleId || ""} ${r.customerId || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (reportPeriod !== "all") {
@@ -267,7 +281,7 @@ export default function ExpenseNew() {
       }
       return true;
     });
-  }, [searchTerm, filterCategory, reportPeriod, reportDate, expensesStore.getAll().length]);
+  }, [searchTerm, filterCategory, reportPeriod, reportDate, linkContext, expensesStore.getAll().length]);
 
   const totals = useMemo(() => {
     const total = filtered.reduce((s, r) => s + r.amount, 0);

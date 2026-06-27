@@ -73,7 +73,7 @@ const menuItems: MenuItem[] = [
     labelKey: "nav.accounting",
     icon: Calculator,
     children: [
-      { path: "/accounting/expenses/new", labelKey: "nav.addExpense", icon: MinusCircle },
+      { path: "/accounting/expenses", labelKey: "nav.addExpense", icon: MinusCircle },
       { path: "/accounting/receipts", labelKey: "nav.receipts", icon: ReceiptText },
       { path: "/accounting/cashbox/topup", labelKey: "nav.cashboxTopup", icon: Wallet },
     ],

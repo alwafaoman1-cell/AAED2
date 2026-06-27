@@ -57,6 +57,7 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { isInsuranceWorkOrder, resolveWorkOrderType } from "@/lib/workOrderType";
+import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 
 const DURATION_BAR_HEX: Record<string, string> = {
   red: "#ef4444",
@@ -578,7 +579,20 @@ export default function WorkOrders() {
                     </div>
                   </td>
                   <td className="py-3 px-4"><div><p className="text-foreground font-medium">{order.customer}</p><p className="text-[10px] text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>{toEnglishDigits(order.phone || "")}</p></div></td>
-                  <td className="py-3 px-4 text-muted-foreground hidden md:table-cell" style={{ fontFamily: "Inter, sans-serif" }}>{order.vehicleType} {order.model} {toEnglishDigits(order.year || "")}</td>
+                  <td className="py-3 px-4 text-muted-foreground hidden md:table-cell" style={{ fontFamily: "Inter, sans-serif" }}>
+                    <div className="flex items-center gap-2">
+                      <VehicleAvatar
+                        size="sm"
+                        imageUrl={order.vehicleThumbnailUrl || order.vehicleImageUrl}
+                        fallbackPhotos={(order.photos || []).map((photo) => photo.dataUrl)}
+                        label={`${order.vehicleType} ${order.model}`.trim() || order.plate}
+                      />
+                      <div>
+                        <div>{order.vehicleType} {order.model} {toEnglishDigits(order.year || "")}</div>
+                        <div className="text-[10px] text-muted-foreground lg:hidden font-mono" dir="ltr">{formatPlateLatin(order.plate)}</div>
+                      </div>
+                    </div>
+                  </td>
                   <td className="py-3 px-4 text-muted-foreground font-mono hidden lg:table-cell" style={{ fontFamily: "Inter, monospace" }}>{formatPlateLatin(order.plate)}</td>
                   <td className="py-3 px-4 text-muted-foreground hidden lg:table-cell">{order.serviceType}</td>
                   <td className="py-3 px-4 text-muted-foreground hidden xl:table-cell">{order.technician}</td>

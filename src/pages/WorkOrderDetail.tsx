@@ -79,6 +79,7 @@ import { salesStore, statusLabel, type SalesDoc } from "@/lib/salesStore";
 import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { resolveWorkOrderType } from "@/lib/workOrderType";
 import { archiveWorkOrder } from "@/lib/deletePolicy";
+import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
 
@@ -435,6 +436,13 @@ export default function WorkOrderDetail() {
           : "border-emerald-500/35 bg-gradient-to-l from-emerald-500/15 to-card"
       }`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
+          <VehicleAvatar
+            size="md"
+            imageUrl={order.vehicleThumbnailUrl || order.vehicleImageUrl}
+            fallbackPhotos={(order.photos || []).map((photo) => photo.dataUrl)}
+            label={`${order.vehicleType} ${order.model}`.trim() || order.plate}
+            className="hidden sm:flex"
+          />
           <div>
             <p className="text-sm font-bold text-foreground">
               {resolveWorkOrderType(order) === "insurance" ? "🛡 Insurance Work Order" : "🚗 General Customer Work Order"}

@@ -21,6 +21,8 @@ export interface Vehicle {
   year?: string;
   color?: string;
   mileage?: string;
+  coverImageUrl?: string;
+  thumbnailUrl?: string;
   visits: number;
   lastVisit: string;
   totalSpent: number;
@@ -150,13 +152,15 @@ async function pushVehicleToCloud(v: Vehicle) {
     mileage: v.mileage ? Number(String(v.mileage).replace(/\D/g, "")) || null : null,
     vin: v.vin || null,
     vin_number: v.vin || null,
+    vehicle_cover_image_url: v.coverImageUrl || null,
+    vehicle_thumbnail_url: v.thumbnailUrl || null,
     archived: !!v.archived,
     archived_at: v.archivedAt || null,
     archived_reason: v.archivedReason || null,
   };
   const query = cloudId
-    ? supabase.from("vehicles").update(payload).eq("id", cloudId)
-    : supabase.from("vehicles").upsert(payload, { onConflict: "tenant_id,plate_letters,plate_number,plate_country" });
+    ? (supabase.from("vehicles") as any).update(payload).eq("id", cloudId)
+    : (supabase.from("vehicles") as any).upsert(payload, { onConflict: "tenant_id,plate_letters,plate_number,plate_country" });
   const { error } = await query;
   if (error) console.warn("[vehiclesStore] cloud write failed", error);
 }
@@ -190,7 +194,7 @@ async function fetchVehiclesFromCloud(): Promise<void> {
     if (!tenantId) return;
     const { data: rows, error } = await supabase
       .from("vehicles")
-      .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,vin_number,archived,archived_at,archived_reason,customer_id")
+      .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,customer_id")
       .eq("tenant_id", tenantId)
       .is("deleted_at", null)
       .or("archived.is.null,archived.eq.false")
@@ -227,12 +231,16 @@ async function fetchVehiclesFromCloud(): Promise<void> {
         archived: !!r.archived,
         archivedAt: r.archived_at || undefined,
         archivedReason: r.archived_reason || undefined,
+        coverImageUrl: r.vehicle_cover_image_url || undefined,
+        thumbnailUrl: r.vehicle_thumbnail_url || undefined,
       };
       if (lo) {
         if (
           !!lo.archived !== !!r.archived ||
           (lo.archivedAt || undefined) !== (r.archived_at || undefined) ||
           (lo.archivedReason || undefined) !== (r.archived_reason || undefined) ||
+          (lo.coverImageUrl || undefined) !== (r.vehicle_cover_image_url || undefined) ||
+          (lo.thumbnailUrl || undefined) !== (r.vehicle_thumbnail_url || undefined) ||
           lo.plate !== fullPlate
         ) {
           vehiclesStore.update(lo.id, { ...patch, plate: fullPlate });
@@ -247,6 +255,8 @@ async function fetchVehiclesFromCloud(): Promise<void> {
           ownerPhone: cust?.phone,
           year: r.year ? String(r.year) : undefined,
           color: r.color || undefined,
+          coverImageUrl: r.vehicle_cover_image_url || undefined,
+          thumbnailUrl: r.vehicle_thumbnail_url || undefined,
           visits: 0,
           lastVisit: "",
           totalSpent: 0,

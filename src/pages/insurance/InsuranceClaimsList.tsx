@@ -28,6 +28,7 @@ import {
   isActiveClaim,
 } from "@/lib/claimVehicleLocation";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
+import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/15 text-warning border-warning/30",
@@ -439,7 +440,19 @@ export default function InsuranceClaimsList() {
                         onClick={() => navigate(`/insurance/${c.id}`)}
                       >
                         <td className="p-3" onClick={stop}><Checkbox checked={bulk.isSelected(c.id)} onCheckedChange={() => bulk.toggle(c.id)} /></td>
-                        {visibleCols.number && <td className="py-3 px-4 font-mono text-xs text-primary" dir="ltr">{toEnglishDigits(c.claim_number)}</td>}
+                        {visibleCols.number && (
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <VehicleAvatar
+                                size="sm"
+                                imageUrl={c.vehicle?.vehicle_thumbnail_url || c.vehicle?.vehicle_cover_image_url}
+                                fallbackPhotos={c.damage_photos}
+                                label={`${make} ${model}`.trim() || plate || c.claim_number}
+                              />
+                              <span className="font-mono text-xs text-primary" dir="ltr">{toEnglishDigits(c.claim_number)}</span>
+                            </div>
+                          </td>
+                        )}
                         {visibleCols.vehicle && (
                           <td className="py-3 px-4">
                             <div className="font-medium">{`${make} ${model}`.trim() || "—"}</div>

@@ -247,6 +247,7 @@ const App = () => (
               <Route path="/sales/payments" element={<CustomerPayments />} />
               <Route path="/sales/settings" element={<SalesSettings />} />
               <Route path="/accounting" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Accounting /></ProtectedRoute>} />
+              <Route path="/accounting/expenses" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />
               <Route path="/accounting/expenses/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />
               <Route path="/accounting/receipts" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Receipts /></ProtectedRoute>} />
               <Route path="/accounting/cashbox/topup" element={<ProtectedRoute roles={["admin","manager","accountant"]}><CashboxTopup /></ProtectedRoute>} />

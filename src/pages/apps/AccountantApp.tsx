@@ -76,7 +76,7 @@ export default function AccountantApp() {
 
   const quick: QL[] = [
     { label: "سند قبض", to: "/accounting/receipts", icon: ArrowDownToLine, cls: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30" },
-    { label: "سند صرف", to: "/accounting/expenses/new", icon: ArrowUpFromLine, cls: "bg-rose-500/10 text-rose-500 border-rose-500/30" },
+    { label: "سند صرف", to: "/accounting/expenses", icon: ArrowUpFromLine, cls: "bg-rose-500/10 text-rose-500 border-rose-500/30" },
     { label: "فاتورة جديدة", to: "/sales/invoices/new", icon: FileText, cls: "bg-blue-500/10 text-blue-500 border-blue-500/30" },
     { label: "مدفوعات عملاء", to: "/sales/payments", icon: Banknote, cls: "bg-cyan-500/10 text-cyan-500 border-cyan-500/30" },
     { label: "دفتر اليومية", to: "/accounting", icon: BookOpen, cls: "bg-indigo-500/10 text-indigo-500 border-indigo-500/30" },
