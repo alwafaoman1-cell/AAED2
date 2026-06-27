@@ -233,22 +233,28 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       const old = expensesStore.getById(editingId);
       if (old) {
         const oldCb = employeeCashboxesStore.getAll().find((c) => c.id === old.cashboxId);
+        let savedExpense: ExpenseRecord;
+        try {
+          savedExpense = await expensesStore.update(editingId, {
+            date, amount: value, categoryId, categoryName: cat?.name,
+            cashboxId, cashboxName: cb?.cashboxName, paymentMethod, beneficiary, description, photo,
+            ...supplierFields,
+            ...partsFields,
+            ...(isPartsCategory ? {} : { partId: undefined, partName: undefined, partNumber: undefined, partQty: undefined, unitBuyPrice: undefined, unitSellPrice: undefined }),
+          });
+        } catch (error: any) {
+          toast.error(error?.message || "تعذر تحديث المصروف في Supabase");
+          return;
+        }
         if (oldCb) employeeCashboxesStore.update(oldCb.id, { currentBalance: oldCb.currentBalance + old.amount });
         if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
-        await expensesStore.update(editingId, {
-          date, amount: value, categoryId, categoryName: cat?.name,
-          cashboxId, cashboxName: cb?.cashboxName, paymentMethod, beneficiary, description, photo,
-          ...supplierFields,
-          ...partsFields,
-          ...(isPartsCategory ? {} : { partId: undefined, partName: undefined, partNumber: undefined, partQty: undefined, unitBuyPrice: undefined, unitSellPrice: undefined }),
-        });
         logActivity({
           action: "update", entity: "expense", entityId: old.voucherNumber,
           label: `${cat?.name || "مصروف"} لأمر العمل ${order.id}`,
           description: `تعديل المبلغ من ${old.amount.toLocaleString()} إلى ${value.toLocaleString()} ر.ع`,
           amount: value, metadata: { workOrderId: order.id },
         });
-        onExpenseSaved?.(expensesStore.getById(editingId) || { ...old, amount: value });
+        onExpenseSaved?.(savedExpense);
         toast.success(`تم تحديث سند الصرف ${old.voucherNumber}`);
       }
       resetForm();
@@ -257,7 +263,6 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     }
 
     const number = voucherSettingsStore.generateNextNumber("payment");
-    if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
 
     const record: ExpenseRecord = {
       id: `EXP-${Date.now()}`,
@@ -278,20 +283,27 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       ...partsFields,
       createdAt: new Date().toISOString(),
     };
-    await expensesStore.add(record);
+    let savedExpense: ExpenseRecord;
+    try {
+      savedExpense = await expensesStore.add(record);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ المصروف في Supabase");
+      return;
+    }
+    if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
     if (initialRequiredPart) {
       void writeOperationalAudit({
         action: "spare_part_converted_to_expense",
         entityType: "required_spare_part",
         entityId: initialRequiredPart.id,
         relatedEntities: {
-          expense_id: record.id,
+          expense_id: savedExpense.id,
           work_order_id: order.cloudId || order.id,
           claim_id: order.claimId || null,
         },
         reason: "Converted from required spare part",
         beforeSnapshot: initialRequiredPart,
-        afterSnapshot: record,
+        afterSnapshot: savedExpense,
       }).catch((error) => console.warn("[required part audit]", error));
     }
 
@@ -307,7 +319,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
         convertedFromRequiredPart: !!initialRequiredPart,
       },
     });
-    onExpenseSaved?.(record);
+    onExpenseSaved?.(savedExpense);
 
     const profitMsg = isPartsCategory && partsFields.unitSellPrice != null && partsFields.unitBuyPrice != null && partsFields.partQty
       ? ` • ربح متوقع: ${(((partsFields.unitSellPrice as number) - (partsFields.unitBuyPrice as number)) * (partsFields.partQty as number)).toFixed(3)} ر.ع`
@@ -317,13 +329,18 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     onOpenChange(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteId || !order) return;
     const rec = expensesStore.getById(deleteId);
     if (rec) {
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === rec.cashboxId);
       if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance + rec.amount });
-      expensesStore.remove(deleteId);
+      try {
+        await expensesStore.remove(deleteId);
+      } catch (error: any) {
+        toast.error(error?.message || "تعذر حذف المصروف في Supabase");
+        return;
+      }
       logActivity({
         action: "delete",
         entity: "expense",

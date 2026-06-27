@@ -3,7 +3,7 @@ import { Trash2, Camera, Save, ImageIcon, Check, Repeat, AlertCircle, Maximize2 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { STAGE_LABELS, StagePhase, StagePhoto, WorkOrder, getWorkOrderById, updateWorkOrder } from "@/lib/workOrdersStore";
+import { STAGE_LABELS, StagePhase, StagePhoto, WorkOrder, getWorkOrderById, updateWorkOrderInCloud } from "@/lib/workOrdersStore";
 import { toast } from "sonner";
 import PhotoLightbox, { type LightboxPhoto } from "@/components/vehicles/PhotoLightbox";
 
@@ -137,7 +137,7 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     const finalPhotos = [...(order!.photos || []), ...pending];
     const derivedStatus = deriveStatusFromPhotos(finalPhotos);
     const patch: Partial<WorkOrder> = { photos: finalPhotos };
@@ -146,16 +146,20 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
       patch.status = derivedStatus;
       statusChanged = true;
     }
-    updateWorkOrder(order!.id, patch);
-    setOrder({ ...order!, ...patch });
-    setPending([]);
-    setDirty(false);
-    if (statusChanged) {
-      toast.success(`تم الحفظ ✓ — وتم تحديث الحالة تلقائياً إلى "${derivedStatus}"`);
-    } else {
-      toast.success("تم حفظ الصور بنجاح ✓");
+    try {
+      const saved = await updateWorkOrderInCloud(order!.id, patch);
+      setOrder(saved);
+      setPending([]);
+      setDirty(false);
+      if (statusChanged) {
+        toast.success(`تم الحفظ ✓ — وتم تحديث الحالة تلقائياً إلى "${derivedStatus}"`);
+      } else {
+        toast.success("تم حفظ الصور بنجاح ✓");
+      }
+      onClose();
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ الصور في Supabase");
     }
-    onClose();
   }
 
   function handleClose() {

@@ -39,7 +39,7 @@ import ClaimDocumentsPanel from "@/components/insurance/ClaimDocumentsPanel";
 import { FolderArchive } from "lucide-react";
 import TemplatePicker from "@/components/print/TemplatePicker";
 import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
-import { addWorkOrder, type WorkOrder, type NeededPart } from "@/lib/workOrdersStore";
+import { saveWorkOrderToCloud, type WorkOrder, type NeededPart } from "@/lib/workOrdersStore";
 import { inspectionsStore, type InspectionRecord } from "@/lib/inspectionsStore";
 import InsuranceInspectionDialog from "@/components/inspection/InsuranceInspectionDialog";
 import { insuranceInspectionStore } from "@/lib/insuranceInspectionStore";
@@ -676,6 +676,10 @@ export default function InsuranceClaimDetail() {
       id: newId,
       customer: company || effectiveCustomerName, // payer = insurance company
       phone: effectivePhone,
+      customerId,
+      vehicleId,
+      claimId: id && isUuid(id) ? id : undefined,
+      workOrderType: "insurance",
       plate: effectivePlate,
       vehicleType: effectiveMake,
       model: effectiveModel,
@@ -712,21 +716,29 @@ export default function InsuranceClaimDetail() {
       toast.warning(`تم تجاهل ${missingCount} صورة بروابط مفقودة عند نقلها لأمر العمل`);
     }
 
-    addWorkOrder(order);
-
-    // Link claim to the new work order id is not possible (job_order_id requires UUID).
-    // Instead, persist linkage in notes and update local state.
-    const linkNote = `\n\n[تم إنشاء أمر عمل: ${newId}]`;
-    if (id && !isNew) {
-      updateClaim.mutate({
-        id,
-        updates: { notes: (notes || "") + linkNote },
-      });
-      setNotes((notes || "") + linkNote);
+    let savedOrder: WorkOrder;
+    try {
+      savedOrder = await saveWorkOrderToCloud(order);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ أمر العمل في Supabase");
+      return;
     }
 
-    toast.success(`تم إنشاء أمر العمل ${newId} بنجاح`);
-    navigate(`/work-orders/${newId}`);
+    const linkNote = `\n\n[تم إنشاء أمر عمل: ${savedOrder.id}]`;
+    if (id && !isNew) {
+      await updateClaim.mutateAsync({
+        id,
+        updates: {
+          notes: (notes || "") + linkNote,
+          job_order_id: savedOrder.cloudId || null,
+        },
+      });
+      setNotes((notes || "") + linkNote);
+      setLinkedWorkOrderId(savedOrder.cloudId || savedOrder.id);
+    }
+
+    toast.success(`تم إنشاء أمر العمل ${savedOrder.id} بنجاح`);
+    navigate(`/work-orders/${savedOrder.id}`);
   };
 
   // ── PDF ──

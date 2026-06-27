@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import VehicleTracking from "@/components/tracking/VehicleTracking";
-import { vehiclesStore, unarchiveVehicle, type Vehicle } from "@/lib/vehiclesStore";
+import { deleteVehicleFromCloud, saveVehicleToCloud, vehiclesStore, unarchiveVehicle, type Vehicle } from "@/lib/vehiclesStore";
 import ArchivedVehicleDetails from "@/components/vehicles/ArchivedVehicleDetails";
 import PlateInput from "@/components/vehicles/PlateInput";
 import { moveToTrash } from "@/lib/trashStore";
@@ -55,12 +55,17 @@ export default function Vehicles() {
   }, [list, search]);
 
   const bulk = useBulkSelection(archived);
-  function handleBulkDelete() {
+  async function handleBulkDelete() {
     const items = bulk.selectedItems;
-    items.forEach((v) => {
-      const r = vehiclesStore.remove(v.id);
-      if (r) moveToTrash({ type: "vehicle", entityId: r.id, label: `${r.owner} - ${r.plate}`, payload: r });
-    });
+    for (const v of items) {
+      try {
+        const r = await deleteVehicleFromCloud(v, "Bulk soft delete vehicle");
+        moveToTrash({ type: "vehicle", entityId: r.id, label: `${r.owner} - ${r.plate}`, payload: r });
+      } catch (error: any) {
+        toast.error(error?.message || `تعذر حذف المركبة ${v.plate} في Supabase`);
+        return;
+      }
+    }
     toast.success(`تم نقل ${items.length} سيارة للمهملات`);
     bulk.clear();
   }
@@ -74,18 +79,25 @@ export default function Vehicles() {
 
   function openNew() { setForm({ ...empty, id: "" }); setEditing(null); setShowForm(true); }
   function openEdit(v: Vehicle) { setForm(v); setEditing(v); setShowForm(true); }
-  function handleSave() {
+  async function handleSave() {
     if (!form.plate || !form.owner) { toast.error("اللوحة والمالك مطلوبان"); return; }
-    if (editing) { vehiclesStore.update(editing.id, form); toast.success("تم التحديث"); }
-    else { vehiclesStore.add({ ...form, id: form.plate || form.id }); toast.success("تمت الإضافة"); }
+    try {
+      await saveVehicleToCloud({ ...form, id: form.plate || form.id, cloudId: editing?.cloudId || form.cloudId }, { previousPlate: editing?.plate });
+      toast.success(editing ? "تم التحديث" : "تمت الإضافة");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ المركبة في Supabase");
+      return;
+    }
     setShowForm(false);
   }
-  function handleDelete() {
+  async function handleDelete() {
     if (!deleting) return;
-    const removed = vehiclesStore.remove(deleting.id);
-    if (removed) {
+    try {
+      const removed = await deleteVehicleFromCloud(deleting, "Soft delete vehicle");
       moveToTrash({ type: "vehicle", entityId: removed.id, label: `${removed.owner} - ${removed.plate}`, payload: removed });
       toast.success("تم النقل للمهملات");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حذف المركبة في Supabase");
     }
     setDeleting(null);
   }

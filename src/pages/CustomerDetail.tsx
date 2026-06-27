@@ -224,9 +224,13 @@ export default function CustomerDetail() {
   function newAppointment() { setEditingAppointment(null); setAppointmentOpen(true); }
   function openStatement() { setStatementOpen(true); }
 
-  function saveNotes() {
-    customersStore.update(customer.id, { notes, lastContactAt: new Date().toISOString() });
-    toast.success("تم حفظ الملاحظات");
+  async function saveNotes() {
+    try {
+      await customersStore.updateAsync(customer.id, { notes, lastContactAt: new Date().toISOString() });
+      toast.success("تم حفظ الملاحظات");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ الملاحظات في Supabase");
+    }
   }
 
   function gotoCustomer(offset: number) {

@@ -1,11 +1,11 @@
 // تحويل مطالبة تأمين ملغاة إلى مصروف + فاتورة على مالك السيارة
 import { expensesStore, type ExpenseRecord } from "./expensesStore";
-import { addWorkOrder, type WorkOrder } from "./workOrdersStore";
+import { saveWorkOrderToCloud, type WorkOrder } from "./workOrdersStore";
 import { nextWorkOrderNumber } from "./numbering";
 import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
 
 /** إنشاء سند مصروف تلقائي للمطالبة الملغاة */
-export function createExpenseFromCancelledClaim(claim: InsuranceClaim, amount: number): ExpenseRecord {
+export async function createExpenseFromCancelledClaim(claim: InsuranceClaim, amount: number): Promise<ExpenseRecord> {
   const voucherNumber = `EXP-CNL-${Date.now().toString().slice(-6)}`;
   const record: ExpenseRecord = {
     id: `${voucherNumber}`,
@@ -21,18 +21,19 @@ export function createExpenseFromCancelledClaim(claim: InsuranceClaim, amount: n
     description: `تكاليف إصلاح المطالبة الملغاة ${claim.claim_number} — ${claim.insurance_company}`,
     createdAt: new Date().toISOString(),
   };
-  expensesStore.add(record);
-  return record;
+  return expensesStore.add(record);
 }
 
 /** إنشاء أمر عمل/فاتورة على مالك السيارة بدلاً من شركة التأمين */
-export function createCustomerInvoiceFromCancelledClaim(
+export async function createCustomerInvoiceFromCancelledClaim(
   claim: InsuranceClaim,
   amount: number,
-): WorkOrder {
+): Promise<WorkOrder> {
   const woId = nextWorkOrderNumber();
   const wo: WorkOrder = {
     id: woId,
+    customerId: (claim as any).customer_id || undefined,
+    vehicleId: (claim as any).vehicle_id || undefined,
     customer: claim.vehicle_owner_name ?? claim.customer?.name ?? "—",
     phone: claim.vehicle_owner_phone ?? claim.customer?.phone ?? "",
     plate: claim.vehicle?.plate_number ?? "—",
@@ -58,6 +59,5 @@ export function createCustomerInvoiceFromCancelledClaim(
       status: "pending",
     })),
   };
-  addWorkOrder(wo);
-  return wo;
+  return saveWorkOrderToCloud(wo);
 }

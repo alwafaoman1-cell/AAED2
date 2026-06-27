@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { postInsuranceClaimApproval, removeInsuranceClaimJournal } from "@/lib/insuranceAccounting";
+import { isUuid } from "@/lib/uuid";
 
 export interface ClaimNeededPart {
   name: string;
@@ -138,19 +139,71 @@ export function useCreateClaim() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (claim: ClaimInsert) => {
+      if (!claim.customer_id || !isUuid(claim.customer_id) || /^(CUST|TEMP)-/i.test(String(claim.customer_id))) {
+        throw new Error("لا يمكن حفظ المطالبة بدون customer_id صالح");
+      }
+      if (!claim.vehicle_id || !isUuid(claim.vehicle_id) || /^(VEH|TEMP)-/i.test(String(claim.vehicle_id))) {
+        throw new Error("لا يمكن حفظ المطالبة بدون vehicle_id صالح");
+      }
+      const [{ data: existingCustomer, error: customerError }, { data: existingVehicle, error: vehicleError }] = await Promise.all([
+        supabase
+          .from("customers")
+          .select("id")
+          .eq("tenant_id", claim.tenant_id)
+          .eq("id", claim.customer_id)
+          .is("deleted_at", null)
+          .maybeSingle(),
+        supabase
+          .from("vehicles")
+          .select("id,customer_id")
+          .eq("tenant_id", claim.tenant_id)
+          .eq("id", claim.vehicle_id)
+          .is("deleted_at", null)
+          .maybeSingle(),
+      ]);
+      if (customerError) throw customerError;
+      if (vehicleError) throw vehicleError;
+      if (!(existingCustomer as any)?.id) throw new Error("لا يمكن حفظ المطالبة: العميل غير موجود في Supabase");
+      if (!(existingVehicle as any)?.id) throw new Error("لا يمكن حفظ المطالبة: المركبة غير موجودة في Supabase");
+      if ((existingVehicle as any).customer_id && (existingVehicle as any).customer_id !== claim.customer_id) {
+        throw new Error("لا يمكن حفظ المطالبة: المركبة مرتبطة بعميل آخر");
+      }
+      const claimNumber = claim.claim_number.trim();
+      const { data: existing, error: existingError } = await supabase
+        .from("insurance_claims" as any)
+        .select("id,claim_number")
+        .eq("tenant_id", claim.tenant_id)
+        .ilike("claim_number", claimNumber)
+        .maybeSingle();
+      if (existingError) throw existingError;
+      if ((existing as any)?.id) {
+        const err = new Error("claim_number_exists");
+        (err as any).existingClaimId = (existing as any).id;
+        throw err;
+      }
       const { data, error } = await supabase
         .from("insurance_claims" as any)
-        .insert(claim as any)
-        .select()
+        .insert({ ...(claim as any), claim_number: claimNumber })
+        .select("id")
         .single();
       if (error) throw error;
-      return data;
+      const { data: verified, error: verifyError } = await supabase
+        .from("insurance_claims" as any)
+        .select("*")
+        .eq("id", (data as any).id)
+        .maybeSingle();
+      if (verifyError) throw verifyError;
+      if (!(verified as any)?.id) throw new Error("تم الحفظ لكن تعذر قراءة المطالبة للتأكيد");
+      return verified;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["insurance_claims"] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["vehicles"] });
+      qc.invalidateQueries({ queryKey: ["job_orders"] });
       toast.success("تم إنشاء المطالبة بنجاح");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(e?.message === "claim_number_exists" ? "رقم المطالبة موجود مسبقًا داخل نفس الورشة" : e.message),
   });
 }
 

@@ -9,7 +9,7 @@ import { CheckCircle2, Upload, X, Loader2, PackageCheck, FileSignature, FileChec
 import { toast } from "sonner";
 import VehicleDeliveryReceiptDialog from "@/components/workorders/VehicleDeliveryReceiptDialog";
 import type { WorkOrder } from "@/lib/workOrdersStore";
-import { addWorkOrder, getWorkOrderById } from "@/lib/workOrdersStore";
+import { getWorkOrderById, refreshWorkOrdersFromCloud } from "@/lib/workOrdersStore";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 
 interface Props {
@@ -113,7 +113,7 @@ export default function ClaimDeliverySection({ claimId, workOrderId, initial, on
         partsNeeded: [],
         displayNumber: (data as any).order_number || undefined,
       };
-      addWorkOrder(adapted);
+      await refreshWorkOrdersFromCloud().catch(() => {});
       return adapted;
     } finally {
       setLoadingWo(false);

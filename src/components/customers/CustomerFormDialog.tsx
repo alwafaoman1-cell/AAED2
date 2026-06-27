@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { customersStore, type Customer, type CustomerTag, type CustomerType } from "@/lib/customersStore";
-import { vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
+import { saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import { toast } from "sonner";
 import { AlertTriangle, Car, Building2, User, Plus, X } from "lucide-react";
 import { normalizePhone, toE164 } from "@/lib/phoneUtils";
@@ -68,7 +68,7 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
     const normalizedPhone = toE164(form.phone);
     const saveForm = { ...form, phone: normalizedPhone };
     if (isEdit && initial) {
-      customersStore.update(initial.id, saveForm);
+      await customersStore.updateAsync(initial.id, saveForm);
       toast.success(`تم تحديث ${saveForm.name}`);
     } else {
       const savedCustomer = await customersStore.addAsync({
@@ -80,11 +80,11 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
       if (addVehicle) {
         let added = 0;
         let skipped = 0;
-        vehicles.forEach((vd) => {
+        for (const vd of vehicles) {
           const plate = vd.plate.trim();
-          if (!plate) return;
+          if (!plate) continue;
           const exists = vehiclesStore.getAll().find((v) => v.plate === plate);
-          if (exists) { skipped++; return; }
+          if (exists) { skipped++; continue; }
           const v: Vehicle = {
             id: plate,
             plate,
@@ -98,9 +98,9 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
             totalSpent: 0,
             photoPairs: [],
           };
-          vehiclesStore.add(v);
+          await saveVehicleToCloud(v, { customerId: savedCustomer.id });
           added++;
-        });
+        }
         if (added > 0) toast.success(`تمت إضافة ${added} ${added === 1 ? "سيارة" : "سيارات"}`);
         if (skipped > 0) toast.warning(`تم تخطي ${skipped} (لوحة مكررة)`);
       }

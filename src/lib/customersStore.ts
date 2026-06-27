@@ -49,6 +49,10 @@ function normalize(s: string): string {
   return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function normalizeCustomerName(s: string): string {
+  return normalize(s).replace(/[^\p{L}\p{N}\s]/gu, "");
+}
+
 function notify() {
   listeners.forEach((l) => { try { l(); } catch {} });
 }
@@ -79,7 +83,7 @@ function rowToCustomer(r: any): Customer {
   };
 }
 
-async function refreshCustomersFromCloud() {
+export async function refreshCustomersFromCloud() {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return;
   const { data, error } = await supabase.from("customers").select("*")
@@ -95,9 +99,61 @@ async function refreshCustomersFromCloud() {
   persist();
 }
 
+async function findExistingCustomerCloud(
+  tenantId: string,
+  input: Partial<Customer> & { name?: string; phone?: string },
+): Promise<Customer | null> {
+  const phone = normalizePhone(input.phone || "");
+  if (phone) {
+    const phoneTail = phone.replace(/\D/g, "").slice(-8);
+    const { data, error } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
+      .or("archived.is.null,archived.eq.false")
+      .ilike("phone", `%${phoneTail || phone}%`)
+      .limit(10);
+    if (error) throw error;
+    const match = (data || []).find((row: any) =>
+      normalizePhone(row.phone || "").replace(/\D/g, "").slice(-8) === phoneTail,
+    );
+    if (match) return rowToCustomer(match);
+  }
+
+  const nameKey = normalizeCustomerName(input.name || "");
+  if (nameKey) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
+      .or("archived.is.null,archived.eq.false")
+      .ilike("name", (input.name || "").trim())
+      .limit(10);
+    if (error) throw error;
+    const match = (data || []).find((row: any) => normalizeCustomerName(row.name || "") === nameKey);
+    if (match) return rowToCustomer(match);
+  }
+
+  return null;
+}
+
+async function readCustomerById(tenantId: string, id: string): Promise<Customer> {
+  const { data, error } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id || !isUuid(data.id)) throw new Error("تعذر تأكيد حفظ العميل في Supabase");
+  return rowToCustomer(data);
+}
+
 async function upsertCustomerCloud(c: Customer): Promise<Customer | null> {
   const tenantId = await getCurrentTenantId();
-  if (!tenantId) return null;
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   const payload = {
     tenant_id: tenantId,
     name: c.name,
@@ -111,15 +167,32 @@ async function upsertCustomerCloud(c: Customer): Promise<Customer | null> {
     commercial_registration: c.commercialRegistration || null,
     tax_number: c.taxNumber || null,
   };
-  const query = isUuid(c.id)
-    ? supabase.from("customers").upsert({ id: c.id, ...payload }).select("*").single()
-    : supabase.from("customers").insert(payload).select("*").single();
+
+  let targetId = isUuid(c.id) ? c.id : null;
+  if (targetId) {
+    const { data: existing, error: lookupError } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("id", targetId)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+    if (!existing?.id) targetId = null;
+  }
+  if (!targetId) {
+    const existing = await findExistingCustomerCloud(tenantId, c);
+    if (existing?.id) targetId = existing.id;
+  }
+
+  const query = targetId
+    ? supabase.from("customers").update(payload).eq("tenant_id", tenantId).eq("id", targetId).select("id").single()
+    : supabase.from("customers").insert(payload).select("id").single();
   const { data, error } = await query;
   if (error) {
     console.warn("[customersStore] cloud upsert failed", error);
     throw error;
   }
-  return data ? rowToCustomer(data) : null;
+  return data?.id ? readCustomerById(tenantId, data.id) : null;
 }
 
 async function replaceTempCustomerId(tempId: string, saved: Customer) {
@@ -194,13 +267,10 @@ export const customersStore = {
   },
 
   add(c: Customer) {
-    const list = load();
     const normalized = { ...c, phone: normalizePhone(c.phone) };
-    list.unshift(normalized);
-    persist();
-    void upsertCustomerCloud(normalized)
-      .then((saved) => { if (saved && saved.id !== normalized.id) void replaceTempCustomerId(normalized.id, saved); })
-      .catch(() => {});
+    void customersStore.addAsync(normalized).catch((error) => {
+      console.warn("[customersStore.add] failed", error);
+    });
   },
 
   async addAsync(c: Customer): Promise<Customer> {
@@ -215,13 +285,31 @@ export const customersStore = {
     return saved;
   },
 
+  async updateAsync(id: string, patch: Partial<Customer>): Promise<Customer> {
+    const current = customersStore.getById(id);
+    if (!current) throw new Error("العميل غير موجود في القائمة الحالية");
+    const normalized = {
+      ...current,
+      ...patch,
+      id,
+      phone: patch.phone !== undefined ? normalizePhone(patch.phone) : current.phone,
+    };
+    const saved = await upsertCustomerCloud(normalized);
+    if (!saved?.id || !isUuid(saved.id)) throw new Error("تعذر تأكيد تحديث العميل في Supabase");
+    const list = load();
+    const idx = list.findIndex((x) => x.id === id || x.id === saved.id);
+    if (idx >= 0) list[idx] = saved;
+    else list.unshift(saved);
+    persist();
+    return saved;
+  },
+
   async ensureCloudCustomer(input: Partial<Customer> & { name: string; phone?: string; id?: string }): Promise<Customer> {
     if (input.id && isUuid(input.id)) {
-      const found = customersStore.getById(input.id);
-      if (found) {
-        const saved = await upsertCustomerCloud(found);
-        return saved || found;
-      }
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+      const existing = await readCustomerById(tenantId, input.id).catch(() => null);
+      if (existing) return existing;
     }
     const byPhone = input.phone ? customersStore.findByPhone(input.phone) : undefined;
     if (byPhone?.id && isUuid(byPhone.id)) {
@@ -232,6 +320,15 @@ export const customersStore = {
     if (byName?.id && isUuid(byName.id)) {
       const saved = await upsertCustomerCloud(byName);
       return saved || byName;
+    }
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+    const cloudExisting = await findExistingCustomerCloud(tenantId, input);
+    if (cloudExisting?.id) {
+      const list = load();
+      if (!list.some((x) => x.id === cloudExisting.id)) list.unshift(cloudExisting);
+      persist();
+      return cloudExisting;
     }
     return customersStore.addAsync({
       id: input.id && isUuid(input.id) ? input.id : crypto.randomUUID(),

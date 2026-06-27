@@ -288,6 +288,7 @@ export function subscribeWorkOrders(cb: () => void): () => void {
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isUuid } from "@/lib/uuid";
+import { customersStore } from "@/lib/customersStore";
 
 
 function cloudStatusToLocal(s: string | null | undefined): string {
@@ -426,8 +427,8 @@ async function migrateLegacyPhotosInBackground(orders: WorkOrder[]) {
     for (const o of candidates) {
       const migrated = await migrateOrderPhotos(o.id, o.photos!);
       if (migrated) {
-        // Update local cache + push to cloud so all devices get the URLs.
-        updateWorkOrder(o.id, { photos: migrated });
+        // Update through the verified cloud save path so all devices get the URLs.
+        await updateWorkOrderInCloud(o.id, { photos: migrated });
       }
     }
     console.info(`[workOrdersStore] photo migration complete.`);
@@ -501,15 +502,11 @@ async function tenantContext(): Promise<{ tenantId: string } | null> {
 }
 
 async function ensureCustomer(tenantId: string, name: string, phone?: string): Promise<string | null> {
+  void tenantId;
   const n = (name || "").trim();
   if (!n) return null;
-  const { data: existing } = await supabase
-    .from("customers").select("id").eq("tenant_id", tenantId).ilike("name", n).limit(1).maybeSingle();
-  if (existing?.id) return existing.id;
-  const { data: created, error } = await supabase
-    .from("customers").insert({ tenant_id: tenantId, name: n, phone: phone || null }).select("id").maybeSingle();
-  if (error) { console.warn("[ensureCustomer]", error); return null; }
-  return created?.id || null;
+  const saved = await customersStore.ensureCloudCustomer({ name: n, phone: phone || "" });
+  return saved?.id && isUuid(saved.id) ? saved.id : null;
 }
 
 async function ensureVehicle(tenantId: string, customerId: string, o: WorkOrder): Promise<string | null> {
@@ -526,14 +523,48 @@ async function ensureVehicle(tenantId: string, customerId: string, o: WorkOrder)
       color: o.color,
     });
     if (resolved.ownershipConflict) {
-      console.warn("[ensureVehicle] existing vehicle belongs to another customer; using existing id without auto-transfer", resolved.vehicleId);
+      throw new Error("هذه المركبة موجودة ومرتبطة بعميل آخر. اختر المركبة الموجودة بقرار واضح أو صحح بيانات العميل/المركبة.");
     }
     return resolved.vehicleId;
   } catch (e) {
     console.warn("[ensureVehicle:identity]", e);
-    return null;
+    throw e instanceof Error ? e : new Error("تعذر التحقق من المركبة في Supabase");
   }
-  return null;
+}
+
+async function resolveCustomerId(tenantId: string, o: WorkOrder): Promise<string | null> {
+  if (o.customerId && isUuid(o.customerId)) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("id", o.customerId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) return data.id;
+  }
+  return ensureCustomer(tenantId, o.customer, o.phone);
+}
+
+async function resolveVehicleId(tenantId: string, customerId: string, o: WorkOrder): Promise<string | null> {
+  if (o.vehicleId && isUuid(o.vehicleId)) {
+    const { data, error } = await supabase
+      .from("vehicles")
+      .select("id,customer_id")
+      .eq("tenant_id", tenantId)
+      .eq("id", o.vehicleId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) {
+      if (data.customer_id && data.customer_id !== customerId) {
+        throw new Error("هذه المركبة مرتبطة بعميل آخر. اختر المركبة الموجودة بقرار واضح أو صحح بيانات العميل/المركبة.");
+      }
+      return data.id;
+    }
+  }
+  return ensureVehicle(tenantId, customerId, { ...o, vehicleId: undefined });
 }
 
 async function pushOrderToCloud(o: WorkOrder) {
@@ -584,6 +615,141 @@ async function pushOrderToCloud(o: WorkOrder) {
     if (error) console.warn("[pushOrderToCloud]", error);
     else KNOWN_CLOUD_NUMBERS.add(o.id);
   } catch (e) { console.warn("[pushOrderToCloud] exception", e); }
+}
+
+function hasTemporaryOperationalId(value: unknown): boolean {
+  return /^(CUST|VEH|TEMP|EXP)-/i.test(String(value || "").trim());
+}
+
+function assertNoTemporaryOperationalIds(o: WorkOrder) {
+  if (hasTemporaryOperationalId(o.id)) throw new Error("order_number مؤقت وغير صالح للحفظ");
+  if (hasTemporaryOperationalId(o.customerId)) throw new Error("customer_id مؤقت وغير صالح للحفظ");
+  if (hasTemporaryOperationalId(o.vehicleId)) throw new Error("vehicle_id مؤقت وغير صالح للحفظ");
+  if (hasTemporaryOperationalId(o.cloudId)) throw new Error("work_order_id مؤقت وغير صالح للحفظ");
+}
+
+function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string, vehicleId: string) {
+  return {
+    tenant_id: tenantId,
+    customer_id: customerId,
+    vehicle_id: vehicleId,
+    order_number: o.id,
+    description: o.description || null,
+    diagnosis: o.diagnosis || null,
+    diagnosis_notes: o.diagnosis || null,
+    service_type: o.serviceType || null,
+    technician_name: o.technician || null,
+    entry_date: o.entryDate || new Date().toISOString().slice(0, 10),
+    status: localStatusToCloud(o.status) as any,
+    labor_cost: o.laborCost || 0,
+    parts_cost: o.partsCost || 0,
+    subtotal: o.totalCost || 0,
+    final_total: o.totalCost || 0,
+    insurance_company: o.insurance && o.insurance !== "-" ? o.insurance : null,
+    insurance_claim_number: o.claimNumber && o.claimNumber !== "-" ? o.claimNumber : null,
+    claim_id: o.claimId && isUuid(o.claimId) ? o.claimId : null,
+    work_order_type: o.claimId ? "insurance" : (o.workOrderType || "general_customer"),
+    archived_at: o.archivedAt || null,
+    notes: o.description || null,
+    parts_needed: (o.partsNeeded || []) as any,
+    work_items: (o.workItems || []) as any,
+    photos: (o.photos || []) as any,
+    odometer_km: o.odometerKm ?? null,
+    fuel_level_pct: o.fuelLevelPct ?? null,
+    reception_notes: o.receptionNotes || null,
+    reception_damage_markers: (o.receptionDamageMarkers || []) as any,
+    reception_signature_data_url: o.receptionSignatureDataUrl || null,
+    vehicle_belongings: (o.vehicleBelongings || {}) as any,
+    received_at: o.receivedAt || null,
+    tracking_expires_at: o.trackingExpiresAt || null,
+    metadata: {
+      extraExpenses: o.extraExpenses || [],
+      linkedExpenseVoucherIds: o.linkedExpenseVoucherIds || [],
+      depositApplied: o.depositApplied || 0,
+      closingReview: o.closingReview || null,
+      trackPassword: o.trackPassword || null,
+      mileage: o.mileage || null,
+    } as any,
+  };
+}
+
+async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
+  const [custRes, vehRes] = await Promise.all([
+    row.customer_id
+      ? supabase.from("customers").select("id,name,phone").eq("id", row.customer_id).maybeSingle()
+      : Promise.resolve({ data: null } as any),
+    row.vehicle_id
+      ? supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url").eq("id", row.vehicle_id).maybeSingle()
+      : Promise.resolve({ data: null } as any),
+  ]);
+  const custMap = new Map<string, any>();
+  if ((custRes as any).data?.id) custMap.set((custRes as any).data.id, (custRes as any).data);
+  const vehMap = new Map<string, any>();
+  const v = (vehRes as any).data;
+  if (v?.id) {
+    vehMap.set(v.id, {
+      plate: [v.plate_letters, v.plate_number].filter(Boolean).join(" ").trim(),
+      brand: v.brand,
+      model: v.model,
+      year: v.year,
+      vin: v.vin_number,
+      color: v.color,
+      imageUrl: v.vehicle_cover_image_url,
+      thumbnailUrl: v.vehicle_thumbnail_url,
+    });
+  }
+  return mapCloudRow(row, custMap, vehMap);
+}
+
+export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder> {
+  assertNoTemporaryOperationalIds(order);
+  const ctx = await tenantContext();
+  if (!ctx) throw new Error("تعذر تحديد الورشة الحالية");
+  const customerId = await resolveCustomerId(ctx.tenantId, order);
+  if (!customerId || !isUuid(customerId)) throw new Error("لا يمكن حفظ أمر العمل بدون customer_id صالح");
+  const vehicleId = await resolveVehicleId(ctx.tenantId, customerId, order);
+  if (!vehicleId || !isUuid(vehicleId)) throw new Error("لا يمكن حفظ أمر العمل بدون vehicle_id صالح");
+
+  const payload = buildJobOrderPayload({ ...order, customerId, vehicleId }, ctx.tenantId, customerId, vehicleId);
+  const existingId = order.cloudId && isUuid(order.cloudId)
+    ? order.cloudId
+    : null;
+  const { data: existingByNumber, error: lookupError } = await supabase
+    .from("job_orders")
+    .select("id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("order_number", order.id)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  const targetId = existingId || existingByNumber?.id || null;
+  const write = targetId
+    ? supabase.from("job_orders").update(payload as any).eq("tenant_id", ctx.tenantId).eq("id", targetId).select("*").single()
+    : (supabase.from("job_orders") as any).insert(payload).select("*").single();
+  const { data, error } = await write;
+  if (error) throw error;
+  if (!data?.id || !isUuid(data.id)) throw new Error("تعذر تأكيد حفظ أمر العمل في Supabase");
+  const { data: verified, error: verifyError } = await supabase
+    .from("job_orders")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", data.id)
+    .maybeSingle();
+  if (verifyError) throw verifyError;
+  if (!verified?.id) throw new Error("تم الحفظ لكن تعذر قراءة أمر العمل للتأكيد");
+
+  const saved = await mapSavedJobOrder(verified);
+  KNOWN_CLOUD_NUMBERS.add(saved.id);
+  const idx = cache.findIndex((o) => o.id === saved.id || o.cloudId === saved.cloudId);
+  if (idx >= 0) cache[idx] = saved;
+  else cache.unshift(saved);
+  persist();
+  return saved;
+}
+
+export async function updateWorkOrderInCloud(id: string, patch: Partial<WorkOrder>): Promise<WorkOrder> {
+  const current = getWorkOrderById(id);
+  if (!current) throw new Error("أمر العمل غير موجود في القائمة الحالية");
+  return saveWorkOrderToCloud({ ...current, ...patch });
 }
 
 // Debounce + coalesce patches per order_number. Editing the parts list rapidly

@@ -40,7 +40,7 @@ import {
   type WorkOrder,
   type NeededPart,
   type StagePhase,
-  addWorkOrder,
+  refreshWorkOrdersFromCloud,
   isPartStillNeeded,
 } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
@@ -234,8 +234,7 @@ export default function WorkOrderDetail() {
             photos: [],
             partsNeeded: [],
           };
-          // سجّل الأمر في المخزن المحلي حتى تعمل عمليات التحديث (صور/قطع/حالة/مصروف)
-          addWorkOrder(adapted);
+          void refreshWorkOrdersFromCloud().catch(() => {});
           setOrder(adapted);
         }
         setLoadingRemote(false);

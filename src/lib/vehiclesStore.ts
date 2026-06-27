@@ -1,6 +1,9 @@
 import { createStore } from "./createStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { customersStore } from "@/lib/customersStore";
+import { ensureVehicleForCustomer, normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
+import { isUuid } from "@/lib/uuid";
 
 export interface VehiclePhotoPair {
   id: string;
@@ -13,6 +16,8 @@ export interface VehiclePhotoPair {
 
 export interface Vehicle {
   id: string; // plate as id
+  cloudId?: string;
+  customerId?: string;
   plate: string;
   type: string;
   vin: string;
@@ -104,9 +109,11 @@ export const vehiclesStore = createStore<Vehicle>({
 // across devices and pulls in vehicles created by insurance flows.
 // ============================================================
 const normPlate = (p: string) => (p || "").trim().toLowerCase().replace(/\s+/g, " ");
+const hasTemporaryOperationalId = (value: unknown) => /^(CUST|VEH|TEMP)-/i.test(String(value || "").trim());
 
 let cloudBootstrapped = false;
 let cloudFetchTimer: ReturnType<typeof setTimeout> | null = null;
+let suppressCloudMutation = false;
 // plate (normalized) → cloud row id
 const KNOWN_CLOUD: Map<string, string> = new Map();
 
@@ -166,6 +173,7 @@ async function pushVehicleToCloud(v: Vehicle) {
 }
 
 vehiclesStore.setMutationHandler((event) => {
+  if (suppressCloudMutation) return;
   if (event.type === "remove") {
     const cloudId = KNOWN_CLOUD.get(normPlate(event.item.plate));
     if (cloudId) {
@@ -181,11 +189,211 @@ vehiclesStore.setMutationHandler((event) => {
     }
     return;
   }
-  void pushVehicleToCloud(event.item);
+  void saveVehicleToCloud(event.item, { updateCache: false }).catch((error) => {
+    console.warn("[vehiclesStore] cloud write failed", error);
+  });
 });
 
 export async function refreshVehiclesFromCloud(): Promise<void> {
   return fetchVehiclesFromCloud();
+}
+
+function buildFullPlate(r: any) {
+  return [r.plate_letters, r.plate_number].filter(Boolean).join(" ").trim();
+}
+
+function rowToVehicle(r: any): Vehicle {
+  const fullPlate = buildFullPlate(r);
+  return {
+    id: fullPlate || r.id,
+    cloudId: r.id,
+    customerId: r.customer_id || undefined,
+    plate: fullPlate,
+    type: [r.brand, r.model].filter(Boolean).join(" ") || "—",
+    vin: r.vin_number || r.vin || "",
+    owner: r.customers?.name || "",
+    ownerPhone: r.customers?.phone || undefined,
+    year: r.year ? String(r.year) : undefined,
+    color: r.color || undefined,
+    mileage: r.mileage ? String(r.mileage) : undefined,
+    coverImageUrl: r.vehicle_cover_image_url || undefined,
+    thumbnailUrl: r.vehicle_thumbnail_url || undefined,
+    visits: 0,
+    lastVisit: "",
+    totalSpent: 0,
+    archived: !!r.archived,
+    archivedAt: r.archived_at || undefined,
+    archivedReason: r.archived_reason || undefined,
+  };
+}
+
+async function readVehicleById(tenantId: string, id: string): Promise<Vehicle> {
+  const { data, error } = await (supabase.from("vehicles") as any)
+    .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,mileage,vin,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,customers(name,phone)")
+    .eq("tenant_id", tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id || !isUuid(data.id)) throw new Error("تعذر تأكيد حفظ المركبة في Supabase");
+  return rowToVehicle(data);
+}
+
+function putVehicleInCache(saved: Vehicle, previousIds: string[] = []) {
+  suppressCloudMutation = true;
+  try {
+    const previousKeys = new Set(previousIds.filter(Boolean).map(normPlate));
+    const existing = vehiclesStore.getAll().find((v) =>
+      v.cloudId === saved.cloudId ||
+      v.id === saved.id ||
+      normPlate(v.plate) === normPlate(saved.plate) ||
+      previousKeys.has(normPlate(v.id)) ||
+      previousKeys.has(normPlate(v.plate)),
+    );
+    if (existing) {
+      if (existing.id !== saved.id) vehiclesStore.remove(existing.id);
+      else vehiclesStore.update(existing.id, saved);
+    }
+    if (!vehiclesStore.getAll().some((v) => v.id === saved.id)) vehiclesStore.add(saved);
+  } finally {
+    suppressCloudMutation = false;
+  }
+}
+
+export async function saveVehicleToCloud(
+  vehicle: Vehicle,
+  options: {
+    customerId?: string | null;
+    previousPlate?: string | null;
+    updateCache?: boolean;
+    allowOwnershipConflict?: boolean;
+  } = {},
+): Promise<Vehicle> {
+  if (hasTemporaryOperationalId(vehicle.id) || hasTemporaryOperationalId(vehicle.cloudId) || hasTemporaryOperationalId(vehicle.customerId) || hasTemporaryOperationalId(options.customerId)) {
+    throw new Error("معرف مؤقت غير صالح لحفظ المركبة في Supabase");
+  }
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+  if (!vehicle.plate?.trim()) throw new Error("رقم اللوحة مطلوب قبل حفظ المركبة");
+  if (!vehicle.owner?.trim() && !options.customerId) throw new Error("العميل مطلوب قبل حفظ المركبة");
+
+  const customer = options.customerId && isUuid(options.customerId)
+    ? { id: options.customerId, name: vehicle.owner || "", phone: vehicle.ownerPhone || "" }
+    : await customersStore.ensureCloudCustomer({
+        id: vehicle.customerId,
+        name: vehicle.owner.trim(),
+        phone: vehicle.ownerPhone || "",
+      });
+  if (!customer?.id || !isUuid(customer.id)) throw new Error("customer_id غير صالح لحفظ المركبة");
+
+  const plate = normalizeVehiclePlate({ plate: vehicle.plate });
+  const vin = normalizeVin(vehicle.vin);
+  const [brand, ...modelParts] = (vehicle.type || "").trim().split(/\s+/).filter(Boolean);
+  let targetId =
+    (vehicle.cloudId && isUuid(vehicle.cloudId) ? vehicle.cloudId : null) ||
+    (isUuid(vehicle.id) ? vehicle.id : null) ||
+    KNOWN_CLOUD.get(normPlate(options.previousPlate || "")) ||
+    KNOWN_CLOUD.get(normPlate(vehicle.plate));
+
+  if (!targetId) {
+    const resolved = await ensureVehicleForCustomer({
+      customerId: customer.id,
+      plate: vehicle.plate,
+      vin,
+      make: brand || vehicle.type || null,
+      model: modelParts.join(" ") || null,
+      year: vehicle.year || null,
+      color: vehicle.color || null,
+      allowVinCandidate: true,
+    });
+    if (resolved.ownershipConflict && !options.allowOwnershipConflict) {
+      const owner = resolved.existing?.customer_name || "عميل آخر";
+      throw new Error(`هذه المركبة مسجلة مسبقًا ومرتبطة بـ ${owner}. اختر المركبة الموجودة أو غيّر قرار الربط بوضوح.`);
+    }
+    targetId = resolved.vehicleId;
+  }
+
+  if (!targetId || !isUuid(targetId)) throw new Error("vehicle_id غير صالح");
+  const { data: existingRow, error: existingError } = await supabase
+    .from("vehicles")
+    .select("id,customer_id")
+    .eq("tenant_id", tenantId)
+    .eq("id", targetId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existingRow?.customer_id && existingRow.customer_id !== customer.id && !options.allowOwnershipConflict) {
+    throw new Error("هذه المركبة مرتبطة بعميل آخر. اختر المركبة الموجودة أو أنشئ مركبة مختلفة.");
+  }
+
+  const payload = {
+    customer_id: customer.id,
+    plate_letters: plate.letters || null,
+    plate_number: plate.digits || null,
+    plate_country: plate.country || "OM",
+    brand: brand || vehicle.type || null,
+    model: modelParts.join(" ") || null,
+    year: vehicle.year ? Number(vehicle.year) || null : null,
+    color: vehicle.color || null,
+    mileage: vehicle.mileage ? Number(String(vehicle.mileage).replace(/\D/g, "")) || null : null,
+    vin: vin || null,
+    vin_number: vin || null,
+    vehicle_cover_image_url: vehicle.coverImageUrl || null,
+    vehicle_thumbnail_url: vehicle.thumbnailUrl || null,
+    archived: !!vehicle.archived,
+    archived_at: vehicle.archivedAt || null,
+    archived_reason: vehicle.archivedReason || null,
+  };
+
+  const { data, error } = await supabase
+    .from("vehicles")
+    .update(payload as any)
+    .eq("tenant_id", tenantId)
+    .eq("id", targetId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id) throw new Error("تعذر حفظ المركبة في Supabase");
+
+  const saved = await readVehicleById(tenantId, data.id);
+  KNOWN_CLOUD.set(normPlate(saved.plate), data.id);
+  if (options.updateCache !== false) {
+    putVehicleInCache(saved, [vehicle.id, vehicle.plate, options.previousPlate || ""].filter(Boolean));
+  }
+  return saved;
+}
+
+export async function deleteVehicleFromCloud(vehicle: Vehicle, reason = "Soft delete vehicle"): Promise<Vehicle> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+  const cloudId =
+    (vehicle.cloudId && isUuid(vehicle.cloudId) ? vehicle.cloudId : null) ||
+    (isUuid(vehicle.id) ? vehicle.id : null) ||
+    KNOWN_CLOUD.get(normPlate(vehicle.plate));
+  if (!cloudId || !isUuid(cloudId)) throw new Error("تعذر تحديد vehicle_id للحذف");
+  const deletedAt = new Date().toISOString();
+  const { data: userData } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from("vehicles")
+    .update({
+      archived: true,
+      archived_at: deletedAt,
+      archived_reason: reason,
+      deleted_at: deletedAt,
+      deleted_by: userData.user?.id || null,
+    } as any)
+    .eq("tenant_id", tenantId)
+    .eq("id", cloudId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id) throw new Error("لم يتم حذف المركبة في Supabase");
+  suppressCloudMutation = true;
+  try {
+    vehiclesStore.remove(vehicle.id);
+  } finally {
+    suppressCloudMutation = false;
+  }
+  KNOWN_CLOUD.delete(normPlate(vehicle.plate));
+  return vehicle;
 }
 
 async function fetchVehiclesFromCloud(): Promise<void> {
@@ -194,7 +402,7 @@ async function fetchVehiclesFromCloud(): Promise<void> {
     if (!tenantId) return;
     const { data: rows, error } = await supabase
       .from("vehicles")
-      .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,customer_id")
+      .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,mileage,vin,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,customer_id")
       .eq("tenant_id", tenantId)
       .is("deleted_at", null)
       .or("archived.is.null,archived.eq.false")
@@ -220,6 +428,7 @@ async function fetchVehiclesFromCloud(): Promise<void> {
     const local = vehiclesStore.getAll();
     const localByPlate = new Map(local.map((v) => [normPlate(v.plate), v]));
 
+    suppressCloudMutation = true;
     for (const r of rows as any[]) {
       const fullPlate = buildPlate(r);
       const np = normPlate(fullPlate);
@@ -228,6 +437,12 @@ async function fetchVehiclesFromCloud(): Promise<void> {
       const cust = r.customer_id ? custMap.get(r.customer_id) : undefined;
       const lo = localByPlate.get(np);
       const patch: Partial<Vehicle> = {
+        cloudId: r.id,
+        customerId: r.customer_id || undefined,
+        owner: cust?.name || "",
+        ownerPhone: cust?.phone,
+        mileage: r.mileage ? String(r.mileage) : undefined,
+        vin: r.vin_number || r.vin || "",
         archived: !!r.archived,
         archivedAt: r.archived_at || undefined,
         archivedReason: r.archived_reason || undefined,
@@ -236,6 +451,8 @@ async function fetchVehiclesFromCloud(): Promise<void> {
       };
       if (lo) {
         if (
+          lo.cloudId !== r.id ||
+          lo.customerId !== r.customer_id ||
           !!lo.archived !== !!r.archived ||
           (lo.archivedAt || undefined) !== (r.archived_at || undefined) ||
           (lo.archivedReason || undefined) !== (r.archived_reason || undefined) ||
@@ -248,13 +465,16 @@ async function fetchVehiclesFromCloud(): Promise<void> {
       } else {
         vehiclesStore.add({
           id: fullPlate || r.id,
+          cloudId: r.id,
+          customerId: r.customer_id || undefined,
           plate: fullPlate,
           type: [r.brand, r.model].filter(Boolean).join(" ") || "—",
-          vin: r.vin_number || "",
+          vin: r.vin_number || r.vin || "",
           owner: cust?.name || "",
           ownerPhone: cust?.phone,
           year: r.year ? String(r.year) : undefined,
           color: r.color || undefined,
+          mileage: r.mileage ? String(r.mileage) : undefined,
           coverImageUrl: r.vehicle_cover_image_url || undefined,
           thumbnailUrl: r.vehicle_thumbnail_url || undefined,
           visits: 0,
@@ -264,7 +484,9 @@ async function fetchVehiclesFromCloud(): Promise<void> {
         });
       }
     }
+    suppressCloudMutation = false;
   } catch (e) {
+    suppressCloudMutation = false;
     console.warn("[vehiclesStore] cloud fetch failed:", e);
   }
 }

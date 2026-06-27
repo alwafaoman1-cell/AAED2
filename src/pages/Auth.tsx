@@ -45,11 +45,11 @@ export default function AuthPage() {
               .eq("tenant_id", profile.tenant_id)
               .maybeSingle();
             if ((data as any)?.login_otp_enabled) {
-              const { data: otpData } = await supabase.functions.invoke("request-security-otp", {
+              const { data: otpData, error: otpError } = await supabase.functions.invoke("request-security-otp", {
                 body: { action: "login_otp" },
               });
-              if (otpData?.error || otpData?.ok === false) {
-                toast.error("OTP مفعل لكن مزود البريد غير مفعّل على الخادم");
+              if (otpError || otpData?.error || otpData?.ok === false) {
+                toast.error(getFunctionErrorMessage(otpError, otpData));
                 await supabase.auth.signOut();
                 return;
               }

@@ -12,7 +12,7 @@ import { inventoryStore } from "@/lib/inventoryStore";
 import { customersStore } from "@/lib/customersStore";
 import WorkOrderPickerDialog from "@/components/workorders/WorkOrderPickerDialog";
 import VehiclePickerDialog from "./VehiclePickerDialog";
-import { vehiclesStore } from "@/lib/vehiclesStore";
+import { saveVehicleToCloud, vehiclesStore } from "@/lib/vehiclesStore";
 import { getWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
 import { stockMovementsStore } from "@/lib/stockMovementsStore";
 import {
@@ -372,13 +372,14 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
     return [...vehicleFields, ...form.customFields];
   }
 
-  function commitSave(updateVehicleCard: boolean) {
+  async function commitSave(updateVehicleCard: boolean) {
     const data = { ...form, customFields: buildOutputCustomFields(), ...totals };
     customersStore.getOrCreateByName(data.customer);
     if (updateVehicleCard && data.linkedVehiclePlate) {
       const orig = vehiclesStore.getAll().find((x) => x.plate === data.linkedVehiclePlate);
       if (orig) {
-        vehiclesStore.update(orig.id, {
+        await saveVehicleToCloud({
+          ...orig,
           vin: data.vehicle.vin || orig.vin,
           year: data.vehicle.year || orig.year,
           color: data.vehicle.color || orig.color,
@@ -392,13 +393,17 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
     setPendingSave(null);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!validate()) return;
     if (vehicleChangedVsStore()) {
       setPendingSave({ ...form, customFields: buildOutputCustomFields(), ...totals });
       return;
     }
-    commitSave(false);
+    try {
+      await commitSave(false);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ الفاتورة");
+    }
   }
   function handlePreview() {
     if (!validate()) return;
@@ -732,8 +737,12 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => commitSave(false)}>لا — احفظ على الفاتورة فقط</AlertDialogCancel>
-            <AlertDialogAction onClick={() => commitSave(true)}>نعم — حدّث البطاقة الأصلية</AlertDialogAction>
+            <AlertDialogCancel onClick={() => void commitSave(false).catch((error: any) => toast.error(error?.message || "تعذر حفظ الفاتورة"))}>
+              لا — احفظ على الفاتورة فقط
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => void commitSave(true).catch((error: any) => toast.error(error?.message || "تعذر تحديث بطاقة المركبة في Supabase"))}>
+              نعم — حدّث البطاقة الأصلية
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

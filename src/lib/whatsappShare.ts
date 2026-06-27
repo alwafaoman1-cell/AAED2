@@ -4,6 +4,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
 import { normalizePhone } from "@/lib/phoneUtils";
+import { getFunctionErrorMessage } from "@/lib/functionErrors";
 
 const BUCKET = "invoices-pdf";
 const SIGNED_TTL = 60 * 60 * 24 * 30; // 30 days
@@ -47,9 +48,12 @@ export async function htmlToPdfBlob(htmlContent: string, fileBaseName: string): 
 /** Check if Meta WhatsApp Cloud integration is enabled for the tenant. */
 export async function isMetaWhatsAppEnabled(): Promise<boolean> {
   try {
+    const { data: tenantId } = await supabase.rpc("get_user_tenant_id");
+    if (!tenantId) return false;
     const { data } = await supabase
       .from("tenant_integrations")
       .select("enabled")
+      .eq("tenant_id", tenantId)
       .eq("provider", "meta_whatsapp")
       .maybeSingle();
     return !!data?.enabled;
@@ -75,8 +79,7 @@ export async function sendPdfViaMetaCloud(args: {
         caption: args.caption,
       },
     });
-    if (error) return { ok: false, error: error.message };
-    if (!data?.ok) return { ok: false, error: data?.error || "send_failed" };
+    if (error || !data?.ok) return { ok: false, error: getFunctionErrorMessage(error, data) };
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: e?.message || "network_error" };

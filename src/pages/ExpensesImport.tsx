@@ -130,8 +130,8 @@ export default function ExpensesImport() {
     }
   };
 
-  const pushOne = (s: StagedExpense) => {
-    if (!s.amount) { toast.error("المبلغ مطلوب"); return; }
+  const pushOne = async (s: StagedExpense): Promise<boolean> => {
+    if (!s.amount) { toast.error("المبلغ مطلوب"); return false; }
     const cat = cats.find((c) => c.id === s.categoryId) || findCategory(s.categoryName, cats);
     const cb = employeeCashboxesStore.getAll().find((c) => c.isDefault) || employeeCashboxesStore.getAll()[0];
     const voucher = voucherSettingsStore.generateNextNumber("payment");
@@ -149,15 +149,24 @@ export default function ExpensesImport() {
       description: s.description,
       createdAt: new Date().toISOString(),
     };
-    expensesStore.add(rec);
+    try {
+      await expensesStore.add(rec);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ المصروف في Supabase");
+      return false;
+    }
     setStaged((prev) => prev.map((x) => x.id === s.id ? { ...x, pushed: true, voucherNumber: voucher } : x));
+    return true;
   };
 
-  const pushAll = () => {
+  const pushAll = async () => {
     const pending = staged.filter((s) => !s.pushed);
     if (!pending.length) { toast.info("لا يوجد بنود للنشر"); return; }
-    pending.forEach(pushOne);
-    toast.success(`تم نشر ${pending.length} بند مصروفات`);
+    let saved = 0;
+    for (const item of pending) {
+      if (await pushOne(item)) saved++;
+    }
+    toast.success(`تم نشر ${saved} بند مصروفات`);
   };
 
   const downloadTemplate = () => {

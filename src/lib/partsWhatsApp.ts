@@ -4,6 +4,7 @@ import type { WaMessageKind } from "./waMessageLogStore";
 import { normalizePhone } from "./phoneUtils";
 import { supabase } from "@/integrations/supabase/client";
 import { readSystemPreferences } from "@/lib/systemPreferences";
+import { getFunctionErrorMessage } from "@/lib/functionErrors";
 
 async function digits(s: string | undefined | null): Promise<string> {
   const prefs = await readSystemPreferences();
@@ -162,8 +163,7 @@ export async function openWhatsAppWithMessage(message: string, phone?: string) {
   const { data, error } = await supabase.functions.invoke("whatsapp-meta-send", {
     body: { to: cleaned, type: "text", text: message, messageKind: "custom" },
   });
-  if (error) throw error;
-  if (!data?.ok) throw new Error(data?.error || "فشل إرسال واتساب");
+  if (error || !data?.ok) throw new Error(getFunctionErrorMessage(error, data));
 }
 
 /** يرسل عبر Edge Function؛ التسجيل يتم داخل الخادم في whatsapp_logs. */
@@ -212,7 +212,6 @@ export async function sendWhatsAppMessage(args: {
       recipientType: args.recipientType || "other",
     },
   });
-  if (error) throw error;
-  if (!data?.ok) throw new Error(data?.error || "فشل إرسال واتساب");
+  if (error || !data?.ok) throw new Error(getFunctionErrorMessage(error, data));
   return data;
 }

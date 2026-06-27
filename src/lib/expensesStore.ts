@@ -245,51 +245,66 @@ export const expensesStore = {
       const newId = (crypto as any)?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
       item.id = newId; // mutate so caller keeps a valid reference
     }
-    cache = [item, ...cache];
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+    const row = recordToRow(item, tenantId);
+    const { data, error } = await (supabase.from("expenses") as any)
+      .upsert(row)
+      .select("*")
+      .single();
+    if (error) throw error;
+    if (!data?.id) throw new Error("تعذر تأكيد حفظ المصروف في Supabase");
+    const saved = rowToRecord(data);
+    cache = [saved, ...cache.filter((e) => e.id !== saved.id)];
     persistLocal();
     notify();
-    try {
-      const tenantId = await getCurrentTenantId();
-      if (!tenantId) return;
-      const row = recordToRow(item, tenantId);
-      const { error } = await (supabase.from("expenses") as any).upsert(row);
-      if (error) console.warn("[expensesStore.add] supabase error:", error.message);
-    } catch (e) {
-      console.warn("[expensesStore.add] failed", e);
-    }
+    return saved;
   },
   async update(id: string, patch: Partial<ExpenseRecord>) {
+    if (!isUuid(id)) throw new Error("expense_id غير صالح للحفظ في Supabase");
     const idx = cache.findIndex((e) => e.id === id);
-    if (idx === -1) return;
-    cache[idx] = { ...cache[idx], ...patch };
+    if (idx === -1) throw new Error("المصروف غير موجود في القائمة الحالية");
+    const next = { ...cache[idx], ...patch };
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+    const row = recordToRow(next, tenantId);
+    // Remove tenant_id from update payload to avoid changing it.
+    const { tenant_id, id: _id, ...updatable } = row as any;
+    const { data, error } = await supabase
+      .from("expenses")
+      .update(updatable)
+      .eq("tenant_id", tenantId)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    if (!data?.id) throw new Error("تعذر تأكيد تحديث المصروف في Supabase");
+    cache[idx] = rowToRecord(data);
     persistLocal();
     notify();
-    try {
-      const tenantId = await getCurrentTenantId();
-      if (!tenantId) return;
-      const row = recordToRow(cache[idx], tenantId);
-      // Remove tenant_id from update payload to avoid changing it.
-      const { tenant_id, id: _id, ...updatable } = row as any;
-      const { error } = await supabase.from("expenses").update(updatable).eq("id", id);
-      if (error) console.warn("[expensesStore.update] supabase error:", error.message);
-    } catch (e) {
-      console.warn("[expensesStore.update] failed", e);
-    }
+    return cache[idx];
   },
   async remove(id: string): Promise<ExpenseRecord | undefined> {
+    if (!isUuid(id)) throw new Error("expense_id غير صالح للحذف في Supabase");
     const idx = cache.findIndex((e) => e.id === id);
-    if (idx === -1) return undefined;
+    if (idx === -1) throw new Error("المصروف غير موجود في القائمة الحالية");
     const removed = cache[idx];
     const deletedAt = new Date().toISOString();
     try {
-      const { error } = await supabase
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+      const { data, error } = await supabase
         .from("expenses")
         .update({
           deleted_at: deletedAt,
           meta: { ...(recordToRow(removed, "unused").meta as any), deletedAt, deleteReason: removed.deleteReason || "soft delete" },
         } as any)
-        .eq("id", id);
+        .eq("tenant_id", tenantId)
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
       if (error) throw error;
+      if (!data?.id) throw new Error("لم يتم حذف المصروف في Supabase");
       cache = cache.filter((e) => e.id !== id);
       persistLocal();
       notify();

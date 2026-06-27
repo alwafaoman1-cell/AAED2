@@ -2,7 +2,7 @@
 // كل صف = حركة يومية (عميل + سيارة + نوع صيانة + مبالغ).
 // يدعم: الإضافة اليدوية، رفع Excel، حذف، وإنشاء أمر عمل + فاتورة + مصروف لقطع الغيار.
 
-import { addWorkOrder, getWorkOrders, type WorkOrder } from "./workOrdersStore";
+import { getWorkOrders, saveWorkOrderToCloud, type WorkOrder } from "./workOrdersStore";
 import { salesStore, makeEmptyDoc, calculateTotals, cryptoRandom, type SalesLineItem } from "./salesStore";
 import { customersStore } from "./customersStore";
 import { expensesStore, type ExpenseRecord } from "./expensesStore";
@@ -86,11 +86,14 @@ export function autoNetRevenue(r: Pick<DailyLogRow, "paidAmount" | "partsBuy">):
 }
 
 /** ينشئ أمر عمل (مغلق) + فاتورة + مصروف قطع غيار لصف داخل السجل */
-export function generateOrderAndInvoiceForRow(row: DailyLogRow): {
+export async function generateOrderAndInvoiceForRow(row: DailyLogRow): Promise<{
   workOrderId: string; invoiceId: string; invoiceNumber: string; expenseId?: string;
-} {
+}> {
   // 1) ضمان وجود العميل
-  if (row.customer) customersStore.getOrCreateByName(row.customer, row.phone);
+  const savedCustomer = await customersStore.ensureCloudCustomer({
+    name: row.customer || "غير محدد",
+    phone: row.phone || "",
+  });
 
   // 2) إنشاء أمر عمل (مغلق — بيانات قديمة)
   const woNumber = `WO-${new Date().getFullYear()}-${String(getWorkOrders().length + 1).padStart(4, "0")}`;
@@ -107,6 +110,7 @@ export function generateOrderAndInvoiceForRow(row: DailyLogRow): {
   const revenue = row.paidAmount || row.finalAmount;
   const wo: WorkOrder = {
     id: woNumber,
+    customerId: savedCustomer.id,
     customer: row.customer || "غير محدد",
     phone: row.phone || "",
     plate: row.plate || "—",
@@ -122,7 +126,7 @@ export function generateOrderAndInvoiceForRow(row: DailyLogRow): {
     partsCost: row.partsBuy,
     diagnosis: `سجل يومي — ${serviceType}`,
   };
-  addWorkOrder(wo);
+  const savedWorkOrder = await saveWorkOrderToCloud(wo);
 
   // 3) إنشاء فاتورة (بنود حسب أنواع الصيانة المختارة)
   const inv = makeEmptyDoc("invoice");
@@ -184,14 +188,14 @@ export function generateOrderAndInvoiceForRow(row: DailyLogRow): {
       paymentMethod: "cash",
       beneficiary: "مورد قطع غيار",
       description: `قطع غيار — ${row.customer} / ${row.plate} (${woNumber})`,
-      linkedWorkOrderId: woNumber,
+      linkedWorkOrderId: savedWorkOrder.id,
       linkedVehiclePlate: row.plate,
       linkedVehicleName: row.vehicleType,
       createdAt: new Date().toISOString(),
     };
-    expensesStore.add(exp);
-    expenseId = exp.id;
+    const savedExpense = await expensesStore.add(exp);
+    expenseId = savedExpense.id;
   }
 
-  return { workOrderId: woNumber, invoiceId: saved.id, invoiceNumber: String(saved.number), expenseId };
+  return { workOrderId: savedWorkOrder.id, invoiceId: saved.id, invoiceNumber: String(saved.number), expenseId };
 }

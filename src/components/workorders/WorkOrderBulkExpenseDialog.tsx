@@ -171,7 +171,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     );
   }, 0);
 
-  const saveAll = () => {
+  const saveAll = async () => {
     if (!order) return;
     const errors: string[] = [];
     items.forEach((it, idx) => {
@@ -185,22 +185,23 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     let savedCount = 0;
     const createdRecords: ExpenseRecord[] = [];
 
-    items.forEach((it) => {
+    try {
+    for (const it of items) {
       const cat = categories.find((c) => c.id === it.categoryId);
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === it.cashboxId);
       const partsCat = isPartsCat(it);
       const totalAmt = computeAmount(it);
       const number = voucherSettingsStore.generateNextNumber("payment");
-      if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - totalAmt });
+      let savedAmountForItem = 0;
 
       if (partsCat && it.parts.length > 0) {
         // كل قطعة = سجل منفصل (ربح دقيق + يظهر في الفاتورة)
-        it.parts.forEach((p, pi) => {
+        for (const [pi, p] of it.parts.entries()) {
           const qty = parseFloat(p.quantity) || 0;
           const buy = parseFloat(p.unitBuyPrice) || 0;
           const sell = parseFloat(p.unitSellPrice) || 0;
           const lineAmt = qty * buy;
-          if (qty <= 0 || !p.name.trim()) return;
+          if (qty <= 0 || !p.name.trim()) continue;
           const rec: ExpenseRecord = {
             id: `EXP-${Date.now()}-${pi}-${Math.random().toString(36).slice(2, 6)}`,
             voucherNumber: it.parts.length > 1 ? `${number}-${pi + 1}` : number,
@@ -222,10 +223,11 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             unitSellPrice: sell > 0 ? sell : undefined,
             createdAt: new Date().toISOString(),
           };
-          expensesStore.add(rec);
-          createdRecords.push(rec);
+          const saved = await expensesStore.add(rec);
+          createdRecords.push(saved || rec);
+          savedAmountForItem += lineAmt;
           savedCount++;
-        });
+        }
       } else {
         const rec: ExpenseRecord = {
           id: `EXP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -240,9 +242,14 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
           createdAt: new Date().toISOString(),
         };
-        expensesStore.add(rec);
-        createdRecords.push(rec);
+        const saved = await expensesStore.add(rec);
+        createdRecords.push(saved || rec);
+        savedAmountForItem += totalAmt;
         savedCount++;
+      }
+      if (cb && savedAmountForItem > 0) {
+        const latest = employeeCashboxesStore.getAll().find((c) => c.id === cb.id) || cb;
+        employeeCashboxesStore.update(cb.id, { currentBalance: latest.currentBalance - savedAmountForItem });
       }
       logActivity({
         action: "create", entity: "expense", entityId: number,
@@ -250,7 +257,11 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
         description: `سند صرف ${totalAmt.toLocaleString()} ر.ع`,
         amount: totalAmt, metadata: { workOrderId: order.id },
       });
-    });
+    }
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ المصروفات في Supabase");
+      return;
+    }
 
     // مزامنة الفاتورة
     let invMsg = "";

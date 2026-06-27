@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import {
-  getWorkOrders, subscribeWorkOrders, updateWorkOrder, type WorkOrder,
+  getWorkOrders, subscribeWorkOrders, updateWorkOrderInCloud, type WorkOrder,
 } from "@/lib/workOrdersStore";
 import WorkOrderStatusDialog from "@/components/workorders/WorkOrderStatusDialog";
 import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
@@ -145,10 +145,14 @@ export default function TechnicianApp() {
     }
   };
 
-  const handleQuickComplete = (o: WorkOrder) => {
+  const handleQuickComplete = async (o: WorkOrder) => {
     if (o.status === "جاهز للتسليم") return;
-    updateWorkOrder(o.id, { status: "جاهز للتسليم" });
-    toast.success(`${o.id} → جاهز للتسليم`);
+    try {
+      await updateWorkOrderInCloud(o.id, { status: "جاهز للتسليم" });
+      toast.success(`${o.id} → جاهز للتسليم`);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تحديث حالة أمر العمل في Supabase");
+    }
   };
 
   const handleSaveNote = () => {

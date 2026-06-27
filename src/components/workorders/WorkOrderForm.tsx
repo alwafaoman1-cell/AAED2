@@ -6,10 +6,9 @@ import { Input } from "@/components/ui/input";
 import PlateInput from "@/components/vehicles/PlateInput";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { addWorkOrder, updateWorkOrder, WORK_ORDER_STATUSES, NEEDED_PART_STATUS_LABELS, type WorkOrder, type ExtraExpense, type NeededPart, type NeededPartStatus, type WorkItem } from "@/lib/workOrdersStore";
+import { saveWorkOrderToCloud, WORK_ORDER_STATUSES, NEEDED_PART_STATUS_LABELS, type WorkOrder, type ExtraExpense, type NeededPart, type NeededPartStatus, type WorkItem } from "@/lib/workOrdersStore";
 import { nextWorkOrderNumber } from "@/lib/numbering";
 import { customersStore } from "@/lib/customersStore";
-import { vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import CustomerPhoneLookup from "@/components/customers/CustomerPhoneLookup";
 import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicker";
 import { getExpensesForWorkOrder } from "@/lib/expensesStore";
@@ -313,19 +312,17 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       toast.error("الرجاء اختيار العميل أو إنشاؤه (إلزامي)");
       return;
     }
-    if (!isUuid(customerId)) {
-      try {
-        const savedCustomer = await customersStore.ensureCloudCustomer({
-          id: customerId,
-          name: form.customer,
-          phone: form.phone,
-        });
-        customerId = savedCustomer.id;
-        setForm((prev) => ({ ...prev, customer: savedCustomer.name, phone: savedCustomer.phone, ...({ customerId: savedCustomer.id } as Partial<WorkOrder>) }));
-      } catch (error: any) {
-        toast.error(error?.message || "Customer must be saved before creating the work order.");
-        return;
-      }
+    try {
+      const savedCustomer = await customersStore.ensureCloudCustomer({
+        id: customerId,
+        name: form.customer,
+        phone: form.phone,
+      });
+      customerId = savedCustomer.id;
+      setForm((prev) => ({ ...prev, customer: savedCustomer.name, phone: savedCustomer.phone, ...({ customerId: savedCustomer.id } as Partial<WorkOrder>) }));
+    } catch (error: any) {
+      toast.error(error?.message || "Customer must be saved before creating the work order.");
+      return;
     }
     if (!form.plate) {
       toast.error("الرجاء إدخال رقم اللوحة");
@@ -370,24 +367,8 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         toast.error("هذه المركبة موجودة ومرتبطة بعميل آخر. استخدم المركبة الحالية أو اطلب تأكيد المدير للنقل.");
         return;
       }
-      if (resolved.created && form.plate.trim()) {
-        const plateKey = form.plate.trim();
-        const v: Vehicle = {
-          id: plateKey,
-          plate: plateKey,
-          type: `${form.vehicleType || ""} ${form.model || ""}`.trim() || "-",
-          vin: normalizeVin(form.vin),
-          owner: form.customer,
-          ownerPhone: toE164(form.phone) || "",
-          year: form.year,
-          color: form.color,
-          mileage: form.mileage,
-          visits: 0,
-          lastVisit: form.entryDate || new Date().toISOString().split("T")[0],
-          totalSpent: 0,
-          photoPairs: [],
-        };
-        vehiclesStore.add(v);
+      if (resolved.created) {
+        void import("@/lib/vehiclesStore").then((m) => m.refreshVehiclesFromCloud()).catch(() => {});
       }
     } catch (error: any) {
       if (String(error?.message || "").includes("vin_candidate_requires_user_confirmation")) {
@@ -425,15 +406,15 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       totalCost: finalTotal,
       receivedAt: form.receivedAt || new Date().toISOString(),
     };
-    if (isEdit) {
-      updateWorkOrder(form.id, payload);
-      toast.success(`تم تحديث ${form.id}`);
-    } else {
-      addWorkOrder({ ...payload, id: targetOrderNumber });
-      toast.success(`تم إنشاء ${targetOrderNumber}`);
+    try {
+      const saved = await saveWorkOrderToCloud({ ...payload, id: targetOrderNumber });
+      toast.success(isEdit ? `تم تحديث ${saved.id}` : `تم إنشاء ${saved.id}`);
+      onClose();
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ أمر العمل في Supabase");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    onClose();
   }
 
   return (

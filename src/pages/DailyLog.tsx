@@ -109,18 +109,23 @@ export default function DailyLog() {
     clearSel();
     setBulkDelete(false);
   };
-  const doBulkPublish = () => {
+  const doBulkPublish = async () => {
     let n = 0;
-    selected.forEach((id) => {
-      const r = dailyLogStore.list().find((x) => x.id === id);
-      if (!r || r.invoiceId) return;
-      const res = generateOrderAndInvoiceForRow(r);
-      dailyLogStore.update(r.id, {
-        workOrderId: res.workOrderId, invoiceId: res.invoiceId,
-        invoiceNumber: res.invoiceNumber, expenseId: res.expenseId,
-      });
-      n++;
-    });
+    try {
+      for (const id of Array.from(selected)) {
+        const r = dailyLogStore.list().find((x) => x.id === id);
+        if (!r || r.invoiceId) continue;
+        const res = await generateOrderAndInvoiceForRow(r);
+        dailyLogStore.update(r.id, {
+          workOrderId: res.workOrderId, invoiceId: res.invoiceId,
+          invoiceNumber: res.invoiceNumber, expenseId: res.expenseId,
+        });
+        n++;
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر نشر الصفوف في Supabase");
+      return;
+    }
     toast.success(`تم نشر ${n} صف`);
     clearSel();
     setBulkPublish(false);
@@ -192,12 +197,18 @@ export default function DailyLog() {
     }
   };
 
-  const generateForRow = (row: DailyLogRow) => {
+  const generateForRow = async (row: DailyLogRow) => {
     if (!row.customer && !row.finalAmount) {
       toast.error("أدخل اسم العميل أو المبلغ أولاً");
       return;
     }
-    const res = generateOrderAndInvoiceForRow(row);
+    let res: Awaited<ReturnType<typeof generateOrderAndInvoiceForRow>>;
+    try {
+      res = await generateOrderAndInvoiceForRow(row);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر نشر الصف في Supabase");
+      return;
+    }
     dailyLogStore.update(row.id, {
       workOrderId: res.workOrderId,
       invoiceId: res.invoiceId,
@@ -208,19 +219,26 @@ export default function DailyLog() {
     toast.success(`تم نشر ${res.workOrderId} (مغلق) + فاتورة ${res.invoiceNumber}${extra}`);
   };
 
-  const generateAll = () => {
+  const generateAll = async () => {
     const pending = rows.filter((r) => !r.invoiceId);
     if (!pending.length) { toast.info("لا توجد صفوف بانتظار النشر"); return; }
-    pending.forEach((r) => {
-      const res = generateOrderAndInvoiceForRow(r);
-      dailyLogStore.update(r.id, {
-        workOrderId: res.workOrderId,
-        invoiceId: res.invoiceId,
-        invoiceNumber: res.invoiceNumber,
-        expenseId: res.expenseId,
-      });
-    });
-    toast.success(`تم نشر ${pending.length} أمر عمل + فاتورة (مغلقة) بنجاح`);
+    let n = 0;
+    try {
+      for (const r of pending) {
+        const res = await generateOrderAndInvoiceForRow(r);
+        dailyLogStore.update(r.id, {
+          workOrderId: res.workOrderId,
+          invoiceId: res.invoiceId,
+          invoiceNumber: res.invoiceNumber,
+          expenseId: res.expenseId,
+        });
+        n++;
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر نشر الصفوف في Supabase");
+      return;
+    }
+    toast.success(`تم نشر ${n} أمر عمل + فاتورة (مغلقة) بنجاح`);
   };
 
   const downloadTemplate = () => {

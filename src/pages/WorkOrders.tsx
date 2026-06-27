@@ -32,7 +32,7 @@ import {
   deleteWorkOrder,
   getWorkOrders,
   subscribeWorkOrders,
-  updateWorkOrder,
+  updateWorkOrderInCloud,
   WORK_ORDER_STATUSES,
   isPartStillNeeded,
   type WorkOrder,
@@ -909,11 +909,17 @@ export default function WorkOrders() {
       <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())} label="أمر">
         {/* تغيير الحالة جماعياً */}
         <Select
-          onValueChange={(status) => {
-            selectedIds.forEach((id) => updateWorkOrder(id, { status }));
-            toast.success(`تم تحديث حالة ${selectedIds.size} أمر إلى "${status}"`);
-            setOrders([...getWorkOrders()]);
-            setSelectedIds(new Set());
+          onValueChange={async (status) => {
+            try {
+              for (const id of Array.from(selectedIds)) {
+                await updateWorkOrderInCloud(id, { status });
+              }
+              toast.success(`تم تحديث حالة ${selectedIds.size} أمر إلى "${status}"`);
+              setOrders([...getWorkOrders()]);
+              setSelectedIds(new Set());
+            } catch (error: any) {
+              toast.error(error?.message || "تعذر تحديث أوامر العمل في Supabase");
+            }
           }}
         >
           <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="تغيير الحالة" /></SelectTrigger>
@@ -923,11 +929,17 @@ export default function WorkOrders() {
         </Select>
         {/* إسناد لفني */}
         <Select
-          onValueChange={(tech) => {
-            selectedIds.forEach((id) => updateWorkOrder(id, { technician: tech }));
-            toast.success(`تم إسناد ${selectedIds.size} أمر إلى ${tech}`);
-            setOrders([...getWorkOrders()]);
-            setSelectedIds(new Set());
+          onValueChange={async (tech) => {
+            try {
+              for (const id of Array.from(selectedIds)) {
+                await updateWorkOrderInCloud(id, { technician: tech });
+              }
+              toast.success(`تم إسناد ${selectedIds.size} أمر إلى ${tech}`);
+              setOrders([...getWorkOrders()]);
+              setSelectedIds(new Set());
+            } catch (error: any) {
+              toast.error(error?.message || "تعذر إسناد أوامر العمل في Supabase");
+            }
           }}
         >
           <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="إسناد لفني" /></SelectTrigger>
@@ -985,11 +997,22 @@ export default function WorkOrders() {
           size="sm"
           variant="outline"
           className="h-8 gap-1"
-          onClick={() => {
-            const archivedAt = new Date().toISOString();
-            selectedIds.forEach((id) => updateWorkOrder(id, { archivedAt, status: "مغلق" }));
-            toast.success(`تم نقل ${selectedIds.size} أمر إلى الأرشيف`);
-            setSelectedIds(new Set());
+          onClick={async () => {
+            try {
+              let n = 0;
+              for (const id of Array.from(selectedIds)) {
+                const order = orders.find((o) => o.id === id);
+                if (!order) continue;
+                await archiveWorkOrder(order, "Bulk Archive Work Order");
+                deleteWorkOrder(id);
+                n++;
+              }
+              toast.success(`تم نقل ${n} أمر إلى الأرشيف`);
+              setOrders([...getWorkOrders()]);
+              setSelectedIds(new Set());
+            } catch (error: any) {
+              toast.error(error?.message || "تعذر نقل أوامر العمل إلى الأرشيف في Supabase");
+            }
           }}
         >
           <FolderOpen size={14} /> للأرشيف

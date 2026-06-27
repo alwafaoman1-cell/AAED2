@@ -32,10 +32,10 @@ import {
 } from "@/lib/financeSettingsStore";
 import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import {
-  addWorkOrder,
   getWorkOrders,
   subscribeWorkOrders,
   refreshWorkOrdersFromCloud,
+  saveWorkOrderToCloud,
   type WorkOrder,
   WORK_ORDER_STATUSES,
 } from "@/lib/workOrdersStore";
@@ -167,7 +167,7 @@ export default function SupervisorApp() {
   });
   const setWoField = <K extends keyof typeof wo>(k: K, v: typeof wo[K]) => setWo((s) => ({ ...s, [k]: v }));
 
-  const handleCreateWO = () => {
+  const handleCreateWO = async () => {
     if (!wo.customer.trim()) return toast.error(isAr ? "اسم العميل مطلوب" : "Customer name required");
     if (!wo.plate.trim()) return toast.error(isAr ? "رقم اللوحة مطلوب" : "Plate number required");
     if (wo.isInsurance) {
@@ -205,15 +205,21 @@ export default function SupervisorApp() {
       partsCost: 0,
       photos: [],
     };
-    addWorkOrder(order);
-    toast.success(`${isAr ? (wo.isInsurance ? "تم إنشاء أمر عمل تأمين" : "تم إنشاء أمر العمل") : (wo.isInsurance ? "Insurance work order created" : "Work order created")} — ${id}`);
+    let saved: WorkOrder;
+    try {
+      saved = await saveWorkOrderToCloud(order);
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر حفظ أمر العمل في Supabase" : "Could not save work order in Supabase"));
+      return;
+    }
+    toast.success(`${isAr ? (wo.isInsurance ? "تم إنشاء أمر عمل تأمين" : "تم إنشاء أمر العمل") : (wo.isInsurance ? "Insurance work order created" : "Work order created")} — ${saved.id}`);
     setWo({
       ...wo, customer: "", phone: "", plate: "", vehicleType: "", model: "",
       year: "", vin: "", color: "", mileage: "", description: "",
       isInsurance: false, insuranceCompany: "", claimNumber: "", policyNumber: "",
       incidentDate: "", incidentLocation: "",
     });
-    setQrOrderId(id);
+    setQrOrderId(saved.id);
     setQrOpen(true);
     setTab("vehicles");
   };
@@ -294,7 +300,7 @@ export default function SupervisorApp() {
     }));
 
 
-  const handleSaveExpense = () => {
+  const handleSaveExpense = async () => {
     const value = parseFloat(exp.amount);
     if (!value || value <= 0) return toast.error(t("supervisor.errAmount"));
     if (!exp.categoryId) return toast.error(t("supervisor.errCategory"));
@@ -313,9 +319,8 @@ export default function SupervisorApp() {
       if (orig.refunded) { toast.error(isAr ? "السند مُسترجَع — لا يمكن تعديله" : "Refunded voucher can't be edited"); return; }
       // ضبط الأرصدة: أعد القديم ثم اخصم الجديد (قد تتغير الخزينة)
       const oldCb = employeeCashboxesStore.getAll().find((c) => c.id === orig.cashboxId);
-      if (oldCb) employeeCashboxesStore.update(oldCb.id, { currentBalance: oldCb.currentBalance + orig.amount });
-      if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
-      expensesStore.update(editingId, {
+      try {
+        await expensesStore.update(editingId, {
         date: exp.date,
         amount: value,
         categoryId: exp.categoryId,
@@ -333,7 +338,13 @@ export default function SupervisorApp() {
         supplierTaxNumber: exp.supplierTaxNumber || undefined,
         supplierInvoiceNumber: exp.supplierInvoiceNumber || undefined,
         edited: true,
-      });
+        });
+      } catch (error: any) {
+        toast.error(error?.message || (isAr ? "تعذر تحديث سند الصرف في Supabase" : "Could not update voucher in Supabase"));
+        return;
+      }
+      if (oldCb) employeeCashboxesStore.update(oldCb.id, { currentBalance: oldCb.currentBalance + orig.amount });
+      if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
       toast.success(isAr ? "تم تعديل السند" : "Voucher updated");
       setEditingId(null);
       resetExpForm();
@@ -341,7 +352,6 @@ export default function SupervisorApp() {
     }
 
     const number = voucherSettingsStore.generateNextNumber("payment");
-    if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
     const record: ExpenseRecord = {
       id: `EXP-${Date.now()}`,
       voucherNumber: number,
@@ -363,7 +373,13 @@ export default function SupervisorApp() {
       supplierInvoiceNumber: exp.supplierInvoiceNumber || undefined,
       createdAt: new Date().toISOString(),
     };
-    expensesStore.add(record);
+    try {
+      await expensesStore.add(record);
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر حفظ سند الصرف في Supabase" : "Could not save voucher in Supabase"));
+      return;
+    }
+    if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
     toast.success(t("supervisor.saved", { n: number }));
     resetExpForm();
   };
@@ -401,12 +417,17 @@ export default function SupervisorApp() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleRefundExp = (rec: ExpenseRecord) => {
+  const handleRefundExp = async (rec: ExpenseRecord) => {
     if (rec.refunded) return toast.error(isAr ? "تم استرجاعه مسبقاً" : "Already refunded");
     if (!confirm(isAr ? `استرجاع المبلغ ${rec.amount} للخزينة؟` : `Refund ${rec.amount} to cashbox?`)) return;
     const cb = employeeCashboxesStore.getAll().find((c) => c.id === rec.cashboxId);
     if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance + rec.amount });
-    expensesStore.update(rec.id, { refunded: true, refundedAt: new Date().toISOString() });
+    try {
+      await expensesStore.update(rec.id, { refunded: true, refundedAt: new Date().toISOString() });
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر تحديث سند الصرف في Supabase" : "Could not update voucher in Supabase"));
+      return;
+    }
     toast.success(isAr ? "تم استرجاع المبلغ للخزينة" : "Refunded to cashbox");
   };
 

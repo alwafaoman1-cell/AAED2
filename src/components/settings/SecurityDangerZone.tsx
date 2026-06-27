@@ -71,8 +71,6 @@ export default function SecurityDangerZone() {
       if (error || data?.error || data?.ok === false) {
         toast.error(getFunctionErrorMessage(error, data));
         return;
-        toast.error("مزود البريد غير مفعّل على الخادم. أضف RESEND_API_KEY قبل استخدام التهيئة.");
-        return;
       }
       toast.success("تم إرسال رمز التحقق إلى بريد المدير");
     } catch (error: any) {

@@ -98,7 +98,7 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
 
   const grandTotal = items.reduce((s, it) => s + computeAmount(it), 0);
 
-  const saveAll = () => {
+  const saveAll = async () => {
     const errors: string[] = [];
     items.forEach((it, idx) => {
       const amt = computeAmount(it);
@@ -109,20 +109,21 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
     if (errors.length) return toast.error(errors[0]);
 
     let saved = 0;
-    items.forEach((it) => {
+    try {
+    for (const it of items) {
       const amt = computeAmount(it);
       const cat = categories.find((c) => c.id === it.categoryId);
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === it.cashboxId);
       const isParts = !!cat && /قطع غيار/.test(cat.name);
       const linkedVehicle = it.linkedVehiclePlate ? allVehicles.find((v) => v.plate === it.linkedVehiclePlate) : undefined;
       const number = voucherSettingsStore.generateNextNumber("payment");
-      if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - amt });
+      let savedAmountForItem = 0;
 
       // إذا فيه قطع → نسجّل كل قطعة كسجل منفصل لتتبع كل قطعة محاسبياً
       if (it.parts.length > 0 && isParts) {
-        it.parts.forEach((p, pi) => {
+        for (const [pi, p] of it.parts.entries()) {
           const pAmt = (parseFloat(p.quantity) || 0) * (parseFloat(p.unitPrice) || 0);
-          if (pAmt <= 0) return;
+          if (pAmt <= 0) continue;
           const partNumber = it.parts.length > 1 ? `${number}-${pi + 1}` : number;
           const rec: ExpenseRecord = {
             id: `EXP-${Date.now()}-${pi}-${Math.random()}`,
@@ -143,9 +144,10 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
             unitBuyPrice: parseFloat(p.unitPrice) || 0,
             createdAt: new Date().toISOString(),
           };
-          expensesStore.add(rec);
+          await expensesStore.add(rec);
+          savedAmountForItem += pAmt;
           saved++;
-        });
+        }
       } else {
         const rec: ExpenseRecord = {
           id: `EXP-${Date.now()}-${Math.random()}`,
@@ -159,8 +161,13 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
           linkedVehicleName: isParts && linkedVehicle ? `${linkedVehicle.type} — ${linkedVehicle.plate}` : undefined,
           createdAt: new Date().toISOString(),
         };
-        expensesStore.add(rec);
+        await expensesStore.add(rec);
+        savedAmountForItem += amt;
         saved++;
+      }
+      if (cb && savedAmountForItem > 0) {
+        const latest = employeeCashboxesStore.getAll().find((c) => c.id === cb.id) || cb;
+        employeeCashboxesStore.update(cb.id, { currentBalance: latest.currentBalance - savedAmountForItem });
       }
       logActivity({
         action: "create", entity: "expense", entityId: number,
@@ -168,7 +175,11 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
         description: `إضافة سند صرف بقيمة ${amt.toLocaleString()} ر.ع`,
         amount: amt,
       });
-    });
+    }
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ المصروفات في Supabase");
+      return;
+    }
 
     toast.success(`تم حفظ ${saved} سند صرف بإجمالي ${grandTotal.toLocaleString()} ر.ع`);
     onSaved?.();

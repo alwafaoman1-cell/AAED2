@@ -120,7 +120,7 @@ export default function ExpenseNew() {
     setPhoto(await fileToWebpDataUrl(file));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const value = parseFloat(amount);
     if (!value || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
     if (!categoryId) return toast.error("اختر تصنيف المصروف");
@@ -145,9 +145,8 @@ export default function ExpenseNew() {
       if (old) {
         // Refund old amount to original cashbox, deduct new amount from current cashbox
         const oldCb = employeeCashboxesStore.getAll().find((c) => c.id === old.cashboxId);
-        if (oldCb) employeeCashboxesStore.update(oldCb.id, { currentBalance: oldCb.currentBalance + old.amount });
-        if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
-        expensesStore.update(editingId, {
+        try {
+          await expensesStore.update(editingId, {
           date, amount: value, categoryId, categoryName: cat?.name, cashboxId,
           cashboxName: cb?.cashboxName, paymentMethod, beneficiary, description, photo,
           supplierTaxNumber: supplierTaxNumber || undefined,
@@ -155,7 +154,13 @@ export default function ExpenseNew() {
           ...(supplierCompany ? { beneficiary: beneficiary || supplierCompany } : {}),
           ...linkContext,
           ...vehicleFields,
-        });
+          });
+        } catch (error: any) {
+          toast.error(error?.message || "تعذر تحديث المصروف في Supabase");
+          return;
+        }
+        if (oldCb) employeeCashboxesStore.update(oldCb.id, { currentBalance: oldCb.currentBalance + old.amount });
+        if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
         logActivity({
           action: "update", entity: "expense", entityId: old.voucherNumber,
           label: `${cat?.name || "مصروف"}`,
@@ -169,7 +174,6 @@ export default function ExpenseNew() {
     }
 
     const number = voucherSettingsStore.generateNextNumber("payment");
-    if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
 
     const record: ExpenseRecord = {
       id: `EXP-${Date.now()}`,
@@ -186,7 +190,13 @@ export default function ExpenseNew() {
       ...vehicleFields,
       createdAt: new Date().toISOString(),
     };
-    expensesStore.add(record);
+    try {
+      await expensesStore.add(record);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ المصروف في Supabase");
+      return;
+    }
+    if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
     logActivity({
       action: "create", entity: "expense", entityId: number,
       label: `${cat?.name || "مصروف"} — ${beneficiary || "بدون مستفيد"}`,
@@ -295,21 +305,26 @@ export default function ExpenseNew() {
 
   const bulk = useBulkSelection<ExpenseRecord>(filtered);
 
-  const handleDeleteMultiple = () => {
+  const handleDeleteMultiple = async () => {
     if (bulk.count === 0) return;
     let refundTotal = 0;
-    bulk.selectedItems.forEach((rec) => {
+    for (const rec of bulk.selectedItems) {
+      try {
+        await expensesStore.remove(rec.id);
+      } catch (error: any) {
+        toast.error(error?.message || `تعذر حذف سند الصرف ${rec.voucherNumber} من Supabase`);
+        return;
+      }
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === rec.cashboxId);
       if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance + rec.amount });
       refundTotal += rec.amount;
-      expensesStore.remove(rec.id);
       logActivity({
         action: "delete", entity: "expense", entityId: rec.voucherNumber,
         label: `${rec.categoryName || "مصروف"}`,
         description: `حذف سند صرف بقيمة ${rec.amount.toLocaleString()} ر.ع`,
         amount: rec.amount,
       });
-    });
+    }
     toast.success(`تم حذف ${bulk.count} سند صرف (إجمالي مُسترجع: ${refundTotal.toLocaleString()} ر.ع)`);
     bulk.clear();
     setDeleteMultipleOpen(false);

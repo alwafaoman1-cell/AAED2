@@ -70,10 +70,10 @@ export default function CancelClaimDialog({
 
       // 2) optional side effects
       if (action === "expense") {
-        const exp = createExpenseFromCancelledClaim(claim, numericAmount);
+        const exp = await createExpenseFromCancelledClaim(claim, numericAmount);
         toast.success(`تم إنشاء سند مصروف ${exp.voucherNumber}`);
       } else if (action === "customer_invoice") {
-        const wo = createCustomerInvoiceFromCancelledClaim(claim, numericAmount);
+        const wo = await createCustomerInvoiceFromCancelledClaim(claim, numericAmount);
         toast.success(`تم إنشاء أمر عمل/فاتورة على مالك السيارة ${wo.id}`);
       }
 

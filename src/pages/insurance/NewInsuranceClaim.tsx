@@ -307,46 +307,19 @@ export default function NewInsuranceClaim() {
       const { data: tenantId } = await supabase.rpc("get_user_tenant_id");
       if (!tenantId) throw new Error("لا يمكن تحديد المستأجر");
 
-      // ── فحص التكرار (رقم اللوحة / VIN / رقم المطالبة) ──
-      const plate = draft.vehiclePlate.trim();
-      const vin = draft.vehicleVin.trim();
+      // فحص تكرار رقم المطالبة داخل نفس الورشة فقط.
       const cn = draft.claimNumber.trim();
-      const dupOr: string[] = [];
-      if (plate) dupOr.push(`vehicle_plate.ilike.${plate}`);
-      if (cn) dupOr.push(`claim_number.ilike.${cn}`);
-      const { data: dupClaims } = await supabase
+      const { data: existingClaim, error: existingClaimError } = await supabase
         .from("insurance_claims" as any)
-        .select("id, claim_number, status, vehicle_plate, insurance_company, created_at")
+        .select("id, claim_number, status, insurance_company, created_at")
         .eq("tenant_id", tenantId as string)
-        .or(dupOr.length ? dupOr.join(",") : "id.eq.00000000-0000-0000-0000-000000000000");
-      const activeDups = ((dupClaims as any[]) || []).filter(
-        (d) => !["rejected", "cancelled", "paid"].includes(d.status)
-      );
-      // VIN duplicates via vehicles table
-      let vinDup: any[] = [];
-      if (vin) {
-        const { data: v } = await supabase
-          .from("vehicles")
-          .select("id, plate_number, brand, model")
-          .eq("tenant_id", tenantId as string)
-          .ilike("vin", vin);
-        vinDup = (v as any[]) || [];
-      }
-      if (activeDups.length || vinDup.length) {
-        const lines = [
-          "تنبيه: توجد مطالبة أو سجل مسبق لهذه المركبة. يرجى مراجعة البيانات قبل إنشاء سجل جديد لتجنب التكرار.",
-          "",
-          ...activeDups.map(
-            (d) => `• مطالبة ${d.claim_number} — ${d.insurance_company || ""} — ${d.vehicle_plate || ""} (${d.status})`
-          ),
-          ...vinDup.map((v) => `• مركبة مسجلة بنفس VIN: ${v.brand || ""} ${v.model || ""} — ${v.plate_number}`),
-          "",
-          "هل تريد المتابعة وإنشاء سجل جديد؟",
-        ].join("\n");
-        if (!window.confirm(lines)) {
-          setSubmitting(false);
-          return;
-        }
+        .ilike("claim_number", cn)
+        .maybeSingle();
+      if (existingClaimError) throw existingClaimError;
+      if ((existingClaim as any)?.id) {
+        toast.warning("رقم المطالبة موجود مسبقًا. سيتم فتح المطالبة الموجودة.");
+        navigate(`/insurance/${(existingClaim as any).id}`);
+        return;
       }
 
 
@@ -425,6 +398,18 @@ export default function NewInsuranceClaim() {
             setSubmitting(false);
             return;
           }
+          if (vehicleCandidate.customer_id && vehicleCandidate.customer_id !== customerId) {
+            const { data: linkedOwner, error: linkedOwnerError } = await supabase
+              .from("customers")
+              .select("id,name,phone")
+              .eq("tenant_id", tenantId as string)
+              .eq("id", vehicleCandidate.customer_id)
+              .maybeSingle();
+            if (linkedOwnerError) throw linkedOwnerError;
+            if (!(linkedOwner as any)?.id) throw new Error("تعذر قراءة مالك المركبة الموجود من Supabase");
+            customerRecord = linkedOwner as any;
+            customerId = (linkedOwner as any).id;
+          }
         }
         vehicleId = vehicleCandidate.id;
       } else if (draft.vehiclePlate.trim() || draft.vehicleVin.trim()) {
@@ -440,6 +425,29 @@ export default function NewInsuranceClaim() {
         vehicleId = resolved.vehicleId;
       }
       if (!vehicleId) throw new Error("لا يمكن حفظ مطالبة بدون vehicle_id");
+
+      const { data: sameVehicleClaims, error: sameVehicleError } = await supabase
+        .from("insurance_claims" as any)
+        .select("id,claim_number,status,insurance_company,created_at")
+        .eq("tenant_id", tenantId as string)
+        .eq("vehicle_id", vehicleId)
+        .neq("claim_number", cn)
+        .not("status", "in", '("rejected","cancelled","paid")')
+        .limit(10);
+      if (sameVehicleError) throw sameVehicleError;
+      if ((sameVehicleClaims as any[])?.length) {
+        const lines = [
+          "تنبيه: نفس المركبة لديها مطالبة أخرى برقم مختلف.",
+          "",
+          ...((sameVehicleClaims as any[]) || []).map((d) => `• مطالبة ${d.claim_number} — ${d.insurance_company || ""} (${d.status})`),
+          "",
+          "هل تريد المتابعة وإنشاء مطالبة جديدة لهذه المركبة؟",
+        ].join("\n");
+        if (!window.confirm(lines)) {
+          setSubmitting(false);
+          return;
+        }
+      }
 
 
 

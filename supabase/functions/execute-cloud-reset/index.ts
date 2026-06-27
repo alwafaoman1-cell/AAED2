@@ -33,7 +33,11 @@ async function sha256(input: string) {
 
 Deno.serve(async (req) => {
   try {
-    if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+    if (req.method === "OPTIONS") {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY");

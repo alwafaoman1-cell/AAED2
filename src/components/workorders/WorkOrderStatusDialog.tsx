@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Check, ChevronLeft, Camera, Image as ImageIcon, Send, Save, Trash2, Loader2 } from "lucide-react";
-import { WORK_ORDER_STATUSES, updateWorkOrder, type WorkOrder, type StagePhase, type StagePhoto } from "@/lib/workOrdersStore";
+import { WORK_ORDER_STATUSES, updateWorkOrderInCloud, type WorkOrder, type StagePhase, type StagePhoto } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
@@ -151,7 +151,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     }
     if (hasPhotos) patch.photos = [...(order!.photos || []), ...pendingPhotos];
     if (Object.keys(patch).length === 0) return true;
-    updateWorkOrder(order!.id, patch);
+    await updateWorkOrderInCloud(order!.id, patch);
     return true;
   }
 
@@ -164,6 +164,8 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
       toast.success("تم الحفظ ✓");
       onUpdated?.();
       onOpenChange(false);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ حالة أمر العمل في Supabase");
     } finally { setSaving(null); }
   }
 
@@ -193,6 +195,8 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
       toast.success("تم الحفظ والإرسال عبر واتساب ✓");
       onUpdated?.();
       onOpenChange(false);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ/إرسال تحديث الحالة");
     } finally { setSaving(null); }
   }
 

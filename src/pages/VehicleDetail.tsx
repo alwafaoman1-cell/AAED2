@@ -20,7 +20,7 @@ import ShareVehicleDialog from "@/components/vehicles/ShareVehicleDialog";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import PhotoLightbox, { type LightboxPhoto } from "@/components/vehicles/PhotoLightbox";
 import VehicleStatusTimelineDialog from "@/components/vehicles/VehicleStatusTimelineDialog";
-import { vehiclesStore, refreshVehiclesFromCloud, type Vehicle, type VehiclePhotoPair } from "@/lib/vehiclesStore";
+import { saveVehicleToCloud, vehiclesStore, refreshVehiclesFromCloud, type Vehicle, type VehiclePhotoPair } from "@/lib/vehiclesStore";
 import { getWorkOrders, subscribeWorkOrders, refreshWorkOrdersFromCloud, type WorkOrder, STAGE_LABELS, type StagePhase } from "@/lib/workOrdersStore";
 import { customersStore } from "@/lib/customersStore";
 import { getVehicleCardHtml, getWorkOrderHtml, getStagePhotosAlbumHtml } from "@/lib/pdfGenerator";
@@ -884,14 +884,18 @@ function EditVehicleDialog({
   const [form, setForm] = useState<Vehicle>(vehicle);
   useEffect(() => setForm(vehicle), [vehicle, open]);
 
-  function save() {
+  async function save() {
     if (!form.plate || !form.owner) {
       toast.error("اللوحة والمالك مطلوبان");
       return;
     }
-    vehiclesStore.update(vehicle.id, form);
-    toast.success("تم تحديث بيانات السيارة");
-    onOpenChange(false);
+    try {
+      await saveVehicleToCloud(form, { previousPlate: vehicle.plate });
+      toast.success("تم تحديث بيانات السيارة");
+      onOpenChange(false);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تحديث المركبة في Supabase");
+    }
   }
 
   return (

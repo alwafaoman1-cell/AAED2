@@ -25,7 +25,11 @@ interface Body {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   try {
     const authHeader = req.headers.get("Authorization");
@@ -78,13 +82,40 @@ Deno.serve(async (req) => {
       }
     }
 
+    const to = String(body.to).replace(/\D/g, "");
+    const type = body.type || "text";
+    const messageBody = type === "text"
+      ? (body.text || "")
+      : (body.caption || body.filename || body.template?.name || "");
+
     const { data: integ, error } = await supabase
       .from("tenant_integrations")
       .select("config, secrets, enabled")
+      .eq("tenant_id", tenantId)
       .eq("provider", "meta_whatsapp")
       .maybeSingle();
     if (error) throw error;
-    if (!integ || !integ.enabled) throw new Error("integration_disabled");
+    if (!integ || !integ.enabled) {
+      await supabase
+        .from("whatsapp_logs")
+        .insert({
+          tenant_id: tenantId,
+          customer_id: customerId,
+          vehicle_id: vehicleId,
+          insurance_claim_id: insuranceClaimId,
+          job_order_id: jobOrderId,
+          recipient_type: body.recipientType || "customer",
+          recipient_name: body.recipientName || null,
+          recipient_phone: to,
+          message_kind: body.messageKind || type,
+          message_body: messageBody,
+          media_url: body.mediaUrl || null,
+          status: "failed",
+          error_message: "integration_disabled",
+          sent_by: userData.user.id,
+        });
+      throw new Error("integration_disabled");
+    }
 
     const cfg = integ.config as Record<string, string>;
     const sec = integ.secrets as Record<string, string>;
@@ -92,15 +123,10 @@ Deno.serve(async (req) => {
     const token = sec.access_token;
     if (!phoneId || !token) throw new Error("missing_credentials");
 
-    const to = String(body.to).replace(/\D/g, "");
-    const type = body.type || "text";
     if (type === "image") throw new Error("secure_link_required");
     if (type === "document" && !/^https:\/\//i.test(body.mediaUrl || "")) {
       throw new Error("secure_https_link_required");
     }
-    const messageBody = type === "text"
-      ? (body.text || "")
-      : (body.caption || body.filename || body.template?.name || "");
 
     const { data: logRow, error: logError } = await supabase
       .from("whatsapp_logs")

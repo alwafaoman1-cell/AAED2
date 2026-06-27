@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { AlertCircle } from "lucide-react";
-import { vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
+import { saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import { toast } from "sonner";
 import VinScannerButton from "@/components/scanner/VinScannerButton";
 import {
@@ -64,7 +64,7 @@ export default function VehicleQuickFormDialog({ open, onOpenChange, ownerName, 
     [plateLetters, plateDigits],
   );
 
-  function save() {
+  async function save() {
     const L = extractPlateLetters(plateLetters);
     const D = extractPlateDigits(plateDigits);
     const err = validatePlateParts(L, D);
@@ -89,10 +89,14 @@ export default function VehicleQuickFormDialog({ open, onOpenChange, ownerName, 
       totalSpent: 0,
       photoPairs: [],
     };
-    vehiclesStore.add(v);
-    toast.success("تمت إضافة السيارة");
-    onSaved?.(v);
-    onOpenChange(false);
+    try {
+      const saved = await saveVehicleToCloud(v);
+      toast.success("تمت إضافة السيارة");
+      onSaved?.(saved);
+      onOpenChange(false);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ المركبة في Supabase");
+    }
   }
 
   return (
