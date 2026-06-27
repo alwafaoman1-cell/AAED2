@@ -72,7 +72,7 @@ export default function Vehicles() {
     );
   }
 
-  function openNew() { setForm({ ...empty, id: `VEH-${Date.now()}` }); setEditing(null); setShowForm(true); }
+  function openNew() { setForm({ ...empty, id: "" }); setEditing(null); setShowForm(true); }
   function openEdit(v: Vehicle) { setForm(v); setEditing(v); setShowForm(true); }
   function handleSave() {
     if (!form.plate || !form.owner) { toast.error("اللوحة والمالك مطلوبان"); return; }

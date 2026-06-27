@@ -287,6 +287,7 @@ export function subscribeWorkOrders(cb: () => void): () => void {
 // ============================================================
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { isUuid } from "@/lib/uuid";
 
 
 function cloudStatusToLocal(s: string | null | undefined): string {
@@ -512,7 +513,7 @@ async function ensureCustomer(tenantId: string, name: string, phone?: string): P
 }
 
 async function ensureVehicle(tenantId: string, customerId: string, o: WorkOrder): Promise<string | null> {
-  if (o.vehicleId) return o.vehicleId;
+  if (o.vehicleId && isUuid(o.vehicleId)) return o.vehicleId;
   try {
     const { ensureVehicleForCustomer } = await import("@/lib/vehicleIdentity");
     const resolved = await ensureVehicleForCustomer({
@@ -539,7 +540,7 @@ async function pushOrderToCloud(o: WorkOrder) {
   try {
     if (KNOWN_CLOUD_NUMBERS.has(o.id)) return; // already on cloud
     const ctx = await tenantContext(); if (!ctx) return;
-    const custId = await ensureCustomer(ctx.tenantId, o.customer, o.phone); if (!custId) return;
+    const custId = o.customerId && isUuid(o.customerId) ? o.customerId : await ensureCustomer(ctx.tenantId, o.customer, o.phone); if (!custId || !isUuid(custId)) return;
     const vehId = await ensureVehicle(ctx.tenantId, custId, o); if (!vehId) return;
     const { error } = await (supabase.from("job_orders") as any).insert({
       tenant_id: ctx.tenantId,
@@ -557,7 +558,7 @@ async function pushOrderToCloud(o: WorkOrder) {
       parts_cost: o.partsCost || 0,
       insurance_company: o.insurance && o.insurance !== "-" ? o.insurance : null,
       insurance_claim_number: o.claimNumber && o.claimNumber !== "-" ? o.claimNumber : null,
-      claim_id: o.claimId || null,
+      claim_id: o.claimId && isUuid(o.claimId) ? o.claimId : null,
       work_order_type: o.claimId ? "insurance" : (o.workOrderType || "general_customer"),
       archived_at: o.archivedAt || null,
       notes: o.description || null,

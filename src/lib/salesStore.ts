@@ -2,6 +2,7 @@
 // (الفواتير، عروض الأسعار، الإشعارات الدائنة، الفواتير المرتجعة، الفواتير الدورية، دفعات العملاء)
 import { resolveSeriesByPrefix } from "@/lib/numberingSettings";
 import { supabase } from "@/integrations/supabase/client";
+import { isUuid } from "@/lib/uuid";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 export type SalesDocType =
@@ -211,7 +212,7 @@ async function upsertSalesCloud(doc: SalesDoc) {
     doc_number: doc.number,
     doc_type: doc.type,
     status: doc.isDeleted ? "cancelled" : doc.status,
-    customer_id: doc.customerId || null,
+    customer_id: doc.customerId && isUuid(doc.customerId) ? doc.customerId : null,
     customer_name: doc.customerName || null,
     date: doc.date,
     due_date: doc.dueDate || null,

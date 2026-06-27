@@ -13,6 +13,7 @@ import { logActivity } from "@/lib/auditLogStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { toast } from "sonner";
+import { isUuid } from "@/lib/uuid";
 
 export const CLOSING_STATUSES = ["جاهز للتسليم", "تم التسليم", "مغلق", "Ready", "Completed", "Delivered", "Closed"];
 
@@ -89,7 +90,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       const { error: auditError } = await (supabase.from("work_order_closing_audit" as any) as any).insert({
         tenant_id: tenantId,
         work_order_id: order.cloudId || order.id,
-        invoice_id: Array.isArray((row as any).invoiceIds) ? (row as any).invoiceIds[0] || null : null,
+        invoice_id: Array.isArray((row as any).invoiceIds) && isUuid((row as any).invoiceIds[0]) ? (row as any).invoiceIds[0] : null,
         user_id: authData.user?.id || null,
         action: "closing_review_approved",
         details: {

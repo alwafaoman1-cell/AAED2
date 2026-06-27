@@ -26,6 +26,7 @@ import { toEnglishDigits } from "@/lib/numberUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
 import { ensureVehicleForCustomer, findExistingVehicle } from "@/lib/vehicleIdentity";
+import { isUuid } from "@/lib/uuid";
 import { toE164 } from "@/lib/phoneUtils";
 
 // ───────────────────── أنواع داخلية ─────────────────────
@@ -354,7 +355,7 @@ export default function NewInsuranceClaim() {
         companyId = await findOrCreateInsuranceCompany(draft.company.trim(), tenantId as string);
       }
 
-      let customerId: string | null = draft.customerId;
+      let customerId: string | null = draft.customerId && isUuid(draft.customerId) ? draft.customerId : null;
       let customerRecord: { id: string; name: string; phone: string | null } | null = null;
       if (customerId) {
         const { data, error } = await supabase
@@ -400,7 +401,7 @@ export default function NewInsuranceClaim() {
 
 
 
-      let vehicleId = draft.vehicleId;
+      let vehicleId = draft.vehicleId && isUuid(draft.vehicleId) ? draft.vehicleId : null;
       const vehicleCandidate = await findExistingVehicle({
         vehicleId: draft.vehicleId,
         plate: draft.vehiclePlate,

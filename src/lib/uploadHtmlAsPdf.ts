@@ -4,6 +4,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { generatePdfFromHtml } from "./htmlToPdf";
+import { isUuid } from "@/lib/uuid";
 
 export type ClaimDocCategory =
   | "claim_estimate"   // تقدير المطالبة
@@ -32,6 +33,7 @@ export async function saveClaimDocument(opts: SaveClaimDocOpts): Promise<{
   try {
     const { data: tenantId } = await supabase.rpc("get_user_tenant_id");
     if (!tenantId) return null;
+    if (!isUuid(opts.claimId)) return null;
 
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const safeName = opts.fileBaseName.replace(/[^A-Za-z0-9._-]/g, "_");

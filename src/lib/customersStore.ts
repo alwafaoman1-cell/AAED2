@@ -8,6 +8,7 @@ import { vehiclesStore } from "./vehiclesStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { normalizePhone } from "@/lib/phoneUtils";
+import { isUuid } from "@/lib/uuid";
 
 export type CustomerTag = "vip" | "regular" | "new";
 export type CustomerType = "individual" | "company";
@@ -94,11 +95,10 @@ async function refreshCustomersFromCloud() {
   persist();
 }
 
-async function upsertCustomerCloud(c: Customer) {
+async function upsertCustomerCloud(c: Customer): Promise<Customer | null> {
   const tenantId = await getCurrentTenantId();
-  if (!tenantId) return;
-  const { error } = await supabase.from("customers").upsert({
-    id: c.id,
+  if (!tenantId) return null;
+  const payload = {
     tenant_id: tenantId,
     name: c.name,
     phone: normalizePhone(c.phone) || null,
@@ -110,8 +110,24 @@ async function upsertCustomerCloud(c: Customer) {
     contact_person: c.contactPerson || null,
     commercial_registration: c.commercialRegistration || null,
     tax_number: c.taxNumber || null,
-  });
-  if (error) console.warn("[customersStore] cloud upsert failed", error);
+  };
+  const query = isUuid(c.id)
+    ? supabase.from("customers").upsert({ id: c.id, ...payload }).select("*").single()
+    : supabase.from("customers").insert(payload).select("*").single();
+  const { data, error } = await query;
+  if (error) {
+    console.warn("[customersStore] cloud upsert failed", error);
+    throw error;
+  }
+  return data ? rowToCustomer(data) : null;
+}
+
+async function replaceTempCustomerId(tempId: string, saved: Customer) {
+  const idx = cache.findIndex((c) => c.id === tempId);
+  if (idx >= 0) {
+    cache[idx] = saved;
+    persist();
+  }
 }
 
 export const customersStore = {
@@ -182,7 +198,56 @@ export const customersStore = {
     const normalized = { ...c, phone: normalizePhone(c.phone) };
     list.unshift(normalized);
     persist();
-    void upsertCustomerCloud(normalized);
+    void upsertCustomerCloud(normalized)
+      .then((saved) => { if (saved && saved.id !== normalized.id) void replaceTempCustomerId(normalized.id, saved); })
+      .catch(() => {});
+  },
+
+  async addAsync(c: Customer): Promise<Customer> {
+    const normalized = { ...c, phone: normalizePhone(c.phone) };
+    const saved = await upsertCustomerCloud(normalized);
+    if (!saved?.id || !isUuid(saved.id)) throw new Error("Customer must be saved before creating the work order.");
+    const list = load();
+    const existingIdx = list.findIndex((x) => x.id === normalized.id || x.id === saved.id);
+    if (existingIdx >= 0) list[existingIdx] = saved;
+    else list.unshift(saved);
+    persist();
+    return saved;
+  },
+
+  async ensureCloudCustomer(input: Partial<Customer> & { name: string; phone?: string; id?: string }): Promise<Customer> {
+    if (input.id && isUuid(input.id)) {
+      const found = customersStore.getById(input.id);
+      if (found) {
+        const saved = await upsertCustomerCloud(found);
+        return saved || found;
+      }
+    }
+    const byPhone = input.phone ? customersStore.findByPhone(input.phone) : undefined;
+    if (byPhone?.id && isUuid(byPhone.id)) {
+      const saved = await upsertCustomerCloud(byPhone);
+      return saved || byPhone;
+    }
+    const byName = customersStore.findByName(input.name);
+    if (byName?.id && isUuid(byName.id)) {
+      const saved = await upsertCustomerCloud(byName);
+      return saved || byName;
+    }
+    return customersStore.addAsync({
+      id: input.id && isUuid(input.id) ? input.id : crypto.randomUUID(),
+      name: input.name.trim(),
+      phone: normalizePhone(input.phone || ""),
+      email: input.email,
+      address: input.address,
+      idNumber: input.idNumber,
+      notes: input.notes,
+      tag: input.tag || "new",
+      type: input.type || "individual",
+      contactPerson: input.contactPerson,
+      commercialRegistration: input.commercialRegistration,
+      taxNumber: input.taxNumber,
+      createdAt: input.createdAt || new Date().toISOString(),
+    });
   },
 
   update(id: string, patch: Partial<Customer>) {
@@ -191,7 +256,7 @@ export const customersStore = {
     if (idx >= 0) {
       list[idx] = { ...list[idx], ...patch, phone: patch.phone !== undefined ? normalizePhone(patch.phone) : list[idx].phone };
       persist();
-      void upsertCustomerCloud(list[idx]);
+      void upsertCustomerCloud(list[idx]).catch(() => {});
     }
   },
 

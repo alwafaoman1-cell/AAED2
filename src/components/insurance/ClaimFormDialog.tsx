@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useCustomers, useVehiclesByCustomer, useJobOrders, useCreateClaim } from "@/hooks/useInsuranceClaims";
 import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
 import { supabase } from "@/integrations/supabase/client";
+import { isUuid } from "@/lib/uuid";
 import { Link } from "react-router-dom";
 
 interface Props {
@@ -42,6 +43,9 @@ export default function ClaimFormDialog({ open, onOpenChange }: Props) {
 
   const handleSubmit = async () => {
     if (!customerId || !vehicleId || !jobOrderId || !claimNumber || !company || !amount) return;
+    if (!isUuid(customerId) || !isUuid(vehicleId) || !isUuid(jobOrderId)) {
+      throw new Error("Customer, vehicle, and work order must be saved before creating the claim.");
+    }
 
     // Get tenant_id
     const { data: profile } = await supabase.rpc("get_user_tenant_id");

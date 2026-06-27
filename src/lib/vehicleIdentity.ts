@@ -6,6 +6,7 @@ import {
   normalizePlateCountry,
   parseFullPlate,
 } from "@/lib/plateUtils";
+import { isUuid } from "@/lib/uuid";
 
 export interface VehicleIdentityInput {
   vehicleId?: string | null;
@@ -75,7 +76,7 @@ export async function findExistingVehicle(input: VehicleIdentityInput): Promise<
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return null;
 
-  if (input.vehicleId) {
+  if (input.vehicleId && isUuid(input.vehicleId)) {
     const { data } = await supabase
       .from("vehicles")
       .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,customers(name,phone)")
@@ -122,6 +123,7 @@ export async function findExistingVehicle(input: VehicleIdentityInput): Promise<
 }
 
 export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { customerId: string }) {
+  if (!isUuid(input.customerId)) throw new Error("customer_id must be a valid UUID before linking vehicle");
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("لا يمكن تحديد الورشة الحالية");
   if (!input.customerId) throw new Error("customer_id مطلوب قبل ربط المركبة");

@@ -45,7 +45,7 @@ export default function NewCustomerDialog({ open, onOpenChange, initialPhone, in
     }
   }, [open, initialName, initialPhone]);
 
-  function handleSave() {
+  async function handleSave() {
     if (!name.trim()) { toast.error("اسم العميل مطلوب"); return; }
     if (!phone.trim()) { toast.error("رقم الهاتف مطلوب"); return; }
     if (type === "company" && !contactPerson.trim()) {
@@ -63,7 +63,7 @@ export default function NewCustomerDialog({ open, onOpenChange, initialPhone, in
       }
       const normalizedPhone = toE164(phone);
       const c: Customer = {
-        id: `CUST-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: crypto.randomUUID(),
         name: name.trim(),
         phone: normalizedPhone,
         email: email.trim() || undefined,
@@ -77,9 +77,9 @@ export default function NewCustomerDialog({ open, onOpenChange, initialPhone, in
         tag: "new",
         createdAt: new Date().toISOString(),
       };
-      customersStore.add(c);
+      const saved = await customersStore.addAsync(c);
       toast.success("تم إنشاء العميل");
-      onCreated?.(c);
+      onCreated?.(saved);
       onOpenChange(false);
     } finally {
       setSaving(false);

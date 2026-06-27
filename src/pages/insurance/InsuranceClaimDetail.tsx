@@ -64,6 +64,7 @@ import { Mail, Send } from "lucide-react";
 import Can from "@/components/Can";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { expensesStore } from "@/lib/expensesStore";
+import { isUuid } from "@/lib/uuid";
 
 
 const insuranceCompanies = [
@@ -429,11 +430,13 @@ export default function InsuranceClaimDetail() {
       toast.error("لم يتم التعرف على الورشة");
       return null;
     }
+    if (!isUuid(customerId)) throw new Error("Customer must be saved before creating the claim.");
+    if (vehicleId && !isUuid(vehicleId)) throw new Error("Vehicle must be saved before creating the claim.");
     return {
       tenant_id: tenant as string,
       customer_id: customerId,
-      vehicle_id: vehicleId,
-      job_order_id: linkedWorkOrderId,
+      vehicle_id: vehicleId || null,
+      job_order_id: linkedWorkOrderId && isUuid(linkedWorkOrderId) ? linkedWorkOrderId : null,
       claim_number: claimNumber,
       insurance_company: company,
       insurance_company_id: companyId,
@@ -486,6 +489,14 @@ export default function InsuranceClaimDetail() {
         return;
       }
     }
+    if (!isUuid(cId)) {
+      toast.error("Customer must be saved before creating the claim.");
+      return;
+    }
+    if (vehicleId && !isUuid(vehicleId)) {
+      toast.error("Vehicle must be saved before creating the claim.");
+      return;
+    }
 
     // Smart insurance company: auto-create if user typed name but didn't pick one
     let insCompanyId = companyId;
@@ -502,7 +513,7 @@ export default function InsuranceClaimDetail() {
       tenant_id: tenant as string,
       customer_id: cId,
       vehicle_id: vehicleId || null,
-      job_order_id: linkedWorkOrderId,
+      job_order_id: linkedWorkOrderId && isUuid(linkedWorkOrderId) ? linkedWorkOrderId : null,
       claim_number: claimNumber,
       insurance_company: company,
       insurance_company_id: insCompanyId,

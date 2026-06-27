@@ -5,6 +5,7 @@
 import type { PaymentMethod } from "./financeSettingsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { isUuid } from "@/lib/uuid";
 
 export interface ExpenseRecord {
   id: string;
@@ -154,10 +155,10 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     beneficiary: e.beneficiary || null,
     description: e.description || null,
     linked_work_order_id: e.linkedWorkOrderId || null,
-    customer_id: e.customerId || null,
-    vehicle_id: e.vehicleId || null,
-    claim_id: e.claimId || null,
-    invoice_id: e.invoiceId || null,
+    customer_id: e.customerId && isUuid(e.customerId) ? e.customerId : null,
+    vehicle_id: e.vehicleId && isUuid(e.vehicleId) ? e.vehicleId : null,
+    claim_id: e.claimId && isUuid(e.claimId) ? e.claimId : null,
+    invoice_id: e.invoiceId && isUuid(e.invoiceId) ? e.invoiceId : null,
     linked_vehicle_plate: e.linkedVehiclePlate || null,
     linked_vehicle_name: e.linkedVehicleName || null,
     attachments,

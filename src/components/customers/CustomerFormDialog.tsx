@@ -64,16 +64,16 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
   const removeVehicleRow = (idx: number) =>
     setVehicles((arr) => (arr.length <= 1 ? arr : arr.filter((_, i) => i !== idx)));
 
-  function performSave() {
+  async function performSave() {
     const normalizedPhone = toE164(form.phone);
     const saveForm = { ...form, phone: normalizedPhone };
     if (isEdit && initial) {
       customersStore.update(initial.id, saveForm);
       toast.success(`تم تحديث ${saveForm.name}`);
     } else {
-      customersStore.add({
+      const savedCustomer = await customersStore.addAsync({
         ...saveForm,
-        id: `CUST-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: crypto.randomUUID(),
         createdAt: new Date().toISOString(),
       });
       toast.success(isCompany ? `تمت إضافة الشركة ${saveForm.name}` : `تم إضافة ${saveForm.name}`);
@@ -90,7 +90,7 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
             plate,
             type: `${vd.type} ${vd.model}`.trim() || "-",
             vin: vd.vin.trim(),
-            owner: saveForm.name,
+            owner: savedCustomer.name,
             ownerPhone: saveForm.phone || "",
             year: vd.year, color: vd.color, mileage: vd.mileage,
             visits: 0,
@@ -122,7 +122,7 @@ export default function CustomerFormDialog({ open, onOpenChange, initial }: Prop
         return;
       }
     }
-    performSave();
+    void performSave().catch((error) => toast.error(error?.message || "تعذر حفظ العميل"));
   }
 
   return (

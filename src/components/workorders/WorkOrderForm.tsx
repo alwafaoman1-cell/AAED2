@@ -22,6 +22,7 @@ import { getCurrentTenantId } from "@/lib/saasAdmin";
 import ReceptionIntakePanel from "@/components/workorders/ReceptionIntakePanel";
 import { toE164 } from "@/lib/phoneUtils";
 import { ensureVehicleForCustomer, findExistingVehicle, normalizeVehiclePlate, normalizeVin, type VehicleIdentityMatch } from "@/lib/vehicleIdentity";
+import { isUuid } from "@/lib/uuid";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
@@ -307,10 +308,24 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   }
 
   async function handleSubmit() {
-    const customerId = (form as WorkOrder & { customerId?: string }).customerId;
-    if (!customerId || !form.customer) {
+    let customerId = (form as WorkOrder & { customerId?: string }).customerId;
+    if (!form.customer) {
       toast.error("الرجاء اختيار العميل أو إنشاؤه (إلزامي)");
       return;
+    }
+    if (!isUuid(customerId)) {
+      try {
+        const savedCustomer = await customersStore.ensureCloudCustomer({
+          id: customerId,
+          name: form.customer,
+          phone: form.phone,
+        });
+        customerId = savedCustomer.id;
+        setForm((prev) => ({ ...prev, customer: savedCustomer.name, phone: savedCustomer.phone, ...({ customerId: savedCustomer.id } as Partial<WorkOrder>) }));
+      } catch (error: any) {
+        toast.error(error?.message || "Customer must be saved before creating the work order.");
+        return;
+      }
     }
     if (!form.plate) {
       toast.error("الرجاء إدخال رقم اللوحة");
@@ -382,7 +397,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       }
       return;
     }
-    if (!resolvedVehicleId) {
+    if (!resolvedVehicleId || !isUuid(resolvedVehicleId)) {
       toast.error("لا يمكن حفظ أمر العمل بدون vehicle_id");
       return;
     }
