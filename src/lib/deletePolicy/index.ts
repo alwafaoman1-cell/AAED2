@@ -96,16 +96,19 @@ export async function getWorkOrderImpact(order: WorkOrder): Promise<ImpactSummar
 
 export async function archiveWorkOrder(order: WorkOrder, reason = "archive work order only") {
   const { tenantId, cloudId, orderNumber } = await resolveWorkOrder(order);
+  if (!cloudId) throw new Error("Work order was not found in Supabase");
   const archivedAt = new Date().toISOString();
+  const userId = await currentUserId();
   const before = { ...order };
-  if (cloudId) {
-    const { error } = await supabase
-      .from("job_orders")
-      .update({ archived_at: archivedAt } as any)
-      .eq("tenant_id", tenantId)
-      .eq("id", cloudId);
-    if (error) throw error;
-  }
+  const { data, error } = await supabase
+    .from("job_orders")
+    .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userId } as any)
+    .eq("tenant_id", tenantId)
+    .eq("id", cloudId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id) throw new Error("Permission denied or work order was not found");
   await writeOperationalAudit({
     action: "work_order_archive_requested",
     entityType: "work_order",
@@ -134,8 +137,10 @@ export async function deleteWorkOrderKeepFinancial(order: WorkOrder, reason: str
 
 export async function deleteWorkOrderWithRelated(order: WorkOrder, reason: string) {
   const { tenantId, cloudId, orderNumber } = await resolveWorkOrder(order);
+  if (!cloudId) throw new Error("Work order was not found in Supabase");
   if (!reason.trim()) throw new Error("Delete reason is required");
   const archivedAt = new Date().toISOString();
+  const userId = await currentUserId();
   const ids = [cloudId, orderNumber, order.id].filter(Boolean) as string[];
 
   await supabase
@@ -150,14 +155,15 @@ export async function deleteWorkOrderWithRelated(order: WorkOrder, reason: strin
     .eq("tenant_id", tenantId)
     .in("work_order_id", ids);
 
-  if (cloudId) {
-    const { error } = await supabase
-      .from("job_orders")
-      .update({ archived_at: archivedAt, status: "delivered" } as any)
-      .eq("tenant_id", tenantId)
-      .eq("id", cloudId);
-    if (error) throw error;
-  }
+  const { data, error } = await supabase
+    .from("job_orders")
+    .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userId, status: "delivered" } as any)
+    .eq("tenant_id", tenantId)
+    .eq("id", cloudId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id) throw new Error("Permission denied or work order was not found");
 
   await writeOperationalAudit({
     action: "work_order_deleted_with_related_records",
@@ -198,16 +204,20 @@ export async function archiveCustomer(customerId: string, reason: string, operat
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("tenant_not_found");
   const archivedAt = new Date().toISOString();
+  const userId = await currentUserId();
   const { data: before } = await supabase.from("customers").select("*").eq("tenant_id", tenantId).eq("id", customerId).maybeSingle();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("customers")
-    .update({ archived: true, archived_at: archivedAt, archived_reason: reason || null } as any)
+    .update({ archived: true, archived_at: archivedAt, archived_reason: reason || null, deleted_at: archivedAt, deleted_by: userId } as any)
     .eq("tenant_id", tenantId)
-    .eq("id", customerId);
+    .eq("id", customerId)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  if (!data?.id) throw new Error("Permission denied or customer was not found");
   if (operational) {
     await supabase.from("vehicles").update({ archived: true, archived_at: archivedAt, archived_reason: reason || null } as any).eq("tenant_id", tenantId).eq("customer_id", customerId);
-    await supabase.from("job_orders").update({ archived_at: archivedAt } as any).eq("tenant_id", tenantId).eq("customer_id", customerId);
+    await supabase.from("job_orders").update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userId } as any).eq("tenant_id", tenantId).eq("customer_id", customerId);
   }
   await writeOperationalAudit({
     action: operational ? "customer_archive_operational_requested" : "customer_archive_requested",

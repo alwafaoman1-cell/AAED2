@@ -78,6 +78,7 @@ import QuickEmailButton from "@/components/QuickEmailButton";
 import { salesStore, statusLabel, type SalesDoc } from "@/lib/salesStore";
 import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { resolveWorkOrderType } from "@/lib/workOrderType";
+import { archiveWorkOrder } from "@/lib/deletePolicy";
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
 
@@ -1257,7 +1258,13 @@ export default function WorkOrderDetail() {
         onOpenChange={setDeleteOpen}
         title={`حذف أمر العمل ${displayNo}`}
         description={`سيتم نقل أمر العمل الخاص بـ "${order.customer}" إلى سلة المهملات.`}
-        onConfirm={() => {
+        onConfirm={async () => {
+          try {
+            await archiveWorkOrder(order, "Archive Work Order Only");
+          } catch (error: any) {
+            toast.error(error?.message || "فشل حذف/أرشفة أمر العمل في Supabase");
+            return;
+          }
           const removed = deleteWorkOrder(order.id);
           if (removed) {
             moveToTrash({

@@ -373,7 +373,7 @@ async function fetchFromCloud(): Promise<void> {
     if (!tenantId) return;
 
     const [{ data: rows }, { data: custs }, { data: vehs }] = await Promise.all([
-      supabase.from("job_orders").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(5000),
+      supabase.from("job_orders").select("*").eq("tenant_id", tenantId).is("archived_at", null).is("deleted_at", null).order("created_at", { ascending: false }).limit(5000),
       supabase.from("customers").select("id,name,phone").eq("tenant_id", tenantId).limit(10000),
       supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin_number,color").eq("tenant_id", tenantId).limit(10000),
     ]);
@@ -662,9 +662,16 @@ if (typeof window !== "undefined") {
 async function pushDeleteToCloud(orderNumber: string) {
   try {
     const ctx = await tenantContext(); if (!ctx) return;
-    const { error } = await supabase.from("job_orders")
-      .update({ archived_at: new Date().toISOString() } as any).eq("tenant_id", ctx.tenantId).eq("order_number", orderNumber);
+    const archivedAt = new Date().toISOString();
+    const { data: userData } = await supabase.auth.getUser();
+    const { data, error } = await supabase.from("job_orders")
+      .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userData.user?.id || null } as any)
+      .eq("tenant_id", ctx.tenantId)
+      .eq("order_number", orderNumber)
+      .select("id")
+      .maybeSingle();
     if (error) console.warn("[pushDeleteToCloud]", error);
+    else if (!data?.id) console.warn("[pushDeleteToCloud] no affected row", { orderNumber });
     else KNOWN_CLOUD_NUMBERS.delete(orderNumber);
   } catch (e) { console.warn("[pushDeleteToCloud] exception", e); }
 }

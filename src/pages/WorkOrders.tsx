@@ -862,8 +862,14 @@ export default function WorkOrders() {
         onOpenChange={(o) => !o && setDeleteOrder(null)}
         title={`حذف أمر العمل ${deleteOrder?.id || ""}`}
         description={`سيتم نقل أمر العمل الخاص بـ "${deleteOrder?.customer || ""}" إلى سلة المهملات. يمكنك استرجاعه لاحقاً.`}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deleteOrder) return;
+          try {
+            await archiveWorkOrder(deleteOrder, "Archive Work Order Only");
+          } catch (error: any) {
+            toast.error(error?.message || "فشل حذف/أرشفة أمر العمل في Supabase");
+            return;
+          }
           const removed = deleteWorkOrder(deleteOrder.id);
           if (removed) {
             moveToTrash({
@@ -985,9 +991,17 @@ export default function WorkOrders() {
         onOpenChange={setShowBulkDelete}
         title={`حذف ${selectedIds.size} أمر عمل`}
         description="سيتم نقل جميع أوامر العمل المحددة إلى سلة المهملات."
-        onConfirm={() => {
+        onConfirm={async () => {
           let n = 0;
-          selectedIds.forEach((id) => {
+          for (const id of Array.from(selectedIds)) {
+            const order = orders.find((o) => o.id === id);
+            if (!order) continue;
+            try {
+              await archiveWorkOrder(order, "Bulk Archive Work Order Only");
+            } catch (error: any) {
+              toast.error(error?.message || `فشل حذف/أرشفة أمر العمل ${id} في Supabase`);
+              return;
+            }
             const removed = deleteWorkOrder(id);
             if (removed) {
               moveToTrash({
@@ -998,7 +1012,7 @@ export default function WorkOrders() {
               });
               n++;
             }
-          });
+          }
           toast.success(`تم نقل ${n} أمر للمهملات`);
           setSelectedIds(new Set());
           setShowBulkDelete(false);

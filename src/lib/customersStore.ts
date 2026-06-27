@@ -83,6 +83,7 @@ async function refreshCustomersFromCloud() {
   if (!tenantId) return;
   const { data, error } = await supabase.from("customers").select("*")
     .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
     .or("archived.is.null,archived.eq.false")
     .order("created_at", { ascending: false });
   if (error) {
@@ -200,7 +201,6 @@ export const customersStore = {
     if (idx === -1) return undefined;
     const [removed] = list.splice(idx, 1);
     persist();
-    void supabase.from("customers").delete().eq("id", id);
     return removed;
   },
 

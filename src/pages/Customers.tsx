@@ -275,12 +275,18 @@ export default function Customers() {
           <FileSpreadsheet size={14} /> تصدير
         </Button>
         {allowDelete && (
-          <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={() => {
+          <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={async () => {
             if (!confirm(`حذف ${bulk.count} عميل؟ سيتم نقلهم للمهملات.`)) return;
-            bulk.selectedItems.forEach(({ customer }) => {
+            for (const { customer } of bulk.selectedItems) {
+              try {
+                await archiveCustomer(customer.id, "Bulk Archive Customer Only");
+              } catch (error: any) {
+                toast.error(error?.message || `فشل حذف/أرشفة العميل ${customer.name} في Supabase`);
+                return;
+              }
               customersStore.remove(customer.id);
               moveToTrash({ type: "customer", entityId: customer.id, label: `${customer.name}${customer.phone ? ` - ${customer.phone}` : ""}`, payload: customer });
-            });
+            }
             toast.success(`تم نقل ${bulk.count} عميل للمهملات`);
             bulk.clear();
           }}>

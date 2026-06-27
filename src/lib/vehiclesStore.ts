@@ -164,7 +164,17 @@ async function pushVehicleToCloud(v: Vehicle) {
 vehiclesStore.setMutationHandler((event) => {
   if (event.type === "remove") {
     const cloudId = KNOWN_CLOUD.get(normPlate(event.item.plate));
-    if (cloudId) void supabase.from("vehicles").delete().eq("id", cloudId);
+    if (cloudId) {
+      void supabase.auth.getUser().then(({ data }) =>
+        supabase.from("vehicles").update({
+          archived: true,
+          archived_at: new Date().toISOString(),
+          archived_reason: "Soft delete vehicle",
+          deleted_at: new Date().toISOString(),
+          deleted_by: data.user?.id || null,
+        } as any).eq("id", cloudId)
+      );
+    }
     return;
   }
   void pushVehicleToCloud(event.item);
@@ -182,6 +192,8 @@ async function fetchVehiclesFromCloud(): Promise<void> {
       .from("vehicles")
       .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,vin_number,archived,archived_at,archived_reason,customer_id")
       .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
+      .or("archived.is.null,archived.eq.false")
       .limit(5000);
     if (error || !rows) return;
 

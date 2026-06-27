@@ -11,10 +11,15 @@ const FUNCTION_ERROR_MESSAGES: Record<string, string> = {
   otp_rate_limited: "Too many attempts. Please wait before requesting another OTP",
   invalid_confirmation_phrase: "Missing or invalid confirmation phrase",
   tenant_not_found: "Server function is not configured",
+  server_env_not_configured: "Server function is not configured",
+  server_function_failed: "Server function failed",
 };
 
 export function getFunctionErrorMessage(error: unknown, data?: any): string {
-  const raw = String(data?.error || (error as any)?.message || error || "").trim();
+  const raw = String(data?.message || data?.code || data?.error || (error as any)?.message || error || "").trim();
   if (!raw) return "Server function is not configured";
+  if (/edge function returned a non-2xx status code/i.test(raw)) {
+    return "Server function failed before returning JSON. Please check Edge Function deployment and secrets.";
+  }
   return FUNCTION_ERROR_MESSAGES[raw] || raw.replace(/^FunctionsHttpError:\s*/i, "") || "Server function is not configured";
 }

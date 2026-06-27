@@ -32,15 +32,15 @@ async function sha256(input: string) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-  const authHeader = req.headers.get("Authorization") || "";
-  const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
-  const admin = createClient(supabaseUrl, serviceKey);
-
   try {
+    if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    if (!supabaseUrl || !serviceKey || !anonKey) throw new Error("server_env_not_configured");
+    const authHeader = req.headers.get("Authorization") || "";
+    const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+    const admin = createClient(supabaseUrl, serviceKey);
     const { data: userData, error: userError } = await userClient.auth.getUser();
     if (userError || !userData.user) throw new Error("unauthorized");
     const body = await req.json().catch(() => ({}));
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
     const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || null;
     const { data: latestOtp } = await admin
       .from("security_action_otps")
-      .select("id,attempt_count,locked_until")
+      .select("id,attempt_count,locked_until,expires_at")
       .eq("tenant_id", profile.tenant_id)
       .eq("user_id", userData.user.id)
       .eq("action", "cloud_reset")
@@ -79,6 +79,7 @@ Deno.serve(async (req) => {
       });
       throw new Error("otp_locked");
     }
+    if (latestOtp?.expires_at && latestOtp.expires_at <= now) throw new Error("otp_expired");
     const expectedHash = await sha256(`${profile.tenant_id}:${userData.user.id}:cloud_reset:${body.otp}`);
     const { data: otpRow } = await admin
       .from("security_action_otps")
@@ -149,7 +150,8 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ ok: false, error: String(error?.message || error) }), {
+    const code = String(error?.message || error || "server_function_failed");
+    return new Response(JSON.stringify({ ok: false, error: code, code, message: code }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
