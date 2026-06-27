@@ -312,6 +312,15 @@ function localStatusToCloud(s: string | undefined): string {
   return "received";
 }
 
+const LEGACY_METADATA_KEY = "__aaedMetadata";
+const LEGACY_RECEPTION_DAMAGE_KEY = "__aaedReceptionDamageMarkers";
+const LEGACY_RECEPTION_SIGNATURE_KEY = "__aaedReceptionSignatureDataUrl";
+const INTERNAL_BELONGING_KEYS = new Set([
+  LEGACY_METADATA_KEY,
+  LEGACY_RECEPTION_DAMAGE_KEY,
+  LEGACY_RECEPTION_SIGNATURE_KEY,
+]);
+
 type CloudRow = any;
 function mapCloudRow(
   r: CloudRow,
@@ -320,6 +329,17 @@ function mapCloudRow(
 ): WorkOrder {
   const c = r.customer_id ? custMap.get(r.customer_id) : undefined;
   const v = r.vehicle_id ? vehMap.get(r.vehicle_id) : undefined;
+  const belongings =
+    r.vehicle_belongings && typeof r.vehicle_belongings === "object" && !Array.isArray(r.vehicle_belongings)
+      ? r.vehicle_belongings
+      : {};
+  const metadata =
+    r.metadata && typeof r.metadata === "object" && !Array.isArray(r.metadata)
+      ? r.metadata
+      : belongings[LEGACY_METADATA_KEY] || {};
+  const visibleBelongings = Object.fromEntries(
+    Object.entries(belongings).filter(([key]) => !INTERNAL_BELONGING_KEYS.has(key)),
+  );
   return {
     id: r.order_number || r.id,
     cloudId: r.id,
@@ -354,18 +374,22 @@ function mapCloudRow(
     photos: Array.isArray(r.photos) ? r.photos : [],
     partsNeeded: Array.isArray(r.parts_needed) ? r.parts_needed : [],
     workItems: Array.isArray(r.work_items) ? r.work_items : [],
-    extraExpenses: Array.isArray(r.metadata?.extraExpenses) ? r.metadata.extraExpenses : [],
-    linkedExpenseVoucherIds: Array.isArray(r.metadata?.linkedExpenseVoucherIds) ? r.metadata.linkedExpenseVoucherIds : [],
-    depositApplied: Number(r.metadata?.depositApplied || 0),
-    closingReview: r.metadata?.closingReview || undefined,
-    trackPassword: r.metadata?.trackPassword || undefined,
-    mileage: r.metadata?.mileage || undefined,
+    extraExpenses: Array.isArray(metadata?.extraExpenses) ? metadata.extraExpenses : [],
+    linkedExpenseVoucherIds: Array.isArray(metadata?.linkedExpenseVoucherIds) ? metadata.linkedExpenseVoucherIds : [],
+    depositApplied: Number(metadata?.depositApplied || 0),
+    closingReview: r.metadata?.closingReview || metadata?.closingReview || undefined,
+    trackPassword: metadata?.trackPassword || undefined,
+    mileage: metadata?.mileage || undefined,
     odometerKm: r.odometer_km ?? undefined,
     fuelLevelPct: r.fuel_level_pct ?? undefined,
     receptionNotes: r.reception_notes || undefined,
-    receptionDamageMarkers: Array.isArray(r.reception_damage_markers) ? r.reception_damage_markers : [],
-    receptionSignatureDataUrl: r.reception_signature_data_url || undefined,
-    vehicleBelongings: r.vehicle_belongings || undefined,
+    receptionDamageMarkers: Array.isArray(r.reception_damage_markers)
+      ? r.reception_damage_markers
+      : Array.isArray(belongings[LEGACY_RECEPTION_DAMAGE_KEY])
+        ? belongings[LEGACY_RECEPTION_DAMAGE_KEY]
+        : [],
+    receptionSignatureDataUrl: r.reception_signature_data_url || belongings[LEGACY_RECEPTION_SIGNATURE_KEY] || undefined,
+    vehicleBelongings: Object.keys(visibleBelongings).length ? (visibleBelongings as WorkOrder["vehicleBelongings"]) : undefined,
     receivedAt: r.received_at || undefined,
   };
 }
@@ -379,12 +403,32 @@ async function fetchFromCloud(): Promise<void> {
     const tenantId = await getCurrentTenantId();
     if (!tenantId) return;
 
-    const [{ data: rows }, { data: custs }, { data: vehs }] = await Promise.all([
-      supabase.from("job_orders").select("*").eq("tenant_id", tenantId).is("archived_at", null).is("deleted_at", null).order("created_at", { ascending: false }).limit(5000),
+    let ordersResult = await supabase
+      .from("job_orders")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .is("archived_at", null)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    if (ordersResult.error && isMissingJobOrderColumnError(ordersResult.error)) {
+      ordersResult = await supabase
+        .from("job_orders")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .is("archived_at", null)
+        .order("created_at", { ascending: false })
+        .limit(5000);
+    }
+    if (ordersResult.error) throw ordersResult.error;
+
+    const [{ data: custs, error: custError }, { data: vehs, error: vehError }] = await Promise.all([
       supabase.from("customers").select("id,name,phone").eq("tenant_id", tenantId).limit(10000),
       supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url").eq("tenant_id", tenantId).limit(10000),
     ]);
-    if (!rows) return;
+    if (custError) throw custError;
+    if (vehError) throw vehError;
+    const rows = ordersResult.data || [];
 
 
     const custMap = new Map<string, any>();
@@ -573,45 +617,11 @@ async function pushOrderToCloud(o: WorkOrder) {
     const ctx = await tenantContext(); if (!ctx) return;
     const custId = o.customerId && isUuid(o.customerId) ? o.customerId : await ensureCustomer(ctx.tenantId, o.customer, o.phone); if (!custId || !isUuid(custId)) return;
     const vehId = await ensureVehicle(ctx.tenantId, custId, o); if (!vehId) return;
-    const { error } = await (supabase.from("job_orders") as any).insert({
-      tenant_id: ctx.tenantId,
-      customer_id: custId,
-      vehicle_id: vehId,
-      order_number: o.id,
-      description: o.description || null,
-      diagnosis: o.diagnosis || null,
-      diagnosis_notes: o.diagnosis || null,
-      service_type: o.serviceType || null,
-      technician_name: o.technician || null,
-      entry_date: o.entryDate || new Date().toISOString().slice(0, 10),
-      status: localStatusToCloud(o.status) as any,
-      labor_cost: o.laborCost || 0,
-      parts_cost: o.partsCost || 0,
-      insurance_company: o.insurance && o.insurance !== "-" ? o.insurance : null,
-      insurance_claim_number: o.claimNumber && o.claimNumber !== "-" ? o.claimNumber : null,
-      claim_id: o.claimId && isUuid(o.claimId) ? o.claimId : null,
-      work_order_type: o.claimId ? "insurance" : (o.workOrderType || "general_customer"),
-      archived_at: o.archivedAt || null,
-      notes: o.description || null,
-      parts_needed: (o.partsNeeded || []) as any,
-      work_items: (o.workItems || []) as any,
-      photos: (o.photos || []) as any,
-      odometer_km: o.odometerKm ?? null,
-      fuel_level_pct: o.fuelLevelPct ?? null,
-      reception_notes: o.receptionNotes || null,
-      reception_damage_markers: (o.receptionDamageMarkers || []) as any,
-      reception_signature_data_url: o.receptionSignatureDataUrl || null,
-      vehicle_belongings: (o.vehicleBelongings || {}) as any,
-      received_at: o.receivedAt || null,
-      metadata: {
-        extraExpenses: o.extraExpenses || [],
-        linkedExpenseVoucherIds: o.linkedExpenseVoucherIds || [],
-        depositApplied: o.depositApplied || 0,
-        closingReview: o.closingReview || null,
-        trackPassword: o.trackPassword || null,
-        mileage: o.mileage || null,
-      } as any,
-    });
+    const payload = buildJobOrderPayload({ ...o, customerId: custId, vehicleId: vehId }, ctx.tenantId, custId, vehId);
+    let { error } = await (supabase.from("job_orders") as any).insert(payload);
+    if (error && isMissingJobOrderColumnError(error)) {
+      ({ error } = await (supabase.from("job_orders") as any).insert(legacyCompatibleJobOrderPayload(payload, o.vehicleBelongings)));
+    }
     if (error) console.warn("[pushOrderToCloud]", error);
     else KNOWN_CLOUD_NUMBERS.add(o.id);
   } catch (e) { console.warn("[pushOrderToCloud] exception", e); }
@@ -626,6 +636,56 @@ function assertNoTemporaryOperationalIds(o: WorkOrder) {
   if (hasTemporaryOperationalId(o.customerId)) throw new Error("customer_id مؤقت وغير صالح للحفظ");
   if (hasTemporaryOperationalId(o.vehicleId)) throw new Error("vehicle_id مؤقت وغير صالح للحفظ");
   if (hasTemporaryOperationalId(o.cloudId)) throw new Error("work_order_id مؤقت وغير صالح للحفظ");
+}
+
+function jobOrderMetadata(o: WorkOrder) {
+  return {
+    extraExpenses: o.extraExpenses || [],
+    linkedExpenseVoucherIds: o.linkedExpenseVoucherIds || [],
+    depositApplied: o.depositApplied || 0,
+    closingReview: o.closingReview || null,
+    trackPassword: o.trackPassword || null,
+    mileage: o.mileage || null,
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function legacyCompatibleJobOrderPayload(
+  payload: Record<string, any>,
+  baseVehicleBelongings?: WorkOrder["vehicleBelongings"],
+) {
+  const next = { ...payload };
+  const belongings = {
+    ...(isPlainObject(baseVehicleBelongings) ? baseVehicleBelongings : {}),
+    ...(isPlainObject(payload.vehicle_belongings) ? payload.vehicle_belongings : {}),
+  };
+
+  if ("metadata" in next) {
+    belongings[LEGACY_METADATA_KEY] = next.metadata || {};
+    delete next.metadata;
+  }
+  if ("reception_damage_markers" in next) {
+    belongings[LEGACY_RECEPTION_DAMAGE_KEY] = Array.isArray(next.reception_damage_markers)
+      ? next.reception_damage_markers
+      : [];
+    delete next.reception_damage_markers;
+  }
+  if ("reception_signature_data_url" in next) {
+    belongings[LEGACY_RECEPTION_SIGNATURE_KEY] = next.reception_signature_data_url || null;
+    delete next.reception_signature_data_url;
+  }
+  delete next.deleted_at;
+  delete next.deleted_by;
+  next.vehicle_belongings = belongings;
+  return next;
+}
+
+function isMissingJobOrderColumnError(error: unknown): boolean {
+  const raw = `${(error as any)?.code || ""} ${(error as any)?.message || ""} ${(error as any)?.details || ""}`.toLowerCase();
+  return raw.includes("pgrst204") || (raw.includes("could not find") && raw.includes("schema cache"));
 }
 
 function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string, vehicleId: string) {
@@ -662,14 +722,7 @@ function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string
     vehicle_belongings: (o.vehicleBelongings || {}) as any,
     received_at: o.receivedAt || null,
     tracking_expires_at: o.trackingExpiresAt || null,
-    metadata: {
-      extraExpenses: o.extraExpenses || [],
-      linkedExpenseVoucherIds: o.linkedExpenseVoucherIds || [],
-      depositApplied: o.depositApplied || 0,
-      closingReview: o.closingReview || null,
-      trackPassword: o.trackPassword || null,
-      mileage: o.mileage || null,
-    } as any,
+    metadata: jobOrderMetadata(o) as any,
   };
 }
 
@@ -722,10 +775,17 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     .maybeSingle();
   if (lookupError) throw lookupError;
   const targetId = existingId || existingByNumber?.id || null;
-  const write = targetId
-    ? supabase.from("job_orders").update(payload as any).eq("tenant_id", ctx.tenantId).eq("id", targetId).select("*").single()
+  let write = targetId
+    ? (supabase.from("job_orders") as any).update(payload).eq("tenant_id", ctx.tenantId).eq("id", targetId).select("*").single()
     : (supabase.from("job_orders") as any).insert(payload).select("*").single();
-  const { data, error } = await write;
+  let { data, error } = await write;
+  if (error && isMissingJobOrderColumnError(error)) {
+    const fallbackPayload = legacyCompatibleJobOrderPayload(payload, order.vehicleBelongings);
+    write = targetId
+      ? (supabase.from("job_orders") as any).update(fallbackPayload).eq("tenant_id", ctx.tenantId).eq("id", targetId).select("*").single()
+      : (supabase.from("job_orders") as any).insert(fallbackPayload).select("*").single();
+    ({ data, error } = await write);
+  }
   if (error) throw error;
   if (!data?.id || !isUuid(data.id)) throw new Error("تعذر تأكيد حفظ أمر العمل في Supabase");
   const { data: verified, error: verifyError } = await supabase
@@ -768,6 +828,7 @@ async function _flushPatch(orderNumber: string) {
     if (!KNOWN_CLOUD_NUMBERS.has(orderNumber)) return;
     const ctx = await tenantContext(); if (!ctx) return;
     const updates: any = {};
+    const current = getWorkOrderById(orderNumber);
     if (patch.status !== undefined) updates.status = localStatusToCloud(patch.status) as any;
     if (patch.diagnosis !== undefined) { updates.diagnosis = patch.diagnosis; updates.diagnosis_notes = patch.diagnosis; }
     if (patch.description !== undefined) updates.description = patch.description;
@@ -800,7 +861,6 @@ async function _flushPatch(orderNumber: string) {
       patch.trackPassword !== undefined ||
       patch.mileage !== undefined
     ) {
-      const current = getWorkOrderById(orderNumber);
       updates.metadata = {
         extraExpenses: patch.extraExpenses ?? current?.extraExpenses ?? [],
         linkedExpenseVoucherIds: patch.linkedExpenseVoucherIds ?? current?.linkedExpenseVoucherIds ?? [],
@@ -811,8 +871,14 @@ async function _flushPatch(orderNumber: string) {
       };
     }
     if (Object.keys(updates).length === 0) return;
-    const { error } = await supabase.from("job_orders")
+    let { error } = await supabase.from("job_orders")
       .update(updates).eq("tenant_id", ctx.tenantId).eq("order_number", orderNumber);
+    if (error && isMissingJobOrderColumnError(error)) {
+      ({ error } = await supabase.from("job_orders")
+        .update(legacyCompatibleJobOrderPayload(updates, current?.vehicleBelongings) as any)
+        .eq("tenant_id", ctx.tenantId)
+        .eq("order_number", orderNumber));
+    }
     if (error) console.warn("[pushPatchToCloud]", error);
   } catch (e) { console.warn("[pushPatchToCloud] exception", e); }
 }
@@ -842,12 +908,20 @@ async function pushDeleteToCloud(orderNumber: string) {
     const ctx = await tenantContext(); if (!ctx) return;
     const archivedAt = new Date().toISOString();
     const { data: userData } = await supabase.auth.getUser();
-    const { data, error } = await supabase.from("job_orders")
+    let { data, error } = await supabase.from("job_orders")
       .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userData.user?.id || null } as any)
       .eq("tenant_id", ctx.tenantId)
       .eq("order_number", orderNumber)
       .select("id")
       .maybeSingle();
+    if (error && isMissingJobOrderColumnError(error)) {
+      ({ data, error } = await supabase.from("job_orders")
+        .update({ archived_at: archivedAt } as any)
+        .eq("tenant_id", ctx.tenantId)
+        .eq("order_number", orderNumber)
+        .select("id")
+        .maybeSingle());
+    }
     if (error) console.warn("[pushDeleteToCloud]", error);
     else if (!data?.id) console.warn("[pushDeleteToCloud] no affected row", { orderNumber });
     else KNOWN_CLOUD_NUMBERS.delete(orderNumber);

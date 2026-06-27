@@ -144,16 +144,20 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
 
   const plate = normalizeVehiclePlate(input);
   const vin = normalizeVin(input.vin);
+  const make = String(input.make || "").trim();
+  const model = String(input.model || "").trim();
+  if (!plate.digits) throw new Error("رقم اللوحة مطلوب قبل حفظ المركبة");
+  if (!make || !model) throw new Error("أدخل ماركة وموديل المركبة قبل الحفظ");
   const { data, error } = await supabase
     .from("vehicles")
     .insert({
       tenant_id: tenantId,
       customer_id: input.customerId,
-      plate_number: plate.digits || null,
+      plate_number: plate.digits,
       plate_letters: plate.letters || null,
       plate_country: plate.country,
-      brand: input.make || null,
-      model: input.model || null,
+      brand: make,
+      model,
       year: input.year ? Number(input.year) || null : null,
       color: input.color || null,
       vin: vin || null,

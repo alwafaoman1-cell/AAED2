@@ -328,6 +328,10 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       toast.error("الرجاء إدخال رقم اللوحة");
       return;
     }
+    if (!form.vehicleId && !vehicleMatch?.id && (!form.vehicleType?.trim() || !form.model?.trim())) {
+      toast.error("أدخل ماركة وموديل المركبة قبل حفظ أمر العمل");
+      return;
+    }
     if (selectedType === "insurance") {
       if (!canChooseInsurance && !form.claimId) {
         toast.error("يجب ربط أمر التأمين بمطالبة موجودة");

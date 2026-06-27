@@ -232,7 +232,12 @@ export default function NewInsuranceClaim() {
     switch (s) {
       case 0: return !!draft.company.trim() && !!draft.claimNumber.trim();
       // يكفي إدخال بيانات السيارة الأساسية يدوياً (ستُنشأ المركبة تلقائياً عند الحفظ)
-      case 1: return !!(draft.vehicleMake.trim() && draft.vehicleModel.trim() && draft.vehiclePlate.trim());
+      case 1: return !!(
+        draft.vehicleMake.trim() &&
+        draft.vehicleModel.trim() &&
+        draft.vehiclePlate.trim() &&
+        (draft.customerId || draft.ownerName.trim())
+      );
       case 2: return !!draft.incidentDate;
       case 3: return draft.estimationType === "upl" ? draft.uplItems.length > 0 && uplTotal > 0 : Number(draft.estimatedCost) > 0;
       case 4: return true;
@@ -257,7 +262,8 @@ export default function NewInsuranceClaim() {
         if (!draft.vehicleMake.trim()) miss.push("الماركة");
         if (!draft.vehicleModel.trim()) miss.push("الموديل");
         if (!draft.vehiclePlate.trim()) miss.push("رقم اللوحة");
-        return miss.length ? `أكمل بيانات السيارة: ${miss.join("، ")}` : null;
+        if (!draft.customerId && !draft.ownerName.trim()) miss.push("اسم المالك أو اختيار عميل موجود");
+        return miss.length ? `أكمل بيانات السيارة والمالك: ${miss.join("، ")}` : null;
       }
       case 2: return draft.incidentDate ? null : "حدد تاريخ التقدير";
       case 3: return draft.estimationType === "upl"
@@ -432,7 +438,7 @@ export default function NewInsuranceClaim() {
         .eq("tenant_id", tenantId as string)
         .eq("vehicle_id", vehicleId)
         .neq("claim_number", cn)
-        .not("status", "in", '("rejected","cancelled","paid")')
+        .not("status", "in", "(rejected,cancelled,paid)")
         .limit(10);
       if (sameVehicleError) throw sameVehicleError;
       if ((sameVehicleClaims as any[])?.length) {
@@ -463,7 +469,7 @@ export default function NewInsuranceClaim() {
         vehicle_id: vehicleId,
         claim_number: draft.claimNumber.trim(),
         insurance_company: draft.company.trim(),
-        insurance_company_id: companyId,
+        insurance_company_id: companyId && isUuid(companyId) ? companyId : null,
         estimated_amount: finalEstimate,
         approved_amount: 0,
         status: "pending",

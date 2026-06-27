@@ -1574,6 +1574,8 @@ export type Database = {
           completed_at: string | null
           created_at: string
           customer_id: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           diagnosis: string | null
           diagnosis_notes: string | null
@@ -1586,6 +1588,7 @@ export type Database = {
           insurance_claim_number: string | null
           insurance_company: string | null
           labor_cost: number
+          metadata: Json
           notes: string | null
           odometer_km: number | null
           order_number: string
@@ -1596,8 +1599,10 @@ export type Database = {
           parts_needed: Json
           photos: Json
           received_at: string | null
+          reception_damage_markers: Json
           reception_notes: string | null
           reception_photos: Json
+          reception_signature_data_url: string | null
           service_type: string | null
           stages: Json
           status: Database["public"]["Enums"]["job_status"]
@@ -1616,6 +1621,8 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           customer_id: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           description?: string | null
           diagnosis?: string | null
           diagnosis_notes?: string | null
@@ -1629,6 +1636,7 @@ export type Database = {
           insurance_company?: string | null
           claim_id?: string | null
           labor_cost?: number
+          metadata?: Json
           notes?: string | null
           odometer_km?: number | null
           order_number: string
@@ -1639,8 +1647,10 @@ export type Database = {
           parts_needed?: Json
           photos?: Json
           received_at?: string | null
+          reception_damage_markers?: Json
           reception_notes?: string | null
           reception_photos?: Json
+          reception_signature_data_url?: string | null
           service_type?: string | null
           stages?: Json
           status?: Database["public"]["Enums"]["job_status"]
@@ -1659,6 +1669,8 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           customer_id?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           description?: string | null
           diagnosis?: string | null
           diagnosis_notes?: string | null
@@ -1672,6 +1684,7 @@ export type Database = {
           insurance_company?: string | null
           claim_id?: string | null
           labor_cost?: number
+          metadata?: Json
           notes?: string | null
           odometer_km?: number | null
           order_number?: string
@@ -1682,8 +1695,10 @@ export type Database = {
           parts_needed?: Json
           photos?: Json
           received_at?: string | null
+          reception_damage_markers?: Json
           reception_notes?: string | null
           reception_photos?: Json
+          reception_signature_data_url?: string | null
           service_type?: string | null
           stages?: Json
           status?: Database["public"]["Enums"]["job_status"]
