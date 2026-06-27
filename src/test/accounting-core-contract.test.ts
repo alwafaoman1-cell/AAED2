@@ -7,6 +7,10 @@ describe("accounting core contract", () => {
   it("keeps OMR decimals and calculates VAT from subtotal only", () => {
     expect(calculateVatFromSubtotal(100)).toEqual({ subtotal: 100, vat: 5, total: 105 });
     expect(calculateVatFromSubtotal(3.5)).toEqual({ subtotal: 3.5, vat: 0.175, total: 3.675 });
+    const pdf = readFileSync(resolve(process.cwd(), "src/lib/pdfGenerator.ts"), "utf8");
+    expect(pdf).toContain("toFixed(3)");
+    expect(pdf).not.toContain("const vat = Math.round(subtotal");
+    expect(pdf).toContain("const vat = Number((subtotal * (s.vatRate / 100)).toFixed(3))");
   });
 
   it("uses actual expenses before estimated costs and does not add both", () => {

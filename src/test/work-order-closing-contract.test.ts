@@ -26,6 +26,11 @@ describe("work order closing review contract", () => {
     expect(review).toContain("skipInvoiceReason");
     expect(review).toContain("canApproveSkip");
     expect(review).toContain("logActivity");
+    expect(review).toContain("work_order_closing_audit");
+    expect(review).toContain("snapshot");
+    expect(review).toContain("manualReason");
+    expect(review).toContain("skipInvoiceReason");
+    expect(read("src/lib/workOrdersStore.ts")).toContain("closingReview: r.metadata?.closingReview");
   });
 });
 

@@ -10,6 +10,9 @@ import { getCurrentRole } from "@/lib/permissions";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { buildWorkOrderAccountingRows, formatOMR, type AccountingCostSource } from "@/lib/accounting/core";
 import { logActivity } from "@/lib/auditLogStore";
+import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { toast } from "sonner";
 
 export const CLOSING_STATUSES = ["جاهز للتسليم", "تم التسليم", "مغلق", "Ready", "Completed", "Delivered", "Closed"];
 
@@ -40,6 +43,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
   const [manualReason, setManualReason] = useState("");
   const [skipInvoice, setSkipInvoice] = useState(false);
   const [skipReason, setSkipReason] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const manualTotal = Number(manualSpare || 0) + Number(manualLabour || 0) + Number(manualOther || 0);
   const revenue = row?.revenueExVat || 0;
@@ -48,7 +52,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
   const hasInvoice = !!row?.hasInvoice;
   const hasPayments = !!row && row.paidAmount > 0;
 
-  const confirm = () => {
+  const confirm = async () => {
     if (!row) return;
     if (!source) return;
     if (source === "Manual Final Cost" && !manualReason.trim()) return;
@@ -77,6 +81,34 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       hasPayments,
     };
 
+    setSaving(true);
+    try {
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("tenant_not_found");
+      const { data: authData } = await supabase.auth.getUser();
+      const { error: auditError } = await (supabase.from("work_order_closing_audit" as any) as any).insert({
+        tenant_id: tenantId,
+        work_order_id: order.cloudId || order.id,
+        invoice_id: Array.isArray((row as any).invoiceIds) ? (row as any).invoiceIds[0] || null : null,
+        user_id: authData.user?.id || null,
+        action: "closing_review_approved",
+        details: {
+          status: targetStatus,
+          finalCostSource: source,
+          manualReason: source === "Manual Final Cost" ? manualReason.trim() : null,
+          invoiceSkipped: !hasInvoice && skipInvoice,
+          skipInvoiceReason: skipInvoice ? skipReason.trim() : null,
+          approvedByRole: role,
+          snapshot,
+        },
+      });
+      if (auditError) throw auditError;
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ مراجعة الإغلاق في Supabase");
+      setSaving(false);
+      return;
+    }
+
     logActivity({
       action: "status_change",
       entity: "work_order",
@@ -103,6 +135,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       approvedByRole: role,
       approvedAt: new Date().toISOString(),
     });
+    setSaving(false);
   };
 
   if (!row) {
@@ -215,7 +248,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
 
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={onCancel}>رجوع</Button>
-        <Button onClick={confirm} disabled={!canConfirm} className="gap-2">
+        <Button onClick={() => void confirm()} disabled={!canConfirm || saving} className="gap-2">
           <Save size={14} /> اعتماد الإغلاق
         </Button>
       </div>

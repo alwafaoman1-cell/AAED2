@@ -346,6 +346,7 @@ function mapCloudRow(
     extraExpenses: Array.isArray(r.metadata?.extraExpenses) ? r.metadata.extraExpenses : [],
     linkedExpenseVoucherIds: Array.isArray(r.metadata?.linkedExpenseVoucherIds) ? r.metadata.linkedExpenseVoucherIds : [],
     depositApplied: Number(r.metadata?.depositApplied || 0),
+    closingReview: r.metadata?.closingReview || undefined,
     trackPassword: r.metadata?.trackPassword || undefined,
     mileage: r.metadata?.mileage || undefined,
     odometerKm: r.odometer_km ?? undefined,
@@ -514,48 +515,9 @@ async function ensureVehicle(tenantId: string, customerId: string, o: WorkOrder)
     return resolved.vehicleId;
   } catch (e) {
     console.warn("[ensureVehicle:identity]", e);
-    if (String((e as any)?.message || e).includes("vin_candidate_requires_user_confirmation")) {
-      return null;
-    }
-  }
-  const plate = (o.plate || "").trim();
-  const { extractPlateLetters, extractPlateDigits } = await import("@/lib/plateUtils");
-  const L = extractPlateLetters(plate);
-  const D = extractPlateDigits(plate);
-  // Split-plate lookup via RPC (matches uniqueness rules)
-  if (L && D) {
-    try {
-      const { data: hits } = await (supabase as any).rpc("find_vehicle_by_plate", {
-        p_letters: L, p_digits: D, p_country: "OM",
-      });
-      const row = (hits as any[])?.[0];
-      if (row?.id) return row.id;
-    } catch (e) { console.warn("[ensureVeh:rpc]", e); }
-  }
-  const { data: created, error } = await supabase
-    .from("vehicles").insert({
-      tenant_id: tenantId,
-      customer_id: customerId,
-      plate_number: D || `UNK${Date.now()}`,
-      plate_letters: L,
-      plate_country: "OM",
-      brand: o.vehicleType || "غير محدد",
-      model: o.model || "غير محدد",
-      year: o.year ? Number(o.year) || null : null,
-      color: o.color || null,
-      vin_number: o.vin || null,
-    }).select("id").maybeSingle();
-  if (error) {
-    console.warn("[ensureVeh:insert]", error);
-    // UNIQUE conflict → try one more lookup
-    if (L && D) {
-      const { data: hits } = await (supabase as any).rpc("find_vehicle_by_plate", { p_letters: L, p_digits: D, p_country: "OM" });
-      const row = (hits as any[])?.[0];
-      if (row?.id) return row.id;
-    }
     return null;
   }
-  return created?.id || null;
+  return null;
 }
 
 async function pushOrderToCloud(o: WorkOrder) {
@@ -598,6 +560,7 @@ async function pushOrderToCloud(o: WorkOrder) {
         extraExpenses: o.extraExpenses || [],
         linkedExpenseVoucherIds: o.linkedExpenseVoucherIds || [],
         depositApplied: o.depositApplied || 0,
+        closingReview: o.closingReview || null,
         trackPassword: o.trackPassword || null,
         mileage: o.mileage || null,
       } as any,
@@ -651,6 +614,7 @@ async function _flushPatch(orderNumber: string) {
       patch.extraExpenses !== undefined ||
       patch.linkedExpenseVoucherIds !== undefined ||
       patch.depositApplied !== undefined ||
+      patch.closingReview !== undefined ||
       patch.trackPassword !== undefined ||
       patch.mileage !== undefined
     ) {
@@ -659,6 +623,7 @@ async function _flushPatch(orderNumber: string) {
         extraExpenses: patch.extraExpenses ?? current?.extraExpenses ?? [],
         linkedExpenseVoucherIds: patch.linkedExpenseVoucherIds ?? current?.linkedExpenseVoucherIds ?? [],
         depositApplied: patch.depositApplied ?? current?.depositApplied ?? 0,
+        closingReview: patch.closingReview ?? current?.closingReview ?? null,
         trackPassword: patch.trackPassword ?? current?.trackPassword ?? null,
         mileage: patch.mileage ?? current?.mileage ?? null,
       };

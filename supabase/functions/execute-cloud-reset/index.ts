@@ -21,6 +21,10 @@ const TENANT_TABLES = [
   "customers",
 ];
 
+async function auditOtp(admin: any, payload: Record<string, unknown>) {
+  await admin.from("security_otp_audit_log").insert(payload).catch(() => {});
+}
+
 async function sha256(input: string) {
   const bytes = new TextEncoder().encode(input);
   const hash = await crypto.subtle.digest("SHA-256", bytes);
@@ -45,12 +49,36 @@ Deno.serve(async (req) => {
 
     const { data: profile } = await admin
       .from("profiles")
-      .select("tenant_id,role")
+      .select("tenant_id,role,is_platform_admin")
       .eq("user_id", userData.user.id)
       .maybeSingle();
     if (!profile?.tenant_id) throw new Error("profile_not_found");
-    if (!["admin", "manager"].includes(profile.role)) throw new Error("admin_required");
+    if (!["admin", "owner"].includes(String(profile.role || "")) && !profile.is_platform_admin) throw new Error("owner_or_super_admin_required");
 
+    const now = new Date().toISOString();
+    const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || null;
+    const { data: latestOtp } = await admin
+      .from("security_action_otps")
+      .select("id,attempt_count,locked_until")
+      .eq("tenant_id", profile.tenant_id)
+      .eq("user_id", userData.user.id)
+      .eq("action", "cloud_reset")
+      .is("consumed_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestOtp?.locked_until && latestOtp.locked_until > now) {
+      await auditOtp(admin, {
+        tenant_id: profile.tenant_id,
+        user_id: userData.user.id,
+        action: "cloud_reset",
+        event: "verify",
+        status: "locked",
+        ip,
+        details: { lockedUntil: latestOtp.locked_until },
+      });
+      throw new Error("otp_locked");
+    }
     const expectedHash = await sha256(`${profile.tenant_id}:${userData.user.id}:cloud_reset:${body.otp}`);
     const { data: otpRow } = await admin
       .from("security_action_otps")
@@ -60,12 +88,40 @@ Deno.serve(async (req) => {
       .eq("action", "cloud_reset")
       .eq("code_hash", expectedHash)
       .is("consumed_at", null)
-      .gt("expires_at", new Date().toISOString())
+      .gt("expires_at", now)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (!otpRow?.id) throw new Error("otp_invalid_or_expired");
-    await admin.from("security_action_otps").update({ consumed_at: new Date().toISOString() }).eq("id", otpRow.id);
+    if (!otpRow?.id) {
+      const attempts = Number(latestOtp?.attempt_count || 0) + 1;
+      const lockedUntil = attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
+      if (latestOtp?.id) {
+        await admin
+          .from("security_action_otps")
+          .update({ attempt_count: attempts, locked_until: lockedUntil, last_attempt_at: now })
+          .eq("id", latestOtp.id);
+      }
+      await auditOtp(admin, {
+        tenant_id: profile.tenant_id,
+        user_id: userData.user.id,
+        action: "cloud_reset",
+        event: "verify",
+        status: lockedUntil ? "locked_after_failure" : "failed",
+        ip,
+        details: { attempts, lockedUntil },
+      });
+      throw new Error(lockedUntil ? "otp_locked" : "otp_invalid_or_expired");
+    }
+    await admin.from("security_action_otps").update({ consumed_at: now, last_attempt_at: now }).eq("id", otpRow.id);
+    await auditOtp(admin, {
+      tenant_id: profile.tenant_id,
+      user_id: userData.user.id,
+      action: "cloud_reset",
+      event: "verify",
+      status: "success",
+      ip,
+      details: { dryRun: body.dryRun !== false },
+    });
 
     const dryRun = body.dryRun !== false;
     const results: Record<string, number | string> = {};

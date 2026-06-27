@@ -25,7 +25,8 @@ import AiWriteButton from "@/components/ai/AiWriteButton";
 import { toEnglishDigits } from "@/lib/numberUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
-import { ensureVehicleForCustomer } from "@/lib/vehicleIdentity";
+import { ensureVehicleForCustomer, findExistingVehicle } from "@/lib/vehicleIdentity";
+import { toE164 } from "@/lib/phoneUtils";
 
 // ───────────────────── أنواع داخلية ─────────────────────
 // ⚠️ هذه الصفحة من منظور "الكراج": نستلم سيارة من شركة تأمين ونطالبها بالمستحقات.
@@ -38,6 +39,7 @@ interface Draft {
   companyId: string | null;
   claimNumber: string;     // الرقم الذي تعطيه شركة التأمين أو نولّده مؤقتاً
   // owner (صاحب السيارة لتسليمها له بعد الإصلاح)
+  customerId: string | null;
   ownerName: string;
   ownerPhone: string;
   expectedDeliveryDate: string; // تاريخ التسليم المتوقع للعميل
@@ -72,7 +74,7 @@ const DRAFT_KEY = "insurance_claim_draft_v3"; // bumped: removed internal-cost &
 
 const emptyDraft = (): Draft => ({
   company: "", companyId: null, claimNumber: "",
-  ownerName: "", ownerPhone: "", expectedDeliveryDate: "",
+  customerId: null, ownerName: "", ownerPhone: "", expectedDeliveryDate: "",
   vehicleId: null, vehicleMake: "", vehicleModel: "", vehiclePlate: "", vehicleYear: "", vehicleColor: "", vehicleVin: "",
   incidentDate: new Date().toISOString().slice(0, 10),
   damageDescription: "",
@@ -97,6 +99,7 @@ export default function NewInsuranceClaim() {
   const skipNextDraftSaveRef = useRef(false);
   const savedDraftAtRef = useRef<number | null>(null);
   const cloudDraftKey = useMemo(() => `${DRAFT_KEY}:${user?.id || "anonymous"}`, [user?.id]);
+  const [existingCustomerByPhone, setExistingCustomerByPhone] = useState<{ id: string; name: string; phone: string | null } | null>(null);
 
   // ── استرجاع المسودة ──
   useEffect(() => {
@@ -170,6 +173,42 @@ export default function NewInsuranceClaim() {
   };
 
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+
+  useEffect(() => {
+    let cancelled = false;
+    const normalizedPhone = toE164(draft.ownerPhone);
+    const phoneDigits = normalizedPhone.replace(/\D/g, "").slice(-8);
+    if (!phoneDigits || draft.customerId) {
+      setExistingCustomerByPhone(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        const { data: tenantId } = await supabase.rpc("get_user_tenant_id");
+        if (!tenantId || cancelled) return;
+        const { data } = await supabase
+          .from("customers")
+          .select("id,name,phone")
+          .eq("tenant_id", tenantId as string)
+          .ilike("phone", `%${phoneDigits}%`)
+          .limit(5);
+        if (cancelled) return;
+        const match = ((data as any[]) || []).find((customer) => {
+          const stored = toE164(customer.phone || "");
+          return stored.replace(/\D/g, "").slice(-8) === phoneDigits;
+        });
+        setExistingCustomerByPhone(match ? {
+          id: match.id,
+          name: match.name || "",
+          phone: match.phone || null,
+        } : null);
+      })();
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [draft.ownerPhone, draft.customerId]);
 
   // ── توليد رقم مرجعي مؤقت للكراج ──
   const generateClaimNumber = () => {
@@ -315,54 +354,79 @@ export default function NewInsuranceClaim() {
         companyId = await findOrCreateInsuranceCompany(draft.company.trim(), tenantId as string);
       }
 
-      // عميل = مالك السيارة (إن أعطي اسم)، وإلا placeholder بشركة التأمين
-      let customerId: string | null = null;
-      if (draft.ownerName.trim()) {
-        const { data: existingCust } = await supabase
+      let customerId: string | null = draft.customerId;
+      let customerRecord: { id: string; name: string; phone: string | null } | null = null;
+      if (customerId) {
+        const { data, error } = await supabase
           .from("customers")
-          .select("id")
+          .select("id,name,phone")
           .eq("tenant_id", tenantId as string)
-          .ilike("name", draft.ownerName.trim())
+          .eq("id", customerId)
           .maybeSingle();
-        if (existingCust) {
-          customerId = (existingCust as any).id;
-        } else {
-          const { data: newCust, error: e1 } = await supabase
-            .from("customers")
-            .insert({
-              tenant_id: tenantId as string,
-              name: draft.ownerName.trim(),
-              phone: draft.ownerPhone.trim() || null,
-            } as any)
-            .select("id")
-            .single();
-          if (e1) throw e1;
-          customerId = (newCust as any).id;
-        }
+        if (error) throw error;
+        customerRecord = (data as any) || null;
+        if (!customerRecord) throw new Error("customer_id غير صحيح");
       } else {
-        const placeholderName = `[تأمين] ${draft.company.trim()}`;
-        const { data: existing } = await supabase
-          .from("customers")
-          .select("id")
-          .eq("tenant_id", tenantId as string)
-          .ilike("name", placeholderName)
-          .maybeSingle();
-        if (existing) customerId = (existing as any).id;
-        else {
-          const { data: newC, error } = await supabase
+        const normalizedPhone = toE164(draft.ownerPhone);
+        const phoneDigits = normalizedPhone.replace(/\D/g, "").slice(-8);
+        if (phoneDigits) {
+          const { data } = await supabase
             .from("customers")
-            .insert({ tenant_id: tenantId as string, name: placeholderName } as any)
-            .select("id").single();
-          if (error) throw error;
-          customerId = (newC as any).id;
+            .select("id,name,phone")
+            .eq("tenant_id", tenantId as string)
+            .ilike("phone", `%${phoneDigits}%`)
+            .limit(5);
+          const phoneMatch = ((data as any[]) || []).find((customer) =>
+            toE164(customer.phone || "").replace(/\D/g, "").slice(-8) === phoneDigits
+          );
+          if (phoneMatch) {
+            throw new Error("رقم الهاتف موجود. اضغط Use Existing Customer قبل حفظ المطالبة.");
+          }
         }
+        if (!draft.ownerName.trim()) throw new Error("اختر customer_id أو أدخل اسم المالك لإنشاء عميل جديد");
+        const { data: newCust, error: e1 } = await supabase
+          .from("customers")
+          .insert({
+            tenant_id: tenantId as string,
+            name: draft.ownerName.trim(),
+            phone: normalizedPhone || null,
+          } as any)
+          .select("id,name,phone")
+          .single();
+        if (e1) throw e1;
+        customerRecord = newCust as any;
+        customerId = customerRecord.id;
       }
 
 
 
-      // ── إنشاء المركبة تلقائياً إن لم تكن مرتبطة ──
       let vehicleId = draft.vehicleId;
-      if (!vehicleId && (draft.vehiclePlate.trim() || draft.vehicleVin.trim())) {
+      const vehicleCandidate = await findExistingVehicle({
+        vehicleId: draft.vehicleId,
+        plate: draft.vehiclePlate,
+        vin: draft.vehicleVin,
+        make: draft.vehicleMake,
+        model: draft.vehicleModel,
+        year: draft.vehicleYear,
+        color: draft.vehicleColor,
+      });
+      if (vehicleCandidate?.id) {
+        const needsConfirmation =
+          vehicleCandidate.source === "vin" ||
+          (!!vehicleCandidate.customer_id && vehicleCandidate.customer_id !== customerId);
+        if (needsConfirmation) {
+          const ok = window.confirm(
+            vehicleCandidate.customer_id && vehicleCandidate.customer_id !== customerId
+              ? "هذه المركبة موجودة ومرتبطة بعميل آخر. هل تريد ربط المطالبة بهذه المركبة بدون تغيير مالكها؟"
+              : "تم العثور على مركبة بالـ VIN فقط. هل تؤكد ربط المطالبة بهذه المركبة؟",
+          );
+          if (!ok) {
+            setSubmitting(false);
+            return;
+          }
+        }
+        vehicleId = vehicleCandidate.id;
+      } else if (draft.vehiclePlate.trim() || draft.vehicleVin.trim()) {
         const resolved = await ensureVehicleForCustomer({
           customerId: customerId!,
           plate: draft.vehiclePlate,
@@ -373,9 +437,6 @@ export default function NewInsuranceClaim() {
           color: draft.vehicleColor,
         });
         vehicleId = resolved.vehicleId;
-        if (resolved.ownershipConflict) {
-          toast.warning("هذه المركبة موجودة ومرتبطة بعميل آخر. تم ربط المطالبة بالمركبة الموجودة بدون تغيير المالك.");
-        }
       }
       if (!vehicleId) throw new Error("لا يمكن حفظ مطالبة بدون vehicle_id");
 
@@ -407,8 +468,8 @@ export default function NewInsuranceClaim() {
         incident_description: draft.damageDescription || null,
         deductible_amount: 0,
         estimated_cost: finalEstimate,
-        vehicle_owner_name: draft.ownerName || null,
-        vehicle_owner_phone: draft.ownerPhone || null,
+        vehicle_owner_name: customerRecord?.name || null,
+        vehicle_owner_phone: customerRecord?.phone || null,
         vehicle_make: draft.vehicleMake || null,
         vehicle_model: draft.vehicleModel || null,
         vehicle_plate: draft.vehiclePlate || null,
@@ -555,7 +616,7 @@ export default function NewInsuranceClaim() {
           <Step0 draft={draft} update={update} generateClaimNumber={generateClaimNumber} companies={companies} />
         )}
         {step === 1 && (
-          <Step1 draft={draft} update={update} />
+          <Step1 draft={draft} update={update} existingCustomerByPhone={existingCustomerByPhone} />
         )}
         {step === 2 && (
           <Step2 draft={draft} update={update} />
@@ -694,7 +755,15 @@ function Step0({ draft, update, generateClaimNumber, companies }: { draft: Draft
 }
 
 // ───────────────────── الخطوة 1: السيارة والعميل ─────────────────────
-function Step1({ draft, update }: { draft: Draft; update: (p: Partial<Draft>) => void }) {
+function Step1({
+  draft,
+  update,
+  existingCustomerByPhone,
+}: {
+  draft: Draft;
+  update: (p: Partial<Draft>) => void;
+  existingCustomerByPhone: { id: string; name: string; phone: string | null } | null;
+}) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [search, setSearch] = useState("");
@@ -726,6 +795,7 @@ function Step1({ draft, update }: { draft: Draft; update: (p: Partial<Draft>) =>
   function pickVehicle(v: any) {
     update({
       vehicleId: v.id,
+      customerId: v.customer_id || draft.customerId,
       vehicleMake: v.brand || "",
       vehicleModel: v.model || "",
       vehiclePlate: v.plate_number || "",
@@ -772,33 +842,41 @@ function Step1({ draft, update }: { draft: Draft; update: (p: Partial<Draft>) =>
             size="sm"
             onClick={async () => {
               try {
-                const { data: tenantId } = await supabase.rpc("get_user_tenant_id");
-                if (!tenantId) { toast.error("تعذّر تحديد المستأجر"); return; }
-                const { extractPlateLetters, extractPlateDigits, findVehicleByPlate } = await import("@/lib/plateUtils");
-                const L = extractPlateLetters(draft.vehiclePlate);
-                const D = extractPlateDigits(draft.vehiclePlate);
-                const found = (L && D) ? await findVehicleByPlate(L, D, "OM") : null;
-                if (found?.id) {
-                  update({ vehicleId: found.id });
-                  toast.success("ربط مع مركبة موجودة بنفس اللوحة");
+                if (!draft.customerId) throw new Error("اضغط Use Existing Customer أو احفظ المطالبة لإنشاء العميل أولاً");
+                const existing = await findExistingVehicle({
+                  plate: draft.vehiclePlate,
+                  vin: draft.vehicleVin,
+                  make: draft.vehicleMake,
+                  model: draft.vehicleModel,
+                  year: draft.vehicleYear,
+                  color: draft.vehicleColor,
+                });
+                if (existing?.id) {
+                  const needsConfirmation =
+                    existing.source === "vin" ||
+                    (!!existing.customer_id && existing.customer_id !== draft.customerId);
+                  if (needsConfirmation) {
+                    const ok = window.confirm(
+                      existing.customer_id && existing.customer_id !== draft.customerId
+                        ? "هذه المركبة موجودة ومرتبطة بعميل آخر. هل تريد ربطها بدون تغيير المالك؟"
+                        : "تم العثور على مركبة بالـ VIN فقط. هل تؤكد ربطها؟",
+                    );
+                    if (!ok) return;
+                  }
+                  update({ vehicleId: existing.id });
+                  toast.success("ربط مع مركبة موجودة");
                   return;
                 }
-                const { data: newVeh, error } = await supabase
-                  .from("vehicles")
-                  .insert({
-                    tenant_id: tenantId as string,
-                    plate_number: D || draft.vehiclePlate.trim(),
-                    plate_letters: L,
-                    plate_country: "OM",
-                    brand: draft.vehicleMake.trim() || null,
-                    model: draft.vehicleModel.trim() || null,
-                    year: draft.vehicleYear ? Number(draft.vehicleYear) : null,
-                    color: draft.vehicleColor.trim() || null,
-                    vin: draft.vehicleVin.trim() || null,
-                  } as any)
-                  .select("id").single();
-                if (error) throw error;
-                update({ vehicleId: (newVeh as any).id });
+                const resolved = await ensureVehicleForCustomer({
+                  customerId: draft.customerId,
+                  plate: draft.vehiclePlate,
+                  vin: draft.vehicleVin,
+                  make: draft.vehicleMake,
+                  model: draft.vehicleModel,
+                  year: draft.vehicleYear,
+                  color: draft.vehicleColor,
+                });
+                update({ vehicleId: resolved.vehicleId });
                 toast.success("تم حفظ السيارة وربطها");
               } catch (e: any) {
                 toast.error(e?.message ?? "فشل حفظ السيارة");
@@ -848,6 +926,7 @@ function Step1({ draft, update }: { draft: Draft; update: (p: Partial<Draft>) =>
             <Input
               value={draft.ownerPhone}
               onChange={(e) => update({ ownerPhone: e.target.value })}
+              onBlur={() => update({ ownerPhone: toE164(draft.ownerPhone) })}
               placeholder="+968 9XXX XXXX"
               dir="ltr"
             />
@@ -861,6 +940,28 @@ function Step1({ draft, update }: { draft: Draft; update: (p: Partial<Draft>) =>
             />
           </div>
         </div>
+        {existingCustomerByPhone && draft.customerId !== existingCustomerByPhone.id && (
+          <div className="mt-3 rounded-lg border border-info/40 bg-info/5 p-3 text-xs flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="font-semibold">Use Existing Customer</div>
+              <div className="text-muted-foreground">
+                {existingCustomerByPhone.name} — <span dir="ltr">{existingCustomerByPhone.phone}</span>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => update({
+                customerId: existingCustomerByPhone.id,
+                ownerName: existingCustomerByPhone.name,
+                ownerPhone: existingCustomerByPhone.phone || draft.ownerPhone,
+              })}
+            >
+              Use Existing Customer
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Vehicle picker dialog */}

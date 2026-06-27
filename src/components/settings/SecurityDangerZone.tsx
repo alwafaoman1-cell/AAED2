@@ -15,7 +15,10 @@ export default function SecurityDangerZone() {
   const [otp, setOtp] = useState("");
   const [confirmPhrase, setConfirmPhrase] = useState("");
   const [busy, setBusy] = useState(false);
-  const isAdmin = profile?.role === "admin" || profile?.role === "manager";
+  const isOwnerOrSuperAdmin =
+    profile?.role === "admin" ||
+    (profile?.role as string | undefined) === "owner" ||
+    !!(profile as any)?.is_platform_admin;
 
   useEffect(() => {
     if (!profile?.tenant_id) return;
@@ -31,7 +34,7 @@ export default function SecurityDangerZone() {
   }, [profile?.tenant_id]);
 
   async function saveSecuritySettings(next: { login_otp_enabled?: boolean; cloud_reset_enabled?: boolean }) {
-    if (!profile?.tenant_id || !isAdmin) return;
+    if (!profile?.tenant_id || !isOwnerOrSuperAdmin) return;
     const payload = {
       tenant_id: profile.tenant_id,
       login_otp_enabled: next.login_otp_enabled ?? loginOtpEnabled,
@@ -57,7 +60,7 @@ export default function SecurityDangerZone() {
   }
 
   async function requestOtp() {
-    if (!isAdmin) return toast.error("هذه العملية للمدير فقط");
+    if (!isOwnerOrSuperAdmin) return toast.error("هذه العملية متاحة للمالك أو Super Admin فقط");
     setBusy(true);
     try {
       await reauthenticate();
@@ -78,7 +81,7 @@ export default function SecurityDangerZone() {
   }
 
   async function executeReset(dryRun: boolean) {
-    if (!isAdmin) return toast.error("هذه العملية للمدير فقط");
+    if (!isOwnerOrSuperAdmin) return toast.error("هذه العملية متاحة للمالك أو Super Admin فقط");
     if (!cloudResetEnabled) return toast.error("فعّل خيار تهيئة السحابة أولاً");
     setBusy(true);
     try {
@@ -112,11 +115,11 @@ export default function SecurityDangerZone() {
       <div className="grid gap-3 md:grid-cols-2">
         <label className="flex items-center justify-between rounded-lg border border-border bg-card p-3 text-sm">
           <span>تفعيل OTP بعد تسجيل الدخول</span>
-          <Switch checked={loginOtpEnabled} disabled={!isAdmin} onCheckedChange={(v) => void saveSecuritySettings({ login_otp_enabled: v })} />
+          <Switch checked={loginOtpEnabled} disabled={!isOwnerOrSuperAdmin} onCheckedChange={(v) => void saveSecuritySettings({ login_otp_enabled: v })} />
         </label>
         <label className="flex items-center justify-between rounded-lg border border-border bg-card p-3 text-sm">
           <span>السماح بتهيئة السحابة من الإعدادات</span>
-          <Switch checked={cloudResetEnabled} disabled={!isAdmin} onCheckedChange={(v) => void saveSecuritySettings({ cloud_reset_enabled: v })} />
+          <Switch checked={cloudResetEnabled} disabled={!isOwnerOrSuperAdmin} onCheckedChange={(v) => void saveSecuritySettings({ cloud_reset_enabled: v })} />
         </label>
       </div>
 
@@ -127,13 +130,13 @@ export default function SecurityDangerZone() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" disabled={busy || !isAdmin} onClick={requestOtp} className="gap-2">
+        <Button type="button" variant="outline" disabled={busy || !isOwnerOrSuperAdmin} onClick={requestOtp} className="gap-2">
           <ShieldCheck size={14} /> إرسال رمز تحقق للبريد
         </Button>
-        <Button type="button" variant="outline" disabled={busy || !isAdmin} onClick={() => executeReset(true)}>
+        <Button type="button" variant="outline" disabled={busy || !isOwnerOrSuperAdmin} onClick={() => executeReset(true)}>
           فحص قبل الحذف
         </Button>
-        <Button type="button" variant="destructive" disabled={busy || !isAdmin} onClick={() => executeReset(false)} className="gap-2">
+        <Button type="button" variant="destructive" disabled={busy || !isOwnerOrSuperAdmin} onClick={() => executeReset(false)} className="gap-2">
           <Trash2 size={14} /> تهيئة وحذف بيانات السحابة
         </Button>
       </div>

@@ -68,7 +68,7 @@ export default function AuthPage() {
     }
   }, [session, profile, loading, navigate, otpVerified, loginOtpOpen, checkingOtpSetting]);
 
-  if (session && profile) return <Navigate to={homeForRole(profile.role)} replace />;
+  if (session && profile && otpVerified) return <Navigate to={homeForRole(profile.role)} replace />;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
