@@ -22,7 +22,11 @@ const TENANT_TABLES = [
 ];
 
 async function auditOtp(admin: any, payload: Record<string, unknown>) {
-  await admin.from("security_otp_audit_log").insert(payload).catch(() => {});
+  try {
+    await admin.from("security_otp_audit_log").insert(payload);
+  } catch {
+    // Audit logging must never break the reset response.
+  }
 }
 
 async function sha256(input: string) {

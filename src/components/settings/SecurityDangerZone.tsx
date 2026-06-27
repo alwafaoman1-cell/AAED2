@@ -23,15 +23,23 @@ export default function SecurityDangerZone() {
 
   useEffect(() => {
     if (!profile?.tenant_id) return;
-    void supabase
-      .from("tenant_security_settings" as any)
-      .select("login_otp_enabled,cloud_reset_enabled")
-      .eq("tenant_id", profile.tenant_id)
-      .maybeSingle()
-      .then(({ data }) => {
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("tenant_security_settings" as any)
+          .select("login_otp_enabled,cloud_reset_enabled")
+          .eq("tenant_id", profile.tenant_id)
+          .maybeSingle();
+        if (error) {
+          toast.error(`تعذر تحميل إعدادات OTP: ${error.message}`);
+          return;
+        }
         setLoginOtpEnabled(!!(data as any)?.login_otp_enabled);
         setCloudResetEnabled(!!(data as any)?.cloud_reset_enabled);
-      });
+      } catch (error: any) {
+        toast.error(error?.message || "تعذر تحميل إعدادات OTP");
+      }
+    })();
   }, [profile?.tenant_id]);
 
   async function saveSecuritySettings(next: { login_otp_enabled?: boolean; cloud_reset_enabled?: boolean }) {
@@ -43,15 +51,26 @@ export default function SecurityDangerZone() {
       updated_by: user?.id || null,
       updated_at: new Date().toISOString(),
     };
-    const { error } = await (supabase.from("tenant_security_settings" as any) as any)
-      .upsert(payload, { onConflict: "tenant_id" });
-    if (error) {
-      toast.error(error.message);
-      return;
+    setBusy(true);
+    try {
+      const { data, error } = await (supabase.from("tenant_security_settings" as any) as any)
+        .upsert(payload, { onConflict: "tenant_id" })
+        .select("login_otp_enabled,cloud_reset_enabled")
+        .single();
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      setLoginOtpEnabled(!!data?.login_otp_enabled);
+      setCloudResetEnabled(!!data?.cloud_reset_enabled);
+      if (typeof next.login_otp_enabled === "boolean") {
+        toast.success(next.login_otp_enabled ? "تم تفعيل OTP لتسجيل الدخول" : "تم إيقاف OTP لتسجيل الدخول");
+      } else {
+        toast.success("تم حفظ إعدادات الأمان");
+      }
+    } finally {
+      setBusy(false);
     }
-    setLoginOtpEnabled(payload.login_otp_enabled);
-    setCloudResetEnabled(payload.cloud_reset_enabled);
-    toast.success("تم حفظ إعدادات الأمان");
   }
 
   async function reauthenticate() {
@@ -112,13 +131,18 @@ export default function SecurityDangerZone() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="flex items-center justify-between rounded-lg border border-border bg-card p-3 text-sm">
-          <span>تفعيل OTP بعد تسجيل الدخول</span>
-          <Switch checked={loginOtpEnabled} disabled={!isOwnerOrSuperAdmin} onCheckedChange={(v) => void saveSecuritySettings({ login_otp_enabled: v })} />
+        <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
+          <span className="space-y-1">
+            <span className="block font-medium">OTP تسجيل الدخول</span>
+            <span className="block text-xs text-muted-foreground">
+              يمكن إيقافه مؤقتًا إذا لم يصل البريد، ثم تفعيله بعد ضبط مفتاح مزود البريد من إعدادات التكامل.
+            </span>
+          </span>
+          <Switch checked={loginOtpEnabled} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(v) => void saveSecuritySettings({ login_otp_enabled: v })} />
         </label>
-        <label className="flex items-center justify-between rounded-lg border border-border bg-card p-3 text-sm">
+        <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
           <span>السماح بتهيئة السحابة من الإعدادات</span>
-          <Switch checked={cloudResetEnabled} disabled={!isOwnerOrSuperAdmin} onCheckedChange={(v) => void saveSecuritySettings({ cloud_reset_enabled: v })} />
+          <Switch checked={cloudResetEnabled} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(v) => void saveSecuritySettings({ cloud_reset_enabled: v })} />
         </label>
       </div>
 

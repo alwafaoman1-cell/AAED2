@@ -18,6 +18,10 @@ function homeForRole(role?: string | null): string {
   return "/";
 }
 
+function functionErrorCode(error: unknown, data?: any): string {
+  return String(data?.code || data?.error || (error as any)?.code || (error as any)?.message || "").trim();
+}
+
 export default function AuthPage() {
   const { session, profile, signIn, loading } = useAuth();
   const navigate = useNavigate();
@@ -29,6 +33,7 @@ export default function AuthPage() {
   const [sendingReset, setSendingReset] = useState(false);
   const [loginOtpOpen, setLoginOtpOpen] = useState(false);
   const [loginOtp, setLoginOtp] = useState("");
+  const [loginOtpNotice, setLoginOtpNotice] = useState("");
   const [otpVerified, setOtpVerified] = useState(false);
   const [checkingOtpSetting, setCheckingOtpSetting] = useState(false);
 
@@ -49,10 +54,25 @@ export default function AuthPage() {
                 body: { action: "login_otp" },
               });
               if (otpError || otpData?.error || otpData?.ok === false) {
-                toast.error(getFunctionErrorMessage(otpError, otpData));
+                const code = functionErrorCode(otpError, otpData);
+                const message = getFunctionErrorMessage(otpError, otpData);
+                if (code === "otp_rate_limited") {
+                  setLoginOtpNotice("تم طلب رموز كثيرة. إذا كان لديك رمز حديث أدخله هنا، أو انتظر قليلًا ثم حاول طلب رمز جديد.");
+                  setLoginOtpOpen(true);
+                  toast.error(message);
+                  return;
+                }
+                if (code === "email_provider_not_configured" || code === "server_env_not_configured") {
+                  toast.warning(`${message} تم السماح بالدخول مؤقتًا حتى تضبط البريد أو توقف OTP من الإعدادات.`);
+                  setOtpVerified(true);
+                  navigate(homeForRole(profile.role), { replace: true });
+                  return;
+                }
+                toast.error(message);
                 await supabase.auth.signOut();
                 return;
               }
+              setLoginOtpNotice("");
               setLoginOtpOpen(true);
               toast.info("تم إرسال رمز تحقق إلى بريدك");
               return;
@@ -223,7 +243,7 @@ export default function AuthPage() {
           <DialogHeader>
             <DialogTitle>رمز تحقق تسجيل الدخول</DialogTitle>
             <DialogDescription>
-              أدخل رمز OTP المكوّن من 6 أرقام المرسل إلى بريدك الإلكتروني لإكمال تسجيل الدخول.
+              {loginOtpNotice || "أدخل رمز OTP المكوّن من 6 أرقام المرسل إلى بريدك الإلكتروني لإكمال تسجيل الدخول."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
