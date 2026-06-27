@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, Package, MessageCircle, Printer, Truck } from "lucide-react";
+import { Plus, Trash2, Package, MessageCircle, Printer, Truck, Receipt } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -20,6 +20,8 @@ interface Props {
   onPrintRequest: () => void;
   onSendWhatsApp?: () => void;
   onSendToSuppliers?: () => void;
+  onConvertToExpense?: (part: NeededPart) => void;
+  onOpenExpense?: (expenseId: string) => void;
   allowEdit: boolean;
 }
 
@@ -30,7 +32,7 @@ const STATUS_BADGE: Record<NeededPartStatus, string> = {
   received: "bg-success/15 text-success",
 };
 
-export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsApp, onSendToSuppliers, allowEdit }: Props) {
+export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsApp, onSendToSuppliers, onConvertToExpense, onOpenExpense, allowEdit }: Props) {
   const [draftName, setDraftName] = useState("");
   const [draftQty, setDraftQty] = useState(1);
   const [draftNotes, setDraftNotes] = useState("");
@@ -157,6 +159,7 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
                 <th className="text-center py-2 px-3 font-medium w-20">الكمية</th>
                 <th className="text-right py-2 px-3 font-medium">ملاحظات</th>
                 <th className="text-center py-2 px-3 font-medium w-36">الحالة</th>
+                <th className="text-center py-2 px-3 font-medium w-44">Expense</th>
                 {allowEdit && <th className="text-center py-2 px-3 font-medium w-12"></th>}
               </tr>
             </thead>
@@ -190,6 +193,28 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
                         <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_BADGE[status]}`}>
                           {NEEDED_PART_STATUS_LABELS[status]}
                         </span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 text-center">
+                      {p.convertedToExpense ? (
+                        <button
+                          type="button"
+                          onClick={() => p.convertedExpenseId && onOpenExpense?.(p.convertedExpenseId)}
+                          className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-1 text-[10px] font-semibold text-success hover:bg-success/20"
+                        >
+                          <Receipt size={11} /> Converted to Expense
+                        </button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={!allowEdit || !onConvertToExpense}
+                          onClick={() => onConvertToExpense?.(p)}
+                          className="h-7 gap-1 text-[11px]"
+                        >
+                          <Receipt size={12} /> Convert to Expense
+                        </Button>
                       )}
                     </td>
                     {allowEdit && (

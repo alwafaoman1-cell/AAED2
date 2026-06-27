@@ -22,11 +22,20 @@ import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import ExpensePreviewDialog from "@/components/workorders/ExpensePreviewDialog";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
+import { writeOperationalAudit } from "@/lib/deletePolicy";
 
 interface Props {
   order: WorkOrder | null;
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  initialRequiredPart?: {
+    id: string;
+    name: string;
+    quantity: number;
+    notes?: string;
+    estimatedUnitPrice?: number;
+  } | null;
+  onExpenseSaved?: (expense: ExpenseRecord) => void;
 }
 
 /** التصنيفات المقترحة لمصروفات أوامر العمل (تطابق ما طلبه المستخدم) */
@@ -56,7 +65,7 @@ function ensureWorkOrderCategories(): string {
   return defaultId;
 }
 
-export default function WorkOrderExpenseDialog({ order, open, onOpenChange }: Props) {
+export default function WorkOrderExpenseDialog({ order, open, onOpenChange, initialRequiredPart, onExpenseSaved }: Props) {
   const [, force] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -113,8 +122,17 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange }: Pr
       setPartQty("1");
       setUnitBuyPrice("");
       setUnitSellPrice("");
+      if (initialRequiredPart) {
+        const qty = Math.max(1, Number(initialRequiredPart.quantity) || 1);
+        const unit = Number(initialRequiredPart.estimatedUnitPrice || 0);
+        setPartName(initialRequiredPart.name || "");
+        setPartQty(String(qty));
+        setUnitBuyPrice(unit > 0 ? String(unit) : "");
+        setAmount(unit > 0 ? (unit * qty).toFixed(3) : "");
+        setDescription([initialRequiredPart.notes, "Converted from required spare part"].filter(Boolean).join(" — "));
+      }
     }
-  }, [open]);
+  }, [open, initialRequiredPart]);
 
   const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
@@ -181,7 +199,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange }: Pr
     setUnitSellPrice("");
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!order) return;
     const value = parseFloat(amount);
     if (!value || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
@@ -217,7 +235,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange }: Pr
         const oldCb = employeeCashboxesStore.getAll().find((c) => c.id === old.cashboxId);
         if (oldCb) employeeCashboxesStore.update(oldCb.id, { currentBalance: oldCb.currentBalance + old.amount });
         if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
-        expensesStore.update(editingId, {
+        await expensesStore.update(editingId, {
           date, amount: value, categoryId, categoryName: cat?.name,
           cashboxId, cashboxName: cb?.cashboxName, paymentMethod, beneficiary, description, photo,
           ...supplierFields,
@@ -230,6 +248,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange }: Pr
           description: `تعديل المبلغ من ${old.amount.toLocaleString()} إلى ${value.toLocaleString()} ر.ع`,
           amount: value, metadata: { workOrderId: order.id },
         });
+        onExpenseSaved?.(expensesStore.getById(editingId) || { ...old, amount: value });
         toast.success(`تم تحديث سند الصرف ${old.voucherNumber}`);
       }
       resetForm();
@@ -251,18 +270,44 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange }: Pr
       // ربط تلقائي للسيارة (مهم لتتبع تكلفة كل سيارة من قطع الغيار)
       linkedVehiclePlate: order.plate,
       linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
+      requiredPartId: initialRequiredPart?.id,
+      sourceWorkOrderId: order.cloudId || order.id,
+      sourceClaimId: order.claimId,
+      convertedFromRequiredPart: !!initialRequiredPart,
       ...supplierFields,
       ...partsFields,
       createdAt: new Date().toISOString(),
     };
-    expensesStore.add(record);
+    await expensesStore.add(record);
+    if (initialRequiredPart) {
+      void writeOperationalAudit({
+        action: "spare_part_converted_to_expense",
+        entityType: "required_spare_part",
+        entityId: initialRequiredPart.id,
+        relatedEntities: {
+          expense_id: record.id,
+          work_order_id: order.cloudId || order.id,
+          claim_id: order.claimId || null,
+        },
+        reason: "Converted from required spare part",
+        beforeSnapshot: initialRequiredPart,
+        afterSnapshot: record,
+      }).catch((error) => console.warn("[required part audit]", error));
+    }
 
     logActivity({
       action: "create", entity: "expense", entityId: number,
       label: `${cat?.name || "مصروف"} لأمر العمل ${order.id}`,
       description: `إضافة مصروف بقيمة ${value.toLocaleString()} ر.ع — ${beneficiary || "بدون مستفيد"}`,
-      amount: value, metadata: { workOrderId: order.id, categoryName: cat?.name },
+      amount: value,
+      metadata: {
+        workOrderId: order.id,
+        categoryName: cat?.name,
+        requiredPartId: initialRequiredPart?.id,
+        convertedFromRequiredPart: !!initialRequiredPart,
+      },
     });
+    onExpenseSaved?.(record);
 
     const profitMsg = isPartsCategory && partsFields.unitSellPrice != null && partsFields.unitBuyPrice != null && partsFields.partQty
       ? ` • ربح متوقع: ${(((partsFields.unitSellPrice as number) - (partsFields.unitBuyPrice as number)) * (partsFields.partQty as number)).toFixed(3)} ر.ع`

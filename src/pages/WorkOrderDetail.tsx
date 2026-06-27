@@ -36,7 +36,9 @@ import {
   WORK_ORDER_STATUSES,
   STAGE_LABELS,
   deleteWorkOrder,
+  updateNeededPartInOrder,
   type WorkOrder,
+  type NeededPart,
   type StagePhase,
   addWorkOrder,
   isPartStillNeeded,
@@ -55,6 +57,7 @@ import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import WorkOrderForm from "@/components/workorders/WorkOrderForm";
 import WorkOrderStatusDialog from "@/components/workorders/WorkOrderStatusDialog";
 import WorkOrderBulkExpenseDialog from "@/components/workorders/WorkOrderBulkExpenseDialog";
+import WorkOrderExpenseDialog from "@/components/workorders/WorkOrderExpenseDialog";
 import ExpensePreviewDialog from "@/components/workorders/ExpensePreviewDialog";
 import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
 import QrLabel from "@/components/workorders/QrLabel";
@@ -162,6 +165,7 @@ export default function WorkOrderDetail() {
   const [partsRequestDate, setPartsRequestDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [deliveryReceiptOpen, setDeliveryReceiptOpen] = useState(false);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
+  const [convertPart, setConvertPart] = useState<NeededPart | null>(null);
 
   const allowEdit = canEdit();
   const allowDelete = canDelete();
@@ -930,6 +934,18 @@ export default function WorkOrderDetail() {
         onPrintRequest={handlePrintNeededParts}
         onSendWhatsApp={() => { setWaTab("templates"); setWaOpen(true); }}
         onSendToSuppliers={() => { setWaTab("suppliers"); setWaOpen(true); }}
+        onConvertToExpense={(part) => {
+          if (part.convertedToExpense) {
+            toast.error("هذه القطعة محولة إلى مصروف مسبقاً");
+            return;
+          }
+          setConvertPart(part);
+        }}
+        onOpenExpense={(expenseId) => {
+          const rec = expensesStore.getById(expenseId);
+          if (rec) setPreviewExpense(rec);
+          else toast.error("لم يتم العثور على المصروف المرتبط");
+        }}
         allowEdit={allowEdit}
       />
 
@@ -1193,6 +1209,23 @@ export default function WorkOrderDetail() {
         order={expenseOpen ? order : null}
         open={expenseOpen}
         onOpenChange={setExpenseOpen}
+      />
+      <WorkOrderExpenseDialog
+        order={convertPart ? order : null}
+        open={!!convertPart}
+        onOpenChange={(open) => !open && setConvertPart(null)}
+        initialRequiredPart={convertPart}
+        onExpenseSaved={(expense) => {
+          if (!convertPart) return;
+          updateNeededPartInOrder(order.id, convertPart.id, {
+            convertedToExpense: true,
+            convertedExpenseId: expense.id,
+            convertedAt: new Date().toISOString(),
+            status: "secured",
+          });
+          toast.success("تم تحويل قطعة الغيار إلى مصروف وربطها بأمر العمل");
+          setConvertPart(null);
+        }}
       />
       <ExpensePreviewDialog
         expense={previewExpense}

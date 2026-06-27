@@ -34,6 +34,13 @@ export interface ExpenseRecord {
   partQty?: number;
   unitBuyPrice?: number;
   unitSellPrice?: number;
+  requiredPartId?: string;
+  sourceWorkOrderId?: string;
+  sourceClaimId?: string;
+  convertedFromRequiredPart?: boolean;
+  archivedAt?: string;
+  deletedAt?: string;
+  deleteReason?: string;
   createdAt: string;
 }
 
@@ -86,6 +93,13 @@ function rowToRecord(r: any): ExpenseRecord {
     partQty: meta.partQty,
     unitBuyPrice: meta.unitBuyPrice,
     unitSellPrice: meta.unitSellPrice,
+    requiredPartId: meta.requiredPartId,
+    sourceWorkOrderId: meta.sourceWorkOrderId,
+    sourceClaimId: meta.sourceClaimId,
+    convertedFromRequiredPart: meta.convertedFromRequiredPart,
+    archivedAt: meta.archivedAt,
+    deletedAt: meta.deletedAt || r.deleted_at || undefined,
+    deleteReason: meta.deleteReason,
     createdAt: r.created_at || new Date().toISOString(),
   };
 }
@@ -104,6 +118,13 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
   if (e.partQty != null) meta.partQty = e.partQty;
   if (e.unitBuyPrice != null) meta.unitBuyPrice = e.unitBuyPrice;
   if (e.unitSellPrice != null) meta.unitSellPrice = e.unitSellPrice;
+  if (e.requiredPartId) meta.requiredPartId = e.requiredPartId;
+  if (e.sourceWorkOrderId) meta.sourceWorkOrderId = e.sourceWorkOrderId;
+  if (e.sourceClaimId) meta.sourceClaimId = e.sourceClaimId;
+  if (e.convertedFromRequiredPart !== undefined) meta.convertedFromRequiredPart = e.convertedFromRequiredPart;
+  if (e.archivedAt) meta.archivedAt = e.archivedAt;
+  if (e.deletedAt) meta.deletedAt = e.deletedAt;
+  if (e.deleteReason) meta.deleteReason = e.deleteReason;
   // photo stored under attachments; also mirror in meta for resilience
   const attachments = e.photo ? [{ url: e.photo }] : [];
   if (e.photo) meta.photo = e.photo;
@@ -125,6 +146,8 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     linked_vehicle_name: e.linkedVehicleName || null,
     attachments,
     meta,
+    deleted_at: e.deletedAt || null,
+    archived_at: e.archivedAt || null,
   };
 }
 
@@ -133,6 +156,7 @@ async function hydrateFromCloud() {
     const { data, error } = await supabase
       .from("expenses")
       .select("*")
+      .is("deleted_at", null)
       .order("date", { ascending: false });
     if (error) throw error;
     const cloud = (data || []).map(rowToRecord);
@@ -204,7 +228,7 @@ export const expensesStore = {
       const tenantId = await getCurrentTenantId();
       if (!tenantId) return;
       const row = recordToRow(item, tenantId);
-      const { error } = await supabase.from("expenses").upsert(row);
+      const { error } = await (supabase.from("expenses") as any).upsert(row);
       if (error) console.warn("[expensesStore.add] supabase error:", error.message);
     } catch (e) {
       console.warn("[expensesStore.add] failed", e);
@@ -235,7 +259,13 @@ export const expensesStore = {
     persistLocal();
     notify();
     try {
-      const { error } = await supabase.from("expenses").delete().eq("id", id);
+      const { error } = await supabase
+        .from("expenses")
+        .update({
+          deleted_at: new Date().toISOString(),
+          meta: { ...(recordToRow(removed, "unused").meta as any), deletedAt: new Date().toISOString(), deleteReason: removed.deleteReason || "soft delete" },
+        } as any)
+        .eq("id", id);
       if (error) console.warn("[expensesStore.remove] supabase error:", error.message);
     } catch (e) {
       console.warn("[expensesStore.remove] failed", e);
@@ -252,7 +282,7 @@ export const expensesStore = {
       try {
         const tenantId = await getCurrentTenantId();
         if (!tenantId) return;
-        await supabase.from("expenses").upsert(recordToRow(item, tenantId));
+        await (supabase.from("expenses") as any).upsert(recordToRow(item, tenantId));
       } catch {}
     })();
   },
@@ -268,7 +298,7 @@ export const expensesStore = {
 export function getExpensesForWorkOrder(workOrderId: string): ExpenseRecord[] {
   return expensesStore
     .getAll()
-    .filter((e) => e.linkedWorkOrderId === workOrderId)
+    .filter((e) => e.linkedWorkOrderId === workOrderId && !e.deletedAt && !e.archivedAt)
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 export function getExpensesTotalForWorkOrder(workOrderId: string): number {

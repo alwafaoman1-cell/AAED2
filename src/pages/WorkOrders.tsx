@@ -44,6 +44,14 @@ import { moveToTrash } from "@/lib/trashStore";
 import { canDelete, canEdit } from "@/lib/permissions";
 import { logActivity } from "@/lib/auditLogStore";
 import { toast } from "sonner";
+import {
+  archiveWorkOrder,
+  deleteWorkOrderKeepFinancial,
+  deleteWorkOrderWithRelated,
+  getWorkOrderImpact,
+  type DeleteMode,
+  type ImpactSummary,
+} from "@/lib/deletePolicy";
 import { computeDays, durationLevel } from "@/lib/claimDurationStatus";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
@@ -150,6 +158,9 @@ export default function WorkOrders() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePersistedState<number>("work_orders_page_size", 20);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
+  const [deleteMode, setDeleteMode] = useState<DeleteMode>("archive_only");
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteImpact, setDeleteImpact] = useState<ImpactSummary | null>(null);
   const allowEdit = canEdit();
   const allowDelete = canDelete();
   const [searchParams] = useSearchParams();
@@ -161,6 +172,18 @@ export default function WorkOrders() {
   useEffect(() => {
     return subscribeWorkOrders(() => setOrders([...getWorkOrders()]));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDeleteImpact(null);
+    if (!deleteOrder) return;
+    void getWorkOrderImpact(deleteOrder).then((impact) => {
+      if (!cancelled) setDeleteImpact(impact);
+    }).catch((error) => {
+      if (!cancelled) toast.error(error?.message || "تعذر فحص المتعلقات");
+    });
+    return () => { cancelled = true; };
+  }, [deleteOrder]);
 
   // عدد الفحوصات المرتبطة بكل أمر عمل
   const inspectionsByOrder: Record<string, number> = (() => {

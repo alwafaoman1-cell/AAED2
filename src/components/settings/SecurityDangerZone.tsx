@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { getFunctionErrorMessage } from "@/lib/functionErrors";
 
 export default function SecurityDangerZone() {
   const { user, profile } = useAuth();
@@ -67,8 +68,9 @@ export default function SecurityDangerZone() {
       const { data, error } = await supabase.functions.invoke("request-security-otp", {
         body: { action: "cloud_reset" },
       });
-      if (error) throw error;
-      if (data?.error === "email_provider_not_configured") {
+      if (error || data?.error || data?.ok === false) {
+        toast.error(getFunctionErrorMessage(error, data));
+        return;
         toast.error("مزود البريد غير مفعّل على الخادم. أضف RESEND_API_KEY قبل استخدام التهيئة.");
         return;
       }
@@ -89,8 +91,7 @@ export default function SecurityDangerZone() {
       const { data, error } = await supabase.functions.invoke("execute-cloud-reset", {
         body: { otp, confirmPhrase, dryRun, reason: "admin settings danger zone" },
       });
-      if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error || "فشل تنفيذ العملية");
+      if (error || !data?.ok) throw new Error(getFunctionErrorMessage(error, data));
       toast.success(dryRun ? "تم فحص البيانات المرشحة للحذف" : "تم تنفيذ تهيئة السحابة");
       console.info("[cloud reset result]", data.results);
     } catch (error: any) {

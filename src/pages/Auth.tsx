@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Loader2, LogIn, Wrench, Mail } from "lucide-react";
 import { toast } from "sonner";
+import { getFunctionErrorMessage } from "@/lib/functionErrors";
 
 function homeForRole(role?: string | null): string {
   if (role === "supervisor") return "/supervisor-app";
@@ -47,7 +48,7 @@ export default function AuthPage() {
               const { data: otpData } = await supabase.functions.invoke("request-security-otp", {
                 body: { action: "login_otp" },
               });
-              if (otpData?.error === "email_provider_not_configured") {
+              if (otpData?.error || otpData?.ok === false) {
                 toast.error("OTP مفعل لكن مزود البريد غير مفعّل على الخادم");
                 await supabase.auth.signOut();
                 return;
@@ -113,7 +114,7 @@ export default function AuthPage() {
       const { data, error } = await supabase.functions.invoke("verify-security-otp", {
         body: { action: "login_otp", otp: loginOtp },
       });
-      if (error || !data?.ok) throw error || new Error(data?.error || "otp_failed");
+      if (error || !data?.ok) throw new Error(getFunctionErrorMessage(error, data));
       setOtpVerified(true);
       setLoginOtpOpen(false);
       toast.success("تم التحقق من رمز الدخول");

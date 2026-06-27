@@ -27,6 +27,7 @@ import AppointmentFormDialog from "@/components/customers/AppointmentFormDialog"
 import SmsDialog from "@/components/customers/SmsDialog";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
+import { archiveCustomer } from "@/lib/deletePolicy";
 
 import { customersStore } from "@/lib/customersStore";
 import { getWorkOrders } from "@/lib/workOrdersStore";
@@ -246,7 +247,13 @@ export default function CustomerDetail() {
     appointmentsStore.remove(a.id);
     toast.success("تم حذف الموعد");
   }
-  function confirmDeleteCustomer() {
+  async function confirmDeleteCustomer() {
+    try {
+      await archiveCustomer(customer.id, "Archive Customer Only");
+    } catch (error: any) {
+      toast.error(error?.message || "فشل حذف/أرشفة العميل في Supabase");
+      return;
+    }
     customersStore.remove(customer.id);
     logActivity({
       action: "delete", entity: "customer", entityId: customer.id,

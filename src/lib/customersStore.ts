@@ -82,7 +82,9 @@ async function refreshCustomersFromCloud() {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return;
   const { data, error } = await supabase.from("customers").select("*")
-    .eq("tenant_id", tenantId).order("created_at", { ascending: false });
+    .eq("tenant_id", tenantId)
+    .or("archived.is.null,archived.eq.false")
+    .order("created_at", { ascending: false });
   if (error) {
     console.warn("[customersStore] cloud fetch failed", error);
     return;

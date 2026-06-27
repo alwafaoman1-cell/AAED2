@@ -18,6 +18,7 @@ import { moveToTrash, registerRestoreHandler } from "@/lib/trashStore";
 import { canDelete, canEdit } from "@/lib/permissions";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
+import { archiveCustomer } from "@/lib/deletePolicy";
 
 const TAG_LABEL: Record<CustomerTag, string> = { vip: "VIP", regular: "عادي", new: "جديد" };
 const TAG_STYLE: Record<CustomerTag, string> = {
@@ -81,8 +82,14 @@ export default function Customers() {
   const vipCount = customers.filter((c) => c.tag === "vip").length;
   const companyCount = customers.filter((c) => c.type === "company").length;
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!deleting) return;
+    try {
+      await archiveCustomer(deleting.id, "Archive Customer Only");
+    } catch (error: any) {
+      toast.error(error?.message || "فشل حذف/أرشفة العميل في Supabase");
+      return;
+    }
     customersStore.remove(deleting.id);
     moveToTrash({
       type: "customer",

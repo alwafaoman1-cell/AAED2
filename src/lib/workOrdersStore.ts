@@ -36,6 +36,10 @@ export interface NeededPart {
   name: string;
   quantity: number;
   notes?: string;
+  estimatedUnitPrice?: number;
+  convertedToExpense?: boolean;
+  convertedExpenseId?: string;
+  convertedAt?: string;
   /** الحالة التفصيلية للقطعة */
   status?: NeededPartStatus;
   /** متروكة للتوافق الخلفي — تعتبر true عندما status === "received" أو "secured" */
@@ -659,7 +663,7 @@ async function pushDeleteToCloud(orderNumber: string) {
   try {
     const ctx = await tenantContext(); if (!ctx) return;
     const { error } = await supabase.from("job_orders")
-      .delete().eq("tenant_id", ctx.tenantId).eq("order_number", orderNumber);
+      .update({ archived_at: new Date().toISOString() } as any).eq("tenant_id", ctx.tenantId).eq("order_number", orderNumber);
     if (error) console.warn("[pushDeleteToCloud]", error);
     else KNOWN_CLOUD_NUMBERS.delete(orderNumber);
   } catch (e) { console.warn("[pushDeleteToCloud] exception", e); }
