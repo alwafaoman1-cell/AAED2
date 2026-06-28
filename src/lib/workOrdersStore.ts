@@ -398,6 +398,45 @@ let cloudBootstrapped = false;
 let cloudFetchTimer: ReturnType<typeof setTimeout> | null = null;
 const KNOWN_CLOUD_NUMBERS = new Set<string>();
 
+function parseWorkOrderNumber(value: string) {
+  const m = String(value || "").trim().match(/^([A-Z]+)-(\d{4})-(\d+)$/i);
+  if (!m) return null;
+  return { prefix: m[1].toUpperCase(), year: m[2], sequence: Number(m[3]), padding: m[3].length };
+}
+
+async function allocateVisibleOrderNumber(tenantId: string, requested: string): Promise<string> {
+  const parsed = parseWorkOrderNumber(requested);
+  if (!parsed) return requested;
+  const { data, error } = await supabase
+    .from("job_orders")
+    .select("order_number")
+    .eq("tenant_id", tenantId)
+    .ilike("order_number", `${parsed.prefix}-${parsed.year}-%`)
+    .limit(10000);
+  if (error) throw error;
+
+  const used = new Set<string>();
+  let max = 0;
+  for (const row of (data || []) as Array<{ order_number: string | null }>) {
+    const n = String(row.order_number || "").trim().toUpperCase();
+    const p = parseWorkOrderNumber(n);
+    if (!p || p.prefix !== parsed.prefix || p.year !== parsed.year) continue;
+    used.add(n);
+    if (Number.isFinite(p.sequence) && p.sequence > max) max = p.sequence;
+  }
+
+  const normalizedRequested = requested.trim().toUpperCase();
+  if (!used.has(normalizedRequested)) return requested;
+
+  let next = Math.max(max + 1, parsed.sequence + 1);
+  let candidate = `${parsed.prefix}-${parsed.year}-${String(next).padStart(parsed.padding, "0")}`;
+  while (used.has(candidate)) {
+    next += 1;
+    candidate = `${parsed.prefix}-${parsed.year}-${String(next).padStart(parsed.padding, "0")}`;
+  }
+  return candidate;
+}
+
 async function fetchFromCloud(): Promise<void> {
   try {
     const tenantId = await getCurrentTenantId();
@@ -763,18 +802,30 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
   const vehicleId = await resolveVehicleId(ctx.tenantId, customerId, order);
   if (!vehicleId || !isUuid(vehicleId)) throw new Error("لا يمكن حفظ أمر العمل بدون vehicle_id صالح");
 
-  const payload = buildJobOrderPayload({ ...order, customerId, vehicleId }, ctx.tenantId, customerId, vehicleId);
   const existingId = order.cloudId && isUuid(order.cloudId)
     ? order.cloudId
     : null;
-  const { data: existingByNumber, error: lookupError } = await supabase
-    .from("job_orders")
-    .select("id")
-    .eq("tenant_id", ctx.tenantId)
-    .eq("order_number", order.id)
-    .maybeSingle();
-  if (lookupError) throw lookupError;
-  const targetId = existingId || existingByNumber?.id || null;
+  let targetId = existingId;
+  let finalOrderNumber = order.id;
+  if (existingId) {
+    const { data: existing, error: existingError } = await supabase
+      .from("job_orders")
+      .select("id,order_number,deleted_at,archived_at")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", existingId)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (!existing?.id) throw new Error("Work order was not found in Supabase");
+    if ((existing as any).deleted_at || (existing as any).archived_at) {
+      throw new Error("Work order is archived/deleted in Supabase and cannot be updated from this form");
+    }
+    finalOrderNumber = (existing as any).order_number || order.id;
+  } else {
+    finalOrderNumber = await allocateVisibleOrderNumber(ctx.tenantId, order.id);
+  }
+
+  const normalizedOrder = { ...order, id: finalOrderNumber, customerId, vehicleId };
+  const payload = buildJobOrderPayload(normalizedOrder, ctx.tenantId, customerId, vehicleId);
   let write = targetId
     ? (supabase.from("job_orders") as any).update(payload).eq("tenant_id", ctx.tenantId).eq("id", targetId).select("*").single()
     : (supabase.from("job_orders") as any).insert(payload).select("*").single();
@@ -793,6 +844,8 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     .select("*")
     .eq("tenant_id", ctx.tenantId)
     .eq("id", data.id)
+    .is("deleted_at", null)
+    .is("archived_at", null)
     .maybeSingle();
   if (verifyError) throw verifyError;
   if (!verified?.id) throw new Error("تم الحفظ لكن تعذر قراءة أمر العمل للتأكيد");

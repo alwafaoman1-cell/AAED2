@@ -174,6 +174,7 @@ export function useCreateClaim() {
         .select("id,claim_number")
         .eq("tenant_id", claim.tenant_id)
         .ilike("claim_number", claimNumber)
+        .limit(1)
         .maybeSingle();
       if (existingError) throw existingError;
       if ((existing as any)?.id) {
@@ -190,6 +191,7 @@ export function useCreateClaim() {
       const { data: verified, error: verifyError } = await supabase
         .from("insurance_claims" as any)
         .select("*")
+        .eq("tenant_id", claim.tenant_id)
         .eq("id", (data as any).id)
         .maybeSingle();
       if (verifyError) throw verifyError;

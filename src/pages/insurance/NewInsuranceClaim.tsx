@@ -320,6 +320,7 @@ export default function NewInsuranceClaim() {
         .select("id, claim_number, status, insurance_company, created_at")
         .eq("tenant_id", tenantId as string)
         .ilike("claim_number", cn)
+        .limit(1)
         .maybeSingle();
       if (existingClaimError) throw existingClaimError;
       if ((existingClaim as any)?.id) {
