@@ -309,6 +309,7 @@ const App = () => (
               <Route path="/media-studio" element={<MediaStudio />} />
               <Route path="/import-export" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ImportExportCenter /></ProtectedRoute>} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings/roles" element={<Navigate to="/settings/roles-permissions" replace />} />
               <Route path="/settings/print-templates" element={<PrintTemplates />} />
               <Route path="/settings/print-templates/:docType" element={<PrintTemplateVariants />} />
               <Route path="/settings/print-templates/:docType/edit/:id" element={<PrintTemplateEditor />} />
@@ -323,6 +324,7 @@ const App = () => (
               <Route path="/settings/tax" element={<TaxSettingsPage />} />
               <Route path="/settings/integrations" element={<IntegrationsSettingsPage />} />
               <Route path="/settings/payment-gateways" element={<PaymentGatewaysPage />} />
+              <Route path="/trash" element={<Navigate to="/settings/trash" replace />} />
               <Route path="/settings/trash" element={<ProtectedRoute roles={["admin"]}><TrashPage /></ProtectedRoute>} />
               <Route path="/settings/audit-log" element={<ProtectedRoute roles={["admin","manager","accountant"]}><AuditLogPage /></ProtectedRoute>} />
               <Route path="/settings/backup" element={<ProtectedRoute roles={["admin"]}><BackupRestorePage /></ProtectedRoute>} />
