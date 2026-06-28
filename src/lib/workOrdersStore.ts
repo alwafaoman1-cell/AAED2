@@ -357,6 +357,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isUuid } from "@/lib/uuid";
 import { customersStore } from "@/lib/customersStore";
+import { sanitizeWorkOrderWritePayload } from "@/lib/supabasePayload";
 
 
 function cloudStatusToLocal(s: string | null | undefined): string {
@@ -786,6 +787,9 @@ function legacyCompatibleJobOrderPayload(
   }
   delete next.deleted_at;
   delete next.deleted_by;
+  delete next.subtotal;
+  delete next.vat;
+  delete next.final_total;
   next.vehicle_belongings = belongings;
   return next;
 }
@@ -796,7 +800,7 @@ function isMissingJobOrderColumnError(error: unknown): boolean {
 }
 
 function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string, vehicleId: string) {
-  return {
+  return sanitizeWorkOrderWritePayload({
     tenant_id: tenantId,
     customer_id: customerId,
     vehicle_id: vehicleId,
@@ -810,8 +814,6 @@ function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string
     status: localStatusToCloud(o.status) as any,
     labor_cost: o.laborCost || 0,
     parts_cost: o.partsCost || 0,
-    subtotal: o.totalCost || 0,
-    final_total: o.totalCost || 0,
     insurance_company: o.insurance && o.insurance !== "-" ? o.insurance : null,
     insurance_claim_number: o.claimNumber && o.claimNumber !== "-" ? o.claimNumber : null,
     claim_id: o.claimId && isUuid(o.claimId) ? o.claimId : null,
@@ -830,7 +832,7 @@ function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string
     received_at: o.receivedAt || null,
     tracking_expires_at: o.trackingExpiresAt || null,
     metadata: jobOrderMetadata(o) as any,
-  };
+  });
 }
 
 async function mapSavedJobOrder(row: any): Promise<WorkOrder> {

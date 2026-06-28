@@ -4,6 +4,7 @@ import { resolveSeriesByPrefix } from "@/lib/numberingSettings";
 import { supabase } from "@/integrations/supabase/client";
 import { isUuid } from "@/lib/uuid";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload, stripUndefined } from "@/lib/supabasePayload";
 
 export type SalesDocType =
   | "invoice"
@@ -206,7 +207,7 @@ async function refreshSalesFromCloud() {
 async function upsertSalesCloud(doc: SalesDoc) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return;
-  const { error } = await (supabase.from("sales_documents") as any).upsert({
+  const payload = stripUndefined({
     id: doc.id,
     tenant_id: tenantId,
     doc_number: doc.number,
@@ -251,6 +252,10 @@ async function upsertSalesCloud(doc: SalesDoc) {
       isDeleted: doc.isDeleted,
     },
   });
+  let { error } = await (supabase.from("sales_documents") as any).upsert(payload);
+  if (error && isGeneratedColumnWriteError(error)) {
+    ({ error } = await (supabase.from("sales_documents") as any).upsert(sanitizeInvoiceGeneratedWritePayload(payload)));
+  }
   if (error) console.warn("[salesStore] cloud upsert failed", error);
 }
 

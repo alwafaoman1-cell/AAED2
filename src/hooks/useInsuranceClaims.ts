@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { postInsuranceClaimApproval, removeInsuranceClaimJournal } from "@/lib/insuranceAccounting";
 import { isUuid } from "@/lib/uuid";
+import { sanitizeClaimWritePayload } from "@/lib/supabasePayload";
 
 export interface ClaimNeededPart {
   name: string;
@@ -185,9 +186,10 @@ export function useCreateClaim() {
         (err as any).existingClaimId = (existing as any).id;
         throw err;
       }
+      const payload = sanitizeClaimWritePayload({ ...(claim as any), claim_number: claimNumber });
       const { data, error } = await supabase
         .from("insurance_claims" as any)
-        .insert({ ...(claim as any), claim_number: claimNumber })
+        .insert(payload)
         .select("id")
         .single();
       if (error) throw error;
@@ -237,9 +239,10 @@ export function useUpdateClaim() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<ClaimInsert> }) => {
+      const payload = sanitizeClaimWritePayload(updates as any);
       const { error } = await supabase
         .from("insurance_claims" as any)
-        .update(updates as any)
+        .update(payload)
         .eq("id", id);
       if (error) throw error;
     },

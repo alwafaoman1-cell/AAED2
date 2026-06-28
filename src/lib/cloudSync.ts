@@ -11,6 +11,7 @@ import { expensesStore } from "./expensesStore";
 import { journalStore } from "./journalStore";
 import { salesStore } from "./salesStore";
 import { suppliersStore } from "./suppliersStore";
+import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload } from "@/lib/supabasePayload";
 
 export type CloudEntity =
   | "customers"
@@ -387,7 +388,12 @@ async function migrateSalesDocs(tenantId: string): Promise<CloudResult> {
 
   let inserted = 0, errors = 0;
   for (const batch of chunked(rows, BATCH)) {
-    const { error, count } = await supabase.from("sales_documents").insert(batch as any, { count: "exact" });
+    let { error, count } = await supabase.from("sales_documents").insert(batch as any, { count: "exact" });
+    if (error && isGeneratedColumnWriteError(error)) {
+      ({ error, count } = await supabase
+        .from("sales_documents")
+        .insert(batch.map((row) => sanitizeInvoiceGeneratedWritePayload(row)) as any, { count: "exact" }));
+    }
     if (error) errors += batch.length; else inserted += count ?? batch.length;
   }
   return { inserted, errors };

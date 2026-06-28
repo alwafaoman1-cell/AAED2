@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload } from "@/lib/supabasePayload";
 
 export interface InsuranceInvoice {
   id: string;
@@ -119,11 +120,19 @@ export function useCreateInsuranceInvoice() {
         inv.idempotency_key ??
         `claim:${inv.claim_id}:total:${Number(inv.total).toFixed(2)}`;
 
-      const { data, error } = await supabase
+      const payload = { ...inv, idempotency_key: idem, invoice_number: "" };
+      let { data, error } = await supabase
         .from("insurance_invoices" as any)
-        .insert({ ...inv, idempotency_key: idem, invoice_number: "" } as any) // الـ trigger يولّد الرقم
+        .insert(payload as any)
         .select()
         .single();
+      if (error && isGeneratedColumnWriteError(error)) {
+        ({ data, error } = await supabase
+          .from("insurance_invoices" as any)
+          .insert(sanitizeInvoiceGeneratedWritePayload(payload) as any)
+          .select()
+          .single());
+      }
       if (error) {
         // 23505 = unique_violation → أعد الفاتورة الموجودة بدل الفشل
         if ((error as any).code === "23505") {
@@ -154,10 +163,17 @@ export function useUpdateInsuranceInvoice() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<InsuranceInvoiceInsert> }) => {
-      const { error } = await supabase
+      const payload = updates as any;
+      let { error } = await supabase
         .from("insurance_invoices" as any)
-        .update(updates as any)
+        .update(payload)
         .eq("id", id);
+      if (error && isGeneratedColumnWriteError(error)) {
+        ({ error } = await supabase
+          .from("insurance_invoices" as any)
+          .update(sanitizeInvoiceGeneratedWritePayload(payload) as any)
+          .eq("id", id));
+      }
       if (error) throw error;
     },
     onSuccess: () => {
