@@ -25,7 +25,7 @@ import AiWriteButton from "@/components/ai/AiWriteButton";
 import { toEnglishDigits } from "@/lib/numberUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
-import { ensureVehicleForCustomer, findExistingVehicle } from "@/lib/vehicleIdentity";
+import { ensureVehicleForCustomer, findExistingVehicle, type VehicleIdentityMatch } from "@/lib/vehicleIdentity";
 import { isUuid } from "@/lib/uuid";
 import { toE164 } from "@/lib/phoneUtils";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
@@ -392,44 +392,20 @@ export default function NewInsuranceClaim() {
 
 
       let vehicleId = draft.vehicleId && isUuid(draft.vehicleId) ? draft.vehicleId : null;
-      const vehicleCandidate = await findExistingVehicle({
-        vehicleId: draft.vehicleId,
-        plate: draft.vehiclePlate,
-        vin: draft.vehicleVin,
-        make: draft.vehicleMake,
-        model: draft.vehicleModel,
-        year: draft.vehicleYear,
-        color: draft.vehicleColor,
-      });
-      if (vehicleCandidate?.id) {
-        const needsConfirmation =
-          vehicleCandidate.source === "vin" ||
-          (!!vehicleCandidate.customer_id && vehicleCandidate.customer_id !== customerId);
-        if (needsConfirmation) {
-          const ok = window.confirm(
-            vehicleCandidate.customer_id && vehicleCandidate.customer_id !== customerId
-              ? "هذه المركبة موجودة ومرتبطة بعميل آخر. هل تريد ربط المطالبة بهذه المركبة بدون تغيير مالكها؟"
-              : "تم العثور على مركبة بالـ VIN فقط. هل تؤكد ربط المطالبة بهذه المركبة؟",
-          );
-          if (!ok) {
-            setSubmitting(false);
-            return;
-          }
-          if (vehicleCandidate.customer_id && vehicleCandidate.customer_id !== customerId) {
-            const { data: linkedOwner, error: linkedOwnerError } = await supabase
-              .from("customers")
-              .select("id,name,phone")
-              .eq("tenant_id", tenantId as string)
-              .eq("id", vehicleCandidate.customer_id)
-              .maybeSingle();
-            if (linkedOwnerError) throw linkedOwnerError;
-            if (!(linkedOwner as any)?.id) throw new Error("تعذر قراءة مالك المركبة الموجود من Supabase");
-            customerRecord = linkedOwner as any;
-            customerId = (linkedOwner as any).id;
-          }
+      if (!vehicleId) {
+        const vehicleCandidate = await findExistingVehicle({
+          plate: draft.vehiclePlate,
+          vin: draft.vehicleVin,
+          make: draft.vehicleMake,
+          model: draft.vehicleModel,
+          year: draft.vehicleYear,
+          color: draft.vehicleColor,
+        });
+        if (vehicleCandidate?.id) {
+          throw new Error("هذه المركبة موجودة مسبقًا. اختر Use This Vehicle أو غيّر بيانات اللوحة.");
         }
-        vehicleId = vehicleCandidate.id;
-      } else if (draft.vehiclePlate.trim() || draft.vehicleVin.trim()) {
+      }
+      if (!vehicleId && (draft.vehiclePlate.trim() || draft.vehicleVin.trim())) {
         const resolved = await ensureVehicleForCustomer({
           customerId: customerId!,
           plate: draft.vehiclePlate,
@@ -793,6 +769,8 @@ function Step1({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [vehicleMatch, setVehicleMatch] = useState<VehicleIdentityMatch | null>(null);
+  const [vehicleLookupLoading, setVehicleLookupLoading] = useState(false);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -805,6 +783,33 @@ function Step1({
       setVehicles((data as any[]) || []);
     })();
   }, [pickerOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (draft.vehicleId || (!draft.vehiclePlate.trim() && !draft.vehicleVin.trim())) {
+      setVehicleMatch(null);
+      return;
+    }
+    setVehicleLookupLoading(true);
+    const timer = setTimeout(() => {
+      void findExistingVehicle({
+        plate: draft.vehiclePlate,
+        vin: draft.vehicleVin,
+        make: draft.vehicleMake,
+        model: draft.vehicleModel,
+        year: draft.vehicleYear,
+        color: draft.vehicleColor,
+      }).then((match) => {
+        if (!cancelled) setVehicleMatch(match);
+      }).finally(() => {
+        if (!cancelled) setVehicleLookupLoading(false);
+      });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [draft.vehicleId, draft.vehiclePlate, draft.vehicleVin, draft.vehicleMake, draft.vehicleModel, draft.vehicleYear, draft.vehicleColor]);
 
   const filtered = useMemo(() => {
     const t = search.trim().toLowerCase();
@@ -856,6 +861,48 @@ function Step1({
             <X size={12} className="ml-1" /> إلغاء الربط
           </Button>
         </div>
+      ) : vehicleLookupLoading ? (
+        <div className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
+          جاري البحث عن المركبة داخل نفس الورشة...
+        </div>
+      ) : vehicleMatch ? (
+        <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs space-y-2">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="space-y-1">
+              <p className="font-semibold text-foreground">المركبة موجودة</p>
+              <p className="text-muted-foreground">
+                اللوحة: {[vehicleMatch.plate_letters, vehicleMatch.plate_number].filter(Boolean).join(" ") || "—"} · VIN: {vehicleMatch.vin_number || vehicleMatch.vin || "—"}
+              </p>
+              <p className="text-muted-foreground">
+                {vehicleMatch.brand || "—"} {vehicleMatch.model || ""} {vehicleMatch.year || ""} · العميل الحالي: {vehicleMatch.customer_name || "—"}
+              </p>
+              {vehicleMatch.customer_id && draft.customerId && vehicleMatch.customer_id !== draft.customerId && (
+                <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
+                  هذه المركبة مرتبطة بعميل آخر. لن يتم ربطها أو نقلها تلقائيًا.
+                </p>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                update({
+                  vehicleId: vehicleMatch.id,
+                  customerId: vehicleMatch.customer_id || draft.customerId,
+                  vehicleMake: vehicleMatch.brand || draft.vehicleMake,
+                  vehicleModel: vehicleMatch.model || draft.vehicleModel,
+                  vehicleYear: vehicleMatch.year ? String(vehicleMatch.year) : draft.vehicleYear,
+                  vehicleColor: vehicleMatch.color || draft.vehicleColor,
+                  vehicleVin: vehicleMatch.vin_number || vehicleMatch.vin || draft.vehicleVin,
+                });
+                toast.success("تم اختيار المركبة الموجودة");
+              }}
+            >
+              Use This Vehicle
+            </Button>
+          </div>
+        </div>
       ) : draft.vehicleMake && draft.vehicleModel && draft.vehiclePlate ? (
         <div className="rounded-lg border border-info/40 bg-info/5 p-3 text-xs flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
@@ -878,19 +925,7 @@ function Step1({
                   color: draft.vehicleColor,
                 });
                 if (existing?.id) {
-                  const needsConfirmation =
-                    existing.source === "vin" ||
-                    (!!existing.customer_id && existing.customer_id !== draft.customerId);
-                  if (needsConfirmation) {
-                    const ok = window.confirm(
-                      existing.customer_id && existing.customer_id !== draft.customerId
-                        ? "هذه المركبة موجودة ومرتبطة بعميل آخر. هل تريد ربطها بدون تغيير المالك؟"
-                        : "تم العثور على مركبة بالـ VIN فقط. هل تؤكد ربطها؟",
-                    );
-                    if (!ok) return;
-                  }
-                  update({ vehicleId: existing.id });
-                  toast.success("ربط مع مركبة موجودة");
+                  toast.error("هذه المركبة موجودة مسبقًا. اختر Use This Vehicle أو غيّر بيانات اللوحة.");
                   return;
                 }
                 const resolved = await ensureVehicleForCustomer({

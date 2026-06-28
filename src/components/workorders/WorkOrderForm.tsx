@@ -148,7 +148,6 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     setVehicleLookupLoading(true);
     const timer = setTimeout(() => {
       void findExistingVehicle({
-        vehicleId: form.vehicleId,
         plate: form.plate,
         vin: form.vin,
         make: form.vehicleType,
@@ -158,7 +157,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       }).then((match) => {
         if (cancelled) return;
         setVehicleMatch(match);
-        setUseExistingVehicle(!!match?.id && match.source !== "vin" && (!!form.vehicleId || !(match.customer_id && currentCustomerId && match.customer_id !== currentCustomerId)));
+        setUseExistingVehicle(false);
       }).finally(() => {
         if (!cancelled) setVehicleLookupLoading(false);
       });
@@ -167,7 +166,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [form.vehicleId, form.plate, form.vin, form.vehicleType, form.model, form.year, form.color, currentCustomerId]);
+  }, [form.plate, form.vin, form.vehicleType, form.model, form.year, form.color, currentCustomerId]);
 
   function selectOrderType(type: WorkOrderType) {
     if (type === "insurance" && !canChooseInsurance) {
@@ -365,6 +364,10 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       return;
     }
     let resolvedVehicleId = form.vehicleId;
+    if (vehicleMatch?.id && !useExistingVehicle && form.vehicleId !== vehicleMatch.id) {
+      toast.error("هذه المركبة موجودة مسبقًا. اختر Use This Vehicle أو غيّر بيانات اللوحة.");
+      return;
+    }
     try {
       const resolved = await ensureVehicleForCustomer({
         customerId,
@@ -426,6 +429,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       toast.success(isEdit ? `تم تحديث ${saved.id}` : `تم إنشاء ${saved.id}`);
       onClose();
     } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ أمر العمل في Supabase");
     } finally {
       setSaving(false);
     }
@@ -536,7 +540,10 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         <h4 className="text-sm font-semibold text-foreground">بيانات المركبة</h4>
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">رقم اللوحة *</label>
-          <PlateInput value={form.plate} onChange={(v) => set("plate", v)} />
+          <PlateInput value={form.plate} onChange={(v) => {
+            setUseExistingVehicle(false);
+            setForm((prev) => ({ ...prev, plate: v, vehicleId: undefined }));
+          }} />
         </div>
         <VehicleMakeModelPicker
           make={form.vehicleType}
@@ -549,6 +556,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           onChange={(patch) =>
             setForm((prev) => ({
               ...prev,
+              vehicleId: undefined,
               vehicleType: patch.make !== undefined ? patch.make : prev.vehicleType,
               model: patch.model !== undefined ? patch.model : prev.model,
               year: patch.year !== undefined ? patch.year : prev.year,

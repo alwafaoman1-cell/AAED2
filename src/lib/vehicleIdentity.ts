@@ -122,6 +122,15 @@ export async function findExistingVehicle(input: VehicleIdentityInput): Promise<
   return null;
 }
 
+export function isVehicleAlreadyExistsError(error: unknown): boolean {
+  const raw = `${(error as any)?.code || ""} ${(error as any)?.message || ""} ${(error as any)?.details || ""}`.toLowerCase();
+  return raw.includes("23505") || raw.includes("duplicate key") || raw.includes("uniq_vehicle_plate");
+}
+
+export function vehicleSelectionRequiredMessage(): string {
+  return "هذه المركبة موجودة مسبقًا. اختر Use This Vehicle أو غيّر بيانات اللوحة.";
+}
+
 export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { customerId: string }) {
   if (!isUuid(input.customerId)) throw new Error("customer_id must be a valid UUID before linking vehicle");
   const tenantId = await getCurrentTenantId();
@@ -130,6 +139,9 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
 
   const existing = await findExistingVehicle(input);
   if (existing?.id) {
+    if (input.vehicleId !== existing.id) {
+      throw new Error(vehicleSelectionRequiredMessage());
+    }
     const confirmedVinCandidate = existing.source !== "vin" || input.allowVinCandidate || input.vehicleId === existing.id;
     if (!confirmedVinCandidate) {
       throw new Error("vin_candidate_requires_user_confirmation");
@@ -165,6 +177,11 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
     } as any)
     .select("id")
     .single();
-  if (error) throw error;
+  if (error) {
+    if (isVehicleAlreadyExistsError(error)) {
+      throw new Error(vehicleSelectionRequiredMessage());
+    }
+    throw error;
+  }
   return { vehicleId: (data as any).id as string, existing: null, ownershipConflict: false, created: true };
 }
