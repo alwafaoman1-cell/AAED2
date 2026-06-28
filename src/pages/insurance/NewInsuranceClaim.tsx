@@ -28,6 +28,7 @@ import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/li
 import { ensureVehicleForCustomer, findExistingVehicle } from "@/lib/vehicleIdentity";
 import { isUuid } from "@/lib/uuid";
 import { toE164 } from "@/lib/phoneUtils";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 // ───────────────────── أنواع داخلية ─────────────────────
 // ⚠️ هذه الصفحة من منظور "الكراج": نستلم سيارة من شركة تأمين ونطالبها بالمستحقات.
@@ -83,6 +84,15 @@ const emptyDraft = (): Draft => ({
   uplItems: [],
   notes: "",
 });
+
+async function resolveTenantForClaim(): Promise<string> {
+  const tenantId = await getCurrentTenantId();
+  if (tenantId && isUuid(tenantId)) return tenantId;
+  const { data, error } = await supabase.rpc("get_user_tenant_id");
+  if (error) throw new Error("Tenant was not loaded. Please refresh and try again.");
+  if (!data || !isUuid(String(data))) throw new Error("Tenant was not loaded. Please refresh and try again.");
+  return String(data);
+}
 
 // ───────────────────── المكون الرئيسي ─────────────────────
 export default function NewInsuranceClaim() {
@@ -185,7 +195,7 @@ export default function NewInsuranceClaim() {
     }
     const timer = setTimeout(() => {
       void (async () => {
-        const { data: tenantId } = await supabase.rpc("get_user_tenant_id");
+        const tenantId = await getCurrentTenantId();
         if (!tenantId || cancelled) return;
         const { data } = await supabase
           .from("customers")
@@ -310,7 +320,7 @@ export default function NewInsuranceClaim() {
     }
     setSubmitting(true);
     try {
-      const { data: tenantId } = await supabase.rpc("get_user_tenant_id");
+      const tenantId = await resolveTenantForClaim();
       if (!tenantId) throw new Error("لا يمكن تحديد المستأجر");
 
       // فحص تكرار رقم المطالبة داخل نفس الورشة فقط.

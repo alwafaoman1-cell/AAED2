@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentRole } from "@/lib/permissions";
 import type { WorkOrderType } from "@/lib/workOrderType";
-import { getCurrentTenantId } from "@/lib/saasAdmin";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import ReceptionIntakePanel from "@/components/workorders/ReceptionIntakePanel";
 import { toE164 } from "@/lib/phoneUtils";
 import { ensureVehicleForCustomer, findExistingVehicle, normalizeVehiclePlate, normalizeVin, type VehicleIdentityMatch } from "@/lib/vehicleIdentity";
@@ -282,6 +282,10 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   async function uploadReceptionPhotos(orderNumber: string) {
     if (receptionFiles.length === 0) return form.photos || [];
     const tenantId = await getCurrentTenantId();
+    if (!tenantId) {
+      toast.warning("Work order saved, but image upload failed because tenant was not loaded.");
+      return form.photos || [];
+    }
     const uploaded = [...(form.photos || [])];
     for (const file of receptionFiles) {
       const safeName = file.name.replace(/[^\w.\-\u0600-\u06FF]+/g, "_");
@@ -289,11 +293,19 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       const { error: uploadError } = await supabase.storage
         .from("work-order-photos")
         .upload(storagePath, file, { contentType: file.type || "image/jpeg", upsert: false });
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.warn("[WorkOrderForm] reception image upload failed", uploadError);
+        toast.warning("Work order saved, but image upload failed because storage bucket is not configured.");
+        continue;
+      }
       const { data: signed, error: signedError } = await supabase.storage
         .from("work-order-photos")
         .createSignedUrl(storagePath, 60 * 60 * 24 * 30);
-      if (signedError || !signed?.signedUrl) throw signedError || new Error("تعذر إنشاء رابط الصورة");
+      if (signedError || !signed?.signedUrl) {
+        console.warn("[WorkOrderForm] reception image signed URL failed", signedError);
+        toast.warning("Work order saved, but image upload failed because storage bucket is not configured.");
+        continue;
+      }
       uploaded.push({
         id: crypto.randomUUID(),
         phase: "received",
@@ -321,7 +333,6 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       customerId = savedCustomer.id;
       setForm((prev) => ({ ...prev, customer: savedCustomer.name, phone: savedCustomer.phone, ...({ customerId: savedCustomer.id } as Partial<WorkOrder>) }));
     } catch (error: any) {
-      toast.error(error?.message || "Customer must be saved before creating the work order.");
       return;
     }
     if (!form.plate) {
@@ -392,9 +403,9 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     try {
       receptionPhotos = await uploadReceptionPhotos(targetOrderNumber);
     } catch (error: any) {
-      toast.error(error?.message || "تعذر رفع صور الاستلام");
-      setSaving(false);
-      return;
+      console.warn("[WorkOrderForm] image upload skipped", error);
+      toast.warning("Work order saved, but image upload failed because storage bucket is not configured.");
+      receptionPhotos = form.photos || [];
     }
     const payload: WorkOrder = {
       ...form,
@@ -415,7 +426,6 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       toast.success(isEdit ? `تم تحديث ${saved.id}` : `تم إنشاء ${saved.id}`);
       onClose();
     } catch (error: any) {
-      toast.error(error?.message || "تعذر حفظ أمر العمل في Supabase");
     } finally {
       setSaving(false);
     }

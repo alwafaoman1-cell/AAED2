@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { getCurrentTenantId } from "@/lib/saasAdmin";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import {
   extractPlateDigits,
   extractPlateLetters,

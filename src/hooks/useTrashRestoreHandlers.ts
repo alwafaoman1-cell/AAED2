@@ -2,7 +2,7 @@
 // restores an item from the Trash page, it's added back to the right store.
 import { useEffect } from "react";
 import { registerRestoreHandler } from "@/lib/trashStore";
-import { restoreWorkOrder, type WorkOrder } from "@/lib/workOrdersStore";
+import { restoreWorkOrderFromTrash, type WorkOrder } from "@/lib/workOrdersStore";
 import { vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import { inventoryStore, type Part } from "@/lib/inventoryStore";
 import { staffStore, type Technician } from "@/lib/staffStore";
@@ -14,7 +14,9 @@ export function useTrashRestoreHandlers() {
   useEffect(() => {
     if (registered) return;
     registered = true;
-    registerRestoreHandler("work_order", (p) => restoreWorkOrder(p as WorkOrder));
+    registerRestoreHandler("work_order", async (p) => {
+      await restoreWorkOrderFromTrash(p as WorkOrder);
+    });
     registerRestoreHandler("vehicle", (p) => vehiclesStore.restore(p as Vehicle));
     registerRestoreHandler("inventory", (p) => inventoryStore.restore(p as Part));
     registerRestoreHandler("staff", (p) => staffStore.restore(p as Technician));

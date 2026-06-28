@@ -139,6 +139,9 @@ export function useCreateClaim() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (claim: ClaimInsert) => {
+      if (!claim.tenant_id || !isUuid(claim.tenant_id)) {
+        throw new Error("Tenant was not loaded. Please refresh and try again.");
+      }
       if (!claim.customer_id || !isUuid(claim.customer_id) || /^(CUST|TEMP)-/i.test(String(claim.customer_id))) {
         throw new Error("لا يمكن حفظ المطالبة بدون customer_id صالح");
       }

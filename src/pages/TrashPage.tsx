@@ -49,11 +49,15 @@ export default function TrashPage() {
     );
   });
 
-  function handleRestore(it: TrashItem) {
-    if (restore(it.trashId)) {
+  async function handleRestore(it: TrashItem) {
+    try {
+      if (!(await restore(it.trashId))) {
+        toast.error("Restore handler was not found");
+        return;
+      }
       toast.success(`تم استرجاع: ${it.label}`);
-    } else {
-      toast.error("لم يتم العثور على معالج الاسترجاع");
+    } catch (error: any) {
+      toast.error(error?.message || "Restore failed in Supabase");
     }
   }
 

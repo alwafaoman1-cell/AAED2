@@ -267,6 +267,74 @@ export function restoreWorkOrder(order: WorkOrder) {
 }
 
 /** يفرض جلب أحدث أوامر العمل من السحابة الآن (يُستخدم في زر التحديث اليدوي). */
+
+export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkOrder> {
+  const ctx = await tenantContext();
+  if (!ctx) throw new Error("Tenant was not loaded. Please refresh and try again.");
+  const orderNumber = order.displayNumber || order.id;
+  let foundId: string | null = null;
+
+  if (order.cloudId && isUuid(order.cloudId)) {
+    const { data, error } = await supabase
+      .from("job_orders")
+      .select("id")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", order.cloudId)
+      .maybeSingle();
+    if (error) throw error;
+    foundId = data?.id || null;
+  }
+
+  if (!foundId && orderNumber) {
+    const { data, error } = await supabase
+      .from("job_orders")
+      .select("id")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("order_number", orderNumber)
+      .maybeSingle();
+    if (error) throw error;
+    foundId = data?.id || null;
+  }
+
+  if (!foundId) throw new Error("Work order was not found in Supabase");
+
+  let { data, error } = await (supabase.from("job_orders") as any)
+    .update({ deleted_at: null, archived_at: null, deleted_by: null })
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", foundId)
+    .select("*")
+    .maybeSingle();
+
+  if (error && isMissingJobOrderColumnError(error)) {
+    ({ data, error } = await (supabase.from("job_orders") as any)
+      .update({ archived_at: null })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", foundId)
+      .select("*")
+      .maybeSingle());
+  }
+  if (error) throw error;
+  if (!data?.id) throw new Error("Restore did not return a work order from Supabase");
+
+  const { data: verified, error: verifyError } = await supabase
+    .from("job_orders")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", foundId)
+    .is("deleted_at", null)
+    .is("archived_at", null)
+    .maybeSingle();
+  if (verifyError) throw verifyError;
+  if (!verified?.id) throw new Error("Work order restore was not visible after verification");
+
+  const saved = await mapSavedJobOrder(verified);
+  const idx = cache.findIndex((o) => o.id === saved.id || o.cloudId === saved.cloudId);
+  if (idx >= 0) cache[idx] = saved;
+  else cache.unshift(saved);
+  persist();
+  return saved;
+}
+
 export async function refreshWorkOrdersFromCloud(): Promise<void> {
   ensureCloudSync();
   await fetchFromCloud();

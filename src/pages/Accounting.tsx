@@ -11,6 +11,8 @@ import JournalLedger from "@/components/accounting/JournalLedger";
 import { journalStore, type JournalEntry } from "@/lib/journalStore";
 import { formatMoney, getTemplateSettings } from "@/lib/pdfGenerator";
 import { getJournalSourceRoute, JOURNAL_SOURCE_LABEL } from "@/lib/journalSourceLink";
+import { expensesStore } from "@/lib/expensesStore";
+import { salesStore } from "@/lib/salesStore";
 
 const REVENUE_ACCOUNTS = new Set([
   "إيرادات المبيعات",
@@ -35,10 +37,38 @@ interface AccountBreakdown {
   entries: JournalEntry[];
 }
 
+function isLiveAccountingEntry(entry: JournalEntry): boolean {
+  if (entry.source === "expense") {
+    const expense = expensesStore.getById(entry.sourceId);
+    return !!expense && !expense.deletedAt && !expense.archivedAt;
+  }
+
+  if (entry.source === "sales_invoice" || entry.source === "work_order_invoice" || entry.source === "customer_payment") {
+    const doc = salesStore.get(entry.sourceId);
+    return !!doc && !doc.isDeleted && doc.status !== "cancelled" && doc.status !== "draft";
+  }
+
+  return true;
+}
+
+function liveAccountingEntries(): JournalEntry[] {
+  return journalStore.getAll().filter(isLiveAccountingEntry);
+}
+
 export default function Accounting() {
   const navigate = useNavigate();
-  const [entries, setEntries] = useState<JournalEntry[]>(journalStore.getAll());
-  useEffect(() => journalStore.subscribe(() => setEntries([...journalStore.getAll()])), []);
+  const [entries, setEntries] = useState<JournalEntry[]>(liveAccountingEntries());
+  useEffect(() => {
+    const refresh = () => setEntries(liveAccountingEntries());
+    const unsubJournal = journalStore.subscribe(refresh);
+    const unsubExpenses = expensesStore.subscribe(refresh);
+    const unsubSales = salesStore.subscribe(refresh);
+    return () => {
+      unsubJournal();
+      unsubExpenses();
+      unsubSales();
+    };
+  }, []);
 
   const { revenue, expenses, profit, margin, monthly, recent, revenueByAccount, expensesByAccount } = useMemo(() => {
     let revenue = 0;
