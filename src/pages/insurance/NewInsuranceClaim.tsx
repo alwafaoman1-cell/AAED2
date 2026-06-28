@@ -492,6 +492,15 @@ export default function NewInsuranceClaim() {
         navigate("/insurance/list");
       }
     } catch (e: any) {
+      if (e?.message === "claim_number_exists" && e?.existingClaimId) {
+        const shouldOpen = window.confirm(
+          e?.existingClaimInactive
+            ? "رقم المطالبة موجود في سجل محذوف/مؤرشف. هل تريد فتح السجل الموجود؟"
+            : "رقم المطالبة موجود مسبقًا. هل تريد فتح السجل الموجود؟",
+        );
+        if (shouldOpen) navigate(`/insurance/${e.existingClaimId}`);
+        return;
+      }
       if (String(e?.message || "").includes("vin_candidate_requires_user_confirmation")) {
         toast.error("تم العثور على مركبة محتملة عبر VIN فقط. اربط مركبة موجودة يدويًا أو أكمل بيانات اللوحة والحروف والدولة قبل حفظ المطالبة.");
       } else {

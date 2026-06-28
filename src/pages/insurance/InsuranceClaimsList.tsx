@@ -63,8 +63,8 @@ export default function InsuranceClaimsList() {
   const [dateRange, setDateRange] = useState<string>("all"); // all, 7d, 30d, 90d
   const [statusClaim, setStatusClaim] = useState<InsuranceClaim | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  // الافتراضي: المركبات قيد العمل داخل الورشة (وصلت فعلياً)
-  const [deliveryFilter, setDeliveryFilter] = useState<string>(() => searchParams.get("location") || "active");
+  // الافتراضي: كل المطالبات النشطة حتى لا تختفي المطالبة الجديدة قبل وصول المركبة للورشة.
+  const [deliveryFilter, setDeliveryFilter] = useState<string>(() => searchParams.get("location") || "all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePersistedState<number>("insurance_claims_page_size", 20);
   const [reportOpen, setReportOpen] = useState(false);

@@ -224,7 +224,7 @@ export default function WorkOrders() {
     const matchesTechnician = technicianFilter === "all" || o.technician === technicianFilter;
     const matchesEntryFrom = !entryFrom || (o.entryDate || "") >= entryFrom;
     const matchesEntryTo = !entryTo || (o.entryDate || "") <= entryTo;
-    const matchesArchive = archiveFilter === "all" || (archiveFilter === "archived" ? !!o.archivedAt : !o.archivedAt);
+    const matchesArchive = archiveFilter === "archived" ? !!o.archivedAt : !o.archivedAt;
     return matchesSearch && matchesStatus && matchesOwnership && matchesParts && matchesTechnician && matchesEntryFrom && matchesEntryTo && matchesArchive;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));

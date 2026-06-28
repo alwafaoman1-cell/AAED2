@@ -121,7 +121,7 @@ export function useInsuranceClaims() {
   return useQuery({
     queryKey: ["insurance_claims"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("insurance_claims" as any)
         .select(`
           *,
@@ -129,7 +129,20 @@ export function useInsuranceClaims() {
           vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
           job_order:job_orders(order_number, status)
         `)
+        .is("deleted_at", null)
+        .is("archived_at", null)
         .order("created_at", { ascending: false });
+      if (error && /deleted_at|archived_at|column/i.test(String((error as any).message || ""))) {
+        ({ data, error } = await supabase
+          .from("insurance_claims" as any)
+          .select(`
+            *,
+            customer:customers(name, phone),
+            vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
+            job_order:job_orders(order_number, status)
+          `)
+          .order("created_at", { ascending: false }));
+      }
       if (error) throw error;
       return data as unknown as InsuranceClaim[];
     },
@@ -175,7 +188,7 @@ export function useCreateClaim() {
       const claimNumber = claim.claim_number.trim();
       const { data: existing, error: existingError } = await supabase
         .from("insurance_claims" as any)
-        .select("id,claim_number")
+        .select("id,claim_number,deleted_at,archived_at")
         .eq("tenant_id", claim.tenant_id)
         .ilike("claim_number", claimNumber)
         .limit(1)
@@ -184,6 +197,7 @@ export function useCreateClaim() {
       if ((existing as any)?.id) {
         const err = new Error("claim_number_exists");
         (err as any).existingClaimId = (existing as any).id;
+        (err as any).existingClaimInactive = !!((existing as any).deleted_at || (existing as any).archived_at);
         throw err;
       }
       const payload = sanitizeClaimWritePayload({ ...(claim as any), claim_number: claimNumber });
@@ -210,7 +224,7 @@ export function useCreateClaim() {
       qc.invalidateQueries({ queryKey: ["job_orders"] });
       toast.success("تم إنشاء المطالبة بنجاح");
     },
-    onError: (e: any) => toast.error(e?.message === "claim_number_exists" ? "رقم المطالبة موجود مسبقًا داخل نفس الورشة" : e.message),
+    onError: (e: any) => toast.error(e?.message === "claim_number_exists" ? (e?.existingClaimInactive ? "Claim number exists in an archived/deleted record. Open or restore the existing record, or use a different number." : "Claim number already exists. Open the existing record.") : e.message),
   });
 }
 
@@ -269,6 +283,16 @@ export function useUpdateClaimStatus() {
       approved_amount?: number;
       rejection_reason?: string;
     }) => {
+      const { data: current, error: currentError } = await supabase
+        .from("insurance_claims" as any)
+        .select("id,status,approved_amount,rejection_reason,deleted_at,archived_at")
+        .eq("id", id)
+        .maybeSingle();
+      if (currentError) throw currentError;
+      if (!(current as any)?.id) throw new Error("Claim was not found in Supabase");
+      if ((current as any).deleted_at || (current as any).archived_at) throw new Error("Cannot update an archived/deleted claim");
+      if ((current as any).status === status) return current;
+
       const updates: any = { status };
       if (status === "approved") {
         updates.approved_at = new Date().toISOString();
@@ -279,11 +303,14 @@ export function useUpdateClaimStatus() {
         updates.rejection_reason = rejection_reason;
       }
 
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from("insurance_claims" as any)
         .update(updates)
-        .eq("id", id);
+        .eq("id", id)
+        .select("id,status,approved_amount,approved_at")
+        .single();
       if (error) throw error;
+      if (!(updated as any)?.id || (updated as any).status !== status) throw new Error("Claim status update could not be verified");
 
       // قيد محاسبي عند الاعتماد
       if (status === "approved") {
@@ -440,3 +467,4 @@ export function useJobOrders() {
     },
   });
 }
+
