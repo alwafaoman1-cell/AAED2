@@ -172,11 +172,15 @@ export function getWorkOrderById(id: string): WorkOrder | undefined {
   if (!raw) return undefined;
   const list = load();
   // 1) Exact id match
-  let found = list.find(o => o.id === raw);
+  let found = list.find(o => o.id === raw || o.cloudId === raw);
   if (found) return found;
   // 2) Case-insensitive id / displayNumber match
   const lower = raw.toLowerCase();
-  found = list.find(o => o.id?.toLowerCase() === lower || o.displayNumber?.toLowerCase() === lower);
+  found = list.find(o =>
+    o.id?.toLowerCase() === lower ||
+    o.cloudId?.toLowerCase() === lower ||
+    o.displayNumber?.toLowerCase() === lower
+  );
   if (found) return found;
   // 3) Extract WO-YYYY-NNN pattern from a URL or longer string
   const m = raw.match(/WO-\d{4}-\d+/i);
@@ -515,7 +519,6 @@ async function fetchFromCloud(): Promise<void> {
       .from("job_orders")
       .select("*")
       .eq("tenant_id", tenantId)
-      .is("archived_at", null)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(5000);
@@ -524,7 +527,6 @@ async function fetchFromCloud(): Promise<void> {
         .from("job_orders")
         .select("*")
         .eq("tenant_id", tenantId)
-        .is("archived_at", null)
         .order("created_at", { ascending: false })
         .limit(5000);
     }
