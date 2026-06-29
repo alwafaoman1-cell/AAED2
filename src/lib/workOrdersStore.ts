@@ -342,7 +342,7 @@ export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkO
 
 export async function refreshWorkOrdersFromCloud(): Promise<void> {
   ensureCloudSync();
-  await fetchFromCloud();
+  await fetchFromCloud({ throwOnError: true });
 }
 
 export function subscribeWorkOrders(cb: () => void): () => void {
@@ -512,8 +512,21 @@ async function allocateVisibleOrderNumber(tenantId: string, requested: string): 
   return candidate;
 }
 
-async function fetchFromCloud(): Promise<void> {
+async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise<void> {
   try {
+    let activeUserId: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      activeUserId = sessionData.session?.user?.id;
+      if (activeUserId) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    if (!activeUserId) {
+      if (options.throwOnError) throw new Error("جلسة الدخول غير جاهزة بعد. أعد المحاولة خلال لحظات.");
+      return;
+    }
+
     let ordersResult = await supabase
       .from("job_orders")
       .select("*")
@@ -581,6 +594,7 @@ async function fetchFromCloud(): Promise<void> {
     setTimeout(() => migrateLegacyPhotosInBackground(cache), 1000);
   } catch (e) {
     console.warn("[workOrdersStore] cloud fetch failed:", e);
+    if (options.throwOnError) throw e;
   }
 }
 
