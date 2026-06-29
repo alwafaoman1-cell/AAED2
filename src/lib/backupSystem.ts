@@ -219,6 +219,28 @@ export function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
 
+export async function readBackupManifestFromBlob(blob: Blob): Promise<BackupManifest> {
+  const filename = "name" in blob ? String((blob as File).name || "").toLowerCase() : "";
+  const isZipByName = filename.endsWith(".zip");
+  const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+  const isZipByMagic = head[0] === 0x50 && head[1] === 0x4b;
+
+  if (isZipByName || isZipByMagic) {
+    const zip = await JSZip.loadAsync(blob);
+    const manifestEntry =
+      zip.file("manifest.json") ||
+      zip.file(/(^|\/)manifest\.json$/i)[0];
+    if (!manifestEntry) {
+      throw new Error("ملف ZIP لا يحتوي على manifest.json");
+    }
+    const text = await manifestEntry.async("string");
+    return JSON.parse(text) as BackupManifest;
+  }
+
+  const text = await blob.text();
+  return JSON.parse(text) as BackupManifest;
+}
+
 async function getCurrentTenantId(): Promise<string | null> {
   const { data } = await supabase.rpc("get_user_tenant_id" as any);
   return (data as string) || null;

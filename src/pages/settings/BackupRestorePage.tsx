@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   buildBackupJson, buildBackupZip, downloadBlob, restoreFromManifest,
   dryRunRestoreManifest,
+  readBackupManifestFromBlob,
   BACKUP_TABLES, type BackupManifest, type RestoreDryRunReport,
 } from "@/lib/backupSystem";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
@@ -104,8 +105,7 @@ export default function BackupRestorePage() {
     try {
       const { data, error } = await supabase.storage.from("backups").download(`${tenantId}/${name}`);
       if (error || !data) throw error || new Error("لا يوجد ملف");
-      const text = await data.text();
-      const m: BackupManifest = JSON.parse(text);
+      const m = await readBackupManifestFromBlob(data);
       const dry = await dryRunRestoreManifest(m, { mode: "merge", onProgress: setProgress });
       if (!dry.ok) throw new Error("Dry Run failed. Review uploaded backup before restore.");
       const r = await restoreFromManifest(m, { onProgress: setProgress, dryRunReport: dry, mode: "merge" });
@@ -121,8 +121,7 @@ export default function BackupRestorePage() {
     if (!restoreFile) return;
     setBusy(true); setProgress("");
     try {
-      const text = await restoreFile.text();
-      const m: BackupManifest = JSON.parse(text);
+      const m = await readBackupManifestFromBlob(restoreFile);
       if (m.app !== "alwafa-erp" || !m.tables) throw new Error("ملف غير صالح");
       const report = await dryRunRestoreManifest(m, { mode: "merge", onProgress: setProgress });
       setRestoreManifest(m);
@@ -260,7 +259,7 @@ export default function BackupRestorePage() {
         </div>
         <input
           type="file"
-          accept=".json,application/json"
+          accept=".json,.zip,application/json,application/zip,application/x-zip-compressed"
           onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
           className="block w-full text-sm file:mr-2 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-secondary file:text-foreground"
         />
