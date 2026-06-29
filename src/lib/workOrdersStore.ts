@@ -530,9 +530,22 @@ async function fetchFromCloud(): Promise<void> {
     }
     if (ordersResult.error) throw ordersResult.error;
 
+    const customerQuery = supabase.from("customers").select("id,name,phone").eq("tenant_id", tenantId).limit(10000);
+    let vehicleQuery: any = await supabase
+      .from("vehicles")
+      .select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url")
+      .eq("tenant_id", tenantId)
+      .limit(10000);
+    if (vehicleQuery.error && isMissingOptionalColumnError(vehicleQuery.error)) {
+      vehicleQuery = await supabase
+        .from("vehicles")
+        .select("id,plate_number,plate_letters,brand,model,year,vin_number,color")
+        .eq("tenant_id", tenantId)
+        .limit(10000);
+    }
     const [{ data: custs, error: custError }, { data: vehs, error: vehError }] = await Promise.all([
-      supabase.from("customers").select("id,name,phone").eq("tenant_id", tenantId).limit(10000),
-      supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url").eq("tenant_id", tenantId).limit(10000),
+      customerQuery,
+      Promise.resolve(vehicleQuery),
     ]);
     if (custError) throw custError;
     if (vehError) throw vehError;
@@ -797,6 +810,11 @@ function legacyCompatibleJobOrderPayload(
 function isMissingJobOrderColumnError(error: unknown): boolean {
   const raw = `${(error as any)?.code || ""} ${(error as any)?.message || ""} ${(error as any)?.details || ""}`.toLowerCase();
   return raw.includes("pgrst204") || (raw.includes("could not find") && raw.includes("schema cache"));
+}
+
+function isMissingOptionalColumnError(error: unknown): boolean {
+  const raw = `${(error as any)?.code || ""} ${(error as any)?.message || ""} ${(error as any)?.details || ""}`.toLowerCase();
+  return raw.includes("pgrst204") || raw.includes("schema cache") || raw.includes("could not find");
 }
 
 function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string, vehicleId: string) {

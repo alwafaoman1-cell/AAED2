@@ -31,6 +31,7 @@ import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import {
   deleteWorkOrder,
   getWorkOrders,
+  refreshWorkOrdersFromCloud,
   subscribeWorkOrders,
   updateWorkOrderInCloud,
   WORK_ORDER_STATUSES,
@@ -162,6 +163,8 @@ export default function WorkOrders() {
   const [deleteMode, setDeleteMode] = useState<DeleteMode>("archive_only");
   const [deleteReason, setDeleteReason] = useState("");
   const [deleteImpact, setDeleteImpact] = useState<ImpactSummary | null>(null);
+  const [isLoadingCloudOrders, setIsLoadingCloudOrders] = useState(false);
+  const [cloudOrdersError, setCloudOrdersError] = useState<string | null>(null);
   const allowEdit = canEdit();
   const allowDelete = canDelete();
   const [searchParams] = useSearchParams();
@@ -171,7 +174,25 @@ export default function WorkOrders() {
   }, [searchParams]);
 
   useEffect(() => {
-    return subscribeWorkOrders(() => setOrders([...getWorkOrders()]));
+    let cancelled = false;
+    const syncVisibleOrders = () => {
+      if (!cancelled) setOrders([...getWorkOrders()]);
+    };
+    const unsubscribe = subscribeWorkOrders(syncVisibleOrders);
+    setIsLoadingCloudOrders(true);
+    setCloudOrdersError(null);
+    refreshWorkOrdersFromCloud()
+      .then(syncVisibleOrders)
+      .catch((error) => {
+        if (!cancelled) setCloudOrdersError(error?.message || "تعذر تحميل أوامر العمل من السحابة");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingCloudOrders(false);
+      });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -790,7 +811,16 @@ export default function WorkOrders() {
           </table>
         </div>
         {filtered.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground"><Car size={40} className="mx-auto mb-3 opacity-30" /><p>لا توجد نتائج</p></div>
+          <div className="text-center py-12 text-muted-foreground">
+            <Car size={40} className="mx-auto mb-3 opacity-30" />
+            <p>
+              {isLoadingCloudOrders
+                ? "جاري تحميل أوامر العمل من السحابة..."
+                : cloudOrdersError
+                  ? cloudOrdersError
+                  : "لا توجد نتائج"}
+            </p>
+          </div>
         )}
         {filtered.length > 0 && (
           <TablePaginationControls
