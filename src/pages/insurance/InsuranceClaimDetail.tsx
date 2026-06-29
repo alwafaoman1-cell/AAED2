@@ -138,6 +138,9 @@ export default function InsuranceClaimDetail() {
   const [workshopArrivalDate, setWorkshopArrivalDate] = useState<string>("");
   const [workStartedAt, setWorkStartedAt] = useState<string>("");
   const [workCompletedAt, setWorkCompletedAt] = useState<string>("");
+  const estimateDateRef = useRef<HTMLInputElement>(null);
+  const workshopArrivalDateRef = useRef<HTMLInputElement>(null);
+  const workStartedAtRef = useRef<HTMLInputElement>(null);
 
   // Media & docs
   const [damagePhotos, setDamagePhotos] = useState<string[]>([]);
@@ -491,6 +494,12 @@ export default function InsuranceClaimDetail() {
     if (verified.estimate_date) setEstimateDate(dateOnly(verified.estimate_date));
   };
 
+  const getWorkflowDateValues = () => ({
+    estimate: estimateDateRef.current?.value || estimateDate || "",
+    arrival: workshopArrivalDateRef.current?.value || workshopArrivalDate || "",
+    started: workStartedAtRef.current?.value || workStartedAt || "",
+  });
+
   const handleSave = async () => {
     if (!company || !claimNumber) {
       toast.error("يرجى إدخال: شركة التأمين ورقم المطالبة");
@@ -572,12 +581,21 @@ export default function InsuranceClaimDetail() {
       });
     } else {
       try {
-        const verified = await updateClaim.mutateAsync({ id: id!, updates: payload });
+        const workflowDates = getWorkflowDateValues();
+        const verified = await updateClaim.mutateAsync({
+          id: id!,
+          updates: {
+            ...payload,
+            estimate_date: workflowDates.estimate || null,
+            workshop_arrival_date: workflowDates.arrival || null,
+            work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
+          },
+        });
         hydrateFromVerifiedClaim(verified);
         await writeClaimAudit("claim_details_saved", {
-          workshop_arrival_date: workshopArrivalDate || null,
-          estimate_date: estimateDate || null,
-          work_started_at: workStartedAt || null,
+          workshop_arrival_date: workflowDates.arrival || null,
+          estimate_date: workflowDates.estimate || null,
+          work_started_at: workflowDates.started || null,
         });
       } catch (e: any) {
         toast.error(e?.message || "فشل حفظ المطالبة");
@@ -1688,21 +1706,21 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 <Label className="text-xs">تاريخ التقدير</Label>
                 <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setEstimateDate(new Date().toISOString().slice(0, 10))}>اليوم</button>
               </div>
-              <Input type="date" value={estimateDate} onChange={(e) => setEstimateDate(e.target.value)} />
+              <Input ref={estimateDateRef} type="date" value={estimateDate} onChange={(e) => setEstimateDate(e.target.value)} />
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <Label className="text-xs">وصول السيارة للورشة</Label>
                 <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setWorkshopArrivalDate(new Date().toISOString().slice(0, 10))}>اليوم</button>
               </div>
-              <Input type="date" value={workshopArrivalDate} onChange={(e) => setWorkshopArrivalDate(e.target.value)} />
+              <Input ref={workshopArrivalDateRef} type="date" value={workshopArrivalDate} onChange={(e) => setWorkshopArrivalDate(e.target.value)} />
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <Label className="text-xs">بدء العمل</Label>
                 <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setWorkStartedAt(new Date().toISOString().slice(0, 10))}>اليوم</button>
               </div>
-              <Input type="date" value={workStartedAt} onChange={(e) => setWorkStartedAt(e.target.value)} />
+              <Input ref={workStartedAtRef} type="date" value={workStartedAt} onChange={(e) => setWorkStartedAt(e.target.value)} />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">تاريخ التسليم</Label>
@@ -1728,12 +1746,13 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   return;
                 }
                 try {
+                  const workflowDates = getWorkflowDateValues();
                   const { data: verified, error } = await supabase
                     .from("insurance_claims" as any)
                     .update({
-                      estimate_date: estimateDate || null,
-                      workshop_arrival_date: workshopArrivalDate || null,
-                      work_started_at: workStartedAt ? new Date(workStartedAt).toISOString() : null,
+                      estimate_date: workflowDates.estimate || null,
+                      workshop_arrival_date: workflowDates.arrival || null,
+                      work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
                     })
                     .eq("id", id)
                     .select("id,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,status")
@@ -1745,6 +1764,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                     estimate_date: (verified as any).estimate_date ?? null,
                     workshop_arrival_date: (verified as any).workshop_arrival_date ?? null,
                     work_started_at: (verified as any).work_started_at ?? null,
+                    requested_workshop_arrival_date: workflowDates.arrival || null,
                   });
                   await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
                   await queryClient.invalidateQueries({ queryKey: ["insurance_claims"] });
