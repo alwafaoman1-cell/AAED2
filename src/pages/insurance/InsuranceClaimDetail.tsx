@@ -166,6 +166,10 @@ export default function InsuranceClaimDetail() {
   const [taxInvoiceHtml, setTaxInvoiceHtml] = useState<string>("");
   const [taxInvoiceNumber, setTaxInvoiceNumber] = useState<string>("");
   const [showSendEmail, setShowSendEmail] = useState(false);
+  const [stageDialog, setStageDialog] = useState<{ key: string; label: string } | null>(null);
+  const [stageDate, setStageDate] = useState<string>(dateOnly(new Date().toISOString()));
+  const [stageNote, setStageNote] = useState("");
+  const [savingStage, setSavingStage] = useState(false);
 
   // ── شروط/ملاحظات تقدير الإصلاح (محرّرة، تُحفظ محلياً لكل tenant) ──
   const DEFAULT_ESTIMATE_TERMS = [
@@ -797,6 +801,63 @@ export default function InsuranceClaimDetail() {
     navigate(`/work-orders/${savedOrder.id}`);
   };
 
+  const openStageDialog = (step: { key: string; label: string }) => {
+    if (isNew || !id) {
+      toast.error("احفظ المطالبة أولاً قبل تغيير المرحلة");
+      return;
+    }
+    setStageDialog({ key: step.key, label: step.label });
+    setStageDate(dateOnly(new Date().toISOString()));
+    setStageNote("");
+  };
+
+  const handleConfirmStageChange = async () => {
+    if (!stageDialog || !id || isNew) return;
+    const changedAt = stageDate || dateOnly(new Date().toISOString());
+    const updates: Record<string, any> = {};
+
+    if (stageDialog.key === "arrived") {
+      updates.workshop_arrival_date = changedAt;
+    } else if (stageDialog.key === "repairing") {
+      updates.work_started_at = new Date(changedAt).toISOString();
+    } else if (stageDialog.key === "ready") {
+      updates.work_completed_at = new Date(changedAt).toISOString();
+    } else if (stageDialog.key === "delivered") {
+      updates.delivered_at = new Date(changedAt).toISOString();
+    } else {
+      toast.info("هذه المرحلة تُدار من الإجراء الخاص بها، وليس من شريط المراحل.");
+      return;
+    }
+
+    setSavingStage(true);
+    try {
+      const { data: verified, error } = await supabase
+        .from("insurance_claims" as any)
+        .update(updates)
+        .eq("id", id)
+        .select("id,status,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,delivered_at,updated_at")
+        .single();
+      if (error) throw error;
+
+      hydrateFromVerifiedClaim(verified);
+      await writeClaimAudit("claim_vehicle_stage_changed", {
+        to_stage: stageDialog.key,
+        to_label: stageDialog.label,
+        changed_at: changedAt,
+        note: stageNote.trim() || null,
+        updates,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
+      await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
+      setStageDialog(null);
+      toast.success("تم حفظ مرحلة المركبة والتأكد منها");
+    } catch (e: any) {
+      toast.error(e?.message || "فشل حفظ مرحلة المركبة");
+    } finally {
+      setSavingStage(false);
+    }
+  };
+
   // ── PDF ──
   // ── Inspection report PDF (uses the linked inspection + claim's photos) ──
   // For insurance-kind inspections we use the dedicated Al Madina Takaful template
@@ -1338,17 +1399,45 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const paymentRemaining = Math.max(0, invoiceTotal > 0 ? invoiceTotal - paidTotal : Number(approvedAmount || estimatedCost || 0) - paidTotal);
   const paymentStatusLabel = paymentRemaining <= 0 && paidTotal > 0 ? "مدفوع" : paidTotal > 0 ? "مدفوع جزئيًا" : "غير مدفوع";
   const vehicleTitle = `${vehicleMake || vehicle?.brand || "—"} ${vehicleModel || vehicle?.model || ""}`.trim();
+  const hasLinkedWorkOrder = !!(linkedWorkOrderId || (existing as any)?.auto_job_order_id || (existing as any)?.job_order_id);
+  const effectiveWorkOrderId = linkedWorkOrderId || (existing as any)?.auto_job_order_id || (existing as any)?.job_order_id || "";
+  const linkedWorkOrderStatus = (existing as any)?.job_order?.status || "—";
+  const isClosedClaim = status === "cancelled" || status === "rejected";
+  const isDeliveredClaim = !!(existing as any)?.delivered_at || status === "paid";
+  const isReadyForDelivery = !!workCompletedAt && !isDeliveredClaim && !isClosedClaim;
+  const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
+  const isAwaitingApproval = !isNew && status === "pending";
+  const isApprovedClaim = status === "approved";
+  const currentVehicleStepIndex = isClosedClaim
+    ? 8
+    : isDeliveredClaim
+      ? 7
+      : isReadyForDelivery
+        ? 5
+        : isRepairingClaim
+          ? 4
+          : isApprovedClaim
+            ? 3
+            : isAwaitingApproval
+              ? 2
+              : workshopArrivalDate
+                ? 0
+                : 1;
   const vehicleProgress = [
-    { key: "arrived", label: "وصلت الورشة", icon: "🏁", active: !!workshopArrivalDate, date: workshopArrivalDate },
-    { key: "inspection", label: "بانتظار الفحص", icon: "🔍", active: status === "pending" && !approvedAmount, date: estimateDate },
-    { key: "approval_wait", label: "بانتظار موافقة التأمين", icon: "⏳", active: status === "pending", date: estimateDate },
-    { key: "approved", label: "تمت الموافقة", icon: "✅", active: status === "approved" || status === "paid", date: dateOnly((existing as any)?.approved_at) },
-    { key: "repairing", label: "تحت الإصلاح", icon: "🛠️", active: !!workStartedAt && status === "approved", date: workStartedAt },
-    { key: "ready", label: "جاهزة للتسليم", icon: "📦", active: !!workCompletedAt, date: workCompletedAt },
-    { key: "delivered", label: "تم التسليم", icon: "🚗", active: !!(existing as any)?.delivered_at || status === "paid", date: dateOnly((existing as any)?.delivered_at) },
-    { key: "customer", label: "مع العميل", icon: "👤", active: status === "paid", date: dateOnly((existing as any)?.paid_at) },
-    { key: "cancelled", label: "ملغاة / مرفوضة", icon: "⛔", active: status === "cancelled" || status === "rejected", date: dateOnly((existing as any)?.updated_at) },
-  ];
+    { key: "arrived", label: "وصلت الورشة", icon: "🏁", date: workshopArrivalDate, editable: true },
+    { key: "inspection", label: "بانتظار الفحص", icon: "🔍", date: estimateDate, editable: false },
+    { key: "approval_wait", label: "بانتظار موافقة التأمين", icon: "⏳", date: estimateDate, editable: false },
+    { key: "approved", label: "تمت الموافقة", icon: "✅", date: dateOnly((existing as any)?.approved_at), editable: false },
+    { key: "repairing", label: "تحت الإصلاح", icon: "🛠️", date: workStartedAt, editable: true },
+    { key: "ready", label: "جاهزة للتسليم", icon: "📦", date: workCompletedAt, editable: true },
+    { key: "delivered", label: "تم التسليم", icon: "🚗", date: dateOnly((existing as any)?.delivered_at), editable: true },
+    { key: "customer", label: "مع العميل", icon: "👤", date: dateOnly((existing as any)?.paid_at), editable: false },
+    { key: "cancelled", label: "ملغاة / مرفوضة", icon: "⛔", date: dateOnly((existing as any)?.updated_at), editable: false },
+  ].map((step, index) => ({
+    ...step,
+    index,
+    state: index < currentVehicleStepIndex ? "completed" : index === currentVehicleStepIndex ? "current" : "upcoming",
+  }));
 
   return (
     <div className="space-y-5 pb-12" dir="rtl">
@@ -1391,21 +1480,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             </Button>
           )}
           {!isNew && (
-            <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-              <FileText size={16} /> ملخص المطالبة
-            </Button>
-          )}
-          {!isNew && (
-            <Button
-              variant="outline"
-              onClick={() => setShowPdf(true)}
-              className="gap-2 border-primary/40 text-primary hover:bg-primary/10"
-              title="طباعة/معاينة تقدير الإصلاح"
-            >
-              <Printer size={16} /> طباعة تقدير الإصلاح
-            </Button>
-          )}
-          {!isNew && (
             <Button
               variant="ghost"
               size="sm"
@@ -1416,20 +1490,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <FileText size={14} /> شروط التقدير
             </Button>
           )}
-          {!isNew && (
-            <Button
-              variant="outline"
-              onClick={() => setShowSendEmail(true)}
-              className="gap-2 border-info/40 text-info hover:bg-info/10"
-              title="إرسال تقرير التأمين بالبريد مع الصور والـ PDF"
-            >
-              <Send size={16} /> إرسال للتأمين
-            </Button>
-          )}
-          <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
-            <Save size={16} />
-            {isNew ? "حفظ" : "حفظ التعديلات"}
-          </Button>
           {!isNew && status !== "cancelled" && status !== "paid" && (
             <Button
               variant="outline"
@@ -1627,26 +1687,145 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             </div>
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
-            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
-              <Save size={16} /> حفظ
-            </Button>
-            <Button onClick={handleApprove} disabled={status === "approved" || isNew || updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
-              <CheckCircle2 size={16} /> اعتماد
-            </Button>
-            <Button variant="outline" onClick={handleConvertToWorkOrder} disabled={isNew || status !== "approved"} className="gap-2">
-              <Wrench size={16} /> إنشاء أمر عمل
-            </Button>
-            <Button variant="outline" onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice} className="gap-2">
-              <FileText size={16} /> إنشاء فاتورة
-            </Button>
-            {!isNew && (
-              <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                <Send size={16} /> إرسال رسالة
-              </Button>
+            {isNew && (
+              <>
+                <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
+                  <Save size={16} /> حفظ
+                </Button>
+                <Button variant="outline" onClick={() => setTab("inspect")} className="gap-2">
+                  <Shield size={16} /> تعديل بيانات التأمين
+                </Button>
+                <Button variant="outline" onClick={() => setTab("inspect")} className="gap-2">
+                  <Car size={16} /> تعديل بيانات المركبة
+                </Button>
+                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
+                  <Upload size={16} /> رفع مستندات
+                </Button>
+              </>
             )}
-            <Button variant="outline" onClick={() => setShowSummary(true)} disabled={isNew} className="gap-2">
-              <Printer size={16} /> PDF
-            </Button>
+
+            {isAwaitingApproval && (
+              <>
+                <Button onClick={handleApprove} disabled={updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
+                  <CheckCircle2 size={16} /> اعتماد / موافقة
+                </Button>
+                <Button variant="outline" onClick={() => setTab("approval")} className="gap-2">
+                  <DollarSign size={16} /> تعديل مبلغ الموافقة
+                </Button>
+                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
+                  <Send size={16} /> إرسال رسالة للتأمين
+                </Button>
+                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
+                  <FileUp size={16} /> رفع LPO
+                </Button>
+                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
+                  <Printer size={16} /> PDF
+                </Button>
+              </>
+            )}
+
+            {isApprovedClaim && !isRepairingClaim && !isReadyForDelivery && !isDeliveredClaim && (
+              <>
+                {hasLinkedWorkOrder ? (
+                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
+                    <LinkIcon size={16} /> فتح أمر العمل
+                  </Button>
+                ) : (
+                  <Button variant="outline" onClick={handleConvertToWorkOrder} className="gap-2">
+                    <Wrench size={16} /> إنشاء أمر عمل
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
+                  <Send size={16} /> إرسال تحديث للعميل
+                </Button>
+                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
+                  <Printer size={16} /> PDF
+                </Button>
+              </>
+            )}
+
+            {hasLinkedWorkOrder && !isClosedClaim && (
+              <>
+                <Badge variant="outline" className="h-10 px-3 flex items-center gap-2">
+                  <Wrench size={14} /> حالة أمر العمل: {linkedWorkOrderStatus}
+                </Badge>
+                {(isRepairingClaim || isReadyForDelivery || isDeliveredClaim) && (
+                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
+                    <LinkIcon size={16} /> فتح أمر العمل
+                  </Button>
+                )}
+              </>
+            )}
+
+            {isRepairingClaim && (
+              <>
+                <Button variant="outline" onClick={() => openStageDialog({ key: "ready", label: "جاهزة للتسليم" })} className="gap-2">
+                  <ClipboardCheck size={16} /> تحديث المرحلة
+                </Button>
+                <Button variant="outline" onClick={() => navigate("/accounting/expenses")} className="gap-2">
+                  <DollarSign size={16} /> إضافة مصروف
+                </Button>
+                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
+                  <Camera size={16} /> رفع صور إصلاح
+                </Button>
+                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
+                  <Send size={16} /> إرسال تحديث للعميل
+                </Button>
+              </>
+            )}
+
+            {isReadyForDelivery && (
+              <>
+                {!hasActiveInvoice && (
+                  <Button variant="outline" onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice} className="gap-2">
+                    <FileText size={16} /> إنشاء فاتورة
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
+                  <Send size={16} /> إشعار جاهزية
+                </Button>
+                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
+                  <Printer size={16} /> طباعة
+                </Button>
+                <Button variant="outline" onClick={() => setTab("delivery")} className="gap-2">
+                  <PackageCheck size={16} /> تسليم المركبة
+                </Button>
+              </>
+            )}
+
+            {isDeliveredClaim && (
+              <>
+                {activeInvoice && (
+                  <Button variant="outline" onClick={() => setShowTaxInvoice(true)} className="gap-2">
+                    <FileText size={16} /> عرض الفاتورة
+                  </Button>
+                )}
+                {paymentRemaining > 0 && (
+                  <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
+                    <Send size={16} /> تذكير دفع
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
+                  <Printer size={16} /> PDF
+                </Button>
+              </>
+            )}
+
+            {isClosedClaim && (
+              <>
+                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
+                  <Printer size={16} /> PDF
+                </Button>
+                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
+                  <Send size={16} /> الرسائل
+                </Button>
+                {hasLinkedWorkOrder && (
+                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
+                    <LinkIcon size={16} /> السجلات المرتبطة
+                  </Button>
+                )}
+              </>
+            )}
           </div>
         </div>
       </Card>
@@ -1659,22 +1838,29 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </div>
           <Badge variant="outline">آخر تحديث: {formatDateLatin((existing as any)?.updated_at || new Date().toISOString())}</Badge>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+        <div className="flex flex-wrap gap-2">
           {vehicleProgress.map((step) => (
-            <div
+            <button
               key={step.key}
-              className={`rounded-xl border p-3 min-h-[92px] ${step.active ? "border-primary/50 bg-primary/10" : "border-border bg-secondary/20"}`}
+              type="button"
+              onClick={() => step.editable ? openStageDialog(step) : toast.info("هذه المرحلة تُحدَّث من الإجراء الخاص بها.")}
+              disabled={isNew || isClosedClaim || step.state === "upcoming" && !step.editable}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs transition-colors ${
+                step.state === "current"
+                  ? "border-primary bg-primary/10 text-primary font-bold"
+                  : step.state === "completed"
+                    ? "border-success/40 bg-success/10 text-success"
+                    : "border-border bg-secondary/20 text-muted-foreground"
+              } ${step.editable && !isClosedClaim ? "hover:border-primary/60 hover:bg-primary/5" : ""}`}
+              title={step.editable ? "اضغط لتحديث المرحلة بتأكيد" : "تُدار هذه المرحلة من الإجراء الخاص بها"}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xl" aria-hidden>{step.icon}</span>
-                {step.active && <CheckCircle2 size={15} className="text-success" />}
-              </div>
-              <div className="mt-2 text-sm font-semibold text-foreground">{step.label}</div>
-              <div className="text-[11px] text-muted-foreground mt-1">
+              <span aria-hidden>{step.icon}</span>
+              {step.state === "completed" && <CheckCircle2 size={13} />}
+              <span>{step.label}</span>
+              <span className="text-[10px] opacity-75">
                 {step.date ? formatDateLatin(step.date) : "لم يتم التسجيل"}
-              </div>
-              <div className="text-[10px] text-muted-foreground mt-1">المستخدم: {(claimAudit[0] as any)?.user_id ? "مسجل" : "—"}</div>
-            </div>
+              </span>
+            </button>
           ))}
         </div>
       </Card>
@@ -2053,25 +2239,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Button variant="outline" onClick={() => setTab("inspect")}>السابق</Button>
             <div className="flex gap-2 flex-wrap items-center">
               <TemplatePicker docType="insurance_tax_invoice" size="sm" />
-              <Button variant="outline" onClick={() => setShowPdf(true)} disabled={isNew} className="gap-2">
-                <Printer size={14} /> معاينة التقدير
-              </Button>
-              <Button
-                variant="outline"
-                onClick={generateTaxInvoice}
-                disabled={isNew || !canIssueTaxInvoice || hasActiveInvoice}
-                className="gap-2 border-success/40 text-success hover:bg-success/10"
-                title={
-                  hasActiveInvoice
-                    ? `فاتورة نشطة (#${activeInvoice.invoice_number}) — لا يمكن إصدار فاتورة أخرى`
-                    : (!canIssueTaxInvoice ? "متاح بعد إكمال أمر العمل أو تسليم المركبة أو رفع LPO" : "")
-                }
-              >
-                <FileText size={14} />
-                {hasActiveInvoice
-                  ? `فاتورة #${activeInvoice.invoice_number} مُصدرة`
-                  : <>فاتورة ضريبية رسمية (QR){!canIssueTaxInvoice && " 🔒"}</>}
-              </Button>
               <Button onClick={() => setTab("approval")} className="gap-2">
                 التالي: الموافقة <ArrowLeftRight size={14} />
               </Button>
@@ -2105,9 +2272,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             )}
 
             <div className="flex flex-wrap gap-2 pt-2">
-              <Button onClick={handleApprove} disabled={status === "approved" || isNew || updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
-                <CheckCircle2 size={16} /> موافقة على المطالبة
-              </Button>
+              <div className="text-xs text-muted-foreground rounded-lg border border-border bg-secondary/20 px-3 py-2">
+                يتم تنفيذ الاعتماد من بطاقة التحكم الرئيسية أعلى الصفحة حتى لا تتكرر الأزرار.
+              </div>
               <Button variant="outline" onClick={() => setStatus("rejected")} disabled={status === "rejected" || isNew}>
                 رفض
               </Button>
@@ -2168,19 +2335,20 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <CheckCircle2 size={16} />
                   أمر العمل تم إنشاؤه تلقائياً عند الموافقة وبيانات السيارة تمت مزامنتها. اختر الإجراء التالي:
                 </div>
-                <div className="grid md:grid-cols-3 gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button
                     onClick={() => setShowWorkOrderInline((v) => !v)}
                     variant={showWorkOrderInline ? "default" : "outline"}
                     className="gap-2"
-                    size="lg"
+                    size="sm"
                   >
                     <Wrench size={16} /> {showWorkOrderInline ? "إخفاء العرض هنا" : "فتح أمر العمل هنا"}
                   </Button>
                   <Button
                     onClick={() => navigate(`/work-orders/${linkedWorkOrderId}`)}
-                    className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                    size="lg"
+                    variant="outline"
+                    className="gap-2"
+                    size="sm"
                   >
                     <LinkIcon size={16} /> الانتقال لصفحة أمر العمل
                   </Button>
@@ -2188,7 +2356,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                     onClick={() => setTab("delivery")}
                     variant="outline"
                     className="gap-2"
-                    size="lg"
+                    size="sm"
                   >
                     <PackageCheck size={16} /> الانتقال للتسليم
                   </Button>
@@ -2200,8 +2368,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <Button
                 onClick={handleConvertToWorkOrder}
                 disabled={status !== "approved"}
-                className="w-full gap-2"
-                size="lg"
+                variant="outline"
+                className="gap-2"
+                size="sm"
               >
                 <Wrench size={18} /> إنشاء أمر العمل هنا
               </Button>
@@ -2397,6 +2566,49 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         onOpenChange={setShowNewInspection}
         preselectOrderId={linkedWorkOrderId || undefined}
       />
+
+      <Dialog open={!!stageDialog} onOpenChange={(open) => !open && setStageDialog(null)}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>تأكيد تغيير مرحلة المركبة</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                <div className="text-xs text-muted-foreground mb-1">المرحلة الحالية</div>
+                <div className="font-semibold">
+                  {vehicleProgress.find((step) => step.state === "current")?.label || "—"}
+                </div>
+              </div>
+              <div className="rounded-lg border border-primary/30 bg-primary/10 p-3">
+                <div className="text-xs text-muted-foreground mb-1">المرحلة الجديدة</div>
+                <div className="font-semibold text-primary">{stageDialog?.label || "—"}</div>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>تاريخ التغيير</Label>
+              <Input type="date" value={stageDate} onChange={(e) => setStageDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>ملاحظة اختيارية</Label>
+              <Textarea
+                value={stageNote}
+                onChange={(e) => setStageNote(e.target.value)}
+                rows={3}
+                placeholder="مثال: تم تحديث المرحلة بعد اتصال شركة التأمين"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setStageDialog(null)} disabled={savingStage}>
+                إلغاء
+              </Button>
+              <Button onClick={handleConfirmStageChange} disabled={savingStage || !stageDate}>
+                {savingStage ? "جاري الحفظ..." : "تأكيد"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Send Insurance Email Dialog */}
       {!isNew && id && (
