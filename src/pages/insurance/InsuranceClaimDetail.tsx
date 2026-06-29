@@ -47,6 +47,7 @@ import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/li
 import { buildInsuranceInspectionHtml } from "@/lib/insuranceInspectionPdf";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompanyAutocomplete";
+import InsuranceEmployeeSelect from "@/components/insurance/InsuranceEmployeeSelect";
 import ClaimPaymentDialog from "@/components/insurance/ClaimPaymentDialog";
 import { usePaymentsByClaim, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, useDeleteClaimPayment } from "@/hooks/useClaimPayments";
 import { findOrCreateInsuranceCompany, useInsuranceCompany } from "@/hooks/useInsuranceCompanies";
@@ -107,6 +108,7 @@ export default function InsuranceClaimDetail() {
   // Insurance company (primary "customer"/payer)
   const [company, setCompany] = useState("");
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [insuranceEmployeeId, setInsuranceEmployeeId] = useState<string | null>(null);
   const [claimNumber, setClaimNumber] = useState("");
   const [lpoNumber, setLpoNumber] = useState("");
 
@@ -215,6 +217,7 @@ export default function InsuranceClaimDetail() {
     if (!existing) return;
     setCompany(existing.insurance_company || "");
     setCompanyId((existing as any).insurance_company_id ?? null);
+    setInsuranceEmployeeId((existing as any).insurance_employee_id ?? null);
     setClaimNumber(existing.claim_number || "");
     setCustomerId(existing.customer_id || "");
     setVehicleId(existing.vehicle_id || "");
@@ -449,6 +452,7 @@ export default function InsuranceClaimDetail() {
       claim_number: claimNumber,
       insurance_company: company,
       insurance_company_id: companyId,
+      insurance_employee_id: insuranceEmployeeId,
       estimated_amount: effectiveEstimate,
       estimated_cost: effectiveEstimate,
       approved_amount: parseFloat(approvedAmount) || 0,
@@ -557,6 +561,7 @@ export default function InsuranceClaimDetail() {
       claim_number: claimNumber,
       insurance_company: company,
       insurance_company_id: insCompanyId,
+      insurance_employee_id: insuranceEmployeeId,
       estimated_amount: effectiveEstimate,
       estimated_cost: effectiveEstimate,
       approved_amount: parseFloat(approvedAmount) || 0,
@@ -1584,7 +1589,16 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <InsuranceCompanyAutocomplete
                 value={company}
                 companyId={companyId}
-                onChange={(name, cid) => { setCompany(name); setCompanyId(cid); }}
+                onChange={(name, cid) => { setCompany(name); setCompanyId(cid); setInsuranceEmployeeId(null); }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">موظف التأمين</Label>
+              <InsuranceEmployeeSelect
+                companyId={companyId}
+                value={insuranceEmployeeId}
+                onChange={setInsuranceEmployeeId}
+                placeholder="الموظف المسؤول"
               />
             </div>
             <div className="space-y-1.5">

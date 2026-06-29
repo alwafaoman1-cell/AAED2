@@ -124,19 +124,50 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }:
     setLoading(true);
     try {
       const pattern = `%${needle}%`;
+      const [{ data: matchedCustomers, error: customerSearchError }, { data: matchedWorkOrders, error: workOrderSearchError }] = await Promise.all([
+        (supabase.from("customers") as any)
+          .select("id")
+          .eq("tenant_id", tenantId)
+          .or(`name.ilike.${pattern},phone.ilike.${pattern}`)
+          .limit(25),
+        (supabase.from("job_orders") as any)
+          .select("id,order_number,vehicle_id")
+          .eq("tenant_id", tenantId)
+          .ilike("order_number", pattern)
+          .limit(25),
+      ]);
+      if (customerSearchError) throw customerSearchError;
+      if (workOrderSearchError) throw workOrderSearchError;
+      const matchedCustomerIds = Array.from(new Set(((matchedCustomers || []) as any[]).map((row) => row.id).filter(Boolean)));
+      const matchedWorkOrderIds = Array.from(new Set(((matchedWorkOrders || []) as any[]).map((row) => row.id).filter(Boolean)));
+      const salesOr = [
+        `doc_number.ilike.${pattern}`,
+        `customer_name.ilike.${pattern}`,
+        `vehicle_plate.ilike.${pattern}`,
+        ...matchedCustomerIds.map((id) => `customer_id.eq.${id}`),
+        ...matchedWorkOrderIds.map((id) => `work_order_id.eq.${id}`),
+      ].join(",");
+      const claimsOr = [
+        `claim_number.ilike.${pattern}`,
+        `vehicle_plate.ilike.${pattern}`,
+        `insurance_company.ilike.${pattern}`,
+        ...matchedCustomerIds.map((id) => `customer_id.eq.${id}`),
+        ...matchedWorkOrderIds.map((id) => `job_order_id.eq.${id}`),
+        ...matchedWorkOrderIds.map((id) => `auto_job_order_id.eq.${id}`),
+      ].join(",");
       const [salesResult, claimsResult] = await Promise.all([
         (supabase.from("sales_documents") as any)
           .select("id,doc_number,total,paid_amount,balance_due,customer_id,customer_name,vehicle_plate,work_order_id,status")
           .eq("tenant_id", tenantId)
           .eq("doc_type", "invoice")
           .not("status", "in", "(cancelled,canceled,draft)")
-          .or(`doc_number.ilike.${pattern},customer_name.ilike.${pattern},vehicle_plate.ilike.${pattern}`)
+          .or(salesOr)
           .limit(12),
         (supabase.from("insurance_claims") as any)
           .select("id,claim_number,customer_id,vehicle_id,vehicle_plate,insurance_company_id,insurance_company,estimated_amount,approved_amount,status,job_order_id,auto_job_order_id")
           .eq("tenant_id", tenantId)
           .not("status", "in", "(cancelled,rejected)")
-          .or(`claim_number.ilike.${pattern},vehicle_plate.ilike.${pattern},insurance_company.ilike.${pattern}`)
+          .or(claimsOr)
           .limit(12),
       ]);
       if (salesResult.error) throw salesResult.error;
@@ -158,7 +189,28 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }:
         }, paidByClaim);
       }
 
-      const customerIds = Array.from(new Set(claimRows.map((row: any) => row.customer_id).filter(Boolean)));
+      const salesRows = salesResult.data || [];
+      const workOrderIds = Array.from(new Set([
+        ...salesRows.map((row: any) => row.work_order_id).filter(Boolean),
+        ...claimRows.map((row: any) => row.job_order_id || row.auto_job_order_id).filter(Boolean),
+      ]));
+      let workOrdersById = new Map<string, { vehicle_id: string | null; order_number: string | null }>();
+      if (workOrderIds.length) {
+        const { data: workOrders, error } = await (supabase.from("job_orders") as any)
+          .select("id,vehicle_id,order_number")
+          .eq("tenant_id", tenantId)
+          .in("id", workOrderIds);
+        if (error) throw error;
+        workOrdersById = (workOrders || []).reduce((map: Map<string, { vehicle_id: string | null; order_number: string | null }>, row: any) => {
+          map.set(row.id, { vehicle_id: row.vehicle_id || null, order_number: row.order_number || null });
+          return map;
+        }, workOrdersById);
+      }
+
+      const customerIds = Array.from(new Set([
+        ...claimRows.map((row: any) => row.customer_id).filter(Boolean),
+        ...salesRows.map((row: any) => row.customer_id).filter(Boolean),
+      ]));
       let customersById = new Map<string, string>();
       if (customerIds.length) {
         const { data: customers, error } = await (supabase.from("customers") as any)
@@ -172,17 +224,18 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }:
         }, customersById);
       }
 
-      const salesTargets: PaymentTarget[] = (salesResult.data || []).map((row: any) => {
+      const salesTargets: PaymentTarget[] = salesRows.map((row: any) => {
         const total = Number(row.total || 0);
         const paid = Number(row.paid_amount || 0);
         const remaining = Number(row.balance_due ?? Math.max(0, total - paid));
+        const linkedWorkOrder = row.work_order_id ? workOrdersById.get(row.work_order_id) : null;
         return {
           kind: "sales_invoice",
           id: row.id,
           number: row.doc_number,
           customerId: row.customer_id || null,
           customerName: row.customer_name || "—",
-          vehicleId: null,
+          vehicleId: linkedWorkOrder?.vehicle_id || null,
           vehiclePlate: row.vehicle_plate || null,
           workOrderId: row.work_order_id || null,
           claimId: null,

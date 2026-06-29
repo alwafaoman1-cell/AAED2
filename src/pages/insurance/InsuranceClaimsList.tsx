@@ -29,6 +29,7 @@ import {
 } from "@/lib/claimVehicleLocation";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
+import { useInsuranceEmployees } from "@/hooks/useInsuranceEmployees";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/15 text-warning border-warning/30",
@@ -55,11 +56,13 @@ export default function InsuranceClaimsList() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: claims = [], isLoading } = useInsuranceClaims();
+  const { data: insuranceEmployees = [] } = useInsuranceEmployees(null);
   const deleteClaim = useDeleteClaim();
 
   const [search, setSearch] = useState(() => searchParams.get("q") || "");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
+  const [employeeFilter, setEmployeeFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<string>("all"); // all, 7d, 30d, 90d
   const [statusClaim, setStatusClaim] = useState<InsuranceClaim | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -99,6 +102,7 @@ export default function InsuranceClaimsList() {
       const location = getClaimVehicleLocation(c);
       if (statusFilter !== "all" && c.status !== statusFilter) return false;
       if (companyFilter !== "all" && c.insurance_company !== companyFilter) return false;
+      if (employeeFilter !== "all" && (c as any).insurance_employee_id !== employeeFilter) return false;
       // فلتر حالة الورشة (الافتراضي = قيد العمل = نشطة ولم تُسلَّم ولم تُلغَ)
       if (deliveryFilter === "active" && !isActiveClaim(c)) return false;
       if (deliveryFilter !== "all" && deliveryFilter !== "active" && location !== deliveryFilter) return false;
@@ -120,7 +124,7 @@ export default function InsuranceClaimsList() {
       }
       return true;
     });
-  }, [claims, search, statusFilter, companyFilter, dateRange, deliveryFilter]);
+  }, [claims, search, statusFilter, companyFilter, employeeFilter, dateRange, deliveryFilter]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -156,7 +160,7 @@ export default function InsuranceClaimsList() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, companyFilter, dateRange, deliveryFilter, pageSize]);
+  }, [search, statusFilter, companyFilter, employeeFilter, dateRange, deliveryFilter, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -175,9 +179,13 @@ export default function InsuranceClaimsList() {
     const parts = [map[deliveryFilter] || "جميع المطالبات"];
     if (statusFilter !== "all") parts.push(`الحالة: ${statusLabels[statusFilter]}`);
     if (companyFilter !== "all") parts.push(`الشركة: ${companyFilter}`);
+    if (employeeFilter !== "all") {
+      const employee = insuranceEmployees.find((item) => item.id === employeeFilter);
+      parts.push(`موظف التأمين: ${employee?.name || "—"}`);
+    }
     if (search) parts.push(`بحث: ${search}`);
     return parts.join(" · ");
-  }, [deliveryFilter, statusFilter, companyFilter, search]);
+  }, [deliveryFilter, statusFilter, companyFilter, employeeFilter, insuranceEmployees, search]);
 
   const exportCsv = () => {
     const headers = ["رقم المطالبة", "شركة التأمين", "العميل", "السيارة", "اللوحة", "المقدر", "المعتمد", "الحالة", "التاريخ"];
@@ -308,6 +316,17 @@ export default function InsuranceClaimsList() {
             <SelectContent>
               <SelectItem value="all">كل الشركات</SelectItem>
               {companies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+            <SelectTrigger className="md:w-52"><SelectValue placeholder="موظف التأمين" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">كل الموظفين</SelectItem>
+              {insuranceEmployees.map((employee) => (
+                <SelectItem key={employee.id} value={employee.id}>
+                  {employee.name}{employee.title ? ` — ${employee.title}` : ""}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={dateRange} onValueChange={setDateRange}>

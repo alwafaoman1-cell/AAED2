@@ -26,6 +26,7 @@ export interface InsuranceClaim {
   claim_number: string;
   insurance_company: string;
   insurance_company_id: string | null;
+  insurance_employee_id: string | null;
   estimated_amount: number;
   approved_amount: number;
   status: "pending" | "approved" | "rejected" | "paid" | "cancelled";
@@ -82,6 +83,7 @@ export type ClaimInsert = {
   claim_number: string;
   insurance_company: string;
   insurance_company_id?: string | null;
+  insurance_employee_id?: string | null;
   estimated_amount: number;
   approved_amount?: number;
   status?: "pending" | "approved" | "rejected" | "paid" | "cancelled";

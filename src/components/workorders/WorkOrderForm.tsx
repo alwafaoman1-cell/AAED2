@@ -91,8 +91,24 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   const [vehicleMatch, setVehicleMatch] = useState<VehicleIdentityMatch | null>(null);
   const [vehicleLookupLoading, setVehicleLookupLoading] = useState(false);
   const [useExistingVehicle, setUseExistingVehicle] = useState(false);
+  const [wizardStep, setWizardStep] = useState<0 | 1 | 2>(0);
   const role = getCurrentRole();
   const canChooseInsurance = role === "admin" || role === "manager" || role === "supervisor";
+  const isWizard = !isEdit;
+  const wizardSteps = [
+    { label: "العميل والمركبة ونوع الأمر", desc: "لا يتم إنشاء أمر العمل في هذه الخطوة." },
+    { label: "الاستلام والصور والتوقيع", desc: "بيانات حالة المركبة عند دخولها." },
+    { label: "المراجعة والحفظ النهائي", desc: "الحفظ في Supabase يتم هنا فقط." },
+  ];
+  const wizardVisible = (step: 0 | 1 | 2) => !isWizard || wizardStep === step;
+  const goWizardNext = () => {
+    if (wizardStep === 0) {
+      if (!form.customer) return toast.error("أكمل بيانات العميل قبل المتابعة");
+      if (!form.plate) return toast.error("أدخل رقم اللوحة قبل المتابعة");
+      if (!form.vehicleType?.trim() || !form.model?.trim()) return toast.error("أدخل ماركة وموديل المركبة قبل المتابعة");
+    }
+    setWizardStep((step) => Math.min(2, step + 1) as 0 | 1 | 2);
+  };
 
   useEffect(() => {
     setForm({
@@ -437,7 +453,34 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
   return (
     <div className="space-y-4 py-2">
-      <div className="rounded-xl border border-border bg-card p-3">
+      {isWizard && (
+        <div className="rounded-xl border border-primary/25 bg-primary/5 p-3 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            {wizardSteps.map((item, index) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => setWizardStep(index as 0 | 1 | 2)}
+                className={`rounded-lg border p-3 text-right transition ${
+                  wizardStep === index
+                    ? "border-primary bg-primary text-primary-foreground shadow"
+                    : wizardStep > index
+                      ? "border-success/40 bg-success/10 text-success"
+                      : "border-border bg-card hover:border-primary/40"
+                }`}
+              >
+                <div className="text-sm font-bold">{index + 1}. {item.label}</div>
+                <div className={`text-[11px] mt-1 ${wizardStep === index ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{item.desc}</div>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            يمكنك الرجوع والتعديل بدون فقدان البيانات. أمر العمل لا يُنشأ إلا عند الضغط على حفظ في الخطوة الأخيرة.
+          </p>
+        </div>
+      )}
+
+      <div className="rounded-xl border border-border bg-card p-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
         <div className="mb-3">
           <h4 className="text-sm font-semibold text-foreground">نوع أمر العمل *</h4>
           <p className="text-[11px] text-muted-foreground">حدد المسار قبل إدخال البيانات. الأمر المرتبط بمطالبة يُصنّف تأمين تلقائيًا.</p>
@@ -472,7 +515,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
       {/* تعبئة تلقائية بالذكاء الاصطناعي من صورة مَلكية/استمارة/رخصة */}
-      <div className="flex items-center justify-between gap-2 bg-primary/5 border border-primary/20 rounded-lg p-3">
+      <div className="flex items-center justify-between gap-2 bg-primary/5 border border-primary/20 rounded-lg p-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
         <div className="text-xs">
           <div className="font-medium text-foreground">⚡ تعبئة سريعة بالذكاء الاصطناعي</div>
           <div className="text-muted-foreground">ارفع صورة المَلكية / الاستمارة / الرخصة وسيستخرج البيانات تلقائياً</div>
@@ -498,7 +541,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
       {/* ===== 1) العميل (بحث موحّد بالهاتف + إنشاء إلزامي) ===== */}
-      <div className="border border-border rounded-lg bg-card/50 p-3 space-y-2">
+      <div className="border border-border rounded-lg bg-card/50 p-3 space-y-2" style={{ display: wizardVisible(0) ? undefined : "none" }}>
         <h4 className="text-sm font-semibold text-foreground">العميل</h4>
         <p className="text-[10px] text-muted-foreground">
           ابحث بالهاتف أو الاسم. لو لم يوجد سيظهر زر «إضافة عميل جديد (إلزامي)».
@@ -536,7 +579,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
       {/* ===== 2) بيانات المركبة (موحّدة — بدون تكرار) ===== */}
-      <div className="border border-primary/30 rounded-lg bg-primary/5 p-3 space-y-3">
+      <div className="border border-primary/30 rounded-lg bg-primary/5 p-3 space-y-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
         <h4 className="text-sm font-semibold text-foreground">بيانات المركبة</h4>
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">رقم اللوحة *</label>
@@ -616,7 +659,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
       {/* ===== 3) بيانات الخدمة ===== */}
-      <div className="border border-border rounded-lg bg-card/50 p-3 space-y-3">
+      <div className="border border-border rounded-lg bg-card/50 p-3 space-y-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
         <h4 className="text-sm font-semibold text-foreground">بيانات الخدمة</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
@@ -706,7 +749,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
 
       {/* فحص واستلام المركبة */}
-      <div className="border border-info/30 rounded-lg bg-info/5 p-3 space-y-3">
+      <div className="border border-info/30 rounded-lg bg-info/5 p-3 space-y-3" style={{ display: wizardVisible(1) ? undefined : "none" }}>
         <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <Car size={14} className="text-info" /> فحص واستلام المركبة
           <span className="text-[10px] text-muted-foreground font-normal">(العداد، الوقود، المقتنيات)</span>
@@ -782,7 +825,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
 
-      <div className="border border-border rounded-lg bg-secondary/20 p-3">
+      <div className="border border-border rounded-lg bg-secondary/20 p-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
             <span className="text-warning">●</span> مصروفات إضافية
@@ -836,7 +879,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
       {/* قطع الغيار المطلوبة (طلب شراء داخلي) */}
-      <div className="border border-info/30 rounded-lg bg-info/5 p-3">
+      <div className="border border-info/30 rounded-lg bg-info/5 p-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
             <Package size={14} className="text-info" /> قطع الغيار المطلوبة
@@ -911,7 +954,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
       {/* سندات صرف خارجية مرتبطة (للقراءة) */}
       {isEdit && linkedVouchers.length > 0 && (
-        <div className="border border-info/30 rounded-lg bg-info/5 p-3">
+        <div className="border border-info/30 rounded-lg bg-info/5 p-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5 mb-2">
             <LinkIcon size={14} className="text-info" /> سندات صرف مرتبطة بهذا الأمر
             <span className="text-[10px] text-muted-foreground font-normal">({linkedVouchers.length})</span>
@@ -936,7 +979,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
       {/* الدفعات */}
       {(availableDeposit > 0 || (initial?.depositApplied || 0) > 0) && (
-        <div className="border border-success/30 rounded-lg bg-success/5 p-3">
+        <div className="border border-success/30 rounded-lg bg-success/5 p-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5 mb-2">
             <Wallet size={14} className="text-success" /> رصيد الدفعات المتاح للعميل/السيارة
           </h4>
@@ -960,7 +1003,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       )}
 
       {/* ملخص التكلفة */}
-      <div className="border-2 border-primary/30 rounded-lg bg-primary/5 p-3 space-y-1 text-sm">
+      <div className="border-2 border-primary/30 rounded-lg bg-primary/5 p-3 space-y-1 text-sm" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex justify-between text-muted-foreground"><span>تكلفة العمالة التقديرية</span><span>{(Number(form.laborCost) || 0).toLocaleString()} ر.ع</span></div>
         <div className="flex justify-between text-muted-foreground"><span>تكلفة قطع الغيار التقديرية</span><span>{(Number(form.partsCost) || 0).toLocaleString()} ر.ع</span></div>
         {extraTotal > 0 && <div className="flex justify-between text-muted-foreground"><span>مصروفات إضافية</span><span>{extraTotal.toLocaleString()} ر.ع</span></div>}
@@ -977,7 +1020,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
       {/* ===== بنود الأعمال المطلوبة (تظهر للعميل في رابط التوقيع) ===== */}
-      <div className="border-2 border-primary/20 rounded-xl bg-card p-3 space-y-3">
+      <div className="border-2 border-primary/20 rounded-xl bg-card p-3 space-y-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm font-bold text-foreground">📋 بنود الأعمال المطلوبة</div>
@@ -1020,7 +1063,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
 
-      <div className="space-y-1.5">
+      <div className="space-y-1.5" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex items-center justify-between">
           <label className="text-xs font-medium text-muted-foreground">ملاحظات / تشخيص</label>
           <AiWriteButton
@@ -1033,9 +1076,20 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         <textarea value={form.diagnosis || ""} onChange={e => set("diagnosis", e.target.value)} className="w-full rounded-lg bg-secondary border border-border text-foreground p-3 text-sm min-h-[80px] resize-none focus:outline-none focus:ring-2 focus:ring-ring" />
       </div>
       <div className="flex gap-3 pt-2">
-        <Button onClick={() => void handleSubmit()} disabled={saving} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
-          {saving ? "جارٍ الحفظ والرفع…" : isEdit ? "حفظ التعديلات" : "حفظ أمر العمل"}
-        </Button>
+        {isWizard && wizardStep > 0 && (
+          <Button type="button" variant="outline" onClick={() => setWizardStep((step) => Math.max(0, step - 1) as 0 | 1 | 2)}>
+            السابق
+          </Button>
+        )}
+        {isWizard && wizardStep < 2 ? (
+          <Button type="button" onClick={goWizardNext} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
+            التالي
+          </Button>
+        ) : (
+          <Button onClick={() => void handleSubmit()} disabled={saving} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
+            {saving ? "جارٍ الحفظ والرفع…" : isEdit ? "حفظ التعديلات" : "حفظ أمر العمل"}
+          </Button>
+        )}
         <Button onClick={onClose} variant="outline" className="border-border text-foreground hover:bg-secondary">إلغاء</Button>
       </div>
     </div>

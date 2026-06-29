@@ -18,6 +18,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCreateClaim } from "@/hooks/useInsuranceClaims";
 import { useInsuranceCompanies, findOrCreateInsuranceCompany } from "@/hooks/useInsuranceCompanies";
 import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompanyAutocomplete";
+import InsuranceEmployeeSelect from "@/components/insurance/InsuranceEmployeeSelect";
 import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicker";
 import UplItemsEditor, { type UplItem } from "@/components/insurance/UplItemsEditor";
 import AiExtractButton from "@/components/ai/AiExtractButton";
@@ -39,6 +40,7 @@ interface Draft {
   // company (مَن سندفع له الفاتورة)
   company: string;
   companyId: string | null;
+  insuranceEmployeeId: string | null;
   claimNumber: string;     // الرقم الذي تعطيه شركة التأمين أو نولّده مؤقتاً
   // owner (صاحب السيارة لتسليمها له بعد الإصلاح)
   customerId: string | null;
@@ -76,6 +78,7 @@ const DRAFT_KEY = "insurance_claim_draft_v3"; // bumped: removed internal-cost &
 
 const emptyDraft = (): Draft => ({
   company: "", companyId: null, claimNumber: "",
+  insuranceEmployeeId: null,
   customerId: null, ownerName: "", ownerPhone: "", expectedDeliveryDate: "",
   vehicleId: null, vehicleMake: "", vehicleModel: "", vehiclePlate: "", vehicleYear: "", vehicleColor: "", vehicleVin: "",
   incidentDate: new Date().toISOString().slice(0, 10),
@@ -457,6 +460,7 @@ export default function NewInsuranceClaim() {
         claim_number: draft.claimNumber.trim(),
         insurance_company: draft.company.trim(),
         insurance_company_id: companyId && isUuid(companyId) ? companyId : null,
+        insurance_employee_id: draft.insuranceEmployeeId && isUuid(draft.insuranceEmployeeId) ? draft.insuranceEmployeeId : null,
         estimated_amount: finalEstimate,
         approved_amount: 0,
         status: "pending",
@@ -727,8 +731,19 @@ function Step0({ draft, update, generateClaimNumber, companies }: { draft: Draft
           <InsuranceCompanyAutocomplete
             value={draft.company}
             companyId={draft.companyId}
-            onChange={(name, id) => update({ company: name, companyId: id })}
+            onChange={(name, id) => update({ company: name, companyId: id, insuranceEmployeeId: null })}
           />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>موظف شركة التأمين</Label>
+          <InsuranceEmployeeSelect
+            companyId={draft.companyId}
+            value={draft.insuranceEmployeeId}
+            onChange={(insuranceEmployeeId) => update({ insuranceEmployeeId })}
+            placeholder="اختر الموظف المسؤول"
+          />
+          <p className="text-[10px] text-muted-foreground">اختياري، ويظهر لاحقًا في تفاصيل المطالبة والفلاتر.</p>
         </div>
 
         <div className="space-y-1.5">

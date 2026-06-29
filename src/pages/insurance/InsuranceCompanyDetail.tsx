@@ -24,6 +24,7 @@ import { computeAging, summarizeAging, DEFAULT_BUCKETS, type AgingBasis, type Ag
 import { journalStore } from "@/lib/journalStore";
 import JournalPreview, { entryToPreviewLine } from "@/components/accounting/JournalPreview";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
+import InsuranceEmployeesManager from "@/components/insurance/InsuranceEmployeesManager";
 
 const CLAIM_STATUS_AR: Record<string, string> = {
   pending: "بانتظار الاعتماد",
@@ -380,6 +381,8 @@ export default function InsuranceCompanyDetail() {
           </div>
         </div>
       </div>
+
+      <InsuranceEmployeesManager companyId={company.id} />
 
       {/* فلاتر الفترة + تصدير */}
       <Card className="p-4">
