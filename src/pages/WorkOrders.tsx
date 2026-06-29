@@ -247,7 +247,7 @@ export default function WorkOrders() {
     const matchesEntryTo = !entryTo || (o.entryDate || "") <= entryTo;
     const matchesArchive =
       archiveFilter === "all" ||
-      (archiveFilter === "archived" ? !!o.archivedAt : !o.archivedAt);
+      (archiveFilter === "archived" ? !!o.archivedAt || !!o.deletedAt : !o.archivedAt && !o.deletedAt);
     return matchesSearch && matchesStatus && matchesOwnership && matchesParts && matchesTechnician && matchesEntryFrom && matchesEntryTo && matchesArchive;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));

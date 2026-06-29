@@ -60,9 +60,29 @@ export async function getCurrentTenantId(): Promise<string | null> {
       .select("tenant_id")
       .eq("user_id", uid)
       .maybeSingle();
-    if (error || !data?.tenant_id) return null;
-    cachedTenantId = data.tenant_id;
-    return cachedTenantId;
+    if (!error && data?.tenant_id) {
+      cachedTenantId = data.tenant_id;
+      return cachedTenantId;
+    }
+
+    const { data: rpcTenant } = await (supabase as any).rpc("get_user_tenant_id");
+    if (rpcTenant) {
+      cachedTenantId = rpcTenant;
+      return cachedTenantId;
+    }
+
+    const { data: roleTenant } = await supabase
+      .from("user_roles" as any)
+      .select("tenant_id")
+      .eq("user_id", uid)
+      .limit(1)
+      .maybeSingle();
+    if ((roleTenant as any)?.tenant_id) {
+      cachedTenantId = (roleTenant as any).tenant_id;
+      return cachedTenantId;
+    }
+
+    return null;
   })();
   const r = await cachedTenantPromise;
   cachedTenantPromise = null;

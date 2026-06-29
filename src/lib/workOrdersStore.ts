@@ -66,6 +66,7 @@ export interface WorkOrder {
   vehicleThumbnailUrl?: string;
   trackingExpiresAt?: string;
   archivedAt?: string;
+  deletedAt?: string;
   customer: string;
   phone: string;
   plate: string;
@@ -425,6 +426,7 @@ function mapCloudRow(
     vehicleThumbnailUrl: v?.thumbnailUrl || undefined,
     trackingExpiresAt: r.tracking_expires_at || undefined,
     archivedAt: r.archived_at || undefined,
+    deletedAt: r.deleted_at || undefined,
     customer: c?.name || "",
     phone: c?.phone || "",
     plate: v?.plate || "",
@@ -519,7 +521,6 @@ async function fetchFromCloud(): Promise<void> {
       .from("job_orders")
       .select("*")
       .eq("tenant_id", tenantId)
-      .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(5000);
     if (ordersResult.error && isMissingJobOrderColumnError(ordersResult.error)) {
