@@ -582,8 +582,8 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
   const subtotal = laborCost + partsCost + extrasTotal || data.totalCost;
   const vat = Number((subtotal * (s.vatRate / 100)).toFixed(3));
   // ⚠️ المحاسبة: الإجمالي = subtotal + VAT الكامل. الدفعة لا تُخصم من الإيراد.
-  const grandTotal = subtotal + vat;
-  const balanceDue = Math.max(0, grandTotal - deposit);
+  const grandTotal = Number((subtotal + vat).toFixed(3));
+  const balanceDue = Number(Math.max(0, grandTotal - deposit).toFixed(3));
 
   const extrasRowsHtml = extras.length === 0 ? '' : extras.map((e) => `
     <tr>

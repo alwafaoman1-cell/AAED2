@@ -73,11 +73,29 @@ const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): 
 
 /** Universal export CSS injected into every PDF render. Template typography is preserved. */
 const PDF_EXPORT_CSS = `
-  html.pdf-export, html.pdf-export body{background:#fff!important;margin:0!important;padding:0!important;overflow:hidden!important;color:#000!important}
+  html.pdf-export, html.pdf-export body{
+    background:#fff!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:visible!important;
+    height:auto!important;
+    min-height:0!important;
+    max-height:none!important;
+    color:#000!important;
+  }
   html.pdf-export *{letter-spacing:0!important;text-rendering:geometricPrecision!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
   html.pdf-export .print-bar, html.pdf-export .no-print{display:none!important}
   /* Keep the template's own inner padding as the visible margin — do NOT force padding:0 here, otherwise content bleeds to the paper edges when the engine renders .page at offset 0,0. */
-  html.pdf-export .page{margin:0!important;box-shadow:none!important;outline:none!important;border:0!important;min-height:0!important}
+  html.pdf-export .page{
+    margin:0!important;
+    box-shadow:none!important;
+    outline:none!important;
+    border:0!important;
+    min-height:0!important;
+    max-height:none!important;
+    overflow:visible!important;
+  }
+  html.pdf-export .page + .page{page-break-before:always!important;break-before:page!important}
   /* Table integrity — never cut rows or headers across pages */
   html.pdf-export table{border-collapse:collapse!important;width:100%!important}
   html.pdf-export thead{display:table-header-group!important}

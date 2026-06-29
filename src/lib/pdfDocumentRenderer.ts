@@ -35,8 +35,8 @@ function createEmptyPage(source: HTMLElement, orientation: PdfOrientation): HTML
   page.style.width = `${width}px`;
   page.style.height = `${height}px`;
   page.style.minHeight = `${height}px`;
-  page.style.maxHeight = `${height}px`;
-  page.style.overflow = "hidden";
+  page.style.maxHeight = "none";
+  page.style.overflow = "visible";
   page.style.margin = `0 auto ${PAGE_GAP_PX}px`;
   page.style.boxSizing = "border-box";
   page.style.position = "relative";
@@ -169,6 +169,8 @@ export function preparePagedPdfDocument(doc: Document, orientation: PdfOrientati
       box-sizing:border-box!important;
       break-after:page!important;
       page-break-after:always!important;
+      overflow:visible!important;
+      max-height:none!important;
       box-shadow:0 2px 12px rgba(0,0,0,.16);
     }
     .page:last-child{break-after:auto!important;page-break-after:auto!important}
