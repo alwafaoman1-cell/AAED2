@@ -88,6 +88,8 @@ const STAGE_FLOW: { key: string; label: string; status: "pending" | "approved" |
   { key: "workorder", label: "أمر عمل", status: "approved" },
 ];
 
+const dateOnly = (value?: string | null) => value ? String(value).slice(0, 10) : "";
+
 export default function InsuranceClaimDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -233,7 +235,7 @@ export default function InsuranceClaimDetail() {
     setLinkedWorkOrderId(existing.job_order_id);
     const createdAtStr = existing.created_at ? String(existing.created_at).slice(0, 10) : "";
     setEstimateDate((existing as any).estimate_date ?? createdAtStr);
-    setWorkshopArrivalDate((existing as any).workshop_arrival_date ?? "");
+    setWorkshopArrivalDate(dateOnly((existing as any).workshop_arrival_date));
     const ws = (existing as any).work_started_at;
     setWorkStartedAt(ws ? String(ws).slice(0, 10) : "");
     const wc = (existing as any).work_completed_at;
@@ -464,6 +466,31 @@ export default function InsuranceClaimDetail() {
     };
   };
 
+  const writeClaimAudit = async (action: string, details: Record<string, unknown>, category = "workflow") => {
+    if (!id || isNew) return;
+    const tenantId = (existing as any)?.tenant_id;
+    if (!tenantId) return;
+    const { error } = await supabase.from("claim_audit_logs").insert({
+      tenant_id: tenantId,
+      claim_id: id,
+      action,
+      category,
+      details: details as any,
+    });
+    if (error) throw error;
+    await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
+  };
+
+  const hydrateFromVerifiedClaim = (verified: any) => {
+    if (!verified?.id) return;
+    setStatus(verified.status ?? status);
+    setApprovedAmount(String(verified.approved_amount ?? approvedAmount ?? ""));
+    setWorkshopArrivalDate(dateOnly(verified.workshop_arrival_date));
+    setWorkStartedAt(dateOnly(verified.work_started_at));
+    setWorkCompletedAt(dateOnly(verified.work_completed_at));
+    if (verified.estimate_date) setEstimateDate(dateOnly(verified.estimate_date));
+  };
+
   const handleSave = async () => {
     if (!company || !claimNumber) {
       toast.error("يرجى إدخال: شركة التأمين ورقم المطالبة");
@@ -544,7 +571,17 @@ export default function InsuranceClaimDetail() {
         onSuccess: (d: any) => navigate(`/insurance/${d.id}`, { replace: true }),
       });
     } else {
-      updateClaim.mutate({ id: id!, updates: payload });
+      try {
+        const verified = await updateClaim.mutateAsync({ id: id!, updates: payload });
+        hydrateFromVerifiedClaim(verified);
+        await writeClaimAudit("claim_details_saved", {
+          workshop_arrival_date: workshopArrivalDate || null,
+          estimate_date: estimateDate || null,
+          work_started_at: workStartedAt || null,
+        });
+      } catch (e: any) {
+        toast.error(e?.message || "فشل حفظ المطالبة");
+      }
     }
   };
 
@@ -574,8 +611,9 @@ export default function InsuranceClaimDetail() {
     updateStatus.mutate(
       { id, status: "approved", approved_amount: parseFloat(approvedAmount) },
       {
-        onSuccess: async () => {
-          setStatus("approved");
+        onSuccess: async (verified: any) => {
+          hydrateFromVerifiedClaim(verified);
+          await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
           await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
           // اقرأ المطالبة المحدّثة من DB لمعرفة WO المُنشأ
           const { data: refreshed } = await supabase
@@ -880,6 +918,20 @@ export default function InsuranceClaimDetail() {
   // ── ملخص شامل للمطالبة (مختلف عن "تقدير المطالبة") ──
   const { data: claimPayments = [] } = usePaymentsByClaim(id);
   const { data: claimDocs = [] } = useClaimDocuments(isNew ? undefined : id);
+  const { data: claimAudit = [] } = useQuery({
+    queryKey: ["claim_audit_logs", id],
+    enabled: !isNew && !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("claim_audit_logs")
+        .select("id, action, category, details, created_at, user_id")
+        .eq("claim_id", id!)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return (data || []) as any[];
+    },
+  });
   const [, refreshExpenses] = useState(0);
   useEffect(() => expensesStore.subscribe(() => refreshExpenses((n) => n + 1)), []);
   const claimExpenses = useMemo(() => {
@@ -1261,6 +1313,24 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     paid: { label: "مدفوعة", cls: "bg-info/15 text-info" },
     cancelled: { label: "ملغاة", cls: "bg-muted text-muted-foreground line-through" },
   };
+  const invoiceTotal = Number((activeInvoice as any)?.total || 0);
+  const paidTotal = (activeInvoice as any)?.paid_amount != null
+    ? Number((activeInvoice as any).paid_amount || 0)
+    : claimPayments.filter((p) => p.status === "cleared").reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const paymentRemaining = Math.max(0, invoiceTotal > 0 ? invoiceTotal - paidTotal : Number(approvedAmount || estimatedCost || 0) - paidTotal);
+  const paymentStatusLabel = paymentRemaining <= 0 && paidTotal > 0 ? "مدفوع" : paidTotal > 0 ? "مدفوع جزئيًا" : "غير مدفوع";
+  const vehicleTitle = `${vehicleMake || vehicle?.brand || "—"} ${vehicleModel || vehicle?.model || ""}`.trim();
+  const vehicleProgress = [
+    { key: "arrived", label: "وصلت الورشة", icon: "🏁", active: !!workshopArrivalDate, date: workshopArrivalDate },
+    { key: "inspection", label: "بانتظار الفحص", icon: "🔍", active: status === "pending" && !approvedAmount, date: estimateDate },
+    { key: "approval_wait", label: "بانتظار موافقة التأمين", icon: "⏳", active: status === "pending", date: estimateDate },
+    { key: "approved", label: "تمت الموافقة", icon: "✅", active: status === "approved" || status === "paid", date: dateOnly((existing as any)?.approved_at) },
+    { key: "repairing", label: "تحت الإصلاح", icon: "🛠️", active: !!workStartedAt && status === "approved", date: workStartedAt },
+    { key: "ready", label: "جاهزة للتسليم", icon: "📦", active: !!workCompletedAt, date: workCompletedAt },
+    { key: "delivered", label: "تم التسليم", icon: "🚗", active: !!(existing as any)?.delivered_at || status === "paid", date: dateOnly((existing as any)?.delivered_at) },
+    { key: "customer", label: "مع العميل", icon: "👤", active: status === "paid", date: dateOnly((existing as any)?.paid_at) },
+    { key: "cancelled", label: "ملغاة / مرفوضة", icon: "⛔", active: status === "cancelled" || status === "rejected", date: dateOnly((existing as any)?.updated_at) },
+  ];
 
   return (
     <div className="space-y-5 pb-12" dir="rtl">
@@ -1515,6 +1585,82 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         />
       </Card>
 
+      <Card className="p-5 border-primary/20 bg-gradient-to-l from-primary/5 via-card to-card">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <VehicleAvatar
+              imageUrl={(vehicle as any)?.vehicle_cover_image_url || (vehicle as any)?.vehicle_thumbnail_url}
+              label={`${vehicleTitle} ${vehiclePlate || vehicle?.plate_number || ""}`.trim()}
+              size="lg"
+            />
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-bold text-foreground">{claimNumber || "مطالبة جديدة"}</h2>
+                <Badge className={statusMeta[status]?.cls}>{statusMeta[status]?.label || status}</Badge>
+                <Badge variant="outline">{activeInvoice ? `فاتورة #${(activeInvoice as any).invoice_number}` : "لا توجد فاتورة"}</Badge>
+                <Badge variant={paymentRemaining <= 0 && paidTotal > 0 ? "default" : "secondary"}>{paymentStatusLabel}</Badge>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-sm text-muted-foreground">
+                <div><span className="block text-[11px]">شركة التأمين</span><strong className="text-foreground">{company || "—"}</strong></div>
+                <div><span className="block text-[11px]">العميل</span><strong className="text-foreground">{ownerName || customer?.name || "—"}</strong></div>
+                <div><span className="block text-[11px]">المركبة</span><strong className="text-foreground">{vehicleTitle}</strong></div>
+                <div><span className="block text-[11px]">اللوحة</span><strong className="text-foreground">{vehiclePlate || vehicle?.plate_number || "—"}</strong></div>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
+              <Save size={16} /> حفظ
+            </Button>
+            <Button onClick={handleApprove} disabled={status === "approved" || isNew || updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
+              <CheckCircle2 size={16} /> اعتماد
+            </Button>
+            <Button variant="outline" onClick={handleConvertToWorkOrder} disabled={isNew || status !== "approved"} className="gap-2">
+              <Wrench size={16} /> إنشاء أمر عمل
+            </Button>
+            <Button variant="outline" onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice} className="gap-2">
+              <FileText size={16} /> إنشاء فاتورة
+            </Button>
+            {!isNew && (
+              <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
+                <Send size={16} /> إرسال رسالة
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setShowSummary(true)} disabled={isNew} className="gap-2">
+              <Printer size={16} /> PDF
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-foreground">حالة المركبة داخل المطالبة</h3>
+            <p className="text-xs text-muted-foreground">كل مرحلة تعتمد على بيانات محفوظة في Supabase وتبقى بعد التحديث.</p>
+          </div>
+          <Badge variant="outline">آخر تحديث: {formatDateLatin((existing as any)?.updated_at || new Date().toISOString())}</Badge>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+          {vehicleProgress.map((step) => (
+            <div
+              key={step.key}
+              className={`rounded-xl border p-3 min-h-[92px] ${step.active ? "border-primary/50 bg-primary/10" : "border-border bg-secondary/20"}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xl" aria-hidden>{step.icon}</span>
+                {step.active && <CheckCircle2 size={15} className="text-success" />}
+              </div>
+              <div className="mt-2 text-sm font-semibold text-foreground">{step.label}</div>
+              <div className="text-[11px] text-muted-foreground mt-1">
+                {step.date ? formatDateLatin(step.date) : "لم يتم التسجيل"}
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-1">المستخدم: {(claimAudit[0] as any)?.user_id ? "مسجل" : "—"}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
       {/* ── Workflow Dates ── */}
       <Can module="Insurance Claims" action="Edit" fallback={
         <Card className="p-4">
@@ -1582,15 +1728,24 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   return;
                 }
                 try {
-                  const { error } = await supabase
+                  const { data: verified, error } = await supabase
                     .from("insurance_claims" as any)
                     .update({
                       estimate_date: estimateDate || null,
                       workshop_arrival_date: workshopArrivalDate || null,
                       work_started_at: workStartedAt ? new Date(workStartedAt).toISOString() : null,
                     })
-                    .eq("id", id);
+                    .eq("id", id)
+                    .select("id,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,status")
+                    .single();
                   if (error) throw error;
+                  if (!(verified as any)?.id) throw new Error("تعذر تأكيد حفظ تواريخ المطالبة");
+                  hydrateFromVerifiedClaim(verified);
+                  await writeClaimAudit("claim_workflow_dates_updated", {
+                    estimate_date: (verified as any).estimate_date ?? null,
+                    workshop_arrival_date: (verified as any).workshop_arrival_date ?? null,
+                    work_started_at: (verified as any).work_started_at ?? null,
+                  });
                   await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
                   await queryClient.invalidateQueries({ queryKey: ["insurance_claims"] });
                   toast.success("تم الحفظ");
@@ -2085,6 +2240,41 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           {!isNew && id && <ClaimDocumentsPanel claimId={id} />}
         </TabsContent>
       </Tabs>
+
+      {!isNew && (
+        <Card className="p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-foreground">Timeline / Audit Log</h3>
+              <p className="text-xs text-muted-foreground">سجل زمني من Supabase لكل إجراء على المطالبة.</p>
+            </div>
+            <Badge variant="outline">{claimAudit.length} إجراء</Badge>
+          </div>
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {claimAudit.length === 0 ? (
+              <div className="text-sm text-muted-foreground border rounded-lg p-4 text-center">لا توجد أحداث مسجلة بعد</div>
+            ) : claimAudit.map((item: any) => (
+              <div key={item.id} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/20 p-3">
+                <div className="mt-1 h-2.5 w-2.5 rounded-full bg-primary shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-sm text-foreground">{item.action}</span>
+                    <Badge variant="secondary" className="text-[10px]">{item.category || "audit"}</Badge>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {formatDateLatin(item.created_at)} — المستخدم: {item.user_id || "—"}
+                  </div>
+                  {item.details && (
+                    <pre className="mt-2 whitespace-pre-wrap break-words rounded bg-background/70 p-2 text-[11px] text-muted-foreground">
+                      {JSON.stringify(item.details, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Estimate PDF — auto-saves to archive as claim_estimate */}
       {!isNew && id && showPdf && (() => {

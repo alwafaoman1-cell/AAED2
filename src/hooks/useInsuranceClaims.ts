@@ -254,11 +254,15 @@ export function useUpdateClaim() {
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<ClaimInsert> }) => {
       const payload = sanitizeClaimWritePayload(updates as any);
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("insurance_claims" as any)
         .update(payload)
-        .eq("id", id);
+        .eq("id", id)
+        .select("*")
+        .single();
       if (error) throw error;
+      if (!(data as any)?.id) throw new Error("Claim update could not be verified");
+      return data as unknown as InsuranceClaim;
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["insurance_claims"] });
@@ -283,14 +287,21 @@ export function useUpdateClaimStatus() {
       approved_amount?: number;
       rejection_reason?: string;
     }) => {
-      const { data: current, error: currentError } = await supabase
+      let { data: current, error: currentError } = await supabase
         .from("insurance_claims" as any)
-        .select("id,status,approved_amount,rejection_reason,deleted_at,archived_at")
+        .select("id,tenant_id,status,approved_amount,rejection_reason,archived_at")
         .eq("id", id)
         .maybeSingle();
+      if (currentError && /archived_at|column/i.test(String((currentError as any).message || ""))) {
+        ({ data: current, error: currentError } = await supabase
+          .from("insurance_claims" as any)
+          .select("id,tenant_id,status,approved_amount,rejection_reason")
+          .eq("id", id)
+          .maybeSingle());
+      }
       if (currentError) throw currentError;
       if (!(current as any)?.id) throw new Error("Claim was not found in Supabase");
-      if ((current as any).deleted_at || (current as any).archived_at) throw new Error("Cannot update an archived/deleted claim");
+      if ((current as any).archived_at) throw new Error("Cannot update an archived claim");
       if ((current as any).status === status) return current;
 
       const updates: any = { status };
@@ -307,10 +318,22 @@ export function useUpdateClaimStatus() {
         .from("insurance_claims" as any)
         .update(updates)
         .eq("id", id)
-        .select("id,status,approved_amount,approved_at")
+        .select("id,tenant_id,status,approved_amount,approved_at,rejection_reason,paid_at")
         .single();
       if (error) throw error;
       if (!(updated as any)?.id || (updated as any).status !== status) throw new Error("Claim status update could not be verified");
+      await supabase.from("claim_audit_logs").insert({
+        tenant_id: (updated as any).tenant_id || (current as any).tenant_id,
+        claim_id: id,
+        action: status === "approved" ? "claim_approved" : "claim_status_changed",
+        category: "workflow",
+        details: {
+          from: (current as any).status,
+          to: status,
+          approved_amount: (updated as any).approved_amount ?? null,
+          rejection_reason: rejection_reason ?? null,
+        },
+      });
 
       // قيد محاسبي عند الاعتماد
       if (status === "approved") {
@@ -332,6 +355,7 @@ export function useUpdateClaimStatus() {
         }
       }
       if (status === "rejected" || status === "cancelled") removeInsuranceClaimJournal(id);
+      return updated;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["insurance_claims"] });
