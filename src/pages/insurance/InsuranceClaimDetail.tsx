@@ -496,6 +496,9 @@ export default function InsuranceClaimDetail() {
     if (!verified?.id) return;
     setStatus(verified.status ?? status);
     setApprovedAmount(String(verified.approved_amount ?? approvedAmount ?? ""));
+    if ("insurance_employee_id" in verified) {
+      setInsuranceEmployeeId(verified.insurance_employee_id ?? null);
+    }
     setWorkshopArrivalDate(dateOnly(verified.workshop_arrival_date));
     setWorkStartedAt(dateOnly(verified.work_started_at));
     setWorkCompletedAt(dateOnly(verified.work_completed_at));
@@ -1953,9 +1956,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                       estimate_date: workflowDates.estimate || null,
                       workshop_arrival_date: workflowDates.arrival || null,
                       work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
+                      insurance_employee_id: insuranceEmployeeId,
                     })
                     .eq("id", id)
-                    .select("id,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,status")
+                    .select("id,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,status,insurance_employee_id")
                     .single();
                   if (error) throw error;
                   if (!(verified as any)?.id) throw new Error("تعذر تأكيد حفظ تواريخ المطالبة");
@@ -1964,6 +1968,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                     estimate_date: (verified as any).estimate_date ?? null,
                     workshop_arrival_date: (verified as any).workshop_arrival_date ?? null,
                     work_started_at: (verified as any).work_started_at ?? null,
+                    insurance_employee_id: (verified as any).insurance_employee_id ?? null,
                     requested_workshop_arrival_date: workflowDates.arrival || null,
                   });
                   await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
