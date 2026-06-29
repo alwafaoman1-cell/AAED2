@@ -127,7 +127,7 @@ export function useInsuranceClaims() {
           *,
           customer:customers(name, phone),
           vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
-          job_order:job_orders(order_number, status)
+          job_order:job_orders!insurance_claims_job_order_id_fkey(order_number, status)
         `)
         .is("deleted_at", null)
         .is("archived_at", null)
@@ -139,7 +139,7 @@ export function useInsuranceClaims() {
             *,
             customer:customers(name, phone),
             vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
-            job_order:job_orders(order_number, status)
+            job_order:job_orders!insurance_claims_job_order_id_fkey(order_number, status)
           `)
           .order("created_at", { ascending: false }));
       }
@@ -239,7 +239,7 @@ export function useClaim(id: string | undefined) {
           *,
           customer:customers(name, phone),
           vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
-          job_order:job_orders(order_number, status)
+          job_order:job_orders!insurance_claims_job_order_id_fkey(order_number, status)
         `)
         .eq("id", id!)
         .single();
