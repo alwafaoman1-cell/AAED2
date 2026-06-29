@@ -143,7 +143,7 @@ export default function WorkOrders() {
   const [technicianFilter, setTechnicianFilter] = useState("all");
   const [entryFrom, setEntryFrom] = useState("");
   const [entryTo, setEntryTo] = useState("");
-  const [archiveFilter, setArchiveFilter] = useState("all");
+  const [archiveFilter, setArchiveFilter] = useState("current");
   const [showForm, setShowForm] = useState(false);
   const [editOrder, setEditOrder] = useState<WorkOrder | null>(null);
   const [previewHtml, setPreviewHtml] = useState("");

@@ -21,6 +21,24 @@ export const BACKUP_TABLES = [
 
 export const BACKUP_BUCKETS = ["damage-photos", "insurance-docs", "invoices-pdf", "avatars"] as const;
 
+const RESTORE_TABLE_ORDER = [
+  "vehicle_makes", "vehicle_models",
+  "insurance_companies",
+  "customers", "vehicles",
+  "job_orders", "insurance_claims",
+  "job_order_parts", "job_order_logs",
+  "inspections", "damage_markers",
+  "insurance_estimates", "insurance_invoices",
+  "claim_payments", "claim_audit_logs",
+  "invoices", "sales_documents", "payments", "expenses",
+  "inventory",
+  "daily_tasks",
+  "payment_links",
+  "print_templates",
+  "sms_logs", "whatsapp_logs", "message_logs", "customer_notifications",
+  "tenant_integrations", "tenant_sms_settings",
+] as const;
+
 export type BackupManifest = {
   version: 1;
   schema_version?: 1;
@@ -354,6 +372,26 @@ function mapTenant(row: any, currentTenantId: string | null) {
 function stripUnsafeRestoreFields(table: string, row: any, currentTenantId: string | null) {
   const next = mapTenant(row, currentTenantId);
   if (table === "tenants" || table === "profiles") return null;
+  if (table === "job_orders") {
+    delete next.subtotal;
+    delete next.vat;
+    delete next.final_total;
+    // insurance_claims and job_orders can reference each other. Insert the
+    // work order first, then relink claim_id after both tables are restored.
+    delete next.claim_id;
+  }
+  if (table === "insurance_claims") {
+    delete next.total_claim_amount;
+    delete next.outstanding_amount;
+  }
+  if (table === "sales_documents" || table === "invoices") {
+    delete next.subtotal;
+    delete next.tax_amount;
+    delete next.vat;
+    delete next.total;
+    delete next.final_total;
+    delete next.balance_due;
+  }
   if (table === "tenant_integrations") {
     delete next.secrets;
     delete next.__secrets_masked;
@@ -373,8 +411,7 @@ export async function restoreFromManifest(
   if (!report.ok) throw new Error("Dry Run failed. Review the report before restoring.");
   const inserted: Record<string, number> = {};
   const errors: Record<string, string> = {};
-  for (const t of BACKUP_TABLES) {
-    if (t === "tenants" || t === "profiles") continue;
+  for (const t of RESTORE_TABLE_ORDER) {
     const rows = (manifest.tables?.[t] || [])
       .map((row) => stripUnsafeRestoreFields(t, row, report.currentTenantId))
       .filter(Boolean);
@@ -390,6 +427,27 @@ export async function restoreFromManifest(
         break;
       }
       inserted[t] = (inserted[t] || 0) + chunk.length;
+    }
+  }
+
+  // Second pass: restore the circular claim link after job_orders and
+  // insurance_claims both exist. Failure here must be visible but should not
+  // undo already restored base rows.
+  const claimLinks = (manifest.tables?.job_orders || [])
+    .filter((row: any) => row?.id && row?.claim_id)
+    .map((row: any) => ({ id: row.id, claim_id: row.claim_id }));
+  if (claimLinks.length) {
+    onP(`ربط أوامر العمل بالمطالبات (${claimLinks.length})…`);
+    for (const link of claimLinks) {
+      const { error } = await supabase
+        .from("job_orders" as any)
+        .update({ claim_id: link.claim_id } as any)
+        .eq("id", link.id)
+        .eq("tenant_id", report.currentTenantId);
+      if (error) {
+        errors.job_orders_claim_links = error.message;
+        break;
+      }
     }
   }
   return { inserted, errors };

@@ -1,8 +1,13 @@
-import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { supabase } from "@/integrations/supabase/client";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isMissingColumnError(error: unknown): boolean {
+  const raw = `${(error as any)?.code || ""} ${(error as any)?.message || ""} ${(error as any)?.details || ""}`.toLowerCase();
+  return raw.includes("pgrst204") || raw.includes("schema cache") || raw.includes("could not find");
+}
 
 export type DeleteMode =
   | "archive_only"
@@ -100,13 +105,22 @@ export async function archiveWorkOrder(order: WorkOrder, reason = "archive work 
   const archivedAt = new Date().toISOString();
   const userId = await currentUserId();
   const before = { ...order };
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("job_orders")
     .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userId } as any)
     .eq("tenant_id", tenantId)
     .eq("id", cloudId)
     .select("id")
     .maybeSingle();
+  if (error && isMissingColumnError(error)) {
+    ({ data, error } = await supabase
+      .from("job_orders")
+      .update({ archived_at: archivedAt } as any)
+      .eq("tenant_id", tenantId)
+      .eq("id", cloudId)
+      .select("id")
+      .maybeSingle());
+  }
   if (error) throw error;
   if (!data?.id) throw new Error("Permission denied or work order was not found");
   await writeOperationalAudit({
@@ -155,13 +169,22 @@ export async function deleteWorkOrderWithRelated(order: WorkOrder, reason: strin
     .eq("tenant_id", tenantId)
     .in("work_order_id", ids);
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("job_orders")
     .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userId, status: "delivered" } as any)
     .eq("tenant_id", tenantId)
     .eq("id", cloudId)
     .select("id")
     .maybeSingle();
+  if (error && isMissingColumnError(error)) {
+    ({ data, error } = await supabase
+      .from("job_orders")
+      .update({ archived_at: archivedAt, status: "delivered" } as any)
+      .eq("tenant_id", tenantId)
+      .eq("id", cloudId)
+      .select("id")
+      .maybeSingle());
+  }
   if (error) throw error;
   if (!data?.id) throw new Error("Permission denied or work order was not found");
 

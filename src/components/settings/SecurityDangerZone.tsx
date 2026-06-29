@@ -16,6 +16,7 @@ export default function SecurityDangerZone() {
   const [cloudResetEnabled, setCloudResetEnabled] = useState(false);
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
+  const [bypassOtp, setBypassOtp] = useState(false);
   const [confirmPhrase, setConfirmPhrase] = useState("");
   const [busy, setBusy] = useState(false);
   const [emailProviderStatus, setEmailProviderStatus] = useState<{
@@ -123,7 +124,7 @@ export default function SecurityDangerZone() {
     try {
       await reauthenticate();
       const { data, error } = await supabase.functions.invoke("execute-cloud-reset", {
-        body: { otp, confirmPhrase, dryRun, reason: "admin settings danger zone" },
+        body: { otp, skipOtp: bypassOtp, confirmPhrase, dryRun, reason: bypassOtp ? "admin settings danger zone otp bypass" : "admin settings danger zone" },
       });
       if (error || !data?.ok) throw new Error(getFunctionErrorMessage(error, data));
       toast.success(dryRun ? "تم فحص البيانات المرشحة للحذف" : "تم تنفيذ تهيئة السحابة");
@@ -143,6 +144,7 @@ export default function SecurityDangerZone() {
           <h3 className="text-sm font-bold text-destructive">منطقة أمان خطرة — تهيئة السحابة</h3>
           <p className="text-xs text-muted-foreground">
             لا يمكن حذف بيانات السحابة إلا بعد كلمة مرور المدير + رمز OTP بالبريد + كتابة DELETE CLOUD DATA.
+            يمكن للمالك/Super Admin تجاوز OTP مؤقتًا عند تعطل البريد، مع بقاء كلمة المرور وعبارة التأكيد إلزامية.
           </p>
         </div>
       </div>
@@ -191,9 +193,19 @@ export default function SecurityDangerZone() {
 
       <div className="grid gap-3 md:grid-cols-3">
         <Input type="password" placeholder="كلمة مرور المدير" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <Input inputMode="numeric" maxLength={6} placeholder="OTP من البريد" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} />
+        <Input inputMode="numeric" maxLength={6} placeholder={bypassOtp ? "OTP متجاوز مؤقتًا" : "OTP من البريد"} value={otp} disabled={bypassOtp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} />
         <Input placeholder="DELETE CLOUD DATA" value={confirmPhrase} onChange={(e) => setConfirmPhrase(e.target.value)} />
       </div>
+
+      <label className="flex items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
+        <span className="space-y-1">
+          <span className="block font-medium">تجاوز OTP مؤقتًا للتهيئة</span>
+          <span className="block text-xs text-muted-foreground">
+            استخدمه فقط إذا كان البريد/OTP لا يعمل. لا يزال مطلوبًا إدخال كلمة مرور المدير وعبارة DELETE CLOUD DATA.
+          </span>
+        </span>
+        <Switch checked={bypassOtp} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(v) => { setBypassOtp(v); if (v) setOtp(""); }} />
+      </label>
 
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" disabled={busy || !isOwnerOrSuperAdmin} onClick={requestOtp} className="gap-2">

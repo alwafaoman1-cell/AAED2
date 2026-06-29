@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -8,17 +10,35 @@ const corsHeaders = {
 
 const TENANT_TABLES = [
   "whatsapp_logs",
+  "message_logs",
+  "customer_notifications",
   "import_export_operations",
-  "job_orders",
-  "insurance_claims",
-  "insurance_estimates",
-  "insurance_invoices",
+  "job_order_parts",
+  "job_order_logs",
+  "claim_audit_logs",
   "claim_payments",
+  "insurance_invoices",
+  "insurance_estimates",
   "customer_advances",
   "expenses",
+  "payments",
+  "payment_links",
   "sales_documents",
+  "invoices",
+  "inspections",
+  "damage_markers",
+  "daily_tasks",
+  "insurance_claims",
+  "job_orders",
   "vehicles",
   "customers",
+  "insurance_companies",
+  "vehicle_models",
+  "vehicle_makes",
+  "inventory",
+  "print_templates",
+  "tenant_sms_settings",
+  "tenant_integrations",
 ];
 
 async function auditOtp(admin: any, payload: Record<string, unknown>) {
@@ -53,7 +73,6 @@ Deno.serve(async (req) => {
     if (userError || !userData.user) throw new Error("unauthorized");
     const body = await req.json().catch(() => ({}));
     if (body.confirmPhrase !== "DELETE CLOUD DATA") throw new Error("invalid_confirmation_phrase");
-    if (!/^\d{6}$/.test(String(body.otp || ""))) throw new Error("invalid_otp_format");
 
     const { data: profile } = await admin
       .from("profiles")
@@ -65,75 +84,94 @@ Deno.serve(async (req) => {
 
     const now = new Date().toISOString();
     const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || null;
-    const { data: latestOtp } = await admin
-      .from("security_action_otps")
-      .select("id,attempt_count,locked_until,expires_at")
-      .eq("tenant_id", profile.tenant_id)
-      .eq("user_id", userData.user.id)
-      .eq("action", "cloud_reset")
-      .is("consumed_at", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (latestOtp?.locked_until && latestOtp.locked_until > now) {
-      await auditOtp(admin, {
-        tenant_id: profile.tenant_id,
-        user_id: userData.user.id,
-        action: "cloud_reset",
-        event: "verify",
-        status: "locked",
-        ip,
-        details: { lockedUntil: latestOtp.locked_until },
-      });
-      throw new Error("otp_locked");
-    }
-    if (latestOtp?.expires_at && latestOtp.expires_at <= now) throw new Error("otp_expired");
-    const expectedHash = await sha256(`${profile.tenant_id}:${userData.user.id}:cloud_reset:${body.otp}`);
-    const { data: otpRow } = await admin
-      .from("security_action_otps")
-      .select("id,expires_at,consumed_at")
-      .eq("tenant_id", profile.tenant_id)
-      .eq("user_id", userData.user.id)
-      .eq("action", "cloud_reset")
-      .eq("code_hash", expectedHash)
-      .is("consumed_at", null)
-      .gt("expires_at", now)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!otpRow?.id) {
-      const attempts = Number(latestOtp?.attempt_count || 0) + 1;
-      const lockedUntil = attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
-      if (latestOtp?.id) {
-        await admin
-          .from("security_action_otps")
-          .update({ attempt_count: attempts, locked_until: lockedUntil, last_attempt_at: now })
-          .eq("id", latestOtp.id);
+    const skipOtp = body.skipOtp === true;
+    if (!skipOtp && !/^\d{6}$/.test(String(body.otp || ""))) throw new Error("invalid_otp_format");
+
+    if (!skipOtp) {
+      const { data: latestOtp } = await admin
+        .from("security_action_otps")
+        .select("id,attempt_count,locked_until,expires_at")
+        .eq("tenant_id", profile.tenant_id)
+        .eq("user_id", userData.user.id)
+        .eq("action", "cloud_reset")
+        .is("consumed_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestOtp?.locked_until && latestOtp.locked_until > now) {
+        await auditOtp(admin, {
+          tenant_id: profile.tenant_id,
+          user_id: userData.user.id,
+          action: "cloud_reset",
+          event: "verify",
+          status: "locked",
+          ip,
+          details: { lockedUntil: latestOtp.locked_until },
+        });
+        throw new Error("otp_locked");
       }
+      if (latestOtp?.expires_at && latestOtp.expires_at <= now) throw new Error("otp_expired");
+      const expectedHash = await sha256(`${profile.tenant_id}:${userData.user.id}:cloud_reset:${body.otp}`);
+      const { data: otpRow } = await admin
+        .from("security_action_otps")
+        .select("id,expires_at,consumed_at")
+        .eq("tenant_id", profile.tenant_id)
+        .eq("user_id", userData.user.id)
+        .eq("action", "cloud_reset")
+        .eq("code_hash", expectedHash)
+        .is("consumed_at", null)
+        .gt("expires_at", now)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!otpRow?.id) {
+        const attempts = Number(latestOtp?.attempt_count || 0) + 1;
+        const lockedUntil = attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
+        if (latestOtp?.id) {
+          await admin
+            .from("security_action_otps")
+            .update({ attempt_count: attempts, locked_until: lockedUntil, last_attempt_at: now })
+            .eq("id", latestOtp.id);
+        }
+        await auditOtp(admin, {
+          tenant_id: profile.tenant_id,
+          user_id: userData.user.id,
+          action: "cloud_reset",
+          event: "verify",
+          status: lockedUntil ? "locked_after_failure" : "failed",
+          ip,
+          details: { attempts, lockedUntil },
+        });
+        throw new Error(lockedUntil ? "otp_locked" : "otp_invalid_or_expired");
+      }
+      await admin.from("security_action_otps").update({ consumed_at: now, last_attempt_at: now }).eq("id", otpRow.id);
       await auditOtp(admin, {
         tenant_id: profile.tenant_id,
         user_id: userData.user.id,
         action: "cloud_reset",
         event: "verify",
-        status: lockedUntil ? "locked_after_failure" : "failed",
+        status: "success",
         ip,
-        details: { attempts, lockedUntil },
+        details: { dryRun: body.dryRun !== false },
       });
-      throw new Error(lockedUntil ? "otp_locked" : "otp_invalid_or_expired");
+    } else {
+      await auditOtp(admin, {
+        tenant_id: profile.tenant_id,
+        user_id: userData.user.id,
+        action: "cloud_reset",
+        event: "verify",
+        status: "otp_bypassed_by_admin",
+        ip,
+        details: { dryRun: body.dryRun !== false, reason: body.reason || null },
+      });
     }
-    await admin.from("security_action_otps").update({ consumed_at: now, last_attempt_at: now }).eq("id", otpRow.id);
-    await auditOtp(admin, {
-      tenant_id: profile.tenant_id,
-      user_id: userData.user.id,
-      action: "cloud_reset",
-      event: "verify",
-      status: "success",
-      ip,
-      details: { dryRun: body.dryRun !== false },
-    });
 
     const dryRun = body.dryRun !== false;
     const results: Record<string, number | string> = {};
+    if (!dryRun) {
+      await admin.from("job_orders").update({ claim_id: null }).eq("tenant_id", profile.tenant_id);
+      await admin.from("insurance_claims").update({ job_order_id: null, auto_job_order_id: null }).eq("tenant_id", profile.tenant_id);
+    }
     for (const table of TENANT_TABLES) {
       const countResult = await admin.from(table).select("id", { count: "exact", head: true }).eq("tenant_id", profile.tenant_id);
       if (countResult.error) {
