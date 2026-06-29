@@ -514,36 +514,38 @@ async function allocateVisibleOrderNumber(tenantId: string, requested: string): 
 
 async function fetchFromCloud(): Promise<void> {
   try {
-    const tenantId = await getCurrentTenantId();
-    if (!tenantId) return;
-
     let ordersResult = await supabase
       .from("job_orders")
       .select("*")
-      .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(5000);
     if (ordersResult.error && isMissingJobOrderColumnError(ordersResult.error)) {
       ordersResult = await supabase
         .from("job_orders")
         .select("*")
-        .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false })
         .limit(5000);
     }
     if (ordersResult.error) throw ordersResult.error;
+    const rows = ordersResult.data || [];
 
-    const customerQuery = supabase.from("customers").select("id,name,phone").eq("tenant_id", tenantId).limit(10000);
-    let vehicleQuery: any = await supabase
-      .from("vehicles")
-      .select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url")
-      .eq("tenant_id", tenantId)
-      .limit(10000);
-    if (vehicleQuery.error && isMissingOptionalColumnError(vehicleQuery.error)) {
+    const customerIds = Array.from(new Set(rows.map((r: any) => r.customer_id).filter(Boolean)));
+    const vehicleIds = Array.from(new Set(rows.map((r: any) => r.vehicle_id).filter(Boolean)));
+    const customerQuery = customerIds.length
+      ? supabase.from("customers").select("id,name,phone").in("id", customerIds).limit(10000)
+      : Promise.resolve({ data: [], error: null } as any);
+    let vehicleQuery: any = vehicleIds.length
+      ? await supabase
+        .from("vehicles")
+        .select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url")
+        .in("id", vehicleIds)
+        .limit(10000)
+      : { data: [], error: null };
+    if (vehicleIds.length && vehicleQuery.error && isMissingOptionalColumnError(vehicleQuery.error)) {
       vehicleQuery = await supabase
         .from("vehicles")
         .select("id,plate_number,plate_letters,brand,model,year,vin_number,color")
-        .eq("tenant_id", tenantId)
+        .in("id", vehicleIds)
         .limit(10000);
     }
     const [{ data: custs, error: custError }, { data: vehs, error: vehError }] = await Promise.all([
@@ -552,7 +554,6 @@ async function fetchFromCloud(): Promise<void> {
     ]);
     if (custError) throw custError;
     if (vehError) throw vehError;
-    const rows = ordersResult.data || [];
 
 
     const custMap = new Map<string, any>();
