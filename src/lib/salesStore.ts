@@ -200,7 +200,38 @@ async function refreshSalesFromCloud() {
     console.warn("[salesStore] cloud fetch failed", error);
     return;
   }
-  cache = (data || []).map(rowToSalesDoc);
+  const documentRows = data || [];
+  const documentIds = documentRows.map((row: any) => row.id).filter(Boolean);
+  let paymentsByDocument = new Map<string, SalesPayment[]>();
+  if (documentIds.length > 0) {
+    const { data: paymentsData, error: paymentsError } = await (supabase.from("sales_payments") as any)
+      .select("id,sales_document_id,date,amount,method,reference,notes")
+      .eq("tenant_id", tenantId)
+      .in("sales_document_id", documentIds)
+      .order("date", { ascending: false });
+    if (paymentsError) {
+      console.warn("[salesStore] sales payments cloud fetch failed", paymentsError);
+    } else {
+      paymentsByDocument = (paymentsData || []).reduce((map: Map<string, SalesPayment[]>, row: any) => {
+        const current = map.get(row.sales_document_id) || [];
+        current.push({
+          id: row.id,
+          date: row.date,
+          amount: Number(row.amount || 0),
+          method: row.method || "cash",
+          reference: row.reference || undefined,
+          note: row.notes || undefined,
+        });
+        map.set(row.sales_document_id, current);
+        return map;
+      }, paymentsByDocument);
+    }
+  }
+  cache = documentRows.map((row: any) => {
+    const doc = rowToSalesDoc(row);
+    const cloudPayments = paymentsByDocument.get(doc.id);
+    return cloudPayments ? { ...doc, payments: cloudPayments } : doc;
+  });
   notify();
 }
 
@@ -257,6 +288,47 @@ async function upsertSalesCloud(doc: SalesDoc) {
     ({ error } = await (supabase.from("sales_documents") as any).upsert(sanitizeInvoiceGeneratedWritePayload(payload)));
   }
   if (error) console.warn("[salesStore] cloud upsert failed", error);
+}
+
+function normalizePaymentMethodForCloud(method: string) {
+  const m = String(method || "").toLowerCase();
+  if (m.includes("cash") || m.includes("نقد")) return "cash";
+  if (m.includes("cheque") || m.includes("check") || m.includes("شيك")) return "cheque";
+  if (m.includes("card") || m.includes("بطاقة")) return "card";
+  if (m.includes("offset") || m.includes("مقاصة")) return "offset";
+  return "bank_transfer";
+}
+
+async function insertSalesPaymentCloud(doc: SalesDoc, payment: Omit<SalesPayment, "id">): Promise<SalesPayment> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذّر تحديد المؤسسة");
+  if (!isUuid(doc.id)) throw new Error("لا يمكن تسجيل دفعة لفاتورة غير محفوظة في السحابة");
+
+  const { data: userData } = await supabase.auth.getUser();
+  const paymentNumber = `PAY-${new Date().getFullYear()}-${Date.now().toString().slice(-8)}`;
+  const { data, error } = await (supabase.from("sales_payments") as any)
+    .insert({
+      tenant_id: tenantId,
+      payment_number: paymentNumber,
+      sales_document_id: doc.id,
+      date: payment.date || new Date().toISOString().slice(0, 10),
+      amount: Number(payment.amount || 0),
+      method: normalizePaymentMethodForCloud(payment.method),
+      reference: payment.reference || null,
+      notes: payment.note || null,
+      created_by: userData.user?.id || null,
+    })
+    .select("id,date,amount,method,reference,notes")
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id,
+    date: data.date,
+    amount: Number(data.amount || 0),
+    method: data.method || payment.method,
+    reference: data.reference || undefined,
+    note: data.notes || undefined,
+  };
 }
 
 export const salesStore = {
@@ -375,10 +447,17 @@ export const salesStore = {
     };
     return salesStore.upsert(copy);
   },
-  addPayment(id: string, payment: Omit<SalesPayment, "id">) {
+  async addPayment(id: string, payment: Omit<SalesPayment, "id">) {
     const doc = salesStore.get(id);
-    if (!doc) return;
-    const p: SalesPayment = { ...payment, id: cryptoRandom() };
+    if (!doc) throw new Error("الفاتورة غير موجودة");
+    if (!Number.isFinite(Number(payment.amount)) || Number(payment.amount) <= 0) {
+      throw new Error("أدخل مبلغاً صحيحاً");
+    }
+    const remaining = Math.max(0, Number(doc.total || 0) - Number(doc.paidTotal || 0));
+    if (Number(payment.amount) > remaining + 0.001) {
+      throw new Error(`المبلغ يتجاوز المتبقي (${remaining.toFixed(3)} ر.ع)`);
+    }
+    const p = await insertSalesPaymentCloud(doc, payment);
     const payments = [...doc.payments, p];
     const paidTotal = payments.reduce((s, x) => s + x.amount, 0);
     const balanceDue = Math.max(0, doc.total - paidTotal);
@@ -415,6 +494,7 @@ export const salesStore = {
         });
       });
     } catch {}
+    void refreshSalesFromCloud();
   },
   removePayment(docId: string, paymentId: string) {
     const doc = salesStore.get(docId);
@@ -488,12 +568,12 @@ export const salesStore = {
     if (!doc) return;
     const remaining = Math.max(0, (doc.total || 0) - (doc.paidTotal || 0));
     if (remaining > 0.001) {
-      salesStore.addPayment(id, {
+      void salesStore.addPayment(id, {
         amount: remaining,
         method,
         date: new Date().toISOString().split("T")[0],
         reference,
-      });
+      }).catch((error) => console.warn("[salesStore] mark paid cloud payment failed", error));
     } else {
       // حالة استثنائية: لا متبقي لكن الحالة ليست paid
       salesStore.upsert({

@@ -3,11 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toast } from "sonner";
 import { salesStore } from "@/lib/salesStore";
+import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
 
 export default function CustomerPayments() {
   const { i18n } = useTranslation();
@@ -16,10 +13,6 @@ export default function CustomerPayments() {
   const [, force] = useState(0);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [invoiceId, setInvoiceId] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [method, setMethod] = useState("نقدي");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     const u = salesStore.subscribe(() => force((x) => x + 1));
@@ -47,14 +40,6 @@ export default function CustomerPayments() {
   const filtered = allPayments.filter(
     (p) => !q || p.customer.includes(q) || p.invoice.includes(q) || p.method.includes(q)
   );
-
-  function save() {
-    if (!invoiceId) { toast.error(isAr ? "اختر الفاتورة" : "Select invoice"); return; }
-    if (amount <= 0) { toast.error(isAr ? "أدخل قيمة" : "Enter amount"); return; }
-    salesStore.addPayment(invoiceId, { amount, method, date });
-    toast.success(isAr ? "تمت الإضافة" : "Saved");
-    setOpen(false); setInvoiceId(""); setAmount(0);
-  }
 
   return (
     <div className="space-y-4" dir={isRtl ? "rtl" : "ltr"}>
@@ -90,33 +75,7 @@ export default function CustomerPayments() {
         ))}
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{isAr ? "تسجيل دفعة" : "Record payment"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label>{isAr ? "الفاتورة" : "Invoice"}</Label>
-              <Select value={invoiceId} onValueChange={setInvoiceId}>
-                <SelectTrigger><SelectValue placeholder={isAr ? "اختر فاتورة" : "Select invoice"} /></SelectTrigger>
-                <SelectContent>
-                  {invoices.filter((i) => i.balanceDue > 0).map((i) => (
-                    <SelectItem key={i.id} value={i.id}>
-                      {i.number} — {i.customerName} ({i.balanceDue.toFixed(3)})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div><Label>{isAr ? "القيمة" : "Amount"}</Label><Input type="number" step="0.001" value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></div>
-            <div><Label>{isAr ? "طريقة الدفع" : "Method"}</Label><Input value={method} onChange={(e) => setMethod(e.target.value)} /></div>
-            <div><Label>{isAr ? "التاريخ" : "Date"}</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>{isAr ? "إلغاء" : "Cancel"}</Button>
-            <Button onClick={save}>{isAr ? "حفظ" : "Save"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <UnifiedAddPaymentDialog open={open} onOpenChange={setOpen} onSaved={() => force((x) => x + 1)} />
     </div>
   );
 }

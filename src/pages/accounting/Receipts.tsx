@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import {
   incomeCategoriesStore,
   employeeCashboxesStore,
@@ -27,9 +28,11 @@ import { logActivity } from "@/lib/auditLogStore";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
+import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
 
 interface Receipt {
   id: string;
+  source?: "sales" | "claim" | "local";
   number: string;
   date: string;
   amount: number;
@@ -54,8 +57,9 @@ function saveReceipts(list: Receipt[]) {
 export default function Receipts() {
   const navigate = useNavigate();
   const [, force] = useState(0);
-  const [receipts, setReceipts] = useState<Receipt[]>(() => loadReceipts());
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [open, setOpen] = useState(false);
+  const [unifiedOpen, setUnifiedOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -63,6 +67,69 @@ export default function Receipts() {
     const u1 = incomeCategoriesStore.subscribe(() => force((n) => n + 1));
     const u2 = employeeCashboxesStore.subscribe(() => force((n) => n + 1));
     return () => { u1(); u2(); };
+  }, []);
+
+  async function fetchCloudReceipts() {
+    const { data: tenantId, error: tenantError } = await supabase.rpc("get_user_tenant_id");
+    if (tenantError || !tenantId) {
+      toast.error(tenantError?.message || "تعذّر تحديد المؤسسة");
+      return;
+    }
+
+    const [salesResult, claimResult] = await Promise.all([
+      (supabase.from("sales_payments") as any)
+        .select("id,payment_number,date,amount,method,reference,notes,sales_document:sales_documents(doc_number,customer_name)")
+        .eq("tenant_id", tenantId)
+        .order("date", { ascending: false }),
+      (supabase.from("claim_payments") as any)
+        .select("id,payment_number,payment_date,amount,payment_method,notes,claim:insurance_claims(claim_number,insurance_company)")
+        .eq("tenant_id", tenantId)
+        .order("payment_date", { ascending: false }),
+    ]);
+    if (salesResult.error) throw salesResult.error;
+    if (claimResult.error) throw claimResult.error;
+
+    const salesReceipts: Receipt[] = (salesResult.data || []).map((row: any) => ({
+      id: `sales:${row.id}`,
+      source: "sales",
+      number: row.payment_number || `PAY-${String(row.id).slice(0, 8)}`,
+      date: row.date,
+      amount: Number(row.amount || 0),
+      payerName: row.sales_document?.customer_name || "عميل",
+      categoryId: "sales_invoice",
+      cashboxId: "cloud",
+      paymentMethod: (row.method || "cash") as PaymentMethod,
+      notes: [row.sales_document?.doc_number, row.reference, row.notes].filter(Boolean).join(" — ") || undefined,
+      createdAt: row.date,
+    }));
+    const claimReceipts: Receipt[] = (claimResult.data || []).map((row: any) => ({
+      id: `claim:${row.id}`,
+      source: "claim",
+      number: row.payment_number || `CP-${String(row.id).slice(0, 8)}`,
+      date: row.payment_date,
+      amount: Number(row.amount || 0),
+      payerName: row.claim?.insurance_company || "شركة تأمين",
+      categoryId: "insurance_claim",
+      cashboxId: "cloud",
+      paymentMethod: (row.payment_method || "bank_transfer") as PaymentMethod,
+      notes: [row.claim?.claim_number, row.notes].filter(Boolean).join(" — ") || undefined,
+      createdAt: row.payment_date,
+    }));
+    setReceipts([...salesReceipts, ...claimReceipts].sort((a, b) => b.date.localeCompare(a.date)));
+  }
+
+  useEffect(() => {
+    void fetchCloudReceipts().catch((error: any) => toast.error(error?.message || "تعذر تحميل سندات القبض"));
+    const channel = supabase
+      .channel("receipts_cloud_sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_payments" }, () => {
+        void fetchCloudReceipts().catch((error: any) => console.warn("[receipts] refresh failed", error));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "claim_payments" }, () => {
+        void fetchCloudReceipts().catch((error: any) => console.warn("[receipts] refresh failed", error));
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
   }, []);
 
   const allowManage = canManageFinance();
@@ -157,10 +224,23 @@ export default function Receipts() {
     setOpen(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteId) return;
     const r = receipts.find((x) => x.id === deleteId);
     if (r) {
+      if (r.source === "sales" || r.source === "claim") {
+        const table = r.source === "sales" ? "sales_payments" : "claim_payments";
+        const cloudId = r.id.replace(`${r.source}:`, "");
+        const { error } = await (supabase.from(table as any) as any).delete().eq("id", cloudId);
+        if (error) {
+          toast.error(error.message);
+          return;
+        }
+        await fetchCloudReceipts();
+        toast.success(`تم حذف ${r.number}`);
+        setDeleteId(null);
+        return;
+      }
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === r.cashboxId);
       if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - r.amount });
       const updated = receipts.filter((x) => x.id !== deleteId);
@@ -180,16 +260,28 @@ export default function Receipts() {
   const total = receipts.reduce((s, r) => s + r.amount, 0);
 
   const bulk = useBulkSelection(receipts);
-  function handleBulkDelete() {
+  async function handleBulkDelete() {
     const items = bulk.selectedItems;
     let updated = [...receipts];
-    items.forEach((r) => {
+    for (const r of items) {
+      if (r.source === "sales" || r.source === "claim") {
+        const table = r.source === "sales" ? "sales_payments" : "claim_payments";
+        const cloudId = r.id.replace(`${r.source}:`, "");
+        const { error } = await (supabase.from(table as any) as any).delete().eq("id", cloudId);
+        if (error) {
+          toast.error(error.message);
+          continue;
+        }
+        updated = updated.filter((x) => x.id !== r.id);
+        continue;
+      }
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === r.cashboxId);
       if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - r.amount });
       logActivity({ action: "delete", entity: "receipt", entityId: r.number, label: `سند قبض من ${r.payerName}`, description: `حذف جماعي`, amount: r.amount });
       updated = updated.filter((x) => x.id !== r.id);
-    });
+    }
     setReceipts(updated); saveReceipts(updated);
+    await fetchCloudReceipts();
     toast.success(`تم حذف ${items.length} سند`);
     bulk.clear();
   }
@@ -218,8 +310,8 @@ export default function Receipts() {
           <Button variant="outline" onClick={() => smartBack(navigate, "/accounting")}>
             <ArrowRight size={16} className="ml-1" /> رجوع
           </Button>
-          <Button onClick={openNew} className="gap-2">
-            <Plus size={16} /> سند قبض جديد
+          <Button onClick={() => setUnifiedOpen(true)} className="gap-2">
+            <Plus size={16} /> إضافة دفعة موحدة
           </Button>
         </div>
       </div>
@@ -261,6 +353,7 @@ export default function Receipts() {
               ) : receipts.map((r) => {
                 const cat = categories.find((c) => c.id === r.categoryId);
                 const cb = cashboxes.find((c) => c.id === r.cashboxId);
+                const sourceLabel = r.source === "claim" ? "مطالبة تأمين" : r.source === "sales" ? "فاتورة مبيعات" : "";
                 return (
                   <tr key={r.id} className="border-t border-border hover:bg-secondary/10">
                     <td className="p-3"><Checkbox checked={bulk.isSelected(r.id)} onCheckedChange={() => bulk.toggle(r.id)} /></td>
@@ -268,10 +361,10 @@ export default function Receipts() {
                     <td className="p-3">{r.date}</td>
                     <td className="p-3">{r.payerName}</td>
                     <td className="p-3">
-                      {cat ? <Badge variant="outline" style={{ borderColor: cat.color, color: cat.color }}>{cat.name}</Badge> : "—"}
+                      {cat ? <Badge variant="outline" style={{ borderColor: cat.color, color: cat.color }}>{cat.name}</Badge> : <Badge variant="secondary">{sourceLabel || "—"}</Badge>}
                     </td>
-                    <td className="p-3">{cb?.cashboxName ?? "—"}</td>
-                    <td className="p-3">{PAYMENT_METHOD_LABELS[r.paymentMethod]}</td>
+                    <td className="p-3">{cb?.cashboxName ?? (r.source ? "سحابي" : "—")}</td>
+                    <td className="p-3">{PAYMENT_METHOD_LABELS[r.paymentMethod] ?? r.paymentMethod}</td>
                     <td className="p-3 font-bold text-success">{r.amount.toLocaleString()} ر.ع</td>
                     {allowManage && (
                       <td className="p-3">
@@ -305,6 +398,12 @@ export default function Receipts() {
           </Button>
         )}
       </BulkActionBar>
+
+      <UnifiedAddPaymentDialog
+        open={unifiedOpen}
+        onOpenChange={setUnifiedOpen}
+        onSaved={() => force((n) => n + 1)}
+      />
 
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -375,7 +474,7 @@ export default function Receipts() {
       <ConfirmDeleteDialog
         open={!!deleteId}
         onOpenChange={(o) => !o && setDeleteId(null)}
-        onConfirm={confirmDelete}
+        onConfirm={() => void confirmDelete()}
         title="حذف سند القبض"
         description="سيتم حذف السند نهائياً وخصم المبلغ من الخزينة. لا يمكن التراجع."
       />
