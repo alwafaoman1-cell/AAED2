@@ -9,7 +9,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
   buildBackupJson, buildBackupZip, downloadBlob, restoreFromManifest,
-  BACKUP_TABLES, type BackupManifest,
+  dryRunRestoreManifest,
+  BACKUP_TABLES, type BackupManifest, type RestoreDryRunReport,
 } from "@/lib/backupSystem";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 
@@ -25,6 +26,8 @@ export default function BackupRestorePage() {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [cloudFiles, setCloudFiles] = useState<CloudFile[]>([]);
+  const [dryRunReport, setDryRunReport] = useState<RestoreDryRunReport | null>(null);
+  const [restoreManifest, setRestoreManifest] = useState<BackupManifest | null>(null);
 
   const tenantId = profile?.tenant_id;
 
@@ -103,7 +106,9 @@ export default function BackupRestorePage() {
       if (error || !data) throw error || new Error("لا يوجد ملف");
       const text = await data.text();
       const m: BackupManifest = JSON.parse(text);
-      const r = await restoreFromManifest(m, { onProgress: setProgress });
+      const dry = await dryRunRestoreManifest(m, { mode: "merge", onProgress: setProgress });
+      if (!dry.ok) throw new Error("Dry Run failed. Review uploaded backup before restore.");
+      const r = await restoreFromManifest(m, { onProgress: setProgress, dryRunReport: dry, mode: "merge" });
       const ok = Object.values(r.inserted).reduce((s,n) => s+n, 0);
       const errs = Object.keys(r.errors).length;
       toast.success(`تمت الاستعادة (${ok} سجل)${errs ? ` — ${errs} جدول واجه أخطاء` : ""}`);
@@ -112,21 +117,43 @@ export default function BackupRestorePage() {
     } finally { setBusy(false); setProgress(""); }
   }
 
-  async function handleRestoreUpload() {
+  async function handleDryRunUpload() {
     if (!restoreFile) return;
     setBusy(true); setProgress("");
     try {
       const text = await restoreFile.text();
       const m: BackupManifest = JSON.parse(text);
       if (m.app !== "alwafa-erp" || !m.tables) throw new Error("ملف غير صالح");
-      const r = await restoreFromManifest(m, { onProgress: setProgress });
+      const report = await dryRunRestoreManifest(m, { mode: "merge", onProgress: setProgress });
+      setRestoreManifest(m);
+      setDryRunReport(report);
+      if (!report.ok) {
+        toast.error("Dry Run فشل — راجع تقرير الأخطاء");
+      } else {
+        toast.success("Dry Run ناجح — يمكنك تنفيذ Merge Restore");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "فشل قراءة الملف");
+      setDryRunReport(null);
+      setRestoreManifest(null);
+    } finally { setBusy(false); setProgress(""); }
+  }
+
+  async function handleRestoreUpload() {
+    if (!restoreManifest || !dryRunReport) return;
+    setBusy(true); setProgress("");
+    try {
+      if (!dryRunReport.ok) throw new Error("Dry Run غير ناجح");
+      const r = await restoreFromManifest(restoreManifest, { onProgress: setProgress, dryRunReport, mode: "merge" });
       const ok = Object.values(r.inserted).reduce((s,n) => s+n, 0);
       const errs = Object.entries(r.errors);
       toast.success(`تمت الاستعادة (${ok} سجل)`);
       if (errs.length) toast.warning(`أخطاء في: ${errs.map(([k]) => k).join(", ")}`);
       setRestoreFile(null);
+      setDryRunReport(null);
+      setRestoreManifest(null);
     } catch (e: any) {
-      toast.error(e?.message || "فشل قراءة الملف");
+      toast.error(e?.message || "فشل تنفيذ الاستعادة");
     } finally { setBusy(false); setProgress(""); setConfirmRestore(false); }
   }
 
@@ -146,7 +173,7 @@ export default function BackupRestorePage() {
           <Database className="text-primary" /> النسخ الاحتياطي والاستعادة
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          نسخ احتياطية كاملة لجميع بيانات النظام مع إمكانية حفظ المرفقات والاستعادة بسهولة.
+          نسخ احتياطية كاملة مع Dry Run وTenant Mapping وMerge Restore آمن بدون حذف بيانات حالية.
         </p>
       </div>
 
@@ -157,7 +184,7 @@ export default function BackupRestorePage() {
           <h2 className="font-semibold">تصدير يدوي</h2>
         </div>
         <p className="text-xs text-muted-foreground">
-          سيتم تصدير {BACKUP_TABLES.length} جدول من بياناتك (العملاء، السيارات، أوامر العمل، الفواتير، التأمين، المخزون…).
+          سيتم تصدير {BACKUP_TABLES.length} جدول مع metadata وrow counts. الأسرار مثل API Keys يتم إخفاؤها ولا تُصدّر كاملة.
         </p>
         <div className="flex items-center justify-between p-3 border border-border rounded-lg">
           <div>
@@ -229,7 +256,7 @@ export default function BackupRestorePage() {
         </div>
         <div className="bg-warning/5 border border-warning/20 rounded-lg p-3 text-xs">
           <AlertTriangle size={14} className="inline ml-1 text-warning" />
-          الاستعادة تُحدّث السجلات الموجودة بنفس المعرّف (upsert). تأكّد من ملف صالح قبل المتابعة.
+          الاستعادة لا تعمل قبل Dry Run ناجح. الوضع الافتراضي Merge Mode ولا يحذف بيانات حالية. Replace Mode معطّل هنا ويتطلب حماية خادم: كلمة مرور + OTP + عبارة تأكيد + backup قبل الحذف.
         </div>
         <input
           type="file"
@@ -237,14 +264,67 @@ export default function BackupRestorePage() {
           onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
           className="block w-full text-sm file:mr-2 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-secondary file:text-foreground"
         />
-        <Button
-          onClick={() => setConfirmRestore(true)}
-          disabled={!restoreFile || busy}
-          variant="destructive"
-          className="gap-2"
-        >
-          <Upload size={16} /> بدء الاستعادة
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            onClick={handleDryRunUpload}
+            disabled={!restoreFile || busy}
+            variant="outline"
+            className="gap-2"
+          >
+            <CheckCircle2 size={16} /> Dry Run / فحص الملف
+          </Button>
+          <Button
+            onClick={() => setConfirmRestore(true)}
+            disabled={!dryRunReport?.ok || !restoreManifest || busy}
+            variant="destructive"
+            className="gap-2"
+          >
+            <Upload size={16} /> Merge Restore
+          </Button>
+        </div>
+        {dryRunReport && (
+          <div className={`rounded-lg border p-3 text-xs ${dryRunReport.ok ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5"}`}>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <b>Dry Run Report</b>
+              <Badge variant="outline">{dryRunReport.ok ? "Ready" : "Blocked"}</Badge>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <div>Schema: {dryRunReport.schemaVersion || "—"}</div>
+              <div>Mode: {dryRunReport.mode}</div>
+              <div className="font-mono" dir="ltr">old_tenant_id: {dryRunReport.sourceTenantId || "—"}</div>
+              <div className="font-mono" dir="ltr">current_tenant_id: {dryRunReport.currentTenantId || "—"}</div>
+            </div>
+            <div className="mt-3 max-h-56 overflow-auto rounded border bg-background/60">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="border-b">
+                    <th className="p-2 text-start">Table</th>
+                    <th className="p-2">Rows</th>
+                    <th className="p-2">Duplicates</th>
+                    <th className="p-2">Importable</th>
+                    <th className="p-2">Skipped</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.keys(dryRunReport.tableCounts).map((table) => (
+                    <tr key={table} className="border-b last:border-0">
+                      <td className="p-2 font-mono" dir="ltr">{table}</td>
+                      <td className="p-2 text-center">{dryRunReport.tableCounts[table] || 0}</td>
+                      <td className="p-2 text-center">{dryRunReport.duplicates[table] || 0}</td>
+                      <td className="p-2 text-center">{dryRunReport.importable[table] || 0}</td>
+                      <td className="p-2 text-center">{dryRunReport.skipped[table] || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {Object.keys(dryRunReport.errors).length > 0 && (
+              <div className="mt-2 text-destructive whitespace-pre-wrap">
+                {Object.entries(dryRunReport.errors).map(([table, errs]) => `${table}: ${errs.join(", ")}`).join("\n")}
+              </div>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* Daily schedule info */}

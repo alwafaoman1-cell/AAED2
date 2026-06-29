@@ -8,9 +8,10 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { MessageCircle, Mail, Phone, RefreshCw, Send, Loader2, Inbox, MessageSquare, Check, X } from "lucide-react";
+import { MessageCircle, Mail, Phone, RefreshCw, Send, Loader2, Inbox, MessageSquare, Check, X, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { Textarea } from "@/components/ui/textarea";
 
 interface Row {
   id: string;
@@ -24,6 +25,23 @@ interface Row {
   sent_at: string | null;
   created_at: string;
   payload: any;
+}
+
+interface UnifiedLogRow {
+  id: string;
+  channel: string;
+  status: string;
+  template_type: string | null;
+  recipient_phone: string | null;
+  recipient_email: string | null;
+  body: string | null;
+  message: string | null;
+  error: string | null;
+  created_at: string;
+  sent_at: string | null;
+  work_order_id: string | null;
+  claim_id: string | null;
+  invoice_id: string | null;
 }
 
 interface PortalNote {
@@ -57,6 +75,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function MessagesCenter() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [logs, setLogs] = useState<UnifiedLogRow[]>([]);
   const [notes, setNotes] = useState<PortalNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -68,15 +87,33 @@ export default function MessagesCenter() {
   const composeType = params.get("compose");
   const invoiceId = params.get("invoiceId");
   const draftMessage = params.get("message") || "";
+  const workOrderId = params.get("workOrderId");
+  const claimId = params.get("claimId");
+  const composerInvoiceId = params.get("invoiceId");
+  const [composer, setComposer] = useState({
+    channel: "whatsapp",
+    template: composeType || "general",
+    phone: "",
+    email: "",
+    linkType: "none",
+    shortLink: "",
+    subject: "AAED2 Notification",
+    body: draftMessage,
+    callResult: "answered",
+    callNotes: "",
+    followUpAt: "",
+  });
 
   async function load() {
     setLoading(true);
-    const [{ data: msgs }, { data: ns }] = await Promise.all([
+    const [{ data: msgs }, { data: ns }, { data: messageLogs }] = await Promise.all([
       supabase.from("customer_notifications").select("*").order("created_at", { ascending: false }).limit(500),
       supabase.from("customer_portal_notes").select("id, job_order_id, note, customer_name, status, submitted_at").order("submitted_at", { ascending: false }).limit(500),
+      supabase.from("message_logs" as any).select("*").order("created_at", { ascending: false }).limit(500),
     ]);
     setRows((msgs || []) as Row[]);
     setNotes((ns || []) as PortalNote[]);
+    setLogs((messageLogs || []) as unknown as UnifiedLogRow[]);
     setLoading(false);
   }
 
@@ -85,6 +122,7 @@ export default function MessagesCenter() {
     const ch = supabase
       .channel("messages_center_changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "customer_notifications" }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "message_logs" }, () => load())
       .on("postgres_changes", { event: "*", schema: "public", table: "customer_portal_notes" }, () => load())
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -109,6 +147,56 @@ export default function MessagesCenter() {
   }, [notes, q]);
 
   const pendingNotesCount = notes.filter((n) => n.status === "pending").length;
+
+  function buildTemplateText(template: string) {
+    const link = composer.shortLink ? `\n${composer.shortLink}` : "";
+    const templates: Record<string, string> = {
+      vehicle_status: `تحديث حالة المركبة من ورشة الوفاء.${link}`,
+      tracking_link: `يمكنك متابعة حالة المركبة من الرابط التالي:${link}`,
+      invoice: `تم إصدار فاتورة جديدة. رابط الفاتورة:${link}`,
+      payment_reminder: draftMessage || `تذكير بدفع المبلغ المتبقي. التفاصيل:${link}`,
+      ready_for_pickup: `مركبتكم جاهزة للاستلام. يرجى التواصل معنا لتأكيد الموعد.${link}`,
+      request_documents: `يرجى تزويدنا بالمستندات المطلوبة لإكمال الإجراء.${link}`,
+      claim_update: `تحديث مطالبة التأمين: يوجد تحديث جديد على المطالبة.${link}`,
+      general: composer.body || "مرحباً، نتواصل معكم من ورشة الوفاء.",
+    };
+    return templates[template] || templates.general;
+  }
+
+  function updateTemplate(template: string) {
+    const next = buildTemplateText(template);
+    setComposer((c) => ({ ...c, template, body: next }));
+  }
+
+  async function sendUnifiedMessage() {
+    setBusyId("composer");
+    try {
+      const payload = {
+        channel: composer.channel,
+        template_type: composer.template,
+        recipient_phone: composer.phone,
+        recipient_email: composer.email,
+        subject: composer.subject,
+        body: composer.channel === "phone" ? composer.callNotes : composer.body,
+        short_link: composer.shortLink || null,
+        work_order_id: workOrderId,
+        claim_id: claimId,
+        invoice_id: composerInvoiceId,
+        call_result: composer.callResult,
+        call_notes: composer.callNotes,
+        follow_up_at: composer.followUpAt || null,
+      };
+      const { data, error } = await supabase.functions.invoke("unified-message-send", { body: payload });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || data?.message || data?.status || "send_failed");
+      toast.success(composer.channel === "phone" ? "تم تسجيل الاتصال" : "تم الإرسال");
+      await load();
+    } catch (e: any) {
+      toast.error(e?.message || "فشل الإرسال/التسجيل");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function send(r: Row) {
     setBusyId(r.id);
@@ -146,9 +234,91 @@ export default function MessagesCenter() {
     <div className="p-4 max-w-6xl mx-auto" dir="rtl">
       <div className="flex items-center gap-2 mb-4">
         <Inbox className="text-primary" size={20} />
-        <h1 className="text-lg font-bold">المراسلات</h1>
+        <h1 className="text-lg font-bold">مركز الرسائل الموحد</h1>
         <Button size="sm" variant="ghost" onClick={load} className="mr-auto"><RefreshCw size={14} /></Button>
       </div>
+
+      <Card className="p-4 mb-4 border-primary/30">
+        <div className="flex items-center gap-2 mb-3">
+          <Send size={16} className="text-primary" />
+          <h2 className="font-bold">Message Composer</h2>
+          {(workOrderId || claimId || composerInvoiceId) && (
+            <Badge variant="outline" className="gap-1"><LinkIcon size={11} /> مربوط بسجل</Badge>
+          )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Select value={composer.channel} onValueChange={(channel) => setComposer((c) => ({ ...c, channel }))}>
+            <SelectTrigger><SelectValue placeholder="القناة" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="whatsapp">WhatsApp</SelectItem>
+              <SelectItem value="email">Email</SelectItem>
+              <SelectItem value="phone">Phone Call Log</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={composer.template} onValueChange={updateTemplate}>
+            <SelectTrigger><SelectValue placeholder="القالب" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="vehicle_status">حالة السيارة</SelectItem>
+              <SelectItem value="tracking_link">رابط التتبع</SelectItem>
+              <SelectItem value="invoice">الفاتورة</SelectItem>
+              <SelectItem value="payment_reminder">تذكير الدفع</SelectItem>
+              <SelectItem value="ready_for_pickup">جاهزية السيارة</SelectItem>
+              <SelectItem value="request_documents">طلب مستندات</SelectItem>
+              <SelectItem value="claim_update">تحديث مطالبة</SelectItem>
+              <SelectItem value="general">رسالة عامة</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={composer.linkType} onValueChange={(linkType) => setComposer((c) => ({ ...c, linkType }))}>
+            <SelectTrigger><SelectValue placeholder="رابط مرفق" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">بدون رابط</SelectItem>
+              <SelectItem value="tracking">Tracking Link</SelectItem>
+              <SelectItem value="invoice">Invoice Link</SelectItem>
+              <SelectItem value="signature">Signature Link</SelectItem>
+              <SelectItem value="record">Claim / Work Order Link</SelectItem>
+            </SelectContent>
+          </Select>
+          {composer.channel !== "email" && (
+            <Input placeholder="Recipient phone" dir="ltr" value={composer.phone} onChange={(e) => setComposer((c) => ({ ...c, phone: e.target.value }))} />
+          )}
+          {composer.channel === "email" && (
+            <>
+              <Input placeholder="Recipient email" dir="ltr" value={composer.email} onChange={(e) => setComposer((c) => ({ ...c, email: e.target.value }))} />
+              <Input placeholder="Subject" value={composer.subject} onChange={(e) => setComposer((c) => ({ ...c, subject: e.target.value }))} />
+            </>
+          )}
+          <Input placeholder="Short / attached link" dir="ltr" value={composer.shortLink} onChange={(e) => setComposer((c) => ({ ...c, shortLink: e.target.value }))} />
+        </div>
+        {composer.channel === "phone" ? (
+          <div className="grid gap-3 md:grid-cols-3 mt-3">
+            <Select value={composer.callResult} onValueChange={(callResult) => setComposer((c) => ({ ...c, callResult }))}>
+              <SelectTrigger><SelectValue placeholder="نتيجة الاتصال" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="answered">تم الرد</SelectItem>
+                <SelectItem value="no_answer">لم يتم الرد</SelectItem>
+                <SelectItem value="busy">مشغول</SelectItem>
+                <SelectItem value="follow_up">يحتاج متابعة</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input type="datetime-local" value={composer.followUpAt} onChange={(e) => setComposer((c) => ({ ...c, followUpAt: e.target.value }))} />
+            <Input placeholder="رقم الهاتف" dir="ltr" value={composer.phone} onChange={(e) => setComposer((c) => ({ ...c, phone: e.target.value }))} />
+            <Textarea className="md:col-span-3" placeholder="ملاحظات الاتصال" value={composer.callNotes} onChange={(e) => setComposer((c) => ({ ...c, callNotes: e.target.value }))} />
+          </div>
+        ) : (
+          <div className="mt-3">
+            <Textarea rows={4} placeholder="Preview / Message body" value={composer.body} onChange={(e) => setComposer((c) => ({ ...c, body: e.target.value }))} />
+          </div>
+        )}
+        <div className="flex gap-2 mt-3 flex-wrap">
+          <Button onClick={sendUnifiedMessage} disabled={busyId === "composer"} className="gap-2">
+            {busyId === "composer" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send size={14} />}
+            {composer.channel === "phone" ? "تسجيل الاتصال" : "إرسال"}
+          </Button>
+          <span className="text-xs text-muted-foreground self-center">
+            يمنع التكرار خلال دقيقتين، وتذكير الدفع خلال 24 ساعة.
+          </span>
+        </div>
+      </Card>
 
       {composeType === "payment_reminder" && (
         <Card className="p-4 mb-4 border-warning/40 bg-warning/5">
@@ -180,8 +350,8 @@ export default function MessagesCenter() {
       <Tabs defaultValue="messages" className="w-full">
         <TabsList className="mb-3">
           <TabsTrigger value="messages" className="gap-2">
-            <MessageCircle size={14} /> رسائل العملاء
-            <Badge variant="outline" className="ms-1">{rows.length}</Badge>
+            <MessageCircle size={14} /> سجل الرسائل الموحد
+            <Badge variant="outline" className="ms-1">{logs.length + rows.length}</Badge>
           </TabsTrigger>
           <TabsTrigger value="notes" className="gap-2">
             <MessageSquare size={14} /> ملاحظات من بوابة QR
@@ -219,6 +389,28 @@ export default function MessagesCenter() {
             <div className="flex justify-center py-10"><Loader2 className="animate-spin text-muted-foreground" /></div>
           ) : (
             <div className="space-y-2">
+              {logs.map((r) => (
+                <div key={r.id} className="border border-border bg-card rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <Badge variant="outline">{r.template_type || "general"}</Badge>
+                    <Badge className={STATUS_COLORS[r.status] || ""}>{r.status}</Badge>
+                    <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                      {r.channel === "whatsapp" && <MessageCircle size={11} />}
+                      {r.channel === "phone" && <Phone size={11} />}
+                      {r.channel === "email" && <Mail size={11} />}
+                      {r.channel}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground" dir="ltr">{r.recipient_phone || r.recipient_email || "—"}</span>
+                    <span className="text-[10px] text-muted-foreground mr-auto">{new Date(r.created_at).toLocaleString("en-GB")}</span>
+                  </div>
+                  <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-3 mb-2">{r.body || r.message}</p>
+                  {r.error && <p className="text-[11px] text-rose-400 mb-2">⚠ {r.error}</p>}
+                  <div className="flex gap-2 flex-wrap">
+                    {r.work_order_id && <Button size="sm" variant="outline" onClick={() => nav(`/work-orders/${r.work_order_id}`)}>أمر العمل</Button>}
+                    {r.claim_id && <Button size="sm" variant="outline" onClick={() => nav(`/insurance/${r.claim_id}`)}>المطالبة</Button>}
+                  </div>
+                </div>
+              ))}
               {filtered.map((r) => (
                 <div key={r.id} className="border border-border bg-card rounded-lg p-3">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -248,7 +440,7 @@ export default function MessagesCenter() {
                   </div>
                 </div>
               ))}
-              {filtered.length === 0 && (
+              {filtered.length === 0 && logs.length === 0 && (
                 <div className="text-center py-10 text-muted-foreground text-sm">لا توجد رسائل</div>
               )}
             </div>
