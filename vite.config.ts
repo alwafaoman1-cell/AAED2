@@ -26,8 +26,8 @@ export default defineConfig(({ mode }) => ({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/~oauth/, /^\/api/, /^\/functions/, /^\/auth/],
         cleanupOutdatedCaches: true,
-        clientsClaim: false,
-        skipWaiting: false,
+        clientsClaim: true,
+        skipWaiting: true,
         globPatterns: ["**/*.{js,css,html,svg,png,jpg,jpeg,webp,woff2}"],
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         runtimeCaching: [
@@ -43,16 +43,11 @@ export default defineConfig(({ mode }) => ({
             },
           },
           {
-            // Supabase REST GETs — SWR for instant paint + background refresh.
-            // Writes (POST/PATCH/DELETE) bypass cache automatically (Workbox only caches GET).
-            // Only cache real 200 OK responses (drop opaque/0) so 401/403 from RLS denials are never re-served.
+            // Supabase REST is operational data. Never cache it in the Service Worker.
+            // This prevents claims/work orders/accounting lists from showing stale rows
+            // after saves, deletes, restores, or tenant-filter changes.
             urlPattern: /^https:\/\/.*\.supabase\.co\/rest\/v1\/.*/i,
-            handler: "StaleWhileRevalidate",
-            options: {
-              cacheName: "supabase-rest",
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 10 },
-              cacheableResponse: { statuses: [200] },
-            },
+            handler: "NetworkOnly",
           },
           {
             // Supabase Auth / Realtime / Functions — never cache (always live)
@@ -96,4 +91,3 @@ export default defineConfig(({ mode }) => ({
     },
   },
 }));
-

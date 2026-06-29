@@ -3,6 +3,8 @@
 // auto-updates to new deploys without a manual reload,
 // and forces a fresh data fetch when the tab regains focus.
 
+import { hasUnsavedWork } from "@/lib/unsavedWork";
+
 export function registerTechPwa() {
   if (typeof window === "undefined") return;
   if (!("serviceWorker" in navigator)) return;
@@ -31,11 +33,13 @@ export function registerTechPwa() {
 
   import("virtual:pwa-register")
     .then(({ registerSW }) => {
-      registerSW({
+      const updateSW = registerSW({
         immediate: true,
-        // لا نُحدّث تلقائياً ولا نعيد تحميل الصفحة. التحديث يُطبَّق طبيعياً في الجلسة التالية
-        // (عند فتح التبويب من جديد). هذا يمنع إعادة التحميل المفاجئة وفقدان العمل الجاري.
-        onNeedRefresh() { /* noop — لا reload تلقائي */ },
+        // Apply new app shell immediately when it is safe. If the user has
+        // unsaved form work, leave the update notice to handle it instead.
+        onNeedRefresh() {
+          if (!hasUnsavedWork()) updateSW(true);
+        },
         onOfflineReady() { /* noop */ },
       });
     })
@@ -43,6 +47,6 @@ export function registerTechPwa() {
       // virtual module may not exist in dev — fine
     });
 
-  // لا نستمع لـ controllerchange ولا نعيد التحميل تلقائياً.
-  // النسخة الجديدة من الـ shell ستُستخدم عند إعادة فتح التبويب يدوياً.
+  // The generated SW uses skipWaiting + clientsClaim; this keeps the app from
+  // staying pinned to an old shell after a successful Vercel deployment.
 }
