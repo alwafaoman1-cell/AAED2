@@ -6,9 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, Plug, Save, Send, MessageCircle, Mail, ShieldAlert, ExternalLink, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowRight, Plug, Save, Send, MessageCircle, Mail, ShieldAlert, ExternalLink, CheckCircle2, XCircle, KeyRound } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { getFunctionErrorMessage } from "@/lib/functionErrors";
 
 type Provider = "twilio_whatsapp" | "meta_whatsapp" | "gmail";
 
@@ -23,25 +25,56 @@ interface IntegrationRow {
   hasSecrets: Record<string, boolean>;
 }
 
+interface EmailProviderStatus {
+  configured: boolean;
+  enabled: boolean;
+  activeProvider: string | null;
+  fromEmail: string;
+  fromName: string;
+  domain: string;
+  maskedKey: string | null;
+  lastTestAt: string | null;
+  lastTestStatus: string | null;
+  lastTestError: string | null;
+  smtpStatus: "coming_soon";
+}
+
 const EMPTY = (p: Provider): IntegrationRow => ({
   provider: p, enabled: false, config: {}, secrets: {}, hasSecrets: {},
 });
 
 export default function IntegrationsSettingsPage() {
+  const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<Provider | null>(null);
   const [testing, setTesting] = useState<Provider | null>(null);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailTesting, setEmailTesting] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<EmailProviderStatus | null>(null);
+  const [emailForm, setEmailForm] = useState({
+    enabled: false,
+    apiKey: "",
+    fromEmail: "",
+    fromName: "",
+    domain: "",
+  });
   const [data, setData] = useState<Record<Provider, IntegrationRow>>({
     twilio_whatsapp: EMPTY("twilio_whatsapp"),
     meta_whatsapp: EMPTY("meta_whatsapp"),
     gmail: EMPTY("gmail"),
   });
+  const canManageEmailProvider =
+    profile?.role === "admin" ||
+    (profile?.role as string | undefined) === "owner" ||
+    (profile?.role as string | undefined) === "super_admin" ||
+    !!(profile as any)?.is_platform_admin;
 
   async function load() {
     setLoading(true);
     const { data: rows } = await supabase
       .from("tenant_integrations")
-      .select("provider, enabled, config, secrets, last_test_at, last_test_status, last_test_error");
+      .select("provider, enabled, config, secrets, last_test_at, last_test_status, last_test_error")
+      .in("provider", ["twilio_whatsapp", "meta_whatsapp", "gmail"]);
     const next = {
       twilio_whatsapp: EMPTY("twilio_whatsapp"),
       meta_whatsapp: EMPTY("meta_whatsapp"),
@@ -62,10 +95,80 @@ export default function IntegrationsSettingsPage() {
       };
     });
     setData(next);
+    await loadEmailProviderStatus();
     setLoading(false);
   }
 
   useEffect(() => { load(); }, []);
+
+  async function loadEmailProviderStatus() {
+    const { data: result, error } = await supabase.functions.invoke("save-email-provider", {
+      body: { action: "status" },
+    });
+    if (error || result?.ok === false) {
+      toast.error(getFunctionErrorMessage(error, result));
+      return;
+    }
+    const status = result.status as EmailProviderStatus;
+    setEmailStatus(status);
+    setEmailForm({
+      enabled: !!status.enabled,
+      apiKey: "",
+      fromEmail: status.fromEmail || "",
+      fromName: status.fromName || "",
+      domain: status.domain || "",
+    });
+  }
+
+  async function saveEmailProvider() {
+    if (!canManageEmailProvider) {
+      toast.error("هذه الإعدادات متاحة للمالك أو Super Admin فقط");
+      return;
+    }
+    setEmailBusy(true);
+    try {
+      const { data: result, error } = await supabase.functions.invoke("save-email-provider", {
+        body: { action: "save", ...emailForm },
+      });
+      if (error || result?.ok === false) {
+        toast.error(getFunctionErrorMessage(error, result));
+        return;
+      }
+      toast.success("تم حفظ مزود البريد");
+      const status = result.status as EmailProviderStatus;
+      setEmailStatus(status);
+      setEmailForm({
+        enabled: !!status.enabled,
+        apiKey: "",
+        fromEmail: status.fromEmail || "",
+        fromName: status.fromName || "",
+        domain: status.domain || "",
+      });
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  async function testEmailProvider() {
+    if (!canManageEmailProvider) {
+      toast.error("هذه الإعدادات متاحة للمالك أو Super Admin فقط");
+      return;
+    }
+    setEmailTesting(true);
+    try {
+      const { data: result, error } = await supabase.functions.invoke("test-email-provider", {
+        body: { provider: "resend_email" },
+      });
+      if (error || result?.ok === false) {
+        toast.error(getFunctionErrorMessage(error, result));
+      } else {
+        toast.success("Connected — تم إرسال رسالة اختبار إلى بريد المستخدم الحالي");
+      }
+      await loadEmailProviderStatus();
+    } finally {
+      setEmailTesting(false);
+    }
+  }
 
   function update(p: Provider, patch: Partial<IntegrationRow>) {
     setData((d) => ({ ...d, [p]: { ...d[p], ...patch } }));
@@ -135,6 +238,121 @@ export default function IntegrationsSettingsPage() {
       <p className="text-sm text-muted-foreground">
         كل ورشة تُدخل بياناتها الخاصة لمزوّداتها (Twilio / Meta WhatsApp / Gmail). البيانات معزولة بين المستأجرين.
       </p>
+
+      <Card className="p-4 space-y-4 border-primary/25">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="space-y-1">
+            <h2 className="font-semibold flex items-center gap-2">
+              <KeyRound size={18} className="text-primary" /> Email & OTP Provider
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              يستخدم OTP مزود البريد النشط لكل ورشة أولًا، ثم fallback إلى secrets الخادم إن وجدت.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {emailStatus?.configured ? (
+              <Badge variant="outline" className="border-success/40 text-success">Configured</Badge>
+            ) : (
+              <Badge variant="outline" className="border-destructive/40 text-destructive">Not Configured</Badge>
+            )}
+            {emailStatus?.lastTestStatus === "success" && <Badge variant="outline" className="border-success/40 text-success">Connected</Badge>}
+            {emailStatus?.lastTestStatus === "failed" && <Badge variant="outline" className="border-destructive/40 text-destructive">Failed</Badge>}
+          </div>
+        </div>
+
+        {!canManageEmailProvider && (
+          <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs">
+            إدارة مزود البريد متاحة للمالك أو Super Admin فقط. يمكنك عرض الحالة دون تعديل الأسرار.
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs">Resend API Key {emailStatus?.maskedKey && <span className="text-success">({emailStatus.maskedKey})</span>}</Label>
+            <Input
+              dir="ltr"
+              type="password"
+              disabled={!canManageEmailProvider}
+              value={emailForm.apiKey}
+              placeholder={emailStatus?.maskedKey ? "اتركه فارغاً للإبقاء على المفتاح الحالي" : "re_xxxxxxxxxxxxx"}
+              onChange={(e) => setEmailForm((f) => ({ ...f, apiKey: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">From Email</Label>
+            <Input
+              dir="ltr"
+              disabled={!canManageEmailProvider}
+              value={emailForm.fromEmail}
+              placeholder="otp@yourdomain.com"
+              onChange={(e) => setEmailForm((f) => ({ ...f, fromEmail: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">From Name</Label>
+            <Input
+              disabled={!canManageEmailProvider}
+              value={emailForm.fromName}
+              placeholder="AAED2 Security"
+              onChange={(e) => setEmailForm((f) => ({ ...f, fromName: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Domain</Label>
+            <Input
+              dir="ltr"
+              disabled={!canManageEmailProvider}
+              value={emailForm.domain}
+              placeholder="yourdomain.com"
+              onChange={(e) => setEmailForm((f) => ({ ...f, domain: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3">
+          <div>
+            <div className="text-sm font-medium">Active / Disabled</div>
+            <div className="text-xs text-muted-foreground">مزود واحد فقط يكون نشطًا لكل tenant.</div>
+          </div>
+          <Switch
+            checked={emailForm.enabled}
+            disabled={!canManageEmailProvider}
+            onCheckedChange={(enabled) => setEmailForm((f) => ({ ...f, enabled }))}
+          />
+        </div>
+
+        <div className="rounded-lg border border-muted bg-secondary/20 p-3 text-xs leading-6">
+          <b>دليل Resend السريع:</b>
+          <ol className="list-decimal pr-5 mt-1 space-y-1">
+            <li>أنشئ حسابًا في Resend.</li>
+            <li>أضف الدومين الخاص بك ووثّقه.</li>
+            <li>أضف DNS records المطلوبة من Resend في مزود الدومين.</li>
+            <li>أنشئ API Key يبدأ بـ <span dir="ltr">re_</span>.</li>
+            <li>أدخل From Email من دومين موثق، ثم اضغط Test Connection.</li>
+            <li>الدومين غير الموثق قد يمنع وصول الرسائل أو يرسلها إلى Spam.</li>
+          </ol>
+        </div>
+
+        <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+          SMTP: Coming Soon — غير مفعّل الآن حتى يتم تنفيذه server-side بشكل آمن.
+        </div>
+
+        {emailStatus?.lastTestAt && (
+          <div className="text-[11px] text-muted-foreground">
+            آخر اختبار: {new Date(emailStatus.lastTestAt).toLocaleString("en-GB")}
+            {emailStatus.lastTestError ? ` — ${emailStatus.lastTestError}` : ""}
+          </div>
+        )}
+
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={saveEmailProvider} disabled={emailBusy || !canManageEmailProvider} className="gap-2">
+            <Save size={14} /> {emailBusy ? "جارِ الحفظ…" : "حفظ مزود البريد"}
+          </Button>
+          <Button onClick={testEmailProvider} disabled={emailTesting || !canManageEmailProvider || !emailStatus?.configured} variant="outline" className="gap-2">
+            <Send size={14} /> {emailTesting ? "جارِ الاختبار…" : "Test Connection"}
+          </Button>
+        </div>
+      </Card>
 
       {/* Twilio WhatsApp */}
       <ProviderCard

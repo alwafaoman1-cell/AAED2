@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { AlertTriangle, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -16,6 +18,13 @@ export default function SecurityDangerZone() {
   const [otp, setOtp] = useState("");
   const [confirmPhrase, setConfirmPhrase] = useState("");
   const [busy, setBusy] = useState(false);
+  const [emailProviderStatus, setEmailProviderStatus] = useState<{
+    configured: boolean;
+    enabled: boolean;
+    activeProvider: string | null;
+    lastTestAt: string | null;
+    lastTestStatus: string | null;
+  } | null>(null);
   const isOwnerOrSuperAdmin =
     profile?.role === "admin" ||
     (profile?.role as string | undefined) === "owner" ||
@@ -40,6 +49,14 @@ export default function SecurityDangerZone() {
         toast.error(error?.message || "تعذر تحميل إعدادات OTP");
       }
     })();
+  }, [profile?.tenant_id]);
+
+  useEffect(() => {
+    if (!profile?.tenant_id) return;
+    void supabase.functions.invoke("save-email-provider", { body: { action: "status" } })
+      .then(({ data, error }) => {
+        if (!error && data?.ok) setEmailProviderStatus(data.status);
+      });
   }, [profile?.tenant_id]);
 
   async function saveSecuritySettings(next: { login_otp_enabled?: boolean; cloud_reset_enabled?: boolean }) {
@@ -131,6 +148,32 @@ export default function SecurityDangerZone() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-border bg-card p-3 text-sm md:col-span-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <span className="block font-medium">Email Provider</span>
+              <span className="block text-xs text-muted-foreground">
+                Active Provider: {emailProviderStatus?.activeProvider || "Not Configured"}
+                {emailProviderStatus?.lastTestAt ? ` • Last Test: ${new Date(emailProviderStatus.lastTestAt).toLocaleString("en-GB")}` : ""}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {emailProviderStatus?.configured && emailProviderStatus?.enabled ? (
+                <Badge variant="outline" className="border-success/40 text-success">Configured</Badge>
+              ) : (
+                <Badge variant="outline" className="border-destructive/40 text-destructive">Not Configured</Badge>
+              )}
+              <Button asChild size="sm" variant="outline">
+                <Link to="/settings/integrations">Configure Email Provider</Link>
+              </Button>
+            </div>
+          </div>
+          {loginOtpEnabled && (!emailProviderStatus?.configured || !emailProviderStatus?.enabled) && (
+            <div className="mt-2 rounded-md border border-warning/30 bg-warning/10 p-2 text-xs">
+              OTP مفعّل لكن مزود البريد غير مضبوط. لن تصل رموز الدخول حتى يتم ضبط Email Provider أو fallback server secrets.
+            </div>
+          )}
+        </div>
         <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
           <span className="space-y-1">
             <span className="block font-medium">OTP تسجيل الدخول</span>

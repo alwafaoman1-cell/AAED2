@@ -13,7 +13,7 @@ async function sha256(input: string) {
 }
 
 function isOwnerOrSuperAdmin(profile: any) {
-  return ["admin", "owner"].includes(String(profile?.role || "")) || !!profile?.is_platform_admin;
+  return ["admin", "owner", "super_admin"].includes(String(profile?.role || "")) || !!profile?.is_platform_admin;
 }
 
 async function audit(admin: any, payload: Record<string, unknown>) {
@@ -21,6 +21,63 @@ async function audit(admin: any, payload: Record<string, unknown>) {
     await admin.from("security_otp_audit_log").insert(payload);
   } catch {
     // Audit logging must never break the OTP response.
+  }
+}
+
+function resendFrom(config: Record<string, string>) {
+  const email = config.from_email;
+  const name = config.from_name || "AAED2 Security";
+  return name ? `${name} <${email}>` : email;
+}
+
+async function resolveEmailProvider(admin: any, tenantId: string) {
+  const { data: row } = await admin
+    .from("tenant_integrations")
+    .select("config,secrets,enabled")
+    .eq("tenant_id", tenantId)
+    .eq("provider", "resend_email")
+    .eq("enabled", true)
+    .maybeSingle();
+  const config = (row?.config || {}) as Record<string, string>;
+  const secrets = (row?.secrets || {}) as Record<string, string>;
+  if (row?.enabled && secrets.api_key && config.from_email) {
+    return {
+      source: "tenant",
+      apiKey: secrets.api_key,
+      from: resendFrom(config),
+    };
+  }
+  const fallbackKey = Deno.env.get("RESEND_API_KEY");
+  if (fallbackKey) {
+    return {
+      source: "fallback",
+      apiKey: fallbackKey,
+      from: Deno.env.get("SECURITY_EMAIL_FROM") || "AAED2 Security <security@aaed.app>",
+    };
+  }
+  return null;
+}
+
+async function sendOtpEmail(args: {
+  apiKey: string;
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+}) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${args.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: args.from,
+      to: args.to,
+      subject: args.subject,
+      text: args.text,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || payload?.error || `resend_failed_${response.status}`);
   }
 }
 
@@ -83,8 +140,8 @@ Deno.serve(async (req) => {
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     });
 
-    const resendKey = Deno.env.get("RESEND_API_KEY");
-    if (!resendKey) {
+    const provider = await resolveEmailProvider(admin, profile.tenant_id);
+    if (!provider) {
       await audit(admin, {
         tenant_id: profile.tenant_id,
         user_id: userData.user.id,
@@ -92,33 +149,52 @@ Deno.serve(async (req) => {
         event: "request",
         status: "email_provider_not_configured",
         ip,
-        details: {},
+        details: { message: "Email provider is not configured." },
       });
-      return new Response(JSON.stringify({ ok: false, error: "email_provider_not_configured" }), {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: "email_provider_not_configured",
+        code: "email_provider_not_configured",
+        message: "Email provider is not configured.",
+      }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: Deno.env.get("SECURITY_EMAIL_FROM") || "AAED2 Security <security@aaed.app>",
+    try {
+      await sendOtpEmail({
+        apiKey: provider.apiKey,
+        from: provider.from,
         to: userData.user.email,
         subject: action === "cloud_reset" ? "AAED2 cloud reset verification code" : "AAED2 login verification code",
         text: `Your AAED2 verification code is ${code}. It expires in 10 minutes.`,
-      }),
-    });
+      });
+    } catch (emailError) {
+      const emailCode = String(emailError?.message || emailError || "email_send_failed");
+      await audit(admin, {
+        tenant_id: profile.tenant_id,
+        user_id: userData.user.id,
+        action,
+        event: "otp email failed",
+        status: "failed",
+        ip,
+        details: { provider: provider.source, error: emailCode },
+      });
+      return new Response(JSON.stringify({ ok: false, error: emailCode, code: emailCode, message: emailCode }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     await audit(admin, {
       tenant_id: profile.tenant_id,
       user_id: userData.user.id,
       action,
-      event: "request",
+      event: "otp email sent",
       status: "sent",
       ip,
-      details: {},
+      details: { provider: provider.source },
     });
 
     return new Response(JSON.stringify({ ok: true }), {

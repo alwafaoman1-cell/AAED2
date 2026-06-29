@@ -1,6 +1,11 @@
 const FUNCTION_ERROR_MESSAGES: Record<string, string> = {
   // Contract anchors: "Email provider is not configured", "Too many attempts".
-  email_provider_not_configured: "مزود البريد غير مفعّل على الخادم. أكمل إعداد البريد قبل طلب الرمز.",
+  email_provider_not_configured: "Email provider is not configured. أكمل إعداد البريد قبل طلب الرمز.",
+  resend_api_key_required: "أدخل Resend API Key قبل تفعيل مزود البريد.",
+  invalid_resend_api_key: "مفتاح Resend يجب أن يبدأ بـ re_.",
+  from_email_required: "أدخل From Email صحيح قبل تفعيل مزود البريد.",
+  user_email_not_found: "لا يوجد بريد إلكتروني للمستخدم الحالي لإرسال رسالة الاختبار.",
+  unsupported_action: "إجراء غير مدعوم في دالة الخادم.",
   integration_disabled: "التكامل معطل حاليًا بشكل آمن.",
   owner_or_super_admin_required: "ليست لديك صلاحية تنفيذ هذه العملية.",
   admin_required: "ليست لديك صلاحية تنفيذ هذه العملية.",
