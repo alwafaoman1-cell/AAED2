@@ -10,14 +10,38 @@ const corsHeaders = {
 };
 
 // ───────── Provider resolver ─────────
-function pickProvider() {
+function fallbackProvider() {
   const lovable = Deno.env.get("LOVABLE_API_KEY");
-  if (lovable) return { url: "https://ai.gateway.lovable.dev/v1/chat/completions", key: lovable, model: "google/gemini-2.5-flash" };
+  if (lovable) return { type: "lovable", url: "https://ai.gateway.lovable.dev/v1/chat/completions", key: lovable, model: "google/gemini-2.5-flash" };
   const openai = Deno.env.get("OPENAI_API_KEY");
-  if (openai) return { url: "https://api.openai.com/v1/chat/completions", key: openai, model: "gpt-4o-mini" };
+  if (openai) return { type: "openai", url: "https://api.openai.com/v1/chat/completions", key: openai, model: "gpt-4o-mini" };
   const gemini = Deno.env.get("GEMINI_API_KEY");
-  if (gemini) return { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: gemini, model: "gemini-2.0-flash" };
+  if (gemini) return { type: "gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: gemini, model: "gemini-2.0-flash" };
+  const anthropic = Deno.env.get("ANTHROPIC_API_KEY");
+  if (anthropic) return { type: "anthropic", url: "https://api.anthropic.com/v1/messages", key: anthropic, model: "claude-3-5-haiku-latest" };
   return null;
+}
+
+async function resolveProvider(admin: any, tenantId: string | null) {
+  if (tenantId) {
+    const { data: row } = await admin
+      .from("tenant_integrations")
+      .select("provider,config,secrets,enabled")
+      .eq("tenant_id", tenantId)
+      .in("provider", ["ai_openai", "ai_gemini", "ai_anthropic", "ai_custom"])
+      .eq("enabled", true)
+      .maybeSingle();
+    const provider = String(row?.provider || "").replace(/^ai_/, "");
+    const config = row?.config || {};
+    const apiKey = row?.secrets?.api_key;
+    if (row?.enabled && apiKey) {
+      if (provider === "openai") return { type: provider, url: "https://api.openai.com/v1/chat/completions", key: apiKey, model: config.model || "gpt-4o-mini" };
+      if (provider === "gemini") return { type: provider, url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: apiKey, model: config.model || "gemini-2.0-flash" };
+      if (provider === "anthropic") return { type: provider, url: "https://api.anthropic.com/v1/messages", key: apiKey, model: config.model || "claude-3-5-haiku-latest" };
+      if (provider === "custom" && config.base_url) return { type: provider, url: config.base_url, key: apiKey, model: config.model };
+    }
+  }
+  return fallbackProvider();
 }
 
 // ───────── Schemas / Tool definitions ─────────
@@ -168,18 +192,23 @@ Deno.serve(async (req) => {
       });
     }
     // Validate the JWT against Supabase Auth (header presence alone is not enough).
+    let tenantId: string | null = null;
+    let admin: any = null;
     try {
       const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.45.0");
       const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
       const ANON_KEY = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY")!;
+      const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
       const sb = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: auth } } });
+      admin = createClient(SUPABASE_URL, SERVICE_KEY);
       const { data: userData } = await sb.auth.getUser();
       if (!userData?.user) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const { data: tenantId } = await sb.rpc("get_user_tenant_id");
+      const { data: resolvedTenantId } = await sb.rpc("get_user_tenant_id");
+      tenantId = resolvedTenantId;
       const { data: aiFeature } = await sb.from("tenant_features")
         .select("enabled")
         .eq("tenant_id", tenantId)
@@ -230,10 +259,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    const provider = pickProvider();
+    const provider = await resolveProvider(admin, tenantId);
     if (!provider) {
-      return new Response(JSON.stringify({ error: "No AI key configured" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return new Response(JSON.stringify({ error: "AI provider is not configured" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -250,7 +279,7 @@ Deno.serve(async (req) => {
       ...safePages.map((p) => ({ type: "image_url", image_url: { url: toDataUrl(p) } })),
     ];
 
-    const body = {
+    const openAiBody = {
       model: provider.model,
       messages: [
         { role: "system", content: preset.system },
@@ -264,14 +293,49 @@ Deno.serve(async (req) => {
       temperature: 0,
     };
 
-    const resp = await fetch(provider.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${provider.key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    const resp = provider.type === "anthropic"
+      ? await fetch(provider.url, {
+          method: "POST",
+          headers: {
+            "x-api-key": provider.key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: provider.model,
+            max_tokens: 1200,
+            system: preset.system,
+            messages: [{
+              role: "user",
+              content: [
+                { type: "text", text: userContent[0].text },
+                ...safePages.map((p) => ({
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: p.mime || "image/jpeg",
+                    data: p.b64.replace(/^data:[^;]+;base64,/, ""),
+                  },
+                })),
+              ],
+            }],
+            tools: [{
+              name: "extract",
+              description: preset.description,
+              input_schema: preset.parameters,
+            }],
+            tool_choice: { type: "tool", name: "extract" },
+            temperature: 0,
+          }),
+        })
+      : await fetch(provider.url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${provider.key}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(openAiBody),
+        });
 
     if (!resp.ok) {
       const txt = await resp.text();
@@ -293,10 +357,13 @@ Deno.serve(async (req) => {
 
     const data = await resp.json();
     const choice = data?.choices?.[0]?.message;
+    const anthropicTool = Array.isArray(data?.content) ? data.content.find((c: any) => c?.type === "tool_use") : null;
     const toolCall = choice?.tool_calls?.[0];
     let extracted: Record<string, string> = {};
 
-    if (toolCall?.function?.arguments) {
+    if (anthropicTool?.input) {
+      extracted = anthropicTool.input;
+    } else if (toolCall?.function?.arguments) {
       try {
         extracted = JSON.parse(toolCall.function.arguments);
       } catch (e) {
