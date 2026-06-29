@@ -5,7 +5,9 @@ import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
   Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Sparkles, Phone,
-  DollarSign, PackageCheck,
+  DollarSign, PackageCheck, ShieldCheck, Hourglass, Settings, BadgeCheck, ClipboardList,
+  Receipt, Wallet, Clock3, UserRound, CarFront, CheckSquare, ImagePlus,
+  WalletCards, MessagesSquare, History, MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -206,6 +208,8 @@ export default function InsuranceClaimDetail() {
     return () => clearTimeout(timer);
   }, [estimateTerms]);
   const [showEstimateTerms, setShowEstimateTerms] = useState(false);
+  const [editInsuranceSection, setEditInsuranceSection] = useState(false);
+  const [editVehicleSection, setEditVehicleSection] = useState(false);
 
   const { data: customers } = useCustomers();
   const { data: vehicles } = useVehiclesByCustomer(customerId || null);
@@ -824,14 +828,19 @@ export default function InsuranceClaimDetail() {
     const changedAt = stageDate || dateOnly(new Date().toISOString());
     const updates: Record<string, any> = {};
 
-    if (stageDialog.key === "arrived") {
+    if (stageDialog.key === "received" || stageDialog.key === "arrived") {
       updates.workshop_arrival_date = changedAt;
+      updates.estimate_date = changedAt;
+    } else if (stageDialog.key === "awaiting_approval") {
+      updates.estimate_date = changedAt;
     } else if (stageDialog.key === "repairing") {
       updates.work_started_at = new Date(changedAt).toISOString();
+      updates.status = "approved";
     } else if (stageDialog.key === "ready") {
       updates.work_completed_at = new Date(changedAt).toISOString();
     } else if (stageDialog.key === "delivered") {
       updates.delivered_at = new Date(changedAt).toISOString();
+      updates.status = "paid";
     } else {
       toast.info("هذه المرحلة تُدار من الإجراء الخاص بها، وليس من شريط المراحل.");
       return;
@@ -863,6 +872,29 @@ export default function InsuranceClaimDetail() {
       toast.error(e?.message || "فشل حفظ مرحلة المركبة");
     } finally {
       setSavingStage(false);
+    }
+  };
+
+  const openUnifiedCustomerPortal = async () => {
+    const workOrderForPortal = linkedWorkOrderId || (existing as any)?.auto_job_order_id || (existing as any)?.job_order_id || "";
+    if (!workOrderForPortal) {
+      toast.error("رابط العميل يتطلب أمر عمل مرتبط بالمطالبة أولاً.");
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from("customer_portal_tokens" as any)
+        .select("token")
+        .eq("job_order_id", workOrderForPortal)
+        .maybeSingle();
+      if (error) throw error;
+      if (!(data as any)?.token) {
+        toast.error("لم يتم إنشاء رابط العميل بعد. افتح أمر العمل المرتبط لإنشاء/مزامنة رابط العميل.");
+        return;
+      }
+      window.open(`/p/${(data as any).token}`, "_blank", "noopener,noreferrer");
+    } catch (e: any) {
+      toast.error(e?.message || "تعذر فتح رابط العميل");
     }
   };
 
@@ -1416,1044 +1448,346 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
   const isAwaitingApproval = !isNew && status === "pending";
   const isApprovedClaim = status === "approved";
-  const currentVehicleStepIndex = isClosedClaim
-    ? 8
-    : isDeliveredClaim
-      ? 7
-      : isReadyForDelivery
-        ? 5
-        : isRepairingClaim
-          ? 4
-          : isApprovedClaim
-            ? 3
-            : isAwaitingApproval
-              ? 2
-              : workshopArrivalDate
-                ? 0
-                : 1;
+  const currentClaimStepIndex = isClosedClaim
+    ? 3
+    : isDeliveredClaim || isReadyForDelivery
+      ? 3
+      : isRepairingClaim || isApprovedClaim || hasLinkedWorkOrder
+        ? 2
+        : isAwaitingApproval
+          ? 1
+          : 0;
   const vehicleProgress = [
-    { key: "arrived", label: "وصلت الورشة", icon: "🏁", date: workshopArrivalDate, editable: true },
-    { key: "inspection", label: "بانتظار الفحص", icon: "🔍", date: estimateDate, editable: false },
-    { key: "approval_wait", label: "بانتظار موافقة التأمين", icon: "⏳", date: estimateDate, editable: false },
-    { key: "approved", label: "تمت الموافقة", icon: "✅", date: dateOnly((existing as any)?.approved_at), editable: false },
-    { key: "repairing", label: "تحت الإصلاح", icon: "🛠️", date: workStartedAt, editable: true },
-    { key: "ready", label: "جاهزة للتسليم", icon: "📦", date: workCompletedAt, editable: true },
-    { key: "delivered", label: "تم التسليم", icon: "🚗", date: dateOnly((existing as any)?.delivered_at), editable: true },
-    { key: "customer", label: "مع العميل", icon: "👤", date: dateOnly((existing as any)?.paid_at), editable: false },
-    { key: "cancelled", label: "ملغاة / مرفوضة", icon: "⛔", date: dateOnly((existing as any)?.updated_at), editable: false },
+    { key: "received", label: "الاستلام والفحص", Icon: ClipboardCheck, date: workshopArrivalDate || estimateDate, editable: true },
+    { key: "awaiting_approval", label: "بانتظار الاعتماد", Icon: ShieldCheck, date: estimateDate, editable: true },
+    { key: "repairing", label: "تحت التنفيذ", Icon: Wrench, date: workStartedAt || dateOnly((existing as any)?.approved_at), editable: true },
+    { key: "ready", label: "جاهزة / تم التسليم", Icon: PackageCheck, date: workCompletedAt || dateOnly((existing as any)?.delivered_at), editable: true },
   ].map((step, index) => ({
     ...step,
     index,
-    state: index < currentVehicleStepIndex ? "completed" : index === currentVehicleStepIndex ? "current" : "upcoming",
+    state: index < currentClaimStepIndex ? "completed" : index === currentClaimStepIndex ? "current" : "upcoming",
   }));
 
   return (
     <div className="space-y-5 pb-12" dir="rtl">
-      {/* ── Header ── */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => smartBack(navigate, "/insurance")}>
-            <ArrowRight size={18} />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Shield className="text-primary" size={24} />
-              {isNew ? "مطالبة تأمين جديدة" : `مطالبة ${claimNumber || "..."}`}
-            </h1>
-            <p className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
-              <Building2 size={12} /> {company || "—"}
-              {!isNew && (
-                <>
-                  <span className="opacity-50">•</span>
-                  <Badge className={statusMeta[status].cls}>{statusMeta[status].label}</Badge>
-                </>
-              )}
-              {!isNew && (existing as any)?.delivered_at && (
-                <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 border-0 shadow-sm">
-                  <PackageCheck size={11} /> تم التسليم • {new Date((existing as any).delivered_at).toLocaleDateString("en-GB")}
-                </Badge>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {!isNew && (
-            <Button
-              variant="outline"
-              onClick={() => navigate(`/insurance/${id}/archive`)}
-              className="gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-              title="أرشيف المطالبة (للعرض فقط)"
-            >
-              <FolderArchive size={16} /> الأرشيف
+      <Card className="p-5 border-primary/20 bg-gradient-to-l from-primary/10 via-card to-card">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex items-start gap-4 min-w-0">
+            <Button variant="ghost" size="icon" onClick={() => smartBack(navigate, "/insurance/list")}>
+              <ArrowRight size={18} />
             </Button>
-          )}
-          {!isNew && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowEstimateTerms(true)}
-              className="gap-1 text-xs text-muted-foreground hover:text-primary"
-              title="تحرير شروط/ملاحظات تقدير الإصلاح"
-            >
-              <FileText size={14} /> شروط التقدير
-            </Button>
-          )}
-          {!isNew && status !== "cancelled" && status !== "paid" && (
-            <Button
-              variant="outline"
-              onClick={() => setShowCancelDialog(true)}
-              className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
-            >
-              <XCircle size={16} /> إغلاق/إلغاء
-            </Button>
-          )}
-          {!isNew && (
-            <Can module="Insurance/Claims" action="Delete">
-              <Button variant="ghost" size="icon" className="text-destructive" onClick={handleDelete}>
-                <Trash2 size={16} />
-              </Button>
-            </Can>
-          )}
-
-        </div>
-      </div>
-
-      {/* ── Header Identity Card (Insurance + Owner) ── */}
-      {!isNew && (
-        <Card className="p-4 bg-card/95 border-primary/15">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-3 min-w-0">
-              <VehicleAvatar
-                size="lg"
-                imageUrl={(vehicle as any)?.vehicle_thumbnail_url || (vehicle as any)?.vehicle_cover_image_url}
-                fallbackPhotos={damagePhotos}
-                label={`${vehicle?.brand || vehicleMake} ${vehicle?.model || vehicleModel}`.trim() || claimNumber}
-              />
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-primary">Claim Management Center</div>
-                <div className="text-lg font-bold truncate">{vehicle?.brand || vehicleMake || "—"} {vehicle?.model || vehicleModel || ""}</div>
-                <div className="text-xs text-muted-foreground font-mono" dir="ltr">
-                  {(vehicle?.plate_number || vehiclePlate || "—")} · {(vehicle as any)?.vin_number || vehicleVin || "VIN —"}
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 flex-1">
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Customer ID</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{customerId || "—"}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Vehicle ID</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{vehicleId || "—"}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Expenses</div>
-                <div className="font-semibold" dir="ltr">{claimExpensesTotal.toFixed(3)} OMR</div>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Work Order</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{linkedWorkOrderId || "—"}</div>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {linkedWorkOrderId && (
-                <Button variant="outline" size="sm" onClick={() => navigate(`/work-orders/${linkedWorkOrderId}`)}>
-                  <Wrench size={14} className="ml-1" /> Work Order
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const params = new URLSearchParams();
-                  if (existing?.id) params.set("claim_id", existing.id);
-                  if (linkedWorkOrderId) params.set("work_order_id", linkedWorkOrderId);
-                  if (customerId) params.set("customer_id", customerId);
-                  if (vehicleId) params.set("vehicle_id", vehicleId);
-                  navigate(`/accounting/expenses?${params.toString()}`);
-                }}
-              >
-                <DollarSign size={14} className="ml-1" /> Expenses
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      <Card className="p-5 grid md:grid-cols-2 gap-5 bg-gradient-to-l from-primary/5 to-transparent">
-        {/* Insurance company (primary) */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm font-bold text-primary">
-            <Building2 size={16} /> شركة التأمين (الجهة الدافعة)
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">شركة التأمين *</Label>
-              <InsuranceCompanyAutocomplete
-                value={company}
-                companyId={companyId}
-                onChange={(name, cid) => { setCompany(name); setCompanyId(cid); setInsuranceEmployeeId(null); }}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">موظف التأمين</Label>
-              <InsuranceEmployeeSelect
-                companyId={companyId}
-                value={insuranceEmployeeId}
-                onChange={setInsuranceEmployeeId}
-                placeholder="الموظف المسؤول"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">رقم المطالبة *</Label>
-              <Input value={claimNumber} onChange={(e) => setClaimNumber(e.target.value)} placeholder="CLM-001" />
-            </div>
-            {/* LPO يُضاف لاحقاً من الفاتورة الضريبية بعد إرسالها لشركة التأمين */}
-          </div>
-        </div>
-
-        {/* Vehicle owner (secondary) — smart autocomplete */}
-        <div className="space-y-3 border-r-0 md:border-r md:pr-5 border-border">
-          <div className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
-            <User size={16} /> مالك السيارة (اختياري — يُجلب تلقائياً من بيانات السيارة)
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5 col-span-2">
-              <Label className="text-xs">اسم المالك</Label>
-              <OwnerAutocomplete
-                value={ownerName}
-                onChange={(v) => {
-                  setOwnerName(v);
-                  // If user clears or types a different name, drop the linked customer
-                  if (customer && customer.name !== v) {
-                    setCustomerId("");
-                    setVehicleId("");
-                  }
-                }}
-                onSelect={(c) => {
-                  setCustomerId(c.id);
-                  setOwnerName(c.name);
-                  if (c.phone) setOwnerPhone(c.phone);
-                  setVehicleId("");
-                }}
-                customers={customers || []}
-              />
-              <p className="text-[10px] text-muted-foreground">
-                {customerId ? (
-                  <span className="text-success inline-flex items-center gap-1">
-                    <CheckCircle2 size={10} /> عميل موجود في النظام
-                  </span>
-                ) : ownerName.trim() ? (
-                  <span className="text-info inline-flex items-center gap-1">
-                    <Sparkles size={10} /> سيُضاف كعميل جديد عند الحفظ
-                  </span>
-                ) : (
-                  "ابحث بالاسم أو أدخل اسماً جديداً"
-                )}
-              </p>
-            </div>
-            <div className="space-y-1.5 col-span-2">
-              <Label className="text-xs">هاتف المالك</Label>
-              <Input value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} placeholder="+968 ..." dir="ltr" />
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* ── Vehicle data (inline, optional, saved with claim) ── */}
-      <Card className="p-5">
-        <VehicleMakeModelPicker
-          make={vehicleMake}
-          model={vehicleModel}
-          plate={vehiclePlate}
-          year={vehicleYear}
-          color={vehicleColor}
-          vin={vehicleVin}
-          onChange={(patch) => {
-            if (patch.make !== undefined) setVehicleMake(patch.make);
-            if (patch.model !== undefined) setVehicleModel(patch.model);
-            if (patch.plate !== undefined) setVehiclePlate(patch.plate);
-            if (patch.year !== undefined) setVehicleYear(patch.year);
-            if (patch.color !== undefined) setVehicleColor(patch.color);
-            if (patch.vin !== undefined) setVehicleVin(patch.vin);
-          }}
-        />
-      </Card>
-
-      <Card className="p-5 border-primary/20 bg-gradient-to-l from-primary/5 via-card to-card">
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-          <div className="flex items-start gap-4">
             <VehicleAvatar
               imageUrl={(vehicle as any)?.vehicle_cover_image_url || (vehicle as any)?.vehicle_thumbnail_url}
+              fallbackPhotos={damagePhotos}
               label={`${vehicleTitle} ${vehiclePlate || vehicle?.plate_number || ""}`.trim()}
               size="lg"
             />
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
+              <div className="text-xs font-semibold text-primary">Claim Management Center</div>
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-bold text-foreground">{claimNumber || "مطالبة جديدة"}</h2>
+                <h1 className="text-2xl font-bold text-foreground">{isNew ? "مطالبة تأمين جديدة" : `مطالبة ${claimNumber || "—"}`}</h1>
                 <Badge className={statusMeta[status]?.cls}>{statusMeta[status]?.label || status}</Badge>
                 <Badge variant="outline">{activeInvoice ? `فاتورة #${(activeInvoice as any).invoice_number}` : "لا توجد فاتورة"}</Badge>
                 <Badge variant={paymentRemaining <= 0 && paidTotal > 0 ? "default" : "secondary"}>{paymentStatusLabel}</Badge>
               </div>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-sm text-muted-foreground">
+              <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 lg:grid-cols-5">
                 <div><span className="block text-[11px]">شركة التأمين</span><strong className="text-foreground">{company || "—"}</strong></div>
                 <div><span className="block text-[11px]">العميل</span><strong className="text-foreground">{ownerName || customer?.name || "—"}</strong></div>
                 <div><span className="block text-[11px]">المركبة</span><strong className="text-foreground">{vehicleTitle}</strong></div>
                 <div><span className="block text-[11px]">اللوحة</span><strong className="text-foreground">{vehiclePlate || vehicle?.plate_number || "—"}</strong></div>
+                <div><span className="block text-[11px]">آخر تحديث</span><strong className="text-foreground">{formatDateLatin((existing as any)?.updated_at || new Date())}</strong></div>
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end">
-            {isNew && (
-              <>
-                <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
-                  <Save size={16} /> حفظ
-                </Button>
-                <Button variant="outline" onClick={() => setTab("inspect")} className="gap-2">
-                  <Shield size={16} /> تعديل بيانات التأمين
-                </Button>
-                <Button variant="outline" onClick={() => setTab("inspect")} className="gap-2">
-                  <Car size={16} /> تعديل بيانات المركبة
-                </Button>
-                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
-                  <Upload size={16} /> رفع مستندات
-                </Button>
-              </>
-            )}
 
+          <div className="flex flex-wrap gap-2 xl:justify-end">
+            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
+              <Save size={16} /> حفظ
+            </Button>
             {isAwaitingApproval && (
-              <>
-                <Button onClick={handleApprove} disabled={updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
-                  <CheckCircle2 size={16} /> اعتماد / موافقة
-                </Button>
-                <Button variant="outline" onClick={() => setTab("approval")} className="gap-2">
-                  <DollarSign size={16} /> تعديل مبلغ الموافقة
-                </Button>
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> إرسال رسالة للتأمين
-                </Button>
-                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
-                  <FileUp size={16} /> رفع LPO
-                </Button>
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> PDF
-                </Button>
-              </>
+              <Button onClick={handleApprove} disabled={updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
+                <CheckCircle2 size={16} /> اعتماد / موافقة
+              </Button>
             )}
-
-            {isApprovedClaim && !isRepairingClaim && !isReadyForDelivery && !isDeliveredClaim && (
-              <>
-                {hasLinkedWorkOrder ? (
-                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
-                    <LinkIcon size={16} /> فتح أمر العمل
-                  </Button>
-                ) : (
-                  <Button variant="outline" onClick={handleConvertToWorkOrder} className="gap-2">
-                    <Wrench size={16} /> إنشاء أمر عمل
-                  </Button>
-                )}
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> إرسال تحديث للعميل
+            {!isNew && isApprovedClaim && (
+              hasLinkedWorkOrder ? (
+                <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
+                  <ClipboardList size={16} /> فتح أمر العمل
                 </Button>
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> PDF
+              ) : (
+                <Button variant="outline" onClick={handleConvertToWorkOrder} className="gap-2">
+                  <Wrench size={16} /> إنشاء أمر عمل
                 </Button>
-              </>
+              )
             )}
-
-            {hasLinkedWorkOrder && !isClosedClaim && (
-              <>
-                <Badge variant="outline" className="h-10 px-3 flex items-center gap-2">
-                  <Wrench size={14} /> حالة أمر العمل: {linkedWorkOrderStatus}
-                </Badge>
-                {(isRepairingClaim || isReadyForDelivery || isDeliveredClaim) && (
-                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
-                    <LinkIcon size={16} /> فتح أمر العمل
-                  </Button>
-                )}
-              </>
+            {!isNew && !hasActiveInvoice && !isClosedClaim && (
+              <Button variant="outline" onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice} className="gap-2">
+                <Receipt size={16} /> إنشاء فاتورة
+              </Button>
             )}
-
-            {isRepairingClaim && (
-              <>
-                <Button variant="outline" onClick={() => openStageDialog({ key: "ready", label: "جاهزة للتسليم" })} className="gap-2">
-                  <ClipboardCheck size={16} /> تحديث المرحلة
-                </Button>
-                <Button variant="outline" onClick={() => navigate("/accounting/expenses")} className="gap-2">
-                  <DollarSign size={16} /> إضافة مصروف
-                </Button>
-                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
-                  <Camera size={16} /> رفع صور إصلاح
-                </Button>
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> إرسال تحديث للعميل
-                </Button>
-              </>
+            {!isNew && (
+              <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
+                <MessageCircle size={16} /> إرسال رسالة
+              </Button>
             )}
-
-            {isReadyForDelivery && (
-              <>
-                {!hasActiveInvoice && (
-                  <Button variant="outline" onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice} className="gap-2">
-                    <FileText size={16} /> إنشاء فاتورة
-                  </Button>
-                )}
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> إشعار جاهزية
-                </Button>
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> طباعة
-                </Button>
-                <Button variant="outline" onClick={() => setTab("delivery")} className="gap-2">
-                  <PackageCheck size={16} /> تسليم المركبة
-                </Button>
-              </>
+            {!isNew && (
+              <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
+                <Printer size={16} /> PDF
+              </Button>
             )}
-
-            {isDeliveredClaim && (
-              <>
-                {activeInvoice && (
-                  <Button variant="outline" onClick={() => setShowTaxInvoice(true)} className="gap-2">
-                    <FileText size={16} /> عرض الفاتورة
-                  </Button>
-                )}
-                {paymentRemaining > 0 && (
-                  <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                    <Send size={16} /> تذكير دفع
-                  </Button>
-                )}
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> PDF
-                </Button>
-              </>
+            {!isNew && (
+              <Button variant="outline" onClick={openUnifiedCustomerPortal} className="gap-2">
+                <LinkIcon size={16} /> رابط العميل
+              </Button>
             )}
-
-            {isClosedClaim && (
-              <>
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> PDF
-                </Button>
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> الرسائل
-                </Button>
-                {hasLinkedWorkOrder && (
-                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
-                    <LinkIcon size={16} /> السجلات المرتبطة
-                  </Button>
-                )}
-              </>
-            )}
+            <Button variant="ghost" onClick={() => smartBack(navigate, "/insurance/list")} className="gap-2">
+              <ArrowRight size={16} /> رجوع
+            </Button>
           </div>
         </div>
       </Card>
+
+      <Card className="p-5">
+        <div className="grid gap-3 md:grid-cols-4">
+          {vehicleProgress.map((step) => {
+            const Icon = step.Icon;
+            const active = step.state === "current";
+            const done = step.state === "completed";
+            return (
+              <button
+                key={step.key}
+                type="button"
+                onClick={() => openStageDialog(step)}
+                disabled={isNew || isClosedClaim}
+                className={`rounded-xl border p-4 text-right transition-all ${
+                  active
+                    ? "border-primary bg-primary/10 shadow-sm"
+                    : done
+                    ? "border-success/30 bg-success/5"
+                    : "border-border bg-secondary/20 opacity-80"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-lg p-2 ${active ? "bg-primary text-primary-foreground" : done ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
+                    <Icon size={18} />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm">{step.label}</div>
+                    <div className="text-[11px] text-muted-foreground">{step.date ? formatDateLatin(step.date) : "لم تُحدّث بعد"}</div>
+                    <div className="text-[10px] text-muted-foreground">بواسطة: {(claimAudit as any[])[0]?.user_id || "—"}</div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        {[
+          { label: "حالة المطالبة", value: statusMeta[status]?.label || status, Icon: BadgeCheck },
+          { label: "حالة السيارة", value: vehicleProgress.find((s) => s.state === "current")?.label || "—", Icon: Car },
+          { label: "أمر العمل", value: hasLinkedWorkOrder ? "مرتبط" : "غير منشأ", Icon: ClipboardList },
+          { label: "الفاتورة", value: activeInvoice ? `#${(activeInvoice as any).invoice_number}` : "لا توجد", Icon: Receipt },
+          { label: "المبلغ الموافق", value: `${Number(approvedAmount || 0).toFixed(3)} ر.ع`, Icon: Wallet },
+          { label: "آخر تحديث", value: formatDateLatin((existing as any)?.updated_at || new Date()), Icon: Clock3 },
+        ].map(({ label, value, Icon }) => (
+          <Card key={label} className="p-4">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground"><Icon size={15} className="text-primary" /> {label}</div>
+            <div className="mt-2 text-sm font-bold text-foreground truncate">{value}</div>
+          </Card>
+        ))}
+      </div>
 
       <Card className="p-5 space-y-4">
         <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="font-bold text-foreground">حالة المركبة داخل المطالبة</h3>
-            <p className="text-xs text-muted-foreground">كل مرحلة تعتمد على بيانات محفوظة في Supabase وتبقى بعد التحديث.</p>
-          </div>
-          <Badge variant="outline">آخر تحديث: {formatDateLatin((existing as any)?.updated_at || new Date().toISOString())}</Badge>
+          <h2 className="font-bold flex items-center gap-2"><Building2 size={18} className="text-primary" /> بيانات شركة التأمين / الجهة الدافعة</h2>
+          {!isNew && <Button size="sm" variant="outline" onClick={() => setEditInsuranceSection((v) => !v)}><Building2 size={14} className="ml-1" /> تعديل بيانات التأمين</Button>}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {vehicleProgress.map((step) => (
-            <button
-              key={step.key}
-              type="button"
-              onClick={() => step.editable ? openStageDialog(step) : toast.info("هذه المرحلة تُحدَّث من الإجراء الخاص بها.")}
-              disabled={isNew || isClosedClaim || step.state === "upcoming" && !step.editable}
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs transition-colors ${
-                step.state === "current"
-                  ? "border-primary bg-primary/10 text-primary font-bold"
-                  : step.state === "completed"
-                    ? "border-success/40 bg-success/10 text-success"
-                    : "border-border bg-secondary/20 text-muted-foreground"
-              } ${step.editable && !isClosedClaim ? "hover:border-primary/60 hover:bg-primary/5" : ""}`}
-              title={step.editable ? "اضغط لتحديث المرحلة بتأكيد" : "تُدار هذه المرحلة من الإجراء الخاص بها"}
-            >
-              <span aria-hidden>{step.icon}</span>
-              {step.state === "completed" && <CheckCircle2 size={13} />}
-              <span>{step.label}</span>
-              <span className="text-[10px] opacity-75">
-                {step.date ? formatDateLatin(step.date) : "لم يتم التسجيل"}
-              </span>
-            </button>
-          ))}
+        {isNew || editInsuranceSection ? (
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="space-y-1.5"><Label>شركة التأمين *</Label><InsuranceCompanyAutocomplete value={company} companyId={companyId} onChange={(name, cid) => { setCompany(name); setCompanyId(cid); setInsuranceEmployeeId(null); }} /></div>
+            <div className="space-y-1.5"><Label>موظف التأمين</Label><InsuranceEmployeeSelect companyId={companyId} value={insuranceEmployeeId} onChange={setInsuranceEmployeeId} placeholder="الموظف المسؤول" /></div>
+            <div className="space-y-1.5"><Label>رقم المطالبة *</Label><Input value={claimNumber} onChange={(e) => setClaimNumber(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>LPO</Label><Input value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} /></div>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-3 text-sm">
+            <Info label="شركة التأمين" value={company} />
+            <Info label="رقم المطالبة" value={claimNumber} />
+            <Info label="موظف التأمين" value={(existing as any)?.insurance_employee?.name || "—"} />
+            <Info label="البريد" value={insuranceCo?.email || "—"} />
+            <Info label="الهاتف" value={insuranceCo?.phone || "—"} />
+            <Info label="رقم المرجع / LPO" value={lpoNumber || "—"} />
+          </div>
+        )}
+      </Card>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card className="p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-bold flex items-center gap-2"><UserRound size={18} className="text-primary" /> بيانات العميل</h2>
+            <div className="flex gap-2">
+              {customerId && <Button size="sm" variant="outline" onClick={() => navigate(`/customers/${customerId}`)}>فتح العميل</Button>}
+              <Button size="sm" variant="ghost" onClick={() => setShowSendEmail(true)}>إرسال رسالة</Button>
+            </div>
+          </div>
+          {isNew ? (
+            <div className="grid gap-3">
+              <OwnerAutocomplete value={ownerName} onChange={setOwnerName} onSelect={(c) => { setCustomerId(c.id); setOwnerName(c.name); if (c.phone) setOwnerPhone(c.phone); setVehicleId(""); }} customers={customers || []} />
+              <Input value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} placeholder="+968 ..." dir="ltr" />
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 text-sm">
+              <Info label="الاسم" value={ownerName || customer?.name || "—"} />
+              <Info label="الهاتف" value={ownerPhone || customer?.phone || "—"} />
+              <Info label="البريد" value={(customer as any)?.email || "—"} />
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-bold flex items-center gap-2"><CarFront size={18} className="text-primary" /> بيانات السيارة</h2>
+            {!isNew && <Button size="sm" variant="outline" onClick={() => setEditVehicleSection((v) => !v)}><CarFront size={14} className="ml-1" /> تعديل بيانات المركبة</Button>}
+          </div>
+          {isNew || editVehicleSection ? (
+            <VehicleMakeModelPicker
+              make={vehicleMake}
+              model={vehicleModel}
+              plate={vehiclePlate}
+              year={vehicleYear}
+              color={vehicleColor}
+              vin={vehicleVin}
+              onChange={(patch) => {
+                if (patch.make !== undefined) setVehicleMake(patch.make);
+                if (patch.model !== undefined) setVehicleModel(patch.model);
+                if (patch.plate !== undefined) setVehiclePlate(patch.plate);
+                if (patch.year !== undefined) setVehicleYear(patch.year);
+                if (patch.color !== undefined) setVehicleColor(patch.color);
+                if (patch.vin !== undefined) setVehicleVin(patch.vin);
+              }}
+            />
+          ) : (
+            <div className="flex gap-4">
+              <VehicleAvatar imageUrl={(vehicle as any)?.vehicle_cover_image_url || (vehicle as any)?.vehicle_thumbnail_url} fallbackPhotos={damagePhotos} label={vehicleTitle} size="lg" />
+              <div className="grid flex-1 gap-3 md:grid-cols-2 text-sm">
+                <Info label="اللوحة" value={vehiclePlate || vehicle?.plate_number || "—"} />
+                <Info label="الدولة" value={(vehicle as any)?.plate_country || "OM"} />
+                <Info label="VIN" value={(vehicle as any)?.vin_number || vehicleVin || "—"} />
+                <Info label="النوع/الموديل" value={`${vehicleTitle} ${vehicleYear || vehicle?.year || ""}`.trim()} />
+                <Info label="اللون" value={vehicleColor || (vehicle as any)?.color || "—"} />
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card className="p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-bold flex items-center gap-2"><ClipboardList size={18} className="text-primary" /> أمر العمل المرتبط</h2>
+          {hasLinkedWorkOrder ? (
+            <Button size="sm" variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)}>فتح أمر العمل</Button>
+          ) : (
+            !isNew && isApprovedClaim && <Button size="sm" onClick={handleConvertToWorkOrder}>إنشاء أمر عمل</Button>
+          )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-3 text-sm">
+          <Info label="رقم أمر العمل" value={effectiveWorkOrderId || "—"} />
+          <Info label="الحالة" value={linkedWorkOrderStatus} />
+          <Info label="تاريخ الإنشاء" value={formatDateLatin((existing as any)?.job_order?.created_at || (existing as any)?.created_at || new Date())} />
         </div>
       </Card>
 
-      {/* ── Workflow Dates ── */}
-      <Can module="Insurance Claims" action="Edit" fallback={
-        <Card className="p-4">
-          <div className="flex items-center gap-2 text-sm font-semibold mb-3">
-            <ClipboardCheck size={16} className="text-primary" /> تواريخ سير العملية
+      <Card className="p-5 space-y-3">
+        <h2 className="font-bold flex items-center gap-2"><CheckSquare size={18} className="text-primary" /> البنود الموافق عليها</h2>
+        {(uplItems?.length || neededParts?.length) ? (
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/30"><tr><th className="p-2 text-right">البند</th><th className="p-2">الكمية</th><th className="p-2">الحالة</th><th className="p-2 text-right">ملاحظات</th></tr></thead>
+              <tbody>
+                {[
+                  ...(uplItems || []).map((i: any) => ({ name: i.description, quantity: i.quantity, status: "معتمد", notes: i.notes || "" })),
+                  ...(neededParts || []).map((i: any) => ({ name: i.name, quantity: i.quantity, status: i.status || "مطلوب", notes: i.notes || "" })),
+                ].map((item, idx) => (
+                  <tr key={idx} className="border-t"><td className="p-2">{item.name || "—"}</td><td className="p-2 text-center">{item.quantity || 1}</td><td className="p-2 text-center"><Badge variant="outline">{item.status}</Badge></td><td className="p-2">{item.notes || "—"}</td></tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <div><div className="text-muted-foreground mb-1">تاريخ التقدير</div><div className="font-semibold">{estimateDate ? formatDateLatin(estimateDate) : "—"}</div></div>
-            <div><div className="text-muted-foreground mb-1">وصول السيارة للورشة</div><div className="font-semibold">{workshopArrivalDate ? formatDateLatin(workshopArrivalDate) : "—"}</div></div>
-            <div><div className="text-muted-foreground mb-1">بدء العمل</div><div className="font-semibold">{workStartedAt ? formatDateLatin(workStartedAt) : "—"}</div></div>
-            <div><div className="text-muted-foreground mb-1">تاريخ التسليم</div><div className="font-semibold">{(existing as any)?.delivered_at ? formatDateLatin((existing as any).delivered_at) : "—"}</div></div>
+        ) : <p className="text-sm text-muted-foreground">لا توجد بنود معتمدة بعد.</p>}
+      </Card>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card className="p-5 space-y-3">
+          <h2 className="font-bold flex items-center gap-2"><ShieldCheck size={18} className="text-primary" /> التقدير والموافقة</h2>
+          <div className="grid gap-3 md:grid-cols-2 text-sm">
+            <Info label="قيمة التقدير" value={`${Number(estimatedCost || 0).toFixed(3)} ر.ع`} />
+            <Info label="قيمة الاعتماد" value={`${Number(approvedAmount || 0).toFixed(3)} ر.ع`} />
+            <Info label="الضريبة" value={`${(Number(approvedAmount || estimatedCost || 0) * 0.05).toFixed(3)} ر.ع`} />
+            <Info label="الإجمالي" value={`${(Number(approvedAmount || estimatedCost || 0) * 1.05).toFixed(3)} ر.ع`} />
+            <Info label="LPO" value={lpoNumber || "—"} />
+            <Info label="التحمل / الاهتلاك" value={`${(existing as any)?.deductible_amount || "—"} / ${(existing as any)?.depreciation_amount || "—"}`} />
           </div>
         </Card>
-      }>
-        <Card className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <ClipboardCheck size={16} className="text-primary" /> تواريخ سير العملية
-            </div>
-            <div className="text-[11px] text-muted-foreground">يتم تسجيل أي تعديل تلقائياً في سجل التدقيق.</div>
+
+        <Card className="p-5 space-y-3">
+          <h2 className="font-bold flex items-center gap-2"><Receipt size={18} className="text-primary" /> الفواتير والمدفوعات</h2>
+          <div className="grid gap-3 md:grid-cols-3 text-sm">
+            <Info label="رقم الفاتورة" value={(activeInvoice as any)?.invoice_number || "—"} />
+            <Info label="الإجمالي" value={`${invoiceTotal.toFixed(3)} ر.ع`} />
+            <Info label="المدفوع" value={`${paidTotal.toFixed(3)} ر.ع`} />
+            <Info label="المتبقي" value={`${paymentRemaining.toFixed(3)} ر.ع`} />
+            <Info label="حالة الدفع" value={paymentStatusLabel} />
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">تاريخ التقدير</Label>
-                <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setEstimateDate(new Date().toISOString().slice(0, 10))}>اليوم</button>
-              </div>
-              <Input ref={estimateDateRef} type="date" value={estimateDate} onChange={(e) => setEstimateDate(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">وصول السيارة للورشة</Label>
-                <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setWorkshopArrivalDate(new Date().toISOString().slice(0, 10))}>اليوم</button>
-              </div>
-              <Input ref={workshopArrivalDateRef} type="date" value={workshopArrivalDate} onChange={(e) => setWorkshopArrivalDate(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">بدء العمل</Label>
-                <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setWorkStartedAt(new Date().toISOString().slice(0, 10))}>اليوم</button>
-              </div>
-              <Input ref={workStartedAtRef} type="date" value={workStartedAt} onChange={(e) => setWorkStartedAt(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">تاريخ التسليم</Label>
-              <Input
-                type="date"
-                value={(existing as any)?.delivered_at ? String((existing as any).delivered_at).slice(0, 10) : ""}
-                readOnly
-                disabled
-                className="bg-muted/40"
-              />
-              <p className="text-[10px] text-muted-foreground">يُسجَّل تلقائياً عند تسليم السيارة من تبويب «التسليم».</p>
-            </div>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            تاريخ وصول السيارة هو المرجع الرئيسي لاحتساب مدة بقاء المركبة ولون حالة المطالبة (أخضر / برتقالي / أصفر / أحمر).
-          </p>
-          <div className="flex justify-end pt-2 border-t">
-            <Button
-              size="sm"
-              onClick={async () => {
-                if (isNew || !id) {
-                  toast.error("احفظ المطالبة أولاً");
-                  return;
-                }
-                try {
-                  const workflowDates = getWorkflowDateValues();
-                  const { data: verified, error } = await supabase
-                    .from("insurance_claims" as any)
-                    .update({
-                      estimate_date: workflowDates.estimate || null,
-                      workshop_arrival_date: workflowDates.arrival || null,
-                      work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
-                      insurance_employee_id: insuranceEmployeeId,
-                    })
-                    .eq("id", id)
-                    .select("id,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,status,insurance_employee_id")
-                    .single();
-                  if (error) throw error;
-                  if (!(verified as any)?.id) throw new Error("تعذر تأكيد حفظ تواريخ المطالبة");
-                  hydrateFromVerifiedClaim(verified);
-                  await writeClaimAudit("claim_workflow_dates_updated", {
-                    estimate_date: (verified as any).estimate_date ?? null,
-                    workshop_arrival_date: (verified as any).workshop_arrival_date ?? null,
-                    work_started_at: (verified as any).work_started_at ?? null,
-                    insurance_employee_id: (verified as any).insurance_employee_id ?? null,
-                    requested_workshop_arrival_date: workflowDates.arrival || null,
-                  });
-                  await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
-                  await queryClient.invalidateQueries({ queryKey: ["insurance_claims"] });
-                  toast.success("تم الحفظ");
-                } catch (e: any) {
-                  toast.error(e.message || "تعذر الحفظ");
-                }
-              }}
-            >
-              حفظ التعديلات
-            </Button>
+          <div className="flex flex-wrap gap-2">
+            {activeInvoice && <Button size="sm" variant="outline" onClick={() => setShowTaxInvoice(true)}>فتح الفاتورة</Button>}
+            {!isNew && <Button size="sm" variant="outline" onClick={() => navigate("/insurance/payments")}>إضافة دفعة</Button>}
+            {paymentRemaining > 0 && <Button size="sm" variant="ghost" onClick={() => setShowSendEmail(true)}>تذكير دفع</Button>}
           </div>
         </Card>
-      </Can>
+      </div>
 
-      {/* ── Workflow Tabs ── */}
-      <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-7">
-          <TabsTrigger value="inspect" className="gap-1.5">
-            <ClipboardCheck size={14} /> 1. فحص
-          </TabsTrigger>
-          <TabsTrigger value="estimate" className="gap-1.5">
-            <Calculator size={14} /> 2. صور وتقدير
-          </TabsTrigger>
-          <TabsTrigger value="approval" className="gap-1.5">
-            <CheckCircle2 size={14} /> 3. موافقة
-          </TabsTrigger>
-          <TabsTrigger value="workorder" className="gap-1.5">
-            <Wrench size={14} /> 4. أمر عمل
-          </TabsTrigger>
-          <TabsTrigger value="delivery" className="gap-1.5" disabled={isNew}>
-            <PackageCheck size={14} /> 5. تسليم
-          </TabsTrigger>
-          <TabsTrigger value="payments" className="gap-1.5" disabled={isNew}>
-            <DollarSign size={14} /> 6. مدفوعات
-          </TabsTrigger>
-          <TabsTrigger value="documents" className="gap-1.5" disabled={isNew}>
-            <FolderArchive size={14} /> 7. الأرشيف
-          </TabsTrigger>
-        </TabsList>
+      <Card className="p-5 space-y-3">
+        <h2 className="font-bold flex items-center gap-2"><WalletCards size={18} className="text-primary" /> المصروفات</h2>
+        <div className="grid gap-3 md:grid-cols-4 text-sm">
+          <Info label="قطع غيار" value={`${claimExpenses.filter((e: any) => String(e.category || "").includes("part")).reduce((s: number, e: any) => s + Number(e.amount || 0), 0).toFixed(3)} ر.ع`} />
+          <Info label="عمالة" value={`${claimExpenses.filter((e: any) => String(e.category || "").includes("labor")).reduce((s: number, e: any) => s + Number(e.amount || 0), 0).toFixed(3)} ر.ع`} />
+          <Info label="أخرى" value={`${claimExpenses.filter((e: any) => !String(e.category || "").includes("part") && !String(e.category || "").includes("labor")).reduce((s: number, e: any) => s + Number(e.amount || 0), 0).toFixed(3)} ر.ع`} />
+          <Info label="الإجمالي" value={`${claimExpensesTotal.toFixed(3)} ر.ع`} />
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => navigate("/accounting/expenses")}>فتح المصروفات</Button>
+          <Button size="sm" variant="outline" onClick={() => navigate(`/accounting/expenses?claim_id=${existing?.id || ""}&work_order_id=${effectiveWorkOrderId || ""}`)}>إضافة مصروف</Button>
+        </div>
+      </Card>
 
-        {/* ── 1) Inspection: damage photos + needed parts (the "inspection result") ── */}
-        <TabsContent value="inspect" className="space-y-4 mt-4">
-          {/* Linked inspection report */}
-          <Card className="p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <ClipboardCheck size={16} className="text-primary" /> تقرير الفحص الفني
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowInspectionPicker(true)}>
-                  <Search size={13} /> استيراد فحص موجود
-                </Button>
-                <Button variant="default" size="sm" className="gap-1" onClick={openNewInspection}>
-                  <Plus size={13} /> فحص جديد
-                </Button>
-              </div>
-            </div>
+      <Card className="p-5 space-y-3">
+        <h2 className="font-bold flex items-center gap-2"><ImagePlus size={18} className="text-primary" /> الصور والمستندات</h2>
+        {!isNew && id ? (
+          <ClaimDocumentsPanel claimId={id} />
+        ) : (
+          <p className="text-sm text-muted-foreground">احفظ المطالبة أولاً قبل رفع/عرض المستندات.</p>
+        )}
+      </Card>
 
-            {linkedInspection ? (
-              <div className="space-y-3">
-                <div className="p-3 bg-success/10 border border-success/30 rounded-lg flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <LinkIcon size={16} className="text-success shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-foreground truncate">
-                        {linkedInspection.id} — {linkedInspection.customer}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground truncate">
-                        {linkedInspection.vehicle} • {linkedInspection.damageType} • {linkedInspection.date}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1"
-                      onClick={() => setShowInspectionPdf(true)}
-                    >
-                      <Printer size={13} /> تصدير PDF
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setLinkedInspection(null)}>
-                      <X size={14} />
-                    </Button>
-                  </div>
-                </div>
-                {damagePhotos.length > 0 && (
-                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                    <Camera size={11} className="text-primary" />
-                    سيتم تضمين {damagePhotos.length} صورة من صور الأضرار في PDF التقرير، وستنتقل بنفس الترتيب إلى أمر العمل عند التحويل.
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="text-center py-4 text-muted-foreground text-xs border-2 border-dashed border-border rounded-lg">
-                اربط تقرير فحص من قسم الفحص والمعاينة، أو أنشئ فحصاً جديداً
-              </div>
-            )}
-          </Card>
-
-          {/* Damage photos */}
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Camera size={16} className="text-primary" /> صور الأضرار ({damagePhotos.length})
-              </div>
-              <label className="cursor-pointer">
-                <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handlePhotoUpload(e.target.files)} disabled={uploading} />
-                <Button variant="outline" size="sm" className="gap-1" asChild>
-                  <span><Upload size={14} /> رفع صور</span>
-                </Button>
-              </label>
-            </div>
-            {damagePhotos.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
-                لا توجد صور بعد. ارفع صور الأضرار لتوثيق حالة السيارة.
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {damagePhotos.map((url, i) => (
-                  <div key={i} className="relative group rounded-lg overflow-hidden border border-border">
-                    <img
-                      src={url}
-                      alt={`damage-${i}`}
-                      className="w-full h-32 object-cover bg-muted"
-                      loading="lazy"
-                      onError={(e) => {
-                        const img = e.currentTarget;
-                        img.style.display = "none";
-                        const fallback = img.nextElementSibling as HTMLElement | null;
-                        if (fallback) fallback.style.display = "flex";
-                      }}
-                    />
-                    <div className="hidden absolute inset-0 items-center justify-center bg-muted text-muted-foreground text-xs flex-col gap-1" style={{ display: "none" }}>
-                      <span>⚠️</span>
-                      <span>صورة مفقودة</span>
-                    </div>
-                    <button
-                      onClick={() => setDamagePhotos((p) => p.filter((_, idx) => idx !== i))}
-                      className="absolute top-1 left-1 w-6 h-6 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          {/* Inspection report upload */}
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <FileText size={16} className="text-primary" /> تقرير الفحص والمستندات
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(docTypeLabels).map(([type, label]) => (
-                  <label key={type} className="cursor-pointer">
-                    <input type="file" multiple accept=".pdf,image/*" className="hidden"
-                      onChange={(e) => handleDocUpload(e.target.files, type)} disabled={uploading} />
-                    <Button variant="outline" size="sm" className="gap-1" asChild>
-                      <span><FileUp size={12} /> {label}</span>
-                    </Button>
-                  </label>
-                ))}
-              </div>
-            </div>
-            {documents.length === 0 ? (
-              <div className="text-center py-6 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
-                ارفع تقرير الفحص الفني أو أي مستندات مساندة.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {documents.map((doc, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <FileText size={16} className="text-primary shrink-0" />
-                      <div className="min-w-0">
-                        <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-primary hover:underline truncate block">
-                          {doc.name}
-                        </a>
-                        <Badge variant="secondary" className="text-[10px] mt-0.5">{docTypeLabels[doc.type] ?? doc.type}</Badge>
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDocuments((d) => d.filter((_, idx) => idx !== i))}>
-                      <Trash2 size={12} />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <div className="flex justify-end">
-            <Button onClick={() => setTab("estimate")} className="gap-2">
-              التالي: التقدير <ArrowLeftRight size={14} />
-            </Button>
-          </div>
-        </TabsContent>
-
-        {/* ── 2) Estimate: needed parts + cost estimate ── */}
-        <TabsContent value="estimate" className="space-y-4 mt-4">
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Car size={16} className="text-primary" /> قطع الغيار المطلوبة ({neededParts.length})
-              </div>
-              <Button variant="outline" size="sm" className="gap-1" onClick={addPart}>
-                <Plus size={14} /> إضافة قطعة
-              </Button>
-            </div>
-            {neededParts.length === 0 ? (
-              <div className="text-center py-6 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
-                أضف قائمة القطع المطلوبة لشركة التأمين.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {neededParts.map((p, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-12 md:col-span-5 space-y-1">
-                      <Label className="text-xs">اسم القطعة</Label>
-                      <Input value={p.name} onChange={(e) => updatePart(i, { name: e.target.value })} placeholder="مثال: مصد أمامي" />
-                    </div>
-                    <div className="col-span-4 md:col-span-2 space-y-1">
-                      <Label className="text-xs">الكمية</Label>
-                      <Input type="number" min={1} value={p.quantity} onChange={(e) => updatePart(i, { quantity: parseInt(e.target.value) || 1 })} />
-                    </div>
-                    <div className="col-span-7 md:col-span-4 space-y-1">
-                      <Label className="text-xs">ملاحظات</Label>
-                      <Input value={p.notes ?? ""} onChange={(e) => updatePart(i, { notes: e.target.value })} placeholder="جديد / مستعمل ..." />
-                    </div>
-                    <div className="col-span-1 flex justify-end">
-                      <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" onClick={() => removePart(i)}>
-                        <Trash2 size={14} />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          {/* Cost estimate */}
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Calculator size={16} className="text-primary" /> تقدير التكلفة
-              </div>
-              <div className="flex items-center gap-2">
-                <Label className="text-xs">نوع التقدير:</Label>
-                <Select value={estimationType} onValueChange={(v) => setEstimationType(v as "lump_sum" | "upl")}>
-                  <SelectTrigger className="w-[160px] h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="lump_sum">Lump Sum (مبلغ مقطوع)</SelectItem>
-                    <SelectItem value="upl">UPL (قائمة بنود)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {estimationType === "lump_sum" ? (
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label>المبلغ المقدر للإصلاح (ر.ع)</Label>
-                  <Input type="number" step="0.01" value={estimatedCost} onChange={(e) => setEstimatedCost(e.target.value)} placeholder="0.00" className="text-lg font-semibold" />
-                  <p className="text-xs text-muted-foreground">سيُستخدم في PDF التقدير المُرسل لشركة التأمين.</p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>ملاحظات</Label>
-                  <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="ملاحظات على التقدير..." />
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <UplItemsEditor items={uplItems} onChange={setUplItems} />
-                <div className="space-y-1.5">
-                  <Label>ملاحظات</Label>
-                  <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="ملاحظات على التقدير..." />
-                </div>
-              </div>
-            )}
-          </Card>
-
-          <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setTab("inspect")}>السابق</Button>
-            <div className="flex gap-2 flex-wrap items-center">
-              <TemplatePicker docType="insurance_tax_invoice" size="sm" />
-              <Button onClick={() => setTab("approval")} className="gap-2">
-                التالي: الموافقة <ArrowLeftRight size={14} />
-              </Button>
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* ── 3) Approval ── */}
-        <TabsContent value="approval" className="space-y-4 mt-4">
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <CheckCircle2 size={16} className="text-primary" /> موافقة شركة التأمين
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label>المبلغ المقدر</Label>
-                  <Input value={estimatedCost} disabled className="bg-muted/40" data-amount="true" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>المبلغ الموافق عليه (ر.ع) *</Label>
-                  <Input type="number" step="0.01" value={approvedAmount} onChange={(e) => setApprovedAmount(e.target.value)} placeholder="0.00" className="text-lg font-semibold text-success" data-amount="true" />
-                </div>
-            </div>
-
-            {status === "rejected" && (
-              <div className="space-y-1.5">
-                <Label>سبب الرفض</Label>
-                <Textarea value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} rows={2} />
-              </div>
-            )}
-
-            <div className="flex flex-wrap gap-2 pt-2">
-              <div className="text-xs text-muted-foreground rounded-lg border border-border bg-secondary/20 px-3 py-2">
-                يتم تنفيذ الاعتماد من بطاقة التحكم الرئيسية أعلى الصفحة حتى لا تتكرر الأزرار.
-              </div>
-              <Button variant="outline" onClick={() => setStatus("rejected")} disabled={status === "rejected" || isNew}>
-                رفض
-              </Button>
-              {status === "rejected" && (
-                <Button variant="destructive" onClick={handleReject} disabled={updateStatus.isPending}>
-                  تأكيد الرفض
-                </Button>
-              )}
-            </div>
-
-            {status === "approved" && (
-              <div className="p-3 bg-success/10 border border-success/30 rounded-lg flex items-center gap-2 text-success text-sm">
-                <CheckCircle2 size={16} /> تمت الموافقة. يمكنك الآن إنشاء أمر العمل من التبويب التالي.
-              </div>
-            )}
-          </Card>
-
-          <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setTab("estimate")}>السابق</Button>
-            {status === "approved" && (
-              <Button onClick={() => setTab("workorder")} className="gap-2">
-                التالي: أمر العمل <ArrowLeftRight size={14} />
-              </Button>
-            )}
-          </div>
-        </TabsContent>
-
-        {/* ── 4) Convert to Work Order ── */}
-        <TabsContent value="workorder" className="space-y-4 mt-4">
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Wrench size={16} className="text-primary" /> تحويل إلى أمر عمل
-            </div>
-            <p className="text-sm text-muted-foreground">
-              سيتم إنشاء أمر عمل جديد يحتوي على: السيارة، صور الأضرار (في مرحلة الفحص)، قطع الغيار المطلوبة، والمبلغ الموافق عليه كتقدير أولي.
-              شركة التأمين <strong className="text-foreground">{company}</strong> ستكون الجهة الدافعة.
-            </p>
-
-            <div className="grid md:grid-cols-3 gap-3 text-sm">
-              <div className="p-3 bg-secondary/40 rounded-lg">
-                <div className="text-xs text-muted-foreground mb-1">السيارة</div>
-                <div className="font-medium">{vehicle ? `${vehicle.brand} ${vehicle.model} — ${vehicle.plate_number}` : "—"}</div>
-              </div>
-              <div className="p-3 bg-secondary/40 rounded-lg">
-                <div className="text-xs text-muted-foreground mb-1">صور وقطع</div>
-                <div className="font-medium">{damagePhotos.length} صور • {neededParts.filter(p => p.name.trim()).length} قطعة</div>
-              </div>
-              <div className="p-3 bg-success/10 rounded-lg">
-                <div className="text-xs text-muted-foreground mb-1">المبلغ الموافق</div>
-                <div className="font-bold text-success" data-amount="true">{parseFloat(approvedAmount || "0").toFixed(3)} ر.ع</div>
-              </div>
-            </div>
-
-            {/* عند وجود أمر عمل تلقائي مرتبط بالموافقة → 3 خيارات */}
-            {linkedWorkOrderId ? (
-              <div className="space-y-3">
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg flex items-center gap-2 text-emerald-700 dark:text-emerald-400 text-sm">
-                  <CheckCircle2 size={16} />
-                  أمر العمل تم إنشاؤه تلقائياً عند الموافقة وبيانات السيارة تمت مزامنتها. اختر الإجراء التالي:
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => setShowWorkOrderInline((v) => !v)}
-                    variant={showWorkOrderInline ? "default" : "outline"}
-                    className="gap-2"
-                    size="sm"
-                  >
-                    <Wrench size={16} /> {showWorkOrderInline ? "إخفاء العرض هنا" : "فتح أمر العمل هنا"}
-                  </Button>
-                  <Button
-                    onClick={() => navigate(`/work-orders/${linkedWorkOrderId}`)}
-                    variant="outline"
-                    className="gap-2"
-                    size="sm"
-                  >
-                    <LinkIcon size={16} /> الانتقال لصفحة أمر العمل
-                  </Button>
-                  <Button
-                    onClick={() => setTab("delivery")}
-                    variant="outline"
-                    className="gap-2"
-                    size="sm"
-                  >
-                    <PackageCheck size={16} /> الانتقال للتسليم
-                  </Button>
-                </div>
-                {/* عرض الملخص inline داخل نفس الصفحة */}
-                {showWorkOrderInline && <InlineWorkOrderSummary workOrderId={linkedWorkOrderId} />}
-              </div>
-            ) : (
-              <Button
-                onClick={handleConvertToWorkOrder}
-                disabled={status !== "approved"}
-                variant="outline"
-                className="gap-2"
-                size="sm"
-              >
-                <Wrench size={18} /> إنشاء أمر العمل هنا
-              </Button>
-            )}
-
-            {!workshopArrivalDate && (
-              <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg flex items-center gap-2 text-destructive text-sm">
-                <AlertCircle size={16} />
-                تحذير: لم يتم تسجيل <strong>تاريخ وصول السيارة للورشة</strong> — يُفضّل إدخاله من تبويب «تفاصيل» قبل إنشاء أمر العمل.
-              </div>
-            )}
-            {workshopArrivalDate && status !== "approved" && status !== "paid" && (
-              <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg flex items-center gap-2 text-warning text-sm">
-                <AlertCircle size={16} /> يجب الموافقة على المطالبة أولاً قبل التحويل لأمر عمل.
-              </div>
-            )}
-          </Card>
-        </TabsContent>
-
-        {/* ── 5) Delivery tab ── */}
-        <TabsContent value="delivery" className="space-y-4 mt-4">
-          {!isNew && id && (
-            <ClaimDeliverySection
-              claimId={id}
-              workOrderId={linkedWorkOrderId || undefined}
-              initial={{
-                delivery_photos: (existing as any)?.delivery_photos ?? [],
-                satisfaction_photos: (existing as any)?.satisfaction_photos ?? [],
-                receiver_id_photo: (existing as any)?.receiver_id_photo ?? null,
-                receiver_name: (existing as any)?.receiver_name ?? null,
-                receiver_id_number: (existing as any)?.receiver_id_number ?? null,
-                delivered_at: (existing as any)?.delivered_at ?? null,
-                delivery_notes: (existing as any)?.delivery_notes ?? null,
-              }}
-              onSaved={() => queryClient.invalidateQueries({ queryKey: ["insurance_claim", id] })}
-            />
-          )}
-        </TabsContent>
-
-        {/* ── 6) Payments tab ── */}
-        <TabsContent value="payments" className="space-y-4 mt-4">
-          {!isNew && id && (
-            <PaymentsSection
-              claimId={id}
-              insuranceCompanyId={companyId}
-              approvedAmount={parseFloat(approvedAmount) || 0}
-              estimatedAmount={parseFloat(estimatedCost) || 0}
-              status={status}
-              onAllPaid={() => updateStatus.mutate({ id, status: "paid" }, { onSuccess: () => setStatus("paid") })}
-            />
-          )}
-        </TabsContent>
-
-        {/* ── 7) Documents Archive ── */}
-        <TabsContent value="documents" className="space-y-4 mt-4">
-          {!isNew && id && <ClaimDocumentsPanel claimId={id} />}
-        </TabsContent>
-      </Tabs>
+      <Card className="p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-bold flex items-center gap-2"><MessagesSquare size={18} className="text-primary" /> المراسلات</h2>
+          <Button size="sm" variant="outline" onClick={() => navigate(`/messages?claim_id=${existing?.id || ""}`)}>فتح مركز الرسائل</Button>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3 text-sm">
+          <Info label="رسائل العميل" value="مربوطة بمركز الرسائل" />
+          <Info label="رسائل شركة التأمين" value={insuranceCo?.email || "—"} />
+          <Info label="سجل الاتصالات" value="Phone / WhatsApp / Email" />
+        </div>
+      </Card>
 
       {!isNew && (
         <Card className="p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="font-bold text-foreground">Timeline / Audit Log</h3>
+              <h3 className="font-bold text-foreground flex items-center gap-2"><History size={18} className="text-primary" /> Timeline / Audit Log</h3>
               <p className="text-xs text-muted-foreground">سجل زمني من Supabase لكل إجراء على المطالبة.</p>
             </div>
             <Badge variant="outline">{claimAudit.length} إجراء</Badge>
@@ -2724,6 +2058,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 }
 
 // ════════════════════════════════════════════════════════════════════════
+function Info({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-border bg-secondary/20 p-3">
+      <div className="text-[11px] text-muted-foreground mb-1">{label}</div>
+      <div className="font-semibold text-foreground break-words">{value || "—"}</div>
+    </div>
+  );
+}
+
 // Owner autocomplete — searches the tenant customers list and lets the
 // user keep typing a brand-new name (which will be auto-created on save).
 // ════════════════════════════════════════════════════════════════════════
