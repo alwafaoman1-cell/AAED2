@@ -12,9 +12,9 @@ import { toast } from "sonner";
 import { getFunctionErrorMessage } from "@/lib/functionErrors";
 
 function homeForRole(role?: string | null): string {
-  if (role === "supervisor") return "/supervisor-app";
-  if (role === "technician") return "/tech";
-  if (role === "accountant") return "/accountant-app";
+  if (role === "supervisor") return "/supervisor";
+  if (role === "technician") return "/technician";
+  if (role === "accountant") return "/accountant";
   return "/";
 }
 

@@ -248,9 +248,9 @@ export default function HomeShortcuts() {
         <div className="flex items-center gap-2 flex-wrap pt-2">
           <span className="text-[11px] text-muted-foreground">{isAr ? "تطبيقات سريعة:" : "Quick apps:"}</span>
           {[
-            { to: "/tech", label: isAr ? "تطبيق الفني" : "Technician" },
-            { to: "/supervisor-app", label: isAr ? "المشرف" : "Supervisor" },
-            { to: "/accountant-app", label: isAr ? "المحاسب" : "Accountant" },
+            { to: "/technician", label: isAr ? "تطبيق الفني" : "Technician" },
+            { to: "/supervisor", label: isAr ? "المشرف" : "Supervisor" },
+            { to: "/accountant", label: isAr ? "المحاسب" : "Accountant" },
             { to: "/install", label: isAr ? "تثبيت التطبيق" : "Install App" },
           ].map((a) => (
             <Link

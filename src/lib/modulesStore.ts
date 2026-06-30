@@ -24,10 +24,10 @@ export const ALL_MODULES: {
   path: string;
   group: "apps" | "core";
 }[] = [
-  { key: "tech",        group: "apps", path: "/tech",           labelAr: "تطبيق الفنيين",  labelEn: "Technician App", descAr: "واجهة الموبايل للفنيين لتحديث أوامر العمل ورفع الصور.", descEn: "Mobile interface for technicians to update work orders & upload photos." },
-  { key: "supervisor",  group: "apps", path: "/supervisor-app", labelAr: "تطبيق المشرف",   labelEn: "Supervisor App", descAr: "إضافة سندات الصرف بسرعة من الجوال.",                 descEn: "Quickly record expenses from the phone." },
+  { key: "tech",        group: "apps", path: "/technician",     labelAr: "تطبيق الفنيين",  labelEn: "Technician App", descAr: "واجهة الموبايل للفنيين لتحديث أوامر العمل ورفع الصور.", descEn: "Mobile interface for technicians to update work orders & upload photos." },
+  { key: "supervisor",  group: "apps", path: "/supervisor",     labelAr: "تطبيق المشرف",   labelEn: "Supervisor App", descAr: "إضافة سندات الصرف بسرعة من الجوال.",                 descEn: "Quickly record expenses from the phone." },
   { key: "manager",     group: "apps", path: "/manager-app",    labelAr: "تطبيق المدير",   labelEn: "Manager App",    descAr: "لوحة KPI تنفيذية على الجوال.",                       descEn: "Executive KPI dashboard on mobile." },
-  { key: "accountant",  group: "apps", path: "/accountant-app", labelAr: "تطبيق المحاسب",  labelEn: "Accountant App", descAr: "لوحة محاسبية يومية ومراقبة الإيرادات.",               descEn: "Daily accounting board & revenue monitor." },
+  { key: "accountant",  group: "apps", path: "/accountant",     labelAr: "تطبيق المحاسب",  labelEn: "Accountant App", descAr: "لوحة محاسبية يومية ومراقبة الإيرادات.",               descEn: "Daily accounting board & revenue monitor." },
   { key: "install",     group: "apps", path: "/install",        labelAr: "صفحة التثبيت",   labelEn: "Install Page",   descAr: "صفحة عامة لتثبيت التطبيق على الهاتف عبر QR.",         descEn: "Public install page with QR code." },
   { key: "insurance",   group: "core", path: "/insurance",      labelAr: "وحدة التأمين",   labelEn: "Insurance Module", descAr: "مطالبات التأمين، التقديرات، الفواتير، والدفعات.",   descEn: "Insurance claims, estimates, invoices, and payments." },
 ];

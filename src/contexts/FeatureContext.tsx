@@ -87,6 +87,7 @@ export const PATH_FEATURES: Array<[string, FeatureKey]> = [
   ["/work-orders", "workshop"],
   ["/inventory", "inventory"],
   ["/reports", "reports"],
+  ["/supervisor", "supervisor_app"],
   ["/supervisor-app", "supervisor_app"],
   ["/sales", "sales_invoices"],
   ["/messages", "whatsapp"],

@@ -86,6 +86,11 @@ const menuItems: MenuItem[] = [
     labelKey: "التطبيقات 📱",
     icon: Smartphone,
     iconClass: "text-blue-400",
+    children: [
+      { path: "/supervisor", labelKey: "تطبيق المشرف", icon: UserCog },
+      { path: "/technician", labelKey: "تطبيق الفني", icon: Wrench },
+      { path: "/accountant", labelKey: "تطبيق المحاسب", icon: FileSpreadsheet },
+    ],
   },
   { path: "/reports", labelKey: "nav.reports", icon: FileBarChart },
   {

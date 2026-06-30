@@ -171,6 +171,9 @@ export function canAccessPath(path: string, role: RbacRole | null | undefined): 
   if (!role) return false;
   if (role === "admin") return true;
   // المسارات العامة دائمًا مسموحة
+  if (path.startsWith("/supervisor")) return role === "manager" || role === "supervisor";
+  if (path.startsWith("/technician")) return role === "manager" || role === "technician";
+  if (path.startsWith("/accountant")) return role === "manager" || role === "accountant";
   if (path === "/profile" || path === "/tasks" || path === "/daily-log" || path === "/media-studio" || path === "/staff") {
     return true;
   }

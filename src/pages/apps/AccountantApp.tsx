@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Calculator, FileText, Wallet, Receipt, BookOpen, LogOut, RefreshCw,
   TrendingDown, TrendingUp, AlertCircle, ChevronLeft, ShieldCheck, BarChart3,
-  Banknote, FileSpreadsheet, Building2, ArrowDownToLine, ArrowUpFromLine,
+  Banknote, FileSpreadsheet, ArrowDownToLine, ArrowUpFromLine,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -82,13 +82,9 @@ export default function AccountantApp() {
     { label: "دفتر اليومية", to: "/accounting", icon: BookOpen, cls: "bg-indigo-500/10 text-indigo-500 border-indigo-500/30" },
     { label: "محاسبة التأمين", to: "/insurance/accounting", icon: ShieldCheck, cls: "bg-purple-500/10 text-purple-500 border-purple-500/30" },
     { label: "دفعات التأمين", to: "/insurance/payments", icon: Wallet, cls: "bg-fuchsia-500/10 text-fuchsia-500 border-fuchsia-500/30" },
-    { label: "الموردين", to: "/inventory/suppliers", icon: Building2, cls: "bg-amber-500/10 text-amber-500 border-amber-500/30" },
-    { label: "دفعات الموردين", to: "/inventory/supplier-payments", icon: ArrowUpFromLine, cls: "bg-orange-500/10 text-orange-500 border-orange-500/30" },
-    { label: "فواتير الشراء", to: "/inventory/purchase-invoices", icon: Receipt, cls: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
     { label: "تقرير شهري", to: "/reports/monthly", icon: BarChart3, cls: "bg-teal-500/10 text-teal-500 border-teal-500/30" },
     { label: "تقارير سحابية", to: "/reports/cloud-advanced", icon: FileSpreadsheet, cls: "bg-sky-500/10 text-sky-500 border-sky-500/30" },
     { label: "سجل النشاط", to: "/settings/audit-log", icon: AlertCircle, cls: "bg-muted text-foreground border-border" },
-    { label: "إعدادات الضريبة", to: "/settings/tax", icon: Calculator, cls: "bg-muted text-foreground border-border" },
   ];
 
   return (

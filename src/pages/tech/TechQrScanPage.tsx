@@ -49,7 +49,7 @@ export default function TechQrScanPage() {
   return (
     <div className="min-h-screen bg-background text-foreground" dir="rtl">
       <header className="sticky top-0 z-20 bg-card/95 backdrop-blur border-b border-border px-3 pt-safe pb-3 flex items-center gap-2">
-        <Button size="icon" variant="ghost" onClick={() => navigate("/tech")}>
+        <Button size="icon" variant="ghost" onClick={() => navigate("/technician")}>
           <ArrowRight className="h-5 w-5" />
         </Button>
         <div className="flex-1">

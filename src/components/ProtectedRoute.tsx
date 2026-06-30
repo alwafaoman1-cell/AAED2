@@ -1,9 +1,10 @@
 import { Navigate, useLocation } from "react-router-dom";
+import type { ReactNode } from "react";
 import { useAuth, AppRole } from "@/contexts/AuthContext";
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldAlert } from "lucide-react";
 
 interface Props {
-  children: React.ReactNode;
+  children: ReactNode;
   roles?: AppRole[];
 }
 
@@ -26,9 +27,12 @@ export default function ProtectedRoute({ children, roles }: Props) {
   if (roles && profile && !roles.includes(profile.role)) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 text-center" dir="rtl">
-        <div>
+        <div className="max-w-md rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <ShieldAlert className="mx-auto mb-3 h-10 w-10 text-destructive" />
           <h2 className="text-xl font-bold mb-2">لا تملك صلاحية الوصول</h2>
-          <p className="text-muted-foreground">هذه الصفحة متاحة فقط للأدوار: {roles.join(", ")}</p>
+          <p className="text-sm text-muted-foreground">
+            هذه الصفحة متاحة فقط للأدوار: {roles.join(", ")}
+          </p>
         </div>
       </div>
     );

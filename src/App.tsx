@@ -19,7 +19,7 @@ import HomeShortcuts from "./pages/HomeShortcuts";
 // Role-based home redirector: supervisors land on their mobile app, others see the shortcuts home.
 function RoleHome() {
   const { profile } = useAuth();
-  if (profile?.role === "supervisor") return <Navigate to="/supervisor-app" replace />;
+  if (profile?.role === "supervisor") return <Navigate to="/supervisor" replace />;
   return <HomeShortcuts />;
 }
 
@@ -202,11 +202,15 @@ const App = () => (
             <Route path="/v/:plate" element={<PublicVehicleProfile />} />
             <Route path="/c/approve/:token" element={<SupplementApprovalPage />} />
             <Route path="/sign/:token" element={<WorkOrderSignPage />} />
-            <Route path="/tech" element={<ProtectedRoute><TechnicianApp /></ProtectedRoute>} />
-            <Route path="/tech/scan" element={<ProtectedRoute><TechQrScanPage /></ProtectedRoute>} />
+            <Route path="/technician" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechnicianApp /></ProtectedRoute>} />
+            <Route path="/technician/scan" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechQrScanPage /></ProtectedRoute>} />
+            <Route path="/tech" element={<Navigate to="/technician" replace />} />
+            <Route path="/tech/scan" element={<Navigate to="/technician/scan" replace />} />
             <Route path="/manager-app" element={<ProtectedRoute roles={["admin","manager"]}><ManagerApp /></ProtectedRoute>} />
-            <Route path="/accountant-app" element={<ProtectedRoute roles={["admin","manager","accountant"]}><AccountantApp /></ProtectedRoute>} />
-            <Route path="/supervisor-app" element={<ProtectedRoute roles={["admin","manager","supervisor"]}><SupervisorApp /></ProtectedRoute>} />
+            <Route path="/accountant" element={<ProtectedRoute roles={["admin","manager","accountant"]}><AccountantApp /></ProtectedRoute>} />
+            <Route path="/accountant-app" element={<Navigate to="/accountant" replace />} />
+            <Route path="/supervisor" element={<ProtectedRoute roles={["admin","manager","supervisor"]}><SupervisorApp /></ProtectedRoute>} />
+            <Route path="/supervisor-app" element={<Navigate to="/supervisor" replace />} />
 
             <Route
               element={

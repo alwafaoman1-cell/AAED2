@@ -59,6 +59,7 @@ export default function TechnicianApp() {
   const [statusFor, setStatusFor] = useState<WorkOrder | null>(null);
   const [photosFor, setPhotosFor] = useState<string | null>(null);
   const [notesFor, setNotesFor] = useState<WorkOrder | null>(null);
+  const [detailFor, setDetailFor] = useState<WorkOrder | null>(null);
   const [noteText, setNoteText] = useState("");
   const [installEvent, setInstallEvent] = useState<any>(null);
   const [notifyState, setNotifyState] = useState<NotificationPermission | "unsupported">(
@@ -88,10 +89,16 @@ export default function TechnicianApp() {
 
   const myName = profile?.full_name?.trim() || "";
   const isPrivileged = hasRole("admin", "manager");
+  const isTechnicianOnly = profile?.role === "technician";
   const activeClock = getActiveClock();
+
+  useEffect(() => {
+    if (isTechnicianOnly && tab === "all") setTab("mine");
+  }, [isTechnicianOnly, tab]);
 
   const visible = useMemo(() => {
     let list = orders.slice();
+    if (isTechnicianOnly) list = list.filter((o) => myName && (o.technician || "").trim() === myName);
     if (tab === "mine" && myName) list = list.filter((o) => (o.technician || "").trim() === myName);
     if (tab === "done") list = list.filter((o) => o.status === "تم التسليم" || o.status === "مغلق" || o.status === "جاهز للتسليم");
     else list = list.filter((o) => ACTIVE_STATUSES.has(o.status) || tab === "all");
@@ -103,14 +110,15 @@ export default function TechnicianApp() {
       );
     }
     return list.sort((a, b) => (a.entryDate < b.entryDate ? 1 : -1));
-  }, [orders, tab, myName, search]);
+  }, [orders, tab, myName, search, isTechnicianOnly]);
 
   const counts = useMemo(() => {
+    const scopedOrders = isTechnicianOnly ? orders.filter((o) => myName && (o.technician || "").trim() === myName) : orders;
     const mine = orders.filter((o) => myName && (o.technician || "").trim() === myName && ACTIVE_STATUSES.has(o.status)).length;
-    const all = orders.filter((o) => ACTIVE_STATUSES.has(o.status)).length;
-    const done = orders.filter((o) => o.status === "تم التسليم" || o.status === "مغلق" || o.status === "جاهز للتسليم").length;
+    const all = scopedOrders.filter((o) => ACTIVE_STATUSES.has(o.status)).length;
+    const done = scopedOrders.filter((o) => o.status === "تم التسليم" || o.status === "مغلق" || o.status === "جاهز للتسليم").length;
     return { mine, all, done };
-  }, [orders, myName]);
+  }, [orders, myName, isTechnicianOnly]);
 
   const handleInstall = async () => {
     if (!installEvent) {
@@ -180,7 +188,7 @@ export default function TechnicianApp() {
             </p>
           </div>
           <LanguageSwitcher size="icon" showLabel={false} />
-          <Button size="icon" variant="ghost" onClick={() => navigate("/tech/scan")} title={t("tech.scanQr")} className="h-9 w-9">
+          <Button size="icon" variant="ghost" onClick={() => navigate("/technician/scan")} title={t("tech.scanQr")} className="h-9 w-9">
             <ScanLine className="h-4 w-4" />
           </Button>
           <Button
@@ -239,9 +247,9 @@ export default function TechnicianApp() {
           </div>
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-            <TabsList className="grid grid-cols-3 w-full h-11">
+            <TabsList className={`grid ${isTechnicianOnly ? "grid-cols-2" : "grid-cols-3"} w-full h-11`}>
               <TabsTrigger value="mine" className="text-xs">{t("tech.tabMine", { n: counts.mine })}</TabsTrigger>
-              <TabsTrigger value="all" className="text-xs">{t("tech.tabAll", { n: counts.all })}</TabsTrigger>
+              {!isTechnicianOnly && <TabsTrigger value="all" className="text-xs">{t("tech.tabAll", { n: counts.all })}</TabsTrigger>}
               <TabsTrigger value="done" className="text-xs">{t("tech.tabDone", { n: counts.done })}</TabsTrigger>
             </TabsList>
           </Tabs>
@@ -283,14 +291,25 @@ export default function TechnicianApp() {
                 <Button size="sm" variant="secondary" className="h-10 text-xs" onClick={() => setPhotosFor(o.id)}>
                   <Camera className="h-4 w-4 mx-1" /> {t("tech.btnPhotos")}
                 </Button>
-                <Button size="sm" variant="outline" className="h-10 text-xs" onClick={() => navigate(`/work-orders/${o.id}`)}>
+                <Button size="sm" variant="outline" className="h-10 text-xs" onClick={() => isPrivileged ? navigate(`/work-orders/${o.id}`) : setDetailFor(o)}>
                   <Eye className="h-4 w-4 mx-1" /> {t("tech.btnDetails")}
                 </Button>
               </div>
 
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-5 gap-1.5">
                 <Button size="sm" variant="ghost" className="h-9 text-[11px] px-1" onClick={() => setNotesFor(o)}>
                   <StickyNote className="h-3.5 w-3.5 mx-1" /> {t("tech.btnNote")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-9 text-[11px] px-1"
+                  onClick={() => {
+                    setNotesFor(o);
+                    setNoteText(isAr ? "طلب قطعة غيار: " : "Parts request: ");
+                  }}
+                >
+                  <Wrench className="h-3.5 w-3.5 mx-1" /> {isAr ? "قطعة" : "Part"}
                 </Button>
                 <Button
                   size="sm"
@@ -356,6 +375,68 @@ export default function TechnicianApp() {
         open={!!photosFor}
         onClose={() => { setPhotosFor(null); setOrders(getWorkOrders()); }}
       />
+
+      <Sheet open={!!detailFor} onOpenChange={(o) => !o && setDetailFor(null)}>
+        <SheetContent side="bottom" className="h-[82vh] bg-card border-border overflow-y-auto" dir={dir}>
+          <SheetHeader>
+            <SheetTitle className="text-foreground">
+              {detailFor?.id} · {detailFor?.plate}
+            </SheetTitle>
+          </SheetHeader>
+          {detailFor && (
+            <div className="mt-4 space-y-3 text-sm">
+              <Card className="p-3 bg-secondary/30 border-border">
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div className="text-muted-foreground">{isAr ? "العميل" : "Customer"}</div>
+                    <div className="font-semibold">{detailFor.customer || "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">{isAr ? "المركبة" : "Vehicle"}</div>
+                    <div className="font-semibold">{detailFor.vehicleType} {detailFor.model}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">{isAr ? "الحالة" : "Status"}</div>
+                    <Badge variant="outline" className={`mt-1 text-[10px] ${STATUS_TONE[detailFor.status] || ""}`}>{detailFor.status}</Badge>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">{isAr ? "الفني" : "Technician"}</div>
+                    <div className="font-semibold">{detailFor.technician || "—"}</div>
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-3 bg-secondary/30 border-border">
+                <div className="text-xs text-muted-foreground mb-1">{isAr ? "الأعمال المطلوبة / تعليمات المشرف" : "Required work / supervisor instructions"}</div>
+                <div className="whitespace-pre-wrap leading-relaxed">{detailFor.description || detailFor.diagnosis || "—"}</div>
+              </Card>
+              {!!detailFor.partsNeeded?.length && (
+                <Card className="p-3 bg-secondary/30 border-border">
+                  <div className="text-xs text-muted-foreground mb-2">{isAr ? "قطع الغيار المطلوبة" : "Needed parts"}</div>
+                  <div className="space-y-2">
+                    {detailFor.partsNeeded.map((p, idx) => (
+                      <div key={`${p.name}-${idx}`} className="flex items-center justify-between rounded-lg border border-border bg-background/60 px-2 py-1.5 text-xs">
+                        <span>{p.name}</span>
+                        <Badge variant="outline">{p.quantity}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+              <div className="grid grid-cols-3 gap-2">
+                <Button className="h-11 text-xs" onClick={() => { setStatusFor(detailFor); setDetailFor(null); }}>
+                  <Workflow className="h-4 w-4 mx-1" /> {t("tech.btnStatus")}
+                </Button>
+                <Button variant="secondary" className="h-11 text-xs" onClick={() => { setPhotosFor(detailFor.id); setDetailFor(null); }}>
+                  <Camera className="h-4 w-4 mx-1" /> {t("tech.btnPhotos")}
+                </Button>
+                <Button variant="outline" className="h-11 text-xs" onClick={() => { setNotesFor(detailFor); setDetailFor(null); }}>
+                  <StickyNote className="h-4 w-4 mx-1" /> {t("tech.btnNote")}
+                </Button>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
       {/* Notes sheet */}
       <Sheet open={!!notesFor} onOpenChange={(o) => !o && setNotesFor(null)}>

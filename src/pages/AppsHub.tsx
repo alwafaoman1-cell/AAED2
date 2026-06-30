@@ -16,10 +16,10 @@ interface AppItem {
 }
 
 const APPS: AppItem[] = [
-  { path: "/tech",           moduleKey: "tech",        icon: Wrench,          color: "text-amber-500",  titleAr: "تطبيق الفنيين",  titleEn: "Technician App",  descAr: "تحديث أوامر العمل ورفع الصور من الجوال.",       descEn: "Update work orders & upload photos from mobile." },
+  { path: "/technician",     moduleKey: "tech",        icon: Wrench,          color: "text-amber-500",  titleAr: "تطبيق الفنيين",  titleEn: "Technician App",  descAr: "تحديث أوامر العمل ورفع الصور من الجوال.",       descEn: "Update work orders & upload photos from mobile." },
   { path: "/manager-app",    moduleKey: "manager",     icon: LayoutDashboard, color: "text-blue-500",   titleAr: "تطبيق المدير",   titleEn: "Manager App",     descAr: "لوحة KPI تنفيذية على الجوال.",                   descEn: "Executive KPI dashboard on mobile." },
-  { path: "/accountant-app", moduleKey: "accountant",  icon: FileSpreadsheet, color: "text-emerald-500",titleAr: "تطبيق المحاسب",  titleEn: "Accountant App",  descAr: "لوحة محاسبية يومية ومراقبة الإيرادات.",            descEn: "Daily accounting board & revenue monitor." },
-  { path: "/supervisor-app", moduleKey: "supervisor",  icon: ReceiptText,     color: "text-fuchsia-500",titleAr: "تطبيق المشرف",   titleEn: "Supervisor App",  descAr: "إضافة سندات الصرف بسرعة من الجوال.",              descEn: "Quickly record expenses from the phone." },
+  { path: "/accountant",     moduleKey: "accountant",  icon: FileSpreadsheet, color: "text-emerald-500",titleAr: "تطبيق المحاسب",  titleEn: "Accountant App",  descAr: "لوحة محاسبية يومية ومراقبة الإيرادات.",            descEn: "Daily accounting board & revenue monitor." },
+  { path: "/supervisor",     moduleKey: "supervisor",  icon: ReceiptText,     color: "text-fuchsia-500",titleAr: "تطبيق المشرف",   titleEn: "Supervisor App",  descAr: "إضافة سندات الصرف بسرعة من الجوال.",              descEn: "Quickly record expenses from the phone." },
   { path: "/install",        moduleKey: "install",     icon: Download,        color: "text-cyan-500",   titleAr: "تثبيت التطبيق",  titleEn: "Install App",     descAr: "صفحة تثبيت التطبيق على الهاتف بدون متجر.",         descEn: "Install the app on your phone — no app store." },
 ];
 
