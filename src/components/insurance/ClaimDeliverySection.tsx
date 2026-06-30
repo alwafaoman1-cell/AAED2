@@ -15,6 +15,7 @@ import AiExtractButton from "@/components/ai/AiExtractButton";
 interface Props {
   claimId: string;
   workOrderId?: string;
+  vehicleId?: string | null;
   initial?: {
     delivery_photos?: string[];
     satisfaction_photos?: string[];
@@ -40,7 +41,20 @@ const SUPA_STATUS_TO_AR: Record<string, string> = {
   closed: "مغلق",
 };
 
-export default function ClaimDeliverySection({ claimId, workOrderId, initial, onSaved }: Props) {
+async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
+  const { error } = await supabase.from("claim_audit_logs").insert(payload as any);
+  if (!error) return;
+  const message = String(error.message || "");
+  if ("vehicle_id" in payload && /vehicle_id|schema cache|column/i.test(message)) {
+    const { vehicle_id: _vehicleId, ...fallback } = payload;
+    const retry = await supabase.from("claim_audit_logs").insert(fallback as any);
+    if (retry.error) throw retry.error;
+    return;
+  }
+  throw error;
+}
+
+export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, initial, onSaved }: Props) {
   const [deliveryPhotos, setDeliveryPhotos] = useState<string[]>(initial?.delivery_photos ?? []);
   const [satisfactionPhotos, setSatisfactionPhotos] = useState<string[]>(initial?.satisfaction_photos ?? []);
   const [receiverIdPhoto, setReceiverIdPhoto] = useState<string | null>(initial?.receiver_id_photo ?? null);
@@ -144,14 +158,15 @@ export default function ClaimDeliverySection({ claimId, workOrderId, initial, on
     }
     const { data: tenant } = await supabase.rpc("get_user_tenant_id");
     if (tenant) {
-      await supabase.from("claim_audit_logs").insert({
+      await insertClaimAuditWithVehicle({
         tenant_id: tenant as string,
         claim_id: claimId,
+        vehicle_id: vehicleId || null,
         action: "upload_photo",
         category,
         file_path: path,
         details: { name: file.name, size: file.size, kind: isPdf ? "pdf" : "image" },
-      });
+      } as any);
     }
     const { data: signed } = await supabase.storage.from("insurance-docs").createSignedUrl(path, 60 * 60 * 24 * 7);
     return signed?.signedUrl ?? "";
@@ -209,6 +224,24 @@ export default function ClaimDeliverySection({ claimId, workOrderId, initial, on
     if (error) {
       toast.error("فشل الحفظ: " + error.message);
       return;
+    }
+    const { data: tenant } = await supabase.rpc("get_user_tenant_id");
+    if (tenant) {
+      await insertClaimAuditWithVehicle({
+        tenant_id: tenant as string,
+        claim_id: claimId,
+        vehicle_id: vehicleId || null,
+        action: markDelivered ? "delivery_confirmed" : "delivery_saved",
+        category: "delivery",
+        details: {
+          delivered_at: payload.delivered_at || deliveredAtIso,
+          receiver_name: receiverName || null,
+          receiver_id_number: receiverIdNumber || null,
+          delivery_photos_count: deliveryPhotos.length,
+          satisfaction_photos_count: satisfactionPhotos.length,
+          has_receiver_id: !!receiverIdPhoto,
+        },
+      } as any);
     }
     toast.success(markDelivered ? "تم تسجيل التسليم" : "تم حفظ بيانات التسليم");
     onSaved?.();
@@ -392,7 +425,14 @@ export default function ClaimDeliverySection({ claimId, workOrderId, initial, on
           </Button>
           {receiverIdPhoto && (
             <div className="relative mt-2 inline-block">
-              <img src={receiverIdPhoto} alt="" className="h-32 rounded-lg border border-border" />
+              {isPdfUrl(receiverIdPhoto) ? (
+                <a href={receiverIdPhoto} target="_blank" rel="noreferrer" className="flex h-32 w-32 flex-col items-center justify-center rounded-lg border border-border bg-muted text-sm">
+                  <span className="text-3xl">📄</span>
+                  PDF
+                </a>
+              ) : (
+                <img src={receiverIdPhoto} alt="" className="h-32 rounded-lg border border-border" />
+              )}
               <button
                 type="button"
                 onClick={() => setReceiverIdPhoto(null)}

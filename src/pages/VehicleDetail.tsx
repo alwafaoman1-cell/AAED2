@@ -25,10 +25,12 @@ import { getWorkOrders, subscribeWorkOrders, refreshWorkOrdersFromCloud, type Wo
 import { customersStore } from "@/lib/customersStore";
 import { getVehicleCardHtml, getWorkOrderHtml, getStagePhotosAlbumHtml } from "@/lib/pdfGenerator";
 import { canEdit } from "@/lib/permissions";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import PlateInput from "@/components/vehicles/PlateInput";
+import { supabase } from "@/integrations/supabase/client";
+import { formatDateLatin } from "@/lib/numberUtils";
 
 export default function VehicleDetail() {
   const { plate } = useParams<{ plate: string }>();
@@ -41,6 +43,23 @@ export default function VehicleDetail() {
   useEffect(() => subscribeWorkOrders(() => setTick((t) => t + 1)), []);
 
   const vehicle = useMemo(() => vehiclesStore.getById(decodedPlate), [decodedPlate, tick]);
+  const { data: vehicleAuditLogs = [] } = useQuery({
+    queryKey: ["vehicle_claim_audit_logs", vehicle?.cloudId],
+    enabled: !!vehicle?.cloudId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("claim_audit_logs" as any)
+        .select("id,claim_id,vehicle_id,action,category,details,created_at")
+        .eq("vehicle_id", vehicle?.cloudId)
+        .order("created_at", { ascending: false })
+        .limit(80);
+      if (error) {
+        if (/vehicle_id|schema cache|column/i.test(String(error.message || ""))) return [];
+        throw error;
+      }
+      return (data || []) as any[];
+    },
+  });
   const allOrders = useMemo<WorkOrder[]>(() => getWorkOrders(), [tick]);
   const orders = useMemo(
     () => allOrders.filter((o) => o.plate === decodedPlate).sort((a, b) => b.entryDate.localeCompare(a.entryDate)),
@@ -444,6 +463,9 @@ export default function VehicleDetail() {
           <TabsTrigger value="claims" className="gap-1 data-[state=active]:bg-card">
             <Shield size={14} /> مطالبات التأمين
           </TabsTrigger>
+          <TabsTrigger value="audit" className="gap-1 data-[state=active]:bg-card">
+            <Activity size={14} /> سجل المركبة ({vehicleAuditLogs.length})
+          </TabsTrigger>
         </TabsList>
 
         {/* Timeline — full WO archive */}
@@ -630,6 +652,38 @@ export default function VehicleDetail() {
                 </div>
               </div>
             </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="audit" className="mt-4 space-y-3">
+          {!vehicle?.cloudId ? (
+            <EmptyState icon={Activity} title="سجل المركبة السحابي غير متاح" hint="ستظهر الأحداث هنا بعد مزامنة المركبة مع Supabase." />
+          ) : vehicleAuditLogs.length === 0 ? (
+            <EmptyState icon={Activity} title="لا توجد أحداث محفوظة للمركبة" hint="أحداث المطالبات والتسليم الجديدة ستظهر هنا تلقائياً." />
+          ) : (
+            <div className="bg-card border border-border rounded-xl divide-y overflow-hidden">
+              {vehicleAuditLogs.map((row: any) => (
+                <div key={row.id} className="p-4 flex flex-col md:flex-row md:items-start gap-3">
+                  <div className="md:w-40 text-xs text-muted-foreground">{formatDateLatin(row.created_at)}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-foreground">{row.action}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary">{row.category || "audit"}</span>
+                      {row.claim_id && (
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => navigate(`/insurance/${row.claim_id}/audit`)}>
+                          فتح السجل
+                        </Button>
+                      )}
+                    </div>
+                    {row.details && (
+                      <pre className="mt-2 max-h-32 overflow-auto rounded bg-secondary/50 p-2 text-[11px] text-muted-foreground" dir="ltr">
+                        {JSON.stringify(row.details, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </TabsContent>
 

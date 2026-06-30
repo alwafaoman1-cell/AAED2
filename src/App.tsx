@@ -73,6 +73,7 @@ const InsuranceClaimsList = lazy(() => import("./pages/insurance/InsuranceClaims
 const InsurancePipeline = lazy(() => import("./pages/insurance/InsurancePipeline"));
 const InsuranceAlertsCenter = lazy(() => import("./pages/insurance/InsuranceAlertsCenter"));
 const InsuranceClaimDetail = lazy(() => import("./pages/insurance/InsuranceClaimDetail"));
+const InsuranceClaimAuditPage = lazy(() => import("./pages/insurance/InsuranceClaimAuditPage"));
 const NewInsuranceClaim = lazy(() => import("./pages/insurance/NewInsuranceClaim"));
 const InsuranceCompanies = lazy(() => import("./pages/insurance/InsuranceCompanies"));
 const InsuranceCompanyDetail = lazy(() => import("./pages/insurance/InsuranceCompanyDetail"));
@@ -288,6 +289,7 @@ const App = () => (
                 <Route path="/insurance/companies/:id" element={<InsuranceCompanyDetail />} />
                 <Route path="/insurance/new" element={<NewInsuranceClaim />} />
                 <Route path="/insurance/:id/archive" element={<ClaimArchivePage />} />
+                <Route path="/insurance/:id/audit" element={<InsuranceClaimAuditPage />} />
                 <Route path="/insurance/:id" element={<InsuranceClaimDetail />} />
               </Route>
               <Route path="/vehicles" element={<Vehicles />} />

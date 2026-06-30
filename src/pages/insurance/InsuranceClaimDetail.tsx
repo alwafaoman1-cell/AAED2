@@ -38,7 +38,6 @@ import { formatDateLatin } from "@/lib/numberUtils";
 import { nextWorkOrderNumber } from "@/lib/numbering";
 import { saveClaimDocument } from "@/lib/uploadHtmlAsPdf";
 import ClaimDocumentsPanel from "@/components/insurance/ClaimDocumentsPanel";
-import { FolderArchive } from "lucide-react";
 import TemplatePicker from "@/components/print/TemplatePicker";
 import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
 import { saveWorkOrderToCloud, type WorkOrder, type NeededPart } from "@/lib/workOrdersStore";
@@ -92,6 +91,19 @@ const STAGE_FLOW: { key: string; label: string; status: "pending" | "approved" |
 ];
 
 const dateOnly = (value?: string | null) => value ? String(value).slice(0, 10) : "";
+
+async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
+  const { error } = await supabase.from("claim_audit_logs").insert(payload as any);
+  if (!error) return;
+  const message = String(error.message || "");
+  if ("vehicle_id" in payload && /vehicle_id|schema cache|column/i.test(message)) {
+    const { vehicle_id: _vehicleId, ...fallback } = payload;
+    const retry = await supabase.from("claim_audit_logs").insert(fallback as any);
+    if (retry.error) throw retry.error;
+    return;
+  }
+  throw error;
+}
 
 export default function InsuranceClaimDetail() {
   const { id } = useParams();
@@ -321,14 +333,15 @@ export default function InsuranceClaimDetail() {
       // audit log (best-effort)
       const { data: tenant } = await supabase.rpc("get_user_tenant_id");
       if (tenant) {
-        await supabase.from("claim_audit_logs").insert({
+        await insertClaimAuditWithVehicle({
           tenant_id: tenant as string,
           claim_id: id,
+          vehicle_id: vehicleId && isUuid(vehicleId) ? vehicleId : null,
           action: "upload_photo",
           category,
           file_path: path,
           details: { name: file.name, size: file.size, type: file.type },
-        });
+        } as any);
       }
       return data?.signedUrl ?? null;
     } catch (e: any) {
@@ -516,14 +529,14 @@ export default function InsuranceClaimDetail() {
     if (!id || isNew) return;
     const tenantId = (existing as any)?.tenant_id;
     if (!tenantId) return;
-    const { error } = await supabase.from("claim_audit_logs").insert({
+    await insertClaimAuditWithVehicle({
       tenant_id: tenantId,
       claim_id: id,
+      vehicle_id: vehicleId && isUuid(vehicleId) ? vehicleId : null,
       action,
       category,
       details: details as any,
     });
-    if (error) throw error;
     await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
   };
 
@@ -1787,7 +1800,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Info label="بداية الإصلاح" value={workStartedAt ? formatDateLatin(workStartedAt) : "—"} />
             <Info label="الجاهزية / التسليم" value={workCompletedAt || (existing as any)?.delivered_at ? formatDateLatin(workCompletedAt || (existing as any)?.delivered_at) : "—"} />
           </Card>
-          <TimelineStrip claimAudit={claimAudit} className="xl:col-span-3" />
+          <TimelineStrip claimAudit={claimAudit} claimId={id} className="xl:col-span-3" />
         </div>
       )}
 
@@ -1897,7 +1910,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Button variant="outline" onClick={() => setShowSendEmail(true)}>إرسال تحديث</Button>
             <Button variant="outline" onClick={() => navigate(`/messages?claim_id=${existing?.id || ""}`)}>فتح مركز الرسائل</Button>
           </Card>
-          <TimelineStrip claimAudit={claimAudit} className="xl:col-span-4" />
+          <TimelineStrip claimAudit={claimAudit} claimId={id} className="xl:col-span-4" />
         </div>
       )}
 
@@ -1944,7 +1957,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Button variant="outline" onClick={() => setShowSendEmail(true)}>إرسال تحديث للعميل</Button>
             <Button variant="outline" onClick={() => navigate(`/messages?claim_id=${existing?.id || ""}`)}>فتح مركز الرسائل</Button>
           </Card>
-          <TimelineStrip claimAudit={claimAudit} className="xl:col-span-4" />
+          <TimelineStrip claimAudit={claimAudit} claimId={id} className="xl:col-span-4" />
         </div>
       )}
 
@@ -2007,29 +2020,58 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Info label="حالة البوابة" value={hasLinkedWorkOrder ? "مفعلة" : "تحتاج أمر عمل مرتبط"} />
             <Button variant="outline" onClick={openUnifiedCustomerPortal} disabled={!hasLinkedWorkOrder}>بوابة العميل</Button>
           </Card>
-          <TimelineStrip claimAudit={claimAudit} className="xl:col-span-3" />
+          <TimelineStrip claimAudit={claimAudit} claimId={id} className="xl:col-span-3" />
         </div>
       )}
 
       {claimViewIndex === 4 && (
         <div className="grid gap-4 xl:grid-cols-3 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
+          {!isNew && id ? (
+            <div className="xl:col-span-2">
+              <ClaimDeliverySection
+                claimId={id}
+                workOrderId={effectiveWorkOrderId || undefined}
+                vehicleId={vehicleId && isUuid(vehicleId) ? vehicleId : null}
+                initial={{
+                  delivery_photos: ((existing as any)?.delivery_photos || []) as string[],
+                  satisfaction_photos: ((existing as any)?.satisfaction_photos || []) as string[],
+                  receiver_id_photo: (existing as any)?.receiver_id_photo || null,
+                  receiver_name: (existing as any)?.receiver_name || null,
+                  receiver_id_number: (existing as any)?.receiver_id_number || null,
+                  delivered_at: (existing as any)?.delivered_at || null,
+                  delivery_notes: (existing as any)?.delivery_notes || null,
+                }}
+                onSaved={() => {
+                  queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
+                  queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
+                }}
+              />
+            </div>
+          ) : (
+            <Card className="p-5 space-y-3 xl:col-span-2">
+              <h2 className="font-bold flex items-center gap-2 text-primary"><PackageCheck size={18} /> التسليم والإغلاق</h2>
+              <p className="text-sm text-muted-foreground">احفظ المطالبة أولاً قبل رفع مستندات التسليم أو إصدار الإقرار.</p>
+            </Card>
+          )}
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-primary"><PackageCheck size={18} /> التسليم والإغلاق</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><FileText size={18} /> ملاحظات نهائية</h2>
             <Info label="حالة التسليم" value={isDeliveredClaim ? "تم التسليم" : isReadyForDelivery ? "جاهز للتسليم" : "قيد التنفيذ"} />
             <Info label="تاريخ التسليم المتوقع" value={formatDateLatin(workCompletedAt || (existing as any)?.delivered_at || new Date())} />
             <Info label="مدة بقاء المركبة" value={`${Math.max(0, Math.ceil((new Date((existing as any)?.delivered_at || new Date()).getTime() - new Date(workshopArrivalDate || (existing as any)?.created_at || new Date()).getTime()) / 86400000))} يوم`} />
-            <Button variant="outline" onClick={() => openStageDialog(vehicleProgress[4])}>تأكيد التسليم</Button>
-          </Card>
-          <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-primary"><FolderArchive size={18} /> مستندات التسليم</h2>
-            {!isNew && id ? <ClaimDocumentsPanel claimId={id} /> : <p className="text-sm text-muted-foreground">احفظ المطالبة أولاً.</p>}
-          </Card>
-          <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-primary"><FileText size={18} /> ملاحظات نهائية</h2>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} />
             <Button variant="outline" onClick={handleSave}>تعديل الملاحظة</Button>
           </Card>
-          <TimelineStrip claimAudit={claimAudit} className="xl:col-span-3" />
+          <Card className="p-5 space-y-3 xl:col-span-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-bold flex items-center gap-2 text-primary"><History size={18} /> سجل الإجراءات</h2>
+                <p className="text-sm text-muted-foreground">السجل الكامل محفوظ في Supabase ومربوط بالمطالبة والمركبة.</p>
+              </div>
+              <Button variant="outline" onClick={() => navigate(`/insurance/${id}/audit`)}>
+                فتح سجل الإجراءات الكامل
+              </Button>
+            </div>
+          </Card>
         </div>
       )}
 
@@ -2590,13 +2632,21 @@ function ApprovedItemsTable({ uplItems, neededParts }: { uplItems: UplItem[]; ne
   );
 }
 
-function TimelineStrip({ claimAudit, className = "" }: { claimAudit: any[]; className?: string }) {
+function TimelineStrip({ claimAudit, claimId, className = "" }: { claimAudit: any[]; claimId?: string; className?: string }) {
+  const navigate = useNavigate();
   const items = (claimAudit || []).slice(0, 6);
   return (
     <Card className={`p-5 ${className}`}>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-bold flex items-center gap-2 text-primary"><History size={18} /> سجل الإجراءات (Timeline)</h2>
-        <Badge variant="outline">{claimAudit.length} إجراء</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline">{claimAudit.length} إجراء</Badge>
+          {claimId && claimId !== "new" && (
+            <Button size="sm" variant="outline" onClick={() => navigate(`/insurance/${claimId}/audit`)}>
+              فتح السجل الكامل
+            </Button>
+          )}
+        </div>
       </div>
       {items.length === 0 ? (
         <p className="text-center text-sm text-muted-foreground">لا توجد أحداث مسجلة بعد.</p>
