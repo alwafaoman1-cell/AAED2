@@ -1968,7 +1968,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Info label="إجمالي الفاتورة" value={`${invoiceTotal.toFixed(3)} ر.ع`} />
             <Info label="الضريبة" value={`${invoiceVat.toFixed(3)} ر.ع`} />
             <Badge variant={activeInvoice ? "default" : "secondary"}>
-              {activeInvoice ? "الفاتورة مرتبطة — استخدم زر عرض الفاتورة من الأعلى" : "لا توجد فاتورة — استخدم زر إنشاء فاتورة من الأعلى"}
+              {activeInvoice ? "الفاتورة مرتبطة — يمكن عرضها من ملخص الفواتير" : "لا توجد فاتورة — ارفع LPO ثم استخدم زر إصدار الفاتورة في هذه المرحلة"}
             </Badge>
           </Card>
           {!isNew && id && (
