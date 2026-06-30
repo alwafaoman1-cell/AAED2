@@ -60,6 +60,23 @@ export default function VehicleDetail() {
       return (data || []) as any[];
     },
   });
+  const { data: vehicleClaims = [] } = useQuery({
+    queryKey: ["vehicle_claim_visits", vehicle?.cloudId],
+    enabled: !!vehicle?.cloudId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("insurance_claims" as any)
+        .select("id,claim_number,status,vehicle_id,job_order_id,auto_job_order_id,created_at,accident_date,updated_at")
+        .eq("vehicle_id", vehicle?.cloudId)
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (error) {
+        if (/vehicle_id|schema cache|column/i.test(String(error.message || ""))) return [];
+        throw error;
+      }
+      return (data || []) as any[];
+    },
+  });
   const allOrders = useMemo<WorkOrder[]>(() => getWorkOrders(), [tick]);
   const orders = useMemo(
     () => allOrders.filter((o) => o.plate === decodedPlate).sort((a, b) => b.entryDate.localeCompare(a.entryDate)),
@@ -180,6 +197,15 @@ export default function VehicleDetail() {
   );
   const totalDeposits = orders.reduce((sum, o) => sum + (o.depositApplied || 0), 0);
   const uniqueStatuses = Array.from(new Set(orders.map((o) => o.status)));
+  const claimOnlyVisits = vehicleClaims.filter((claim: any) => !claim.job_order_id && !claim.auto_job_order_id);
+  const workshopVisitDates = [
+    ...orders.map((o) => o.entryDate).filter(Boolean),
+    ...claimOnlyVisits.map((claim: any) => String(claim.accident_date || claim.created_at || "").slice(0, 10)).filter(Boolean),
+  ].sort();
+  const workshopVisits = orders.length + claimOnlyVisits.length;
+  const firstWorkshopVisit = workshopVisitDates[0] || "-";
+  const lastWorkshopVisit = workshopVisitDates[workshopVisitDates.length - 1] || "-";
+  const trackingVisits = Number((vehicle as any).trackingVisits || (vehicle as any).tracking_views || 0);
 
   const photoPairs = vehicle.photoPairs || [];
 
@@ -351,6 +377,29 @@ export default function VehicleDetail() {
     toast.info(`إنشاء أمر عمل جديد للسيارة ${vehicle.plate}`);
   }
 
+  function openNewVisitForVehicle() {
+    const latest = orders[0];
+    const previousClosed = latest && /delivered|closed|ready|تسليم|مغلق|جاهز/i.test(String(latest.status || ""));
+    navigate("/work-orders/new", {
+      state: {
+        prefillCustomer: vehicle.owner,
+        prefillPhone: vehicle.ownerPhone,
+        prefillPlate: vehicle.plate,
+        prefillVehicle: vehicle,
+        prefillVisit: latest
+          ? {
+              parentWorkOrderId: latest.cloudId,
+              parentOrderNumber: latest.displayNumber || latest.id,
+              visitNumber: workshopVisits + 1,
+              visitType: previousClosed ? "new_visit" : "supplement",
+              returnReason: previousClosed ? "new work after delivery" : "additional work before delivery",
+            }
+          : { visitNumber: 1, visitType: "new_visit" },
+      },
+    });
+    toast.info(`فتح عمل جديد للمركبة ${vehicle.plate}`);
+  }
+
   return (
     <div className="space-y-6" dir="rtl">
       {/* Header */}
@@ -408,7 +457,7 @@ export default function VehicleDetail() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={newWorkOrderForVehicle} className="gradient-gold text-primary-foreground gap-1.5" size="sm">
+              <Button onClick={openNewVisitForVehicle} className="gradient-gold text-primary-foreground gap-1.5" size="sm">
                 <Plus size={14} /> أمر عمل جديد
               </Button>
               <Button onClick={() => setStatusDlgOpen(true)} variant="outline" size="sm" className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10">
@@ -439,8 +488,11 @@ export default function VehicleDetail() {
           - "إجمالي المصروفات" = قطع + عمالة + مصروفات تشغيلية (تكلفة فعلية).
           - "دفعات مستلمة" = ما دفعه العميل فعلياً (Income/Liability) — لا يُخصم من المصروفات.
           - "صافي الربح" = الفواتير − المصروفات (الدفعات لا تدخل في المعادلة، لأنها تحصيل لدين قائم). */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard title="عدد الزيارات" value={orders.length || vehicle.visits} icon={History} variant="info" />
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+        <StatCard title="زيارات الورشة" value={workshopVisits || vehicle.visits || 0} icon={History} variant="info" />
+        <StatCard title="زيارات رابط التتبع" value={trackingVisits} icon={Activity} variant="info" />
+        <StatCard title="أول زيارة" value={firstWorkshopVisit} icon={Calendar} variant="info" />
+        <StatCard title="آخر زيارة" value={lastWorkshopVisit} icon={Calendar} variant="success" />
         <StatCard title="إجمالي الفواتير" value={`${totalRepairCost.toLocaleString()} ر.ع`} icon={DollarSign} variant="success" />
         <StatCard title="إجمالي المصروفات" value={`${(totalParts + totalLabor + totalExtras).toLocaleString()} ر.ع`} icon={Receipt} variant="warning" />
         <StatCard title="قطع الغيار" value={`${totalParts.toLocaleString()} ر.ع`} icon={Wrench} variant="gold" />

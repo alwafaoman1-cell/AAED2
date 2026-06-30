@@ -13,7 +13,7 @@ import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import StatCard from "@/components/StatCard";
 import CustomerFormDialog from "@/components/customers/CustomerFormDialog";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
-import { customersStore, type Customer, type CustomerTag } from "@/lib/customersStore";
+import { customersStore, refreshCustomersFromCloud, type Customer, type CustomerTag } from "@/lib/customersStore";
 import { moveToTrash, registerRestoreHandler } from "@/lib/trashStore";
 import { canDelete, canEdit } from "@/lib/permissions";
 import { toast } from "sonner";
@@ -91,6 +91,7 @@ export default function Customers() {
       return;
     }
     customersStore.remove(deleting.id);
+    await refreshCustomersFromCloud().catch(() => {});
     moveToTrash({
       type: "customer",
       entityId: deleting.id,
@@ -285,6 +286,7 @@ export default function Customers() {
                 return;
               }
               customersStore.remove(customer.id);
+              await refreshCustomersFromCloud().catch(() => {});
               moveToTrash({ type: "customer", entityId: customer.id, label: `${customer.name}${customer.phone ? ` - ${customer.phone}` : ""}`, payload: customer });
             }
             toast.success(`تم نقل ${bulk.count} عميل للمهملات`);

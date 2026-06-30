@@ -229,13 +229,22 @@ export async function archiveCustomer(customerId: string, reason: string, operat
   const archivedAt = new Date().toISOString();
   const userId = await currentUserId();
   const { data: before } = await supabase.from("customers").select("*").eq("tenant_id", tenantId).eq("id", customerId).maybeSingle();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("customers")
     .update({ archived: true, archived_at: archivedAt, archived_reason: reason || null, deleted_at: archivedAt, deleted_by: userId } as any)
     .eq("tenant_id", tenantId)
     .eq("id", customerId)
     .select("id")
     .maybeSingle();
+  if (error && isMissingColumnError(error)) {
+    ({ data, error } = await supabase
+      .from("customers")
+      .update({ deleted_at: archivedAt, archived_at: archivedAt, deleted_by: userId } as any)
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId)
+      .select("id")
+      .maybeSingle());
+  }
   if (error) throw error;
   if (!data?.id) throw new Error("Permission denied or customer was not found");
   if (operational) {
@@ -251,5 +260,15 @@ export async function archiveCustomer(customerId: string, reason: string, operat
     beforeSnapshot: before,
     afterSnapshot: { archived: true, archived_at: archivedAt },
   });
+  const { data: stillVisible, error: verifyError } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("id", customerId)
+    .is("deleted_at", null)
+    .or("archived.is.null,archived.eq.false")
+    .maybeSingle();
+  if (verifyError) throw verifyError;
+  if (stillVisible?.id) throw new Error("Customer archive was not persisted in Supabase");
   return { archivedAt };
 }

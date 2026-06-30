@@ -62,6 +62,11 @@ export interface WorkOrder {
   claimId?: string;
   trackingToken?: string;
   vehicleId?: string;
+  parentWorkOrderId?: string;
+  parentOrderNumber?: string;
+  visitNumber?: number;
+  visitType?: "new_visit" | "supplement" | "return";
+  returnReason?: string;
   vehicleImageUrl?: string;
   vehicleThumbnailUrl?: string;
   trackingExpiresAt?: string;
@@ -422,6 +427,11 @@ function mapCloudRow(
     claimId: r.claim_id || undefined,
     trackingToken: r.tracking_token || undefined,
     vehicleId: r.vehicle_id || undefined,
+    parentWorkOrderId: r.parent_work_order_id || metadata?.parentWorkOrderId || undefined,
+    parentOrderNumber: metadata?.parentOrderNumber || undefined,
+    visitNumber: r.visit_number || metadata?.visitNumber || undefined,
+    visitType: r.visit_type || metadata?.visitType || undefined,
+    returnReason: r.return_reason || metadata?.returnReason || undefined,
     vehicleImageUrl: v?.imageUrl || undefined,
     vehicleThumbnailUrl: v?.thumbnailUrl || undefined,
     trackingExpiresAt: r.tracking_expires_at || undefined,
@@ -785,6 +795,11 @@ function jobOrderMetadata(o: WorkOrder) {
     closingReview: o.closingReview || null,
     trackPassword: o.trackPassword || null,
     mileage: o.mileage || null,
+    parentWorkOrderId: o.parentWorkOrderId || null,
+    parentOrderNumber: o.parentOrderNumber || null,
+    visitNumber: o.visitNumber || null,
+    visitType: o.visitType || null,
+    returnReason: o.returnReason || null,
   };
 }
 
@@ -821,6 +836,10 @@ function legacyCompatibleJobOrderPayload(
   delete next.subtotal;
   delete next.vat;
   delete next.final_total;
+  delete next.parent_work_order_id;
+  delete next.visit_number;
+  delete next.visit_type;
+  delete next.return_reason;
   next.vehicle_belongings = belongings;
   return next;
 }
@@ -867,6 +886,10 @@ function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string
     vehicle_belongings: (o.vehicleBelongings || {}) as any,
     received_at: o.receivedAt || null,
     tracking_expires_at: o.trackingExpiresAt || null,
+    parent_work_order_id: o.parentWorkOrderId && isUuid(o.parentWorkOrderId) ? o.parentWorkOrderId : null,
+    visit_number: o.visitNumber || null,
+    visit_type: o.visitType || null,
+    return_reason: o.returnReason || null,
     metadata: jobOrderMetadata(o) as any,
   });
 }

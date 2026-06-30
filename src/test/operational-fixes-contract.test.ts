@@ -18,6 +18,7 @@ describe("operational fixes contract", () => {
     }
     expect(read("src/lib/functionErrors.ts")).toContain("Email provider is not configured");
     expect(read("src/lib/functionErrors.ts")).toContain("Too many attempts");
+    expect(read("src/lib/functionErrors.ts")).toContain("Server function is not deployed or is unreachable");
   });
 
   it("converts required spare parts into linked expenses once", () => {
@@ -45,5 +46,23 @@ describe("operational fixes contract", () => {
     expect(migration).toContain("deleted_at");
     expect(store).toContain("archived_at");
     expect(store).not.toContain(".delete().eq(\"tenant_id\", ctx.tenantId).eq(\"order_number\"");
+  });
+
+  it("persists customer archive and links repeat vehicle visits", () => {
+    const policy = read("src/lib/deletePolicy/index.ts");
+    const customers = read("src/pages/Customers.tsx");
+    const vehicle = read("src/pages/VehicleDetail.tsx");
+    const workOrderForm = read("src/components/workorders/WorkOrderForm.tsx");
+    const migration = read("supabase/migrations/20260630123000_work_order_repeat_visits.sql");
+
+    expect(policy).toContain("Customer archive was not persisted in Supabase");
+    expect(customers).toContain("refreshCustomersFromCloud");
+    expect(vehicle).toContain("زيارات الورشة");
+    expect(vehicle).toContain("زيارات رابط التتبع");
+    expect(vehicle).toContain("prefillVisit");
+    expect(workOrderForm).toContain("parentWorkOrderId");
+    expect(workOrderForm).toContain("visitNumber");
+    expect(migration).toContain("parent_work_order_id");
+    expect(migration).toContain("visit_number");
   });
 });

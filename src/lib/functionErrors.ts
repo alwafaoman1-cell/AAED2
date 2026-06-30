@@ -36,6 +36,9 @@ export function getFunctionErrorMessage(error: unknown, data?: any): string {
   if (/edge function returned a non-2xx status code/i.test(raw)) {
     return "تعذّر تنفيذ العملية من الخادم. الدالة لم تُرجع نتيجة صالحة.";
   }
+  if (/failed to send a request to the edge function/i.test(raw)) {
+    return "Server function is not deployed or is unreachable. تأكد من نشر دوال الخادم ثم حاول مرة أخرى.";
+  }
   if (/server function failed before returning json/i.test(raw)) {
     return "تعذّر تنفيذ العملية من الخادم. الدالة لم تُرجع نتيجة صالحة.";
   }

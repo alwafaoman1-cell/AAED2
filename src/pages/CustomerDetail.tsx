@@ -29,7 +29,7 @@ import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { archiveCustomer } from "@/lib/deletePolicy";
 
-import { customersStore } from "@/lib/customersStore";
+import { customersStore, refreshCustomersFromCloud } from "@/lib/customersStore";
 import { getWorkOrders } from "@/lib/workOrdersStore";
 import { vehiclesStore } from "@/lib/vehiclesStore";
 import {
@@ -259,6 +259,7 @@ export default function CustomerDetail() {
       return;
     }
     customersStore.remove(customer.id);
+    await refreshCustomersFromCloud().catch(() => {});
     logActivity({
       action: "delete", entity: "customer", entityId: customer.id,
       label: customer.name,

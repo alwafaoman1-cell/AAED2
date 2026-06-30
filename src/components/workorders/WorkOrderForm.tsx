@@ -65,16 +65,47 @@ interface Props {
   prefillCustomer?: string;
   prefillPhone?: string;
   prefillPlate?: string;
+  prefillVehicle?: unknown;
+  prefillVisit?: unknown;
 }
 
-export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefillPhone, prefillPlate }: Props) {
+function vehiclePrefillFields(prefillVehicle: unknown): Partial<WorkOrder> {
+  const v = (prefillVehicle || {}) as Record<string, any>;
+  return {
+    plate: v.plate || "",
+    vehicleType: v.type || v.brand || v.make || "",
+    model: v.model || "",
+    year: v.year ? String(v.year) : "",
+    vin: v.vin || v.vin_number || "",
+    color: v.color || "",
+    mileage: v.mileage ? String(v.mileage) : "",
+    vehicleId: isUuid(v.cloudId || v.id) ? (v.cloudId || v.id) : undefined,
+    customer: v.owner || "",
+    phone: v.ownerPhone || "",
+  };
+}
+
+function visitPrefillFields(prefillVisit: unknown): Partial<WorkOrder> {
+  const visit = (prefillVisit || {}) as Record<string, any>;
+  return {
+    parentWorkOrderId: visit.parentWorkOrderId,
+    parentOrderNumber: visit.parentOrderNumber,
+    visitNumber: visit.visitNumber,
+    visitType: visit.visitType || "new_visit",
+    returnReason: visit.returnReason,
+  };
+}
+
+export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit }: Props) {
   const isEdit = !!initial;
   const [form, setForm] = useState<WorkOrder>(() => ({
     ...empty,
+    ...vehiclePrefillFields(prefillVehicle),
+    ...visitPrefillFields(prefillVisit),
     ...(initial || {}),
-    customer: initial?.customer || prefillCustomer || "",
-    phone: initial?.phone || prefillPhone || "",
-    plate: initial?.plate || prefillPlate || "",
+    customer: initial?.customer || prefillCustomer || vehiclePrefillFields(prefillVehicle).customer || "",
+    phone: initial?.phone || prefillPhone || vehiclePrefillFields(prefillVehicle).phone || "",
+    plate: initial?.plate || prefillPlate || vehiclePrefillFields(prefillVehicle).plate || "",
     extraExpenses: initial?.extraExpenses || [],
     partsNeeded: initial?.partsNeeded || [],
   }));
@@ -113,14 +144,16 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   useEffect(() => {
     setForm({
       ...empty,
+      ...vehiclePrefillFields(prefillVehicle),
+      ...visitPrefillFields(prefillVisit),
       ...(initial || {}),
-      customer: initial?.customer || prefillCustomer || "",
-      phone: initial?.phone || prefillPhone || "",
-      plate: initial?.plate || prefillPlate || "",
+      customer: initial?.customer || prefillCustomer || vehiclePrefillFields(prefillVehicle).customer || "",
+      phone: initial?.phone || prefillPhone || vehiclePrefillFields(prefillVehicle).phone || "",
+      plate: initial?.plate || prefillPlate || vehiclePrefillFields(prefillVehicle).plate || "",
       extraExpenses: initial?.extraExpenses || [],
       partsNeeded: initial?.partsNeeded || [],
     });
-  }, [initial, prefillCustomer, prefillPhone, prefillPlate]);
+  }, [initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit]);
 
   useEffect(() => {
     let cancelled = false;
@@ -477,6 +510,14 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           <p className="text-[11px] text-muted-foreground">
             يمكنك الرجوع والتعديل بدون فقدان البيانات. أمر العمل لا يُنشأ إلا عند الضغط على حفظ في الخطوة الأخيرة.
           </p>
+        </div>
+      )}
+
+      {!isEdit && form.parentOrderNumber && (
+        <div className="rounded-lg border border-info/30 bg-info/10 p-3 text-xs text-foreground">
+          طھظ… ظپطھط­ ظ‡ط°ط§ ط§ظ„ط£ظ…ط± ظƒط²ظٹط§ط±ط© ط¬ط¯ظٹط¯ط© ظ„ظ„ظ…ط±ظƒط¨ط© ط¨ط¹ط¯ ط§ظ„طھط³ظ„ظٹظ….
+          <span className="font-semibold"> ط§ظ„ط£ظ…ط± ط§ظ„ط³ط§ط¨ظ‚: {form.parentOrderNumber}</span>
+          {form.visitNumber ? <span> â€¢ ط±ظ‚ظ… ط§ظ„ط²ظٹط§ط±ط©: {form.visitNumber}</span> : null}
         </div>
       )}
 
