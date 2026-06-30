@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
-  Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Sparkles, Phone,
+  Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Phone,
   DollarSign, PackageCheck, ShieldCheck, Hourglass, Settings, BadgeCheck, ClipboardList,
   Receipt, Wallet, Clock3, UserRound, CarFront, CheckSquare, ImagePlus,
   WalletCards, MessagesSquare, History, MessageCircle,
@@ -1533,9 +1533,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             </Button>
             <Button variant="outline" onClick={openUnifiedCustomerPortal} disabled={isNew} className="gap-2">
               <LinkIcon size={16} /> رابط العميل
-            </Button>
-            <Button variant="outline" disabled title="لا توجد إجراءات إضافية مفعّلة لهذه المرحلة حالياً" className="gap-2">
-              <Sparkles size={16} /> المزيد
             </Button>
             <Button variant="ghost" onClick={() => smartBack(navigate, "/insurance/list")} className="gap-2 mr-auto">
               <ArrowRight size={16} /> رجوع
