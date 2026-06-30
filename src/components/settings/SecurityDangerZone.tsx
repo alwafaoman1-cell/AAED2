@@ -19,6 +19,7 @@ export default function SecurityDangerZone() {
   const [bypassOtp, setBypassOtp] = useState(false);
   const [confirmPhrase, setConfirmPhrase] = useState("");
   const [busy, setBusy] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
   const [emailProviderStatus, setEmailProviderStatus] = useState<{
     configured: boolean;
     enabled: boolean;
@@ -98,6 +99,13 @@ export default function SecurityDangerZone() {
   }
 
   async function requestOtp() {
+    setStatusMessage(null);
+    if (!password.trim()) {
+      const message = "أدخل كلمة مرور المدير أولاً قبل إرسال OTP.";
+      setStatusMessage({ type: "error", text: message });
+      toast.error(message);
+      return;
+    }
     if (!isOwnerOrSuperAdmin) return toast.error("هذه العملية متاحة للمالك أو Super Admin فقط");
     setBusy(true);
     try {
@@ -118,6 +126,25 @@ export default function SecurityDangerZone() {
   }
 
   async function executeReset(dryRun: boolean) {
+    setStatusMessage(null);
+    if (!password.trim()) {
+      const message = "أدخل كلمة مرور المدير أولاً.";
+      setStatusMessage({ type: "error", text: message });
+      toast.error(message);
+      return;
+    }
+    if (!dryRun && confirmPhrase.trim() !== "DELETE CLOUD DATA") {
+      const message = "اكتب عبارة التأكيد DELETE CLOUD DATA قبل تنفيذ الحذف.";
+      setStatusMessage({ type: "error", text: message });
+      toast.error(message);
+      return;
+    }
+    if (!bypassOtp && !otp.trim()) {
+      const message = "أرسل OTP ثم أدخل الرمز، أو استخدم تجاوز OTP المؤقت بصلاحية المالك عند تعطل البريد.";
+      setStatusMessage({ type: "error", text: message });
+      toast.error(message);
+      return;
+    }
     if (!isOwnerOrSuperAdmin) return toast.error("هذه العملية متاحة للمالك أو Super Admin فقط");
     if (!cloudResetEnabled) return toast.error("فعّل خيار تهيئة السحابة أولاً");
     setBusy(true);
@@ -176,6 +203,17 @@ export default function SecurityDangerZone() {
             </div>
           )}
         </div>
+        {statusMessage && (
+          <div
+            className={
+              statusMessage.type === "success"
+                ? "md:col-span-2 rounded-md border border-success/30 bg-success/10 p-2 text-xs text-success"
+                : "md:col-span-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive"
+            }
+          >
+            {statusMessage.text}
+          </div>
+        )}
         <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
           <span className="space-y-1">
             <span className="block font-medium">OTP تسجيل الدخول</span>

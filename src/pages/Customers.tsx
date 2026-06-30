@@ -92,6 +92,7 @@ export default function Customers() {
     }
     customersStore.remove(deleting.id);
     await refreshCustomersFromCloud().catch(() => {});
+    customersStore.remove(deleting.id);
     moveToTrash({
       type: "customer",
       entityId: deleting.id,
@@ -287,6 +288,7 @@ export default function Customers() {
               }
               customersStore.remove(customer.id);
               await refreshCustomersFromCloud().catch(() => {});
+              customersStore.remove(customer.id);
               moveToTrash({ type: "customer", entityId: customer.id, label: `${customer.name}${customer.phone ? ` - ${customer.phone}` : ""}`, payload: customer });
             }
             toast.success(`تم نقل ${bulk.count} عميل للمهملات`);

@@ -8,12 +8,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import { useState } from "react";
 
 interface Props {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   title?: string;
   description?: ReactNode;
   confirmLabel?: string;
@@ -29,6 +30,19 @@ export default function ConfirmDeleteDialog({
   confirmLabel = "نقل للمهملات",
   destructive = true,
 }: Props) {
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleConfirm(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent dir="rtl" className="bg-card border-border">
@@ -43,14 +57,15 @@ export default function ConfirmDeleteDialog({
             إلغاء
           </AlertDialogCancel>
           <AlertDialogAction
+            disabled={submitting}
             className={
               destructive
                 ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 : ""
             }
-            onClick={onConfirm}
+            onClick={handleConfirm}
           >
-            {confirmLabel}
+            {submitting ? "جارٍ التنفيذ..." : confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
