@@ -356,7 +356,22 @@ export default function InsuranceClaimDetail() {
       const url = await uploadFile(f, "docs");
       if (url) newDocs.push({ url, name: f.name, type });
     }
-    setDocuments((d) => [...d, ...newDocs]);
+    if (!newDocs.length) return;
+    const mergedDocs = [...documents, ...newDocs];
+    setDocuments(mergedDocs);
+    if (!isNew && id) {
+      try {
+        await updateClaim.mutateAsync({
+          id,
+          updates: { documents: mergedDocs as any },
+        });
+        await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
+        await queryClient.invalidateQueries({ queryKey: ["insurance-claim-documents", id] });
+      } catch (e: any) {
+        toast.error(e?.message || "تعذر حفظ مستندات المطالبة");
+        return;
+      }
+    }
 
     // ── LPO auto-approve: عند رفع أمر الشراء، أصدر الفاتورة الضريبية تلقائياً ──
     if (type === "lpo" && newDocs.length > 0) {
@@ -847,7 +862,7 @@ export default function InsuranceClaimDetail() {
       updates.work_completed_at = new Date(changedAt).toISOString();
     } else if (stageDialog.key === "delivered") {
       updates.delivered_at = new Date(changedAt).toISOString();
-      updates.status = "paid";
+      updates.work_completed_at = updates.work_completed_at || new Date(changedAt).toISOString();
     } else {
       toast.info("هذه المرحلة تُدار من الإجراء الخاص بها، وليس من شريط المراحل.");
       return;
@@ -1232,11 +1247,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     rejectionReason, notes, documents, damagePhotos, existing, claimPayments,
   ]);
 
-  /** يولّد فاتورة ضريبية رسمية مع QR ZATCA TLV — يلزم CR+VAT لشركة التأمين + إكمال أمر العمل أو التسليم. */
-  const jobOrderCompleted = (existing as any)?.job_order?.status === "completed" || (existing as any)?.job_order?.status === "delivered";
-  const claimDelivered = !!(existing as any)?.delivered_at;
+  /** يولّد فاتورة ضريبية رسمية مع QR ZATCA TLV — يلزم LPO أو رقم اعتماد واضح قبل إصدار الفاتورة. */
   const hasLpo = documents.some((d) => d.type === "lpo");
-  const canIssueTaxInvoice = jobOrderCompleted || claimDelivered || hasLpo;
+  const canIssueTaxInvoice = hasLpo || !!lpoNumber.trim();
 
   // فاتورة نشطة مرتبطة بهذه المطالبة (Single Source of Truth)
   const { data: activeInvoice } = useQuery({
@@ -1258,7 +1271,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
   const generateTaxInvoice = async () => {
     if (!canIssueTaxInvoice) {
-      toast.error("لا يمكن إصدار الفاتورة الضريبية إلا بعد إكمال أمر العمل أو تسجيل تسليم المركبة");
+      toast.error("لا يمكن إصدار الفاتورة الضريبية قبل رفع LPO أو إدخال رقم LPO.");
       return;
     }
     if (!insuranceCo) {
@@ -1454,9 +1467,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
   const isAwaitingApproval = !isNew && status === "pending";
   const isApprovedClaim = status === "approved";
-  const currentClaimStepIndex = isClosedClaim || isDeliveredClaim
+  const currentClaimStepIndex = status === "paid" || activeInvoice
     ? 5
-    : activeInvoice || isReadyForDelivery
+    : isClosedClaim || isDeliveredClaim || isReadyForDelivery
       ? 4
       : isRepairingClaim || hasLinkedWorkOrder
         ? 3
@@ -1470,8 +1483,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     { key: "awaiting_approval", label: "الفحص والتقدير", subtitle: "الصور والمستندات", Icon: Upload, date: estimateDate, editable: true },
     { key: "approval", label: "اعتماد التأمين", subtitle: "الموافقة والمبالغ", Icon: ShieldCheck, date: dateOnly((existing as any)?.approved_at), editable: true },
     { key: "repairing", label: "الإصلاح والمتابعة", subtitle: "أمر العمل والتقدم", Icon: Wrench, date: workStartedAt, editable: true },
-    { key: "invoice", label: "الفاتورة والدفع", subtitle: "الفاتورة والدفعات", Icon: Receipt, date: workCompletedAt || dateOnly((activeInvoice as any)?.created_at), editable: true },
     { key: "delivered", label: "التسليم والإغلاق", subtitle: "التسليم والملفات", Icon: PackageCheck, date: dateOnly((existing as any)?.delivered_at), editable: true },
+    { key: "invoice", label: "الفاتورة والدفع", subtitle: "LPO والفاتورة والدفعات", Icon: Receipt, date: dateOnly((activeInvoice as any)?.created_at) || workCompletedAt, editable: true },
   ].map((step, index) => ({
     ...step,
     index,
@@ -1535,12 +1548,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             ) : (
               <Button
                 variant="default"
-                onClick={generateTaxInvoice}
-                disabled={isNew || isClosedClaim || !canCreateClaimInvoice}
-                title={!canIssueTaxInvoice ? "تحتاج LPO أو إكمال أمر العمل/التسليم" : claimInvoiceBaseAmount <= 0 ? "أدخل المبلغ المعتمد أو التقدير قبل إنشاء الفاتورة" : undefined}
+                onClick={() => {
+                  claimViewTouchedRef.current = true;
+                  setClaimViewIndex(5);
+                }}
+                disabled={isNew || isClosedClaim}
+                title="افتح مرحلة الفاتورة والدفع لرفع LPO وإصدار الفاتورة"
                 className="gap-2 bg-emerald-600 hover:bg-emerald-700"
               >
-                <Receipt size={16} /> إنشاء فاتورة
+                <Receipt size={16} /> الفاتورة والدفع
               </Button>
             )}
             <Button variant="outline" onClick={() => setShowSendEmail(true)} disabled={isNew} className="gap-2">
@@ -1630,14 +1646,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 <div className="space-y-1.5"><Label>شركة التأمين *</Label><InsuranceCompanyAutocomplete value={company} companyId={companyId} onChange={(name, cid) => { setCompany(name); setCompanyId(cid); setInsuranceEmployeeId(null); }} /></div>
                 <div className="space-y-1.5"><Label>موظف التأمين</Label><InsuranceEmployeeSelect companyId={companyId} value={insuranceEmployeeId} onChange={setInsuranceEmployeeId} placeholder="الموظف المسؤول" /></div>
                 <div className="space-y-1.5"><Label>رقم المطالبة *</Label><Input value={claimNumber} onChange={(e) => setClaimNumber(e.target.value)} /></div>
-                <div className="space-y-1.5"><Label>LPO / المرجع</Label><Input value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} /></div>
               </div>
             ) : (
               <div className="grid gap-3 text-sm md:grid-cols-2">
                 <Info label="اسم شركة التأمين" value={company} />
                 <Info label="رقم المطالبة" value={claimNumber} />
                 <Info label="موظف التأمين" value={(existing as any)?.insurance_employee?.name || "—"} />
-                <Info label="رقم المرجع / LPO" value={lpoNumber || "—"} />
                 <Info label="البريد الإلكتروني" value={insuranceCo?.email || "—"} />
                 <Info label="رقم التواصل" value={insuranceCo?.phone || "—"} />
               </div>
@@ -1811,16 +1825,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <p className="text-xs text-muted-foreground">تعرض خريطة الضرر عند توفر بيانات الفحص المرتبط.</p>
           </Card>
 
-          <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-primary"><ShieldCheck size={18} /> تقرير LPO</h2>
-            <Info label="LPO" value={lpoNumber || "لم يتم إصدار LPO بعد"} />
-            {lpoNumber ? (
-              <Button variant="outline" onClick={() => setShowSummary(true)}>عرض LPO / تفاصيل الاعتماد</Button>
-            ) : (
-              <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">لا يوجد LPO مرفوع حالياً. استخدم بطاقة المستندات لإضافة خطاب الاعتماد.</p>
-            )}
-          </Card>
-
           <Card className="p-5 space-y-3 xl:col-span-2">
             <h2 className="font-bold flex items-center gap-2 text-primary"><CheckSquare size={18} /> البنود المطلوبة / الموافق عليها</h2>
             <ApprovedItemsTable uplItems={uplItems} neededParts={neededParts} />
@@ -1893,16 +1897,13 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
           <Card className="p-5 space-y-4 xl:col-span-2">
             <h2 className="font-bold flex items-center gap-2 text-primary"><Settings size={18} /> تقدم إصلاح المركبة</h2>
-            <div className="grid gap-3 md:grid-cols-6">
-              {["استلام", "فك وتقييم", "هيكل وسمكرة", "دهان", "تجميع وفحص", "جاهزة"].map((label, i) => (
-                <div key={label} className="text-center">
-                  <div className={`mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-full ${i < 3 || isRepairingClaim || isReadyForDelivery || isDeliveredClaim ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                    {i < 3 || isRepairingClaim || isReadyForDelivery || isDeliveredClaim ? <CheckCircle2 size={16} /> : i + 1}
-                  </div>
-                  <div className="text-xs font-semibold">{label}</div>
-                  <div className="text-[10px] text-muted-foreground">{i < 3 || isRepairingClaim || isReadyForDelivery || isDeliveredClaim ? "تم / جارٍ" : "في الانتظار"}</div>
-                </div>
-              ))}
+            <div className="grid gap-3 md:grid-cols-3">
+              <Info label="حالة التنفيذ" value={isReadyForDelivery || isDeliveredClaim ? "جاهزة للتسليم" : isRepairingClaim || hasLinkedWorkOrder ? "قيد التنفيذ" : "بانتظار أمر العمل"} />
+              <Info label="تاريخ بداية الإصلاح" value={workStartedAt ? formatDateLatin(workStartedAt) : "—"} />
+              <Info label="تاريخ الجاهزية" value={workCompletedAt ? formatDateLatin(workCompletedAt) : "—"} />
+            </div>
+            <div className="rounded-xl border bg-slate-50 p-3 text-sm text-muted-foreground">
+              تفاصيل مراحل الإصلاح والصور الفنية تُدار من صفحة أمر العمل حتى لا تتكرر داخل المطالبة.
             </div>
             <Button variant="outline" onClick={() => openStageDialog(vehicleProgress[3])}>تحديث مرحلة الإصلاح</Button>
           </Card>
@@ -1916,11 +1917,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <ApprovedItemsTable uplItems={uplItems} neededParts={neededParts} />
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-primary"><ImagePlus size={18} /> صور الإصلاح</h2>
-            <div className="grid grid-cols-4 gap-2">
-              {damagePhotos.slice(0, 4).map((src, i) => <img key={i} src={src} className="h-20 w-full rounded-lg border object-cover opacity-80" />)}
-              <button type="button" className="flex h-20 items-center justify-center rounded-lg border border-dashed text-muted-foreground" onClick={() => toast.info("استخدم لوحة المستندات لرفع صور الإصلاح")}>+</button>
-            </div>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><ImagePlus size={18} /> مرفقات الإصلاح</h2>
+            <p className="text-sm text-muted-foreground">صور الإصلاح التفصيلية تُرفع من أمر العمل المرتبط. هنا تظهر المطالبة والاعتماد فقط.</p>
+            <Button variant="outline" onClick={() => hasLinkedWorkOrder ? navigate(`/work-orders/${effectiveWorkOrderId}`) : toast.info("أنشئ أمر العمل أولاً")}>فتح أمر العمل</Button>
           </Card>
           <Card className="p-5 space-y-3">
             <h2 className="font-bold flex items-center gap-2 text-primary"><MessagesSquare size={18} /> تحديثات العميل</h2>
@@ -1931,8 +1930,38 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       )}
 
-      {claimViewIndex === 4 && (
+      {claimViewIndex === 5 && (
         <div className="grid gap-4 xl:grid-cols-3 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
+          <Card className="p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-bold flex items-center gap-2 text-primary"><ShieldCheck size={18} /> LPO / اعتماد إصدار الفاتورة</h2>
+              <Badge variant={hasLpo || lpoNumber ? "default" : "secondary"}>
+                {hasLpo || lpoNumber ? "جاهز للفوترة" : "مطلوب قبل الفاتورة"}
+              </Badge>
+            </div>
+            <div className="space-y-2">
+              <Label>رقم LPO / مرجع الاعتماد</Label>
+              <Input value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
+            </div>
+            <div className="rounded-xl border border-dashed border-primary/30 bg-primary/5 p-4 text-sm text-muted-foreground">
+              ارفع خطاب LPO هنا. بعد الرفع يتم حفظ المستند على المطالبة، ثم يمكن إصدار الفاتورة من زر الفاتورة في الأعلى.
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border px-4 text-sm font-semibold hover:bg-muted">
+                <FileUp size={16} /> رفع LPO
+                <Input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => handleDocUpload(e.target.files, "lpo")} />
+              </Label>
+              <Button
+                variant="default"
+                onClick={generateTaxInvoice}
+                disabled={isNew || isClosedClaim || !canCreateClaimInvoice}
+                title={!canIssueTaxInvoice ? "ارفع LPO أو أدخل رقم LPO قبل إصدار الفاتورة" : claimInvoiceBaseAmount <= 0 ? "أدخل المبلغ المعتمد أو التقدير قبل إنشاء الفاتورة" : undefined}
+                className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+              >
+                <Receipt size={16} /> إصدار الفاتورة
+              </Button>
+            </div>
+          </Card>
           <Card className="p-5 space-y-3">
             <h2 className="font-bold flex items-center gap-2 text-primary"><Receipt size={18} /> ملخص الفاتورة</h2>
             <Info label="رقم الفاتورة" value={(activeInvoice as any)?.invoice_number || "—"} />
@@ -1964,14 +1993,14 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       )}
 
-      {claimViewIndex === 5 && (
+      {claimViewIndex === 4 && (
         <div className="grid gap-4 xl:grid-cols-3 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
             <h2 className="font-bold flex items-center gap-2 text-primary"><PackageCheck size={18} /> التسليم والإغلاق</h2>
             <Info label="حالة التسليم" value={isDeliveredClaim ? "تم التسليم" : isReadyForDelivery ? "جاهز للتسليم" : "قيد التنفيذ"} />
             <Info label="تاريخ التسليم المتوقع" value={formatDateLatin(workCompletedAt || (existing as any)?.delivered_at || new Date())} />
             <Info label="مدة بقاء المركبة" value={`${Math.max(0, Math.ceil((new Date((existing as any)?.delivered_at || new Date()).getTime() - new Date(workshopArrivalDate || (existing as any)?.created_at || new Date()).getTime()) / 86400000))} يوم`} />
-            <Button variant="outline" onClick={() => openStageDialog(vehicleProgress[5])}>تأكيد التسليم</Button>
+            <Button variant="outline" onClick={() => openStageDialog(vehicleProgress[4])}>تأكيد التسليم</Button>
           </Card>
           <Card className="p-5 space-y-3">
             <h2 className="font-bold flex items-center gap-2 text-primary"><FolderArchive size={18} /> مستندات التسليم</h2>
