@@ -1938,7 +1938,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Info label="رقم الفاتورة" value={(activeInvoice as any)?.invoice_number || "—"} />
             <Info label="إجمالي الفاتورة" value={`${invoiceTotal.toFixed(3)} ر.ع`} />
             <Info label="الضريبة" value={`${invoiceVat.toFixed(3)} ر.ع`} />
-            {activeInvoice ? <Button variant="outline" onClick={() => navigate("/insurance/accounting")}>عرض الفاتورة</Button> : <Button onClick={generateTaxInvoice} disabled={!canCreateClaimInvoice} title={!canCreateClaimInvoice ? "أكمل الاعتماد والمبلغ قبل إنشاء الفاتورة" : undefined}>إنشاء فاتورة</Button>}
+            <Badge variant={activeInvoice ? "default" : "secondary"}>
+              {activeInvoice ? "الفاتورة مرتبطة — استخدم زر عرض الفاتورة من الأعلى" : "لا توجد فاتورة — استخدم زر إنشاء فاتورة من الأعلى"}
+            </Badge>
           </Card>
           {!isNew && id && (
             <div className="xl:col-span-2">
