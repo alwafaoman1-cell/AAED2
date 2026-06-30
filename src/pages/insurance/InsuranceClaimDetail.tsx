@@ -1253,6 +1253,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     },
   });
   const hasActiveInvoice = !!activeInvoice;
+  const claimInvoiceBaseAmount = parseFloat(approvedAmount) || parseFloat(estimatedCost) || 0;
+  const canCreateClaimInvoice = canIssueTaxInvoice && claimInvoiceBaseAmount > 0;
 
   const generateTaxInvoice = async () => {
     if (!canIssueTaxInvoice) {
@@ -1276,7 +1278,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
     // مبالغ من المطالبة: المبلغ المعتمد من شركة التأمين يُعتبر "غير شامل ضريبة القيمة المضافة".
     // النظام يضيف 5% VAT تلقائياً عند إصدار الفاتورة الضريبية.
-    const approvedRaw = parseFloat(approvedAmount) || parseFloat(estimatedCost) || 0;
+    const approvedRaw = claimInvoiceBaseAmount;
     if (approvedRaw <= 0) {
       toast.error("لا يمكن إصدار فاتورة بمبلغ صفر — أدخل المبلغ المعتمد أولاً.");
       return;
@@ -1534,8 +1536,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <Button
                 variant="default"
                 onClick={generateTaxInvoice}
-                disabled={isNew || isClosedClaim || !canIssueTaxInvoice}
-                title={!canIssueTaxInvoice ? "تحتاج LPO أو إكمال أمر العمل/التسليم" : undefined}
+                disabled={isNew || isClosedClaim || !canCreateClaimInvoice}
+                title={!canIssueTaxInvoice ? "تحتاج LPO أو إكمال أمر العمل/التسليم" : claimInvoiceBaseAmount <= 0 ? "أدخل المبلغ المعتمد أو التقدير قبل إنشاء الفاتورة" : undefined}
                 className="gap-2 bg-emerald-600 hover:bg-emerald-700"
               >
                 <Receipt size={16} /> إنشاء فاتورة
@@ -1936,7 +1938,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Info label="رقم الفاتورة" value={(activeInvoice as any)?.invoice_number || "—"} />
             <Info label="إجمالي الفاتورة" value={`${invoiceTotal.toFixed(3)} ر.ع`} />
             <Info label="الضريبة" value={`${invoiceVat.toFixed(3)} ر.ع`} />
-            {activeInvoice ? <Button variant="outline" onClick={() => navigate("/insurance/accounting")}>عرض الفاتورة</Button> : <Button onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice}>إنشاء فاتورة</Button>}
+            {activeInvoice ? <Button variant="outline" onClick={() => navigate("/insurance/accounting")}>عرض الفاتورة</Button> : <Button onClick={generateTaxInvoice} disabled={!canCreateClaimInvoice} title={!canCreateClaimInvoice ? "أكمل الاعتماد والمبلغ قبل إنشاء الفاتورة" : undefined}>إنشاء فاتورة</Button>}
           </Card>
           {!isNew && id && (
             <div className="xl:col-span-2">
