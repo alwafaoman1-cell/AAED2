@@ -917,24 +917,26 @@ export default function WorkOrders() {
             toast.error(error?.message || "فشل حذف/أرشفة أمر العمل في Supabase");
             return;
           }
-          const removed = deleteWorkOrder(deleteOrder.id);
+          let removed = deleteWorkOrder(deleteOrder.id);
           await refreshWorkOrdersFromCloud().catch(() => {});
           deleteWorkOrder(deleteOrder.id);
-          if (removed) {
-            const cloudEntityId = removed.cloudId && isUuid(removed.cloudId) ? removed.cloudId : removed.id;
+          const trashed = removed || deleteOrder;
+          if (trashed) {
+            removed = trashed;
+            const cloudEntityId = trashed.cloudId && isUuid(trashed.cloudId) ? trashed.cloudId : trashed.id;
             moveToTrash({
               type: "work_order",
               entityId: cloudEntityId,
-              label: `${removed.customer} - ${removed.plate}`,
-              payload: { ...removed, cloudId: cloudEntityId },
+              label: `${trashed.displayNumber || trashed.id} - ${trashed.customer} - ${trashed.plate}`,
+              payload: { ...trashed, cloudId: cloudEntityId },
             });
             logActivity({
               action: "delete",
               entity: "work_order",
-              entityId: removed.id,
+              entityId: trashed.id,
               label: `أمر عمل ${removed.customer} - ${removed.plate}`,
               description: `نقل لسلة المهملات`,
-              amount: removed.totalCost,
+              amount: trashed.totalCost,
             });
             toast.success(`تم نقل ${removed.id} للمهملات`);
           }
@@ -1081,13 +1083,14 @@ export default function WorkOrders() {
             const removed = deleteWorkOrder(id);
             await refreshWorkOrdersFromCloud().catch(() => {});
             deleteWorkOrder(id);
-            if (removed) {
-              const cloudEntityId = removed.cloudId && isUuid(removed.cloudId) ? removed.cloudId : removed.id;
+            const trashed = removed || order;
+            if (trashed) {
+              const cloudEntityId = trashed.cloudId && isUuid(trashed.cloudId) ? trashed.cloudId : trashed.id;
               moveToTrash({
                 type: "work_order",
                 entityId: cloudEntityId,
-                label: `${removed.customer} - ${removed.plate}`,
-                payload: { ...removed, cloudId: cloudEntityId },
+                label: `${trashed.displayNumber || trashed.id} - ${trashed.customer} - ${trashed.plate}`,
+                payload: { ...trashed, cloudId: cloudEntityId },
               });
               n++;
             }

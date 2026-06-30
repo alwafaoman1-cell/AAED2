@@ -1273,16 +1273,18 @@ export default function WorkOrderDetail() {
             toast.error(error?.message || "فشل حذف/أرشفة أمر العمل في Supabase");
             return;
           }
-          const removed = deleteWorkOrder(order.id);
+          let removed = deleteWorkOrder(order.id);
           await refreshWorkOrdersFromCloud().catch(() => {});
           deleteWorkOrder(order.id);
-          if (removed) {
-            const cloudEntityId = removed.cloudId && isUuid(removed.cloudId) ? removed.cloudId : removed.id;
+          const trashed = removed || order;
+          if (trashed) {
+            removed = trashed;
+            const cloudEntityId = trashed.cloudId && isUuid(trashed.cloudId) ? trashed.cloudId : trashed.id;
             moveToTrash({
               type: "work_order",
               entityId: cloudEntityId,
-              label: `${removed.customer} - ${removed.plate}`,
-              payload: { ...removed, cloudId: cloudEntityId },
+              label: `${trashed.displayNumber || trashed.id} - ${trashed.customer} - ${trashed.plate}`,
+              payload: { ...trashed, cloudId: cloudEntityId },
             });
             logActivity({
               action: "delete",
