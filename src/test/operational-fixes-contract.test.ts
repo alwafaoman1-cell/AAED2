@@ -81,6 +81,8 @@ describe("operational fixes contract", () => {
     expect(store).toContain("Trash restore mismatch");
     expect(store).toContain("cache = cache.filter");
     expect(store).toContain("eq(\"order_number\", expectedOrderNumber)");
+    expect(store).toContain("restoreStartedAt");
+    expect(store).toContain(".neq(\"order_number\", expectedOrderNumber)");
     expect(workOrders.match(/refreshWorkOrdersFromCloud/g)?.length || 0).toBeGreaterThanOrEqual(3);
     expect(detail).toContain("refreshWorkOrdersFromCloud");
     expect(dangerZone).toContain("if (!dryRun && !bypassOtp && !otp.trim())");

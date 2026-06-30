@@ -281,6 +281,7 @@ export function restoreWorkOrder(order: WorkOrder) {
 export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkOrder> {
   const ctx = await tenantContext();
   if (!ctx) throw new Error("Tenant was not loaded. Please refresh and try again.");
+  const restoreStartedAt = new Date(Date.now() - 60_000).toISOString();
   const orderNumber = order.displayNumber || order.id;
   const expectedOrderNumber = /^WO-/i.test(orderNumber || "") ? orderNumber : null;
   let foundId: string | null = null;
@@ -363,6 +364,16 @@ export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkO
       .eq("tenant_id", ctx.tenantId)
       .eq("id", foundId);
     throw new Error(`Trash restore mismatch: expected ${expectedOrderNumber}, got ${verified.order_number}. Please refresh the trash and try again.`);
+  }
+  if (expectedOrderNumber && (verified as any).customer_id && (verified as any).vehicle_id) {
+    const archivedAt = new Date().toISOString();
+    await (supabase.from("job_orders") as any)
+      .update({ deleted_at: archivedAt, archived_at: archivedAt })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("customer_id", (verified as any).customer_id)
+      .eq("vehicle_id", (verified as any).vehicle_id)
+      .neq("order_number", expectedOrderNumber)
+      .gte("created_at", restoreStartedAt);
   }
 
   const saved = await mapSavedJobOrder(verified);
