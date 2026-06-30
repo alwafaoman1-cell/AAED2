@@ -18,7 +18,13 @@ export function useTrashRestoreHandlers() {
     registerRestoreHandler("work_order", async (p, item) => {
       const payload = p as WorkOrder;
       const cloudId = payload.cloudId || (isUuid(item.entityId) ? item.entityId : undefined);
-      await restoreWorkOrderFromTrash({ ...payload, cloudId });
+      const labelOrderNumber = item.label.match(/WO-\d{4}-\d+/)?.[0];
+      await restoreWorkOrderFromTrash({
+        ...payload,
+        id: labelOrderNumber || payload.id,
+        displayNumber: labelOrderNumber || payload.displayNumber,
+        cloudId,
+      });
     });
     registerRestoreHandler("vehicle", (p) => vehiclesStore.restore(p as Vehicle));
     registerRestoreHandler("inventory", (p) => inventoryStore.restore(p as Part));

@@ -80,6 +80,7 @@ describe("operational fixes contract", () => {
     expect(store).toContain(".is(\"archived_at\", null)");
     expect(store).toContain("Trash restore mismatch");
     expect(store).toContain("cache = cache.filter");
+    expect(store).toContain("eq(\"order_number\", expectedOrderNumber)");
     expect(workOrders.match(/refreshWorkOrdersFromCloud/g)?.length || 0).toBeGreaterThanOrEqual(3);
     expect(detail).toContain("refreshWorkOrdersFromCloud");
     expect(dangerZone).toContain("if (!dryRun && !bypassOtp && !otp.trim())");
@@ -88,6 +89,7 @@ describe("operational fixes contract", () => {
     expect(resetFunction).toContain("if (!dryRun && body.confirmPhrase !== \"DELETE CLOUD DATA\")");
     expect(trashStore).toContain("handler(item.payload, item)");
     expect(restoreHandlers).toContain("isUuid(item.entityId)");
+    expect(restoreHandlers).toContain("labelOrderNumber");
     expect(workOrders).toContain("payload: { ...trashed, cloudId: cloudEntityId }");
     expect(detail).toContain("payload: { ...trashed, cloudId: cloudEntityId }");
     expect(workOrders).toContain("const trashed = removed || deleteOrder");

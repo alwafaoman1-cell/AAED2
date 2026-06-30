@@ -285,7 +285,18 @@ export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkO
   const expectedOrderNumber = /^WO-/i.test(orderNumber || "") ? orderNumber : null;
   let foundId: string | null = null;
 
-  if (order.cloudId && isUuid(order.cloudId)) {
+  if (expectedOrderNumber) {
+    const { data, error } = await supabase
+      .from("job_orders")
+      .select("id")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("order_number", expectedOrderNumber)
+      .maybeSingle();
+    if (error) throw error;
+    foundId = data?.id || null;
+  }
+
+  if (!foundId && order.cloudId && isUuid(order.cloudId)) {
     const { data, error } = await supabase
       .from("job_orders")
       .select("id")
