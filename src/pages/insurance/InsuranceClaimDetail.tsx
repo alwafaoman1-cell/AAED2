@@ -1458,10 +1458,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           ? 1
           : 0;
   const vehicleProgress = [
-    { key: "received", label: "الاستلام والفحص", Icon: ClipboardCheck, date: workshopArrivalDate || estimateDate, editable: true },
-    { key: "awaiting_approval", label: "بانتظار الاعتماد", Icon: ShieldCheck, date: estimateDate, editable: true },
-    { key: "repairing", label: "تحت التنفيذ", Icon: Wrench, date: workStartedAt || dateOnly((existing as any)?.approved_at), editable: true },
-    { key: "ready", label: "جاهزة / تم التسليم", Icon: PackageCheck, date: workCompletedAt || dateOnly((existing as any)?.delivered_at), editable: true },
+    { key: "received", label: "البيانات الأساسية", subtitle: "الاستلام والفحص", Icon: FileText, date: workshopArrivalDate || estimateDate, editable: true },
+    { key: "awaiting_approval", label: "الفحص والمرفقات", subtitle: "التقدير والمستندات", Icon: Upload, date: estimateDate, editable: true },
+    { key: "repairing", label: "الاعتماد والتنفيذ", subtitle: "الموافقة وأمر العمل", Icon: Wrench, date: workStartedAt || dateOnly((existing as any)?.approved_at), editable: true },
+    { key: "ready", label: "الفاتورة والإغلاق", subtitle: "الدفع والتسليم", Icon: PackageCheck, date: workCompletedAt || dateOnly((existing as any)?.delivered_at), editable: true },
   ].map((step, index) => ({
     ...step,
     index,
@@ -1470,85 +1470,77 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
   return (
     <div className="space-y-5 pb-12" dir="rtl">
-      <Card className="p-5 border-primary/20 bg-gradient-to-l from-primary/10 via-card to-card">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="flex items-start gap-4 min-w-0">
-            <Button variant="ghost" size="icon" onClick={() => smartBack(navigate, "/insurance/list")}>
-              <ArrowRight size={18} />
-            </Button>
-            <VehicleAvatar
-              imageUrl={(vehicle as any)?.vehicle_cover_image_url || (vehicle as any)?.vehicle_thumbnail_url}
-              fallbackPhotos={damagePhotos}
-              label={`${vehicleTitle} ${vehiclePlate || vehicle?.plate_number || ""}`.trim()}
-              size="lg"
-            />
-            <div className="min-w-0 space-y-2">
-              <div className="text-xs font-semibold text-primary">Claim Management Center</div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-bold text-foreground">{isNew ? "مطالبة تأمين جديدة" : `مطالبة ${claimNumber || "—"}`}</h1>
-                <Badge className={statusMeta[status]?.cls}>{statusMeta[status]?.label || status}</Badge>
-                <Badge variant="outline">{activeInvoice ? `فاتورة #${(activeInvoice as any).invoice_number}` : "لا توجد فاتورة"}</Badge>
-                <Badge variant={paymentRemaining <= 0 && paidTotal > 0 ? "default" : "secondary"}>{paymentStatusLabel}</Badge>
-              </div>
-              <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 lg:grid-cols-5">
-                <div><span className="block text-[11px]">شركة التأمين</span><strong className="text-foreground">{company || "—"}</strong></div>
-                <div><span className="block text-[11px]">العميل</span><strong className="text-foreground">{ownerName || customer?.name || "—"}</strong></div>
-                <div><span className="block text-[11px]">المركبة</span><strong className="text-foreground">{vehicleTitle}</strong></div>
-                <div><span className="block text-[11px]">اللوحة</span><strong className="text-foreground">{vehiclePlate || vehicle?.plate_number || "—"}</strong></div>
-                <div><span className="block text-[11px]">آخر تحديث</span><strong className="text-foreground">{formatDateLatin((existing as any)?.updated_at || new Date())}</strong></div>
-              </div>
-            </div>
-          </div>
+      <span className="sr-only">Claim Management Center</span>
+      <Card className="overflow-hidden border-slate-200/80 bg-white shadow-sm">
+        <div className="grid divide-y divide-border lg:grid-cols-7 lg:divide-x lg:divide-x-reverse lg:divide-y-0">
+          <HeaderMetric label="رقم المطالبة" value={claimNumber || "—"} icon={<FileText size={18} className="text-primary" />} strong />
+          <HeaderMetric label="شركة التأمين" value={company || "—"} icon={<Building2 size={18} className="text-primary" />} />
+          <HeaderMetric label="العميل" value={ownerName || customer?.name || "—"} icon={<UserRound size={18} className="text-slate-700" />} />
+          <HeaderMetric label="المركبة" value={vehicleTitle || "—"} icon={<CarFront size={18} className="text-slate-700" />} />
+          <HeaderMetric label="رقم اللوحة" value={vehiclePlate || vehicle?.plate_number || "—"} sub={(vehicle as any)?.plate_country || "OM"} />
+          <HeaderMetric label="حالة التقدير" value={statusMeta[status]?.label || status} badgeClass={statusMeta[status]?.cls} />
+          <HeaderMetric label="حالة الدفع" value={paymentStatusLabel} badgeClass={paymentRemaining <= 0 && paidTotal > 0 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-700 border-slate-200"} />
+        </div>
 
-          <div className="flex flex-wrap gap-2 xl:justify-end">
-            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
+        <div className="border-t bg-slate-50/70 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2 bg-blue-700 hover:bg-blue-800">
               <Save size={16} /> حفظ
             </Button>
-            {isAwaitingApproval && (
-              <Button onClick={handleApprove} disabled={updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
-                <CheckCircle2 size={16} /> اعتماد / موافقة
+            <Button
+              onClick={handleApprove}
+              disabled={!isAwaitingApproval || updateStatus.isPending}
+              title={!isAwaitingApproval ? "تظهر الموافقة فقط عندما تكون المطالبة بانتظار الاعتماد" : undefined}
+              className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+            >
+              <CheckCircle2 size={16} /> اعتماد / موافقة
+            </Button>
+            {!isNew && isApprovedClaim && hasLinkedWorkOrder ? (
+              <Button variant="default" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2 bg-blue-600 hover:bg-blue-700">
+                <ClipboardList size={16} /> فتح أمر العمل
+              </Button>
+            ) : (
+              <Button
+                variant="default"
+                onClick={handleConvertToWorkOrder}
+                disabled={isNew || !isApprovedClaim || hasLinkedWorkOrder}
+                title={hasLinkedWorkOrder ? "يوجد أمر عمل مرتبط بالفعل" : !isApprovedClaim ? "يُنشأ أمر العمل بعد اعتماد المطالبة" : undefined}
+                className="gap-2 bg-blue-600 hover:bg-blue-700"
+              >
+                <Wrench size={16} /> إنشاء أمر عمل
               </Button>
             )}
-            {!isNew && isApprovedClaim && (
-              hasLinkedWorkOrder ? (
-                <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
-                  <ClipboardList size={16} /> فتح أمر العمل
-                </Button>
-              ) : (
-                <Button variant="outline" onClick={handleConvertToWorkOrder} className="gap-2">
-                  <Wrench size={16} /> إنشاء أمر عمل
-                </Button>
-              )
-            )}
-            {!isNew && !hasActiveInvoice && !isClosedClaim && (
-              <Button variant="outline" onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice} className="gap-2">
-                <Receipt size={16} /> إنشاء فاتورة
-              </Button>
-            )}
-            {!isNew && (
-              <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                <MessageCircle size={16} /> إرسال رسالة
-              </Button>
-            )}
-            {!isNew && (
-              <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                <Printer size={16} /> PDF
-              </Button>
-            )}
-            {!isNew && (
-              <Button variant="outline" onClick={openUnifiedCustomerPortal} className="gap-2">
-                <LinkIcon size={16} /> رابط العميل
-              </Button>
-            )}
-            <Button variant="ghost" onClick={() => smartBack(navigate, "/insurance/list")} className="gap-2">
+            <Button
+              variant="default"
+              onClick={generateTaxInvoice}
+              disabled={isNew || hasActiveInvoice || isClosedClaim || !canIssueTaxInvoice}
+              title={hasActiveInvoice ? "توجد فاتورة مرتبطة بالفعل" : !canIssueTaxInvoice ? "تحتاج LPO أو إكمال أمر العمل/التسليم" : undefined}
+              className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+            >
+              <Receipt size={16} /> إنشاء فاتورة
+            </Button>
+            <Button variant="outline" onClick={() => setShowSendEmail(true)} disabled={isNew} className="gap-2">
+              <MessageCircle size={16} /> إرسال رسالة
+            </Button>
+            <Button variant="outline" onClick={() => setShowSummary(true)} disabled={isNew} className="gap-2">
+              <Printer size={16} /> PDF
+            </Button>
+            <Button variant="outline" onClick={openUnifiedCustomerPortal} disabled={isNew} className="gap-2">
+              <LinkIcon size={16} /> رابط العميل
+            </Button>
+            <Button variant="outline" disabled title="لا توجد إجراءات إضافية مفعّلة لهذه المرحلة حالياً" className="gap-2">
+              <Sparkles size={16} /> المزيد
+            </Button>
+            <Button variant="ghost" onClick={() => smartBack(navigate, "/insurance/list")} className="gap-2 mr-auto">
               <ArrowRight size={16} /> رجوع
             </Button>
           </div>
         </div>
       </Card>
 
-      <Card className="p-5">
-        <div className="grid gap-3 md:grid-cols-4">
+      <Card className="px-5 py-5">
+        <div className="relative grid gap-4 md:grid-cols-4">
+          <div className="absolute left-8 right-8 top-7 hidden border-t border-dashed border-blue-200 md:block" />
           {vehicleProgress.map((step) => {
             const Icon = step.Icon;
             const active = step.state === "current";
@@ -1559,24 +1551,25 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 type="button"
                 onClick={() => openStageDialog(step)}
                 disabled={isNew || isClosedClaim}
-                className={`rounded-xl border p-4 text-right transition-all ${
-                  active
-                    ? "border-primary bg-primary/10 shadow-sm"
-                    : done
-                    ? "border-success/30 bg-success/5"
-                    : "border-border bg-secondary/20 opacity-80"
-                }`}
+                className="relative z-10 flex flex-col items-center gap-2 rounded-xl p-2 text-center transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                <div className="flex items-center gap-2">
-                  <span className={`rounded-lg p-2 ${active ? "bg-primary text-primary-foreground" : done ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>
-                    <Icon size={18} />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="font-bold text-sm">{step.label}</div>
-                    <div className="text-[11px] text-muted-foreground">{step.date ? formatDateLatin(step.date) : "لم تُحدّث بعد"}</div>
-                    <div className="text-[10px] text-muted-foreground">بواسطة: {(claimAudit as any[])[0]?.user_id || "—"}</div>
-                  </div>
+                <span
+                  className={`flex h-12 w-12 items-center justify-center rounded-full border-2 text-sm font-bold shadow-sm ${
+                    active
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : done
+                      ? "border-emerald-500 bg-emerald-500 text-white"
+                      : "border-slate-200 bg-white text-slate-500"
+                  }`}
+                >
+                  {done ? <CheckCircle2 size={20} /> : active ? step.index + 1 : <Icon size={20} />}
+                </span>
+                <div className={active ? "text-blue-700" : done ? "text-emerald-700" : "text-slate-500"}>
+                  <div className="font-bold text-sm">{step.index + 1}. {step.label}</div>
+                  <div className="text-xs">{step.subtitle}</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">{step.date ? formatDateLatin(step.date) : "لم تُحدّث بعد"}</div>
                 </div>
+                {active && <span className="mt-1 h-0.5 w-24 rounded-full bg-blue-600" />}
               </button>
             );
           })}
@@ -1629,7 +1622,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <h2 className="font-bold flex items-center gap-2"><UserRound size={18} className="text-primary" /> بيانات العميل</h2>
             <div className="flex gap-2">
               {customerId && <Button size="sm" variant="outline" onClick={() => navigate(`/customers/${customerId}`)}>فتح العميل</Button>}
-              <Button size="sm" variant="ghost" onClick={() => setShowSendEmail(true)}>إرسال رسالة</Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowSendEmail(true)} disabled={isNew}>إرسال رسالة</Button>
             </div>
           </div>
           {isNew ? (
@@ -1649,7 +1642,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         <Card className="p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-bold flex items-center gap-2"><CarFront size={18} className="text-primary" /> بيانات السيارة</h2>
-            {!isNew && <Button size="sm" variant="outline" onClick={() => setEditVehicleSection((v) => !v)}><CarFront size={14} className="ml-1" /> تعديل بيانات المركبة</Button>}
+            <div className="flex gap-2">
+              {!isNew && vehicleId && <Button size="sm" variant="outline" onClick={() => navigate(`/vehicles/${encodeURIComponent(vehicleId)}`)}>فتح المركبة</Button>}
+              {!isNew && <Button size="sm" variant="outline" onClick={() => setEditVehicleSection((v) => !v)}><CarFront size={14} className="ml-1" /> تعديل بيانات المركبة</Button>}
+            </div>
           </div>
           {isNew || editVehicleSection ? (
             <VehicleMakeModelPicker
@@ -1741,8 +1737,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Info label="حالة الدفع" value={paymentStatusLabel} />
           </div>
           <div className="flex flex-wrap gap-2">
-            {activeInvoice && <Button size="sm" variant="outline" onClick={() => setShowTaxInvoice(true)}>فتح الفاتورة</Button>}
-            {!isNew && <Button size="sm" variant="outline" onClick={() => navigate("/insurance/payments")}>إضافة دفعة</Button>}
+            {activeInvoice && <Button size="sm" variant="outline" onClick={() => navigate("/insurance/accounting")}>فتح الفاتورة</Button>}
+            {!isNew && <Button size="sm" variant="outline" onClick={() => navigate(`/insurance/payments?claim_id=${existing?.id || ""}`)}>إضافة دفعة</Button>}
             {paymentRemaining > 0 && <Button size="sm" variant="ghost" onClick={() => setShowSendEmail(true)}>تذكير دفع</Button>}
           </div>
         </Card>
@@ -1757,7 +1753,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           <Info label="الإجمالي" value={`${claimExpensesTotal.toFixed(3)} ر.ع`} />
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => navigate("/accounting/expenses")}>فتح المصروفات</Button>
+          <Button size="sm" variant="outline" onClick={() => navigate(`/accounting/expenses?claim_id=${existing?.id || ""}`)}>فتح المصروفات</Button>
           <Button size="sm" variant="outline" onClick={() => navigate(`/accounting/expenses?claim_id=${existing?.id || ""}&work_order_id=${effectiveWorkOrderId || ""}`)}>إضافة مصروف</Button>
         </div>
       </Card>
@@ -2070,6 +2066,41 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
 // Owner autocomplete — searches the tenant customers list and lets the
 // user keep typing a brand-new name (which will be auto-created on save).
 // ════════════════════════════════════════════════════════════════════════
+function HeaderMetric({
+  label,
+  value,
+  sub,
+  icon,
+  strong,
+  badgeClass,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  icon?: React.ReactNode;
+  strong?: boolean;
+  badgeClass?: string;
+}) {
+  return (
+    <div className="flex min-h-[88px] items-center justify-center gap-3 px-4 py-3 text-center">
+      {icon && <div className="shrink-0">{icon}</div>}
+      <div className="min-w-0">
+        <div className="mb-1 text-xs font-medium text-slate-500">{label}</div>
+        {badgeClass ? (
+          <span className={`inline-flex max-w-full items-center justify-center rounded-full border px-3 py-1 text-xs font-bold ${badgeClass}`}>
+            <span className="truncate">{value || "—"}</span>
+          </span>
+        ) : (
+          <div className={`${strong ? "text-lg text-blue-700" : "text-sm text-slate-900"} truncate font-bold`}>
+            {value || "—"}
+          </div>
+        )}
+        {sub && <div className="mt-1 text-[11px] text-slate-500">{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
 interface OwnerAutoProps {
   value: string;
   onChange: (v: string) => void;
