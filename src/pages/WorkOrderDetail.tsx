@@ -68,6 +68,7 @@ import ApprovalHistoryTab from "@/components/workorders/ApprovalHistoryTab";
 import CustomerPortalLink from "@/components/workorders/CustomerPortalLink";
 import SendStageNotificationButton from "@/components/workorders/SendStageNotificationButton";
 import SmartCustomerSendBar from "@/components/workorders/SmartCustomerSendBar";
+import { isUuid } from "@/lib/uuid";
 // PortalNotesPending moved to /messages
 import VehicleDeliveryReceiptDialog from "@/components/workorders/VehicleDeliveryReceiptDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -1276,11 +1277,12 @@ export default function WorkOrderDetail() {
           await refreshWorkOrdersFromCloud().catch(() => {});
           deleteWorkOrder(order.id);
           if (removed) {
+            const cloudEntityId = removed.cloudId && isUuid(removed.cloudId) ? removed.cloudId : removed.id;
             moveToTrash({
               type: "work_order",
-              entityId: removed.id,
+              entityId: cloudEntityId,
               label: `${removed.customer} - ${removed.plate}`,
-              payload: removed,
+              payload: { ...removed, cloudId: cloudEntityId },
             });
             logActivity({
               action: "delete",

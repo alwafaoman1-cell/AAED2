@@ -59,6 +59,7 @@ import { TablePaginationControls } from "@/components/ui/table-pagination-contro
 import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { isInsuranceWorkOrder, resolveWorkOrderType } from "@/lib/workOrderType";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
+import { isUuid } from "@/lib/uuid";
 
 const DURATION_BAR_HEX: Record<string, string> = {
   red: "#ef4444",
@@ -920,11 +921,12 @@ export default function WorkOrders() {
           await refreshWorkOrdersFromCloud().catch(() => {});
           deleteWorkOrder(deleteOrder.id);
           if (removed) {
+            const cloudEntityId = removed.cloudId && isUuid(removed.cloudId) ? removed.cloudId : removed.id;
             moveToTrash({
               type: "work_order",
-              entityId: removed.id,
+              entityId: cloudEntityId,
               label: `${removed.customer} - ${removed.plate}`,
-              payload: removed,
+              payload: { ...removed, cloudId: cloudEntityId },
             });
             logActivity({
               action: "delete",
@@ -1080,11 +1082,12 @@ export default function WorkOrders() {
             await refreshWorkOrdersFromCloud().catch(() => {});
             deleteWorkOrder(id);
             if (removed) {
+              const cloudEntityId = removed.cloudId && isUuid(removed.cloudId) ? removed.cloudId : removed.id;
               moveToTrash({
                 type: "work_order",
-                entityId: removed.id,
+                entityId: cloudEntityId,
                 label: `${removed.customer} - ${removed.plate}`,
-                payload: removed,
+                payload: { ...removed, cloudId: cloudEntityId },
               });
               n++;
             }

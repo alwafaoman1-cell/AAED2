@@ -72,6 +72,8 @@ describe("operational fixes contract", () => {
     const detail = read("src/pages/WorkOrderDetail.tsx");
     const dangerZone = read("src/components/settings/SecurityDangerZone.tsx");
     const resetFunction = read("supabase/functions/execute-cloud-reset/index.ts");
+    const trashStore = read("src/lib/trashStore.ts");
+    const restoreHandlers = read("src/hooks/useTrashRestoreHandlers.ts");
 
     expect(store).toContain("!order.deletedAt && !order.archivedAt");
     expect(store).toContain(".is(\"deleted_at\", null)");
@@ -82,5 +84,9 @@ describe("operational fixes contract", () => {
     expect(resetFunction).toContain("const dryRun = body.dryRun !== false");
     expect(resetFunction).toContain("const skipOtp = body.skipOtp === true || dryRun");
     expect(resetFunction).toContain("if (!dryRun && body.confirmPhrase !== \"DELETE CLOUD DATA\")");
+    expect(trashStore).toContain("handler(item.payload, item)");
+    expect(restoreHandlers).toContain("isUuid(item.entityId)");
+    expect(workOrders).toContain("payload: { ...removed, cloudId: cloudEntityId }");
+    expect(detail).toContain("payload: { ...removed, cloudId: cloudEntityId }");
   });
 });

@@ -39,7 +39,7 @@ const STORAGE_KEY = "alwafa_trash_v1";
 
 let cache: TrashItem[] | null = null;
 const listeners = new Set<() => void>();
-const restoreHandlers = new Map<EntityType, (payload: unknown) => void | Promise<void>>();
+const restoreHandlers = new Map<EntityType, (payload: unknown, item: TrashItem) => void | Promise<void>>();
 
 function load(): TrashItem[] {
   if (cache) return cache;
@@ -90,7 +90,7 @@ export async function restore(trashId: string): Promise<boolean> {
   if (!item) return false;
   const handler = restoreHandlers.get(item.type);
   if (!handler) return false;
-  await handler(item.payload);
+  await handler(item.payload, item);
   cache = list.filter((t) => t.trashId !== trashId);
   persist();
   return true;
@@ -98,7 +98,7 @@ export async function restore(trashId: string): Promise<boolean> {
 
 export function registerRestoreHandler(
   type: EntityType,
-  handler: (payload: unknown) => void | Promise<void>
+  handler: (payload: unknown, item: TrashItem) => void | Promise<void>
 ) {
   restoreHandlers.set(type, handler);
 }
