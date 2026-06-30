@@ -282,6 +282,7 @@ export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkO
   const ctx = await tenantContext();
   if (!ctx) throw new Error("Tenant was not loaded. Please refresh and try again.");
   const orderNumber = order.displayNumber || order.id;
+  const expectedOrderNumber = /^WO-/i.test(orderNumber || "") ? orderNumber : null;
   let foundId: string | null = null;
 
   if (order.cloudId && isUuid(order.cloudId)) {
@@ -325,6 +326,14 @@ export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkO
   }
   if (error) throw error;
   if (!data?.id) throw new Error("Restore did not return a work order from Supabase");
+  if (expectedOrderNumber && data.order_number && data.order_number !== expectedOrderNumber) {
+    const archivedAt = new Date().toISOString();
+    await (supabase.from("job_orders") as any)
+      .update({ deleted_at: archivedAt, archived_at: archivedAt })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", foundId);
+    throw new Error(`Trash restore mismatch: expected ${expectedOrderNumber}, got ${data.order_number}. Please refresh the trash and try again.`);
+  }
 
   const { data: verified, error: verifyError } = await supabase
     .from("job_orders")
@@ -336,11 +345,18 @@ export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkO
     .maybeSingle();
   if (verifyError) throw verifyError;
   if (!verified?.id) throw new Error("Work order restore was not visible after verification");
+  if (expectedOrderNumber && verified.order_number && verified.order_number !== expectedOrderNumber) {
+    const archivedAt = new Date().toISOString();
+    await (supabase.from("job_orders") as any)
+      .update({ deleted_at: archivedAt, archived_at: archivedAt })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", foundId);
+    throw new Error(`Trash restore mismatch: expected ${expectedOrderNumber}, got ${verified.order_number}. Please refresh the trash and try again.`);
+  }
 
   const saved = await mapSavedJobOrder(verified);
-  const idx = cache.findIndex((o) => o.id === saved.id || o.cloudId === saved.cloudId);
-  if (idx >= 0) cache[idx] = saved;
-  else cache.unshift(saved);
+  cache = cache.filter((o) => o.id !== saved.id && o.cloudId !== saved.cloudId);
+  cache.unshift(saved);
   persist();
   return saved;
 }

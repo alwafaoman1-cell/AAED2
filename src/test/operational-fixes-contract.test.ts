@@ -78,6 +78,8 @@ describe("operational fixes contract", () => {
     expect(store).toContain("!order.deletedAt && !order.archivedAt");
     expect(store).toContain(".is(\"deleted_at\", null)");
     expect(store).toContain(".is(\"archived_at\", null)");
+    expect(store).toContain("Trash restore mismatch");
+    expect(store).toContain("cache = cache.filter");
     expect(workOrders.match(/refreshWorkOrdersFromCloud/g)?.length || 0).toBeGreaterThanOrEqual(3);
     expect(detail).toContain("refreshWorkOrdersFromCloud");
     expect(dangerZone).toContain("if (!dryRun && !bypassOtp && !otp.trim())");
