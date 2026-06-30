@@ -1422,10 +1422,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     }
   };
 
-  if (!isNew && isLoading) {
-    return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
-  }
-
   // Status pill
   const statusMeta: Record<string, { label: string; cls: string }> = {
     pending: { label: "بانتظار الموافقة", cls: "bg-warning/15 text-warning" },
@@ -1473,6 +1469,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   useEffect(() => {
     if (!claimViewTouchedRef.current) setClaimViewIndex(currentClaimStepIndex);
   }, [currentClaimStepIndex]);
+
+  if (!isNew && isLoading) {
+    return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
+  }
 
   return (
     <div className="space-y-5 pb-12" dir="rtl">
