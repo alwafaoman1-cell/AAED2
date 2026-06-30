@@ -252,9 +252,6 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuItem onClick={() => setShowPayment(true)}>{isAr ? "إضافة سند قبض" : "Add receipt voucher"}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.info(isAr ? "قريبًا" : "soon")}>{isAr ? "إضافة سند صرف" : "Add payment voucher"}</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => toast.info(isAr ? "قريبًا" : "soon")}>{isAr ? "عرض القسائم المرتبطة" : "View linked vouchers"}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 

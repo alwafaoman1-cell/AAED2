@@ -346,7 +346,21 @@ export default function InsuranceClaimDetail() {
       const url = await uploadFile(f, "photos");
       if (url) uploaded.push(url);
     }
-    setDamagePhotos((p) => [...p, ...uploaded]);
+    if (!uploaded.length) return;
+    const mergedPhotos = [...damagePhotos, ...uploaded];
+    setDamagePhotos(mergedPhotos);
+    if (!isNew && id) {
+      try {
+        await updateClaim.mutateAsync({
+          id,
+          updates: { damage_photos: mergedPhotos as any },
+        });
+        await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
+        toast.success("تم رفع الصور وحفظها في المطالبة");
+      } catch (e: any) {
+        toast.error(e?.message || "تعذر حفظ صور المطالبة");
+      }
+    }
   };
 
   const handleDocUpload = async (files: FileList | null, type: string) => {
@@ -1783,7 +1797,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <div className="flex items-center justify-between"><h2 className="font-bold flex items-center gap-2 text-primary"><ImagePlus size={18} /> صور الحادث</h2><Badge variant="outline">{damagePhotos.length} صور</Badge></div>
             <div className="grid grid-cols-4 gap-2">
               {damagePhotos.slice(0, 4).map((src, i) => <img key={i} src={src} className="h-20 w-full rounded-lg border object-cover" />)}
-              <button type="button" className="flex h-20 items-center justify-center rounded-lg border border-dashed text-muted-foreground" onClick={() => toast.info("استخدم لوحة المستندات بالأسفل لرفع الصور")}>+</button>
+              {!isNew && (
+                <Label className="flex h-20 cursor-pointer items-center justify-center rounded-lg border border-dashed text-muted-foreground transition hover:border-primary hover:text-primary">
+                  <Plus size={22} />
+                  <Input type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotoUpload(e.target.files)} />
+                </Label>
+              )}
             </div>
           </Card>
 
@@ -1791,7 +1810,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <div className="flex items-center justify-between"><h2 className="font-bold flex items-center gap-2 text-primary"><Camera size={18} /> صور الإصلاح</h2><Button size="sm" variant="outline" onClick={() => setShowInspectionPicker(true)}>ربط فحص</Button></div>
             <div className="grid grid-cols-5 gap-2">
               {damagePhotos.slice(0, 5).map((src, i) => <img key={i} src={src} className="h-20 w-full rounded-lg border object-cover opacity-80" />)}
-              <div className="flex h-20 items-center justify-center rounded-lg border border-dashed text-muted-foreground">+</div>
             </div>
           </Card>
 

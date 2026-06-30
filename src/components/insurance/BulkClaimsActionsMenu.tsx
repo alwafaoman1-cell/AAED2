@@ -11,7 +11,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  MoreHorizontal, FileText, Receipt, FileX, Download, FileSpreadsheet,
+  MoreHorizontal, Receipt, FileSpreadsheet,
   CheckCircle, DollarSign, Archive, Send, Trash2, Sparkles, Loader2,
   MessageSquare, Building2, RefreshCw,
 } from "lucide-react";
@@ -101,10 +101,6 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
     onClear();
   }
 
-  function comingSoon(label: string) {
-    toast.info(`${label} — قريباً ضمن المرحلة التالية`, { duration: 3000 });
-  }
-
   return (
     <>
       <DropdownMenu>
@@ -180,12 +176,6 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
                 <DropdownMenuItem onClick={() => bulkExportClaimsCSV(selected)} className="gap-2">
                   <FileSpreadsheet size={14} /> تصدير المحددة Excel/CSV
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("إشعار دائن (Credit Note)")} className="gap-2">
-                  <FileX size={14} /> إنشاء إشعار دائن
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("تصدير فواتير PDF")} className="gap-2">
-                  <Download size={14} /> تصدير الفواتير PDF
-                </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
           </DropdownMenuSub>
@@ -235,42 +225,6 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
                   className="gap-2"
                 >
                   <MessageSquare size={14} /> فتح واتساب للعملاء المحددين
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("واتساب لشركات التأمين")} className="gap-2">
-                  <MessageSquare size={14} /> واتساب لشركات التأمين
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("إرسال رابط الفاتورة")} className="gap-2">
-                  <Send size={14} /> إرسال رابط الفاتورة
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("إرسال رابط متابعة الإصلاح")} className="gap-2">
-                  <Send size={14} /> إرسال رابط متابعة الإصلاح
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuPortal>
-          </DropdownMenuSub>
-
-          {/* --- تقارير (Phase 3) --- */}
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="gap-2">
-              <FileText size={14} className="text-amber-600" />
-              <span>التقارير</span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuSubContent className="w-64">
-                <DropdownMenuItem onClick={() => comingSoon("تقرير حسب شركة التأمين")} className="gap-2">
-                  <FileText size={14} /> تقرير حسب شركة التأمين
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("تقرير شهري للمحددة")} className="gap-2">
-                  <FileText size={14} /> تقرير شهري للمحددة
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("تقرير الأرباح")} className="gap-2">
-                  <FileText size={14} /> تقرير الأرباح
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("تقرير السيارات المسلَّمة")} className="gap-2">
-                  <FileText size={14} /> تقرير السيارات المسلَّمة
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => comingSoon("تقرير السيارات قيد العمل")} className="gap-2">
-                  <FileText size={14} /> تقرير السيارات قيد العمل
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
