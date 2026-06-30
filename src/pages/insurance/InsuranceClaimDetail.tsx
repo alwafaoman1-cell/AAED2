@@ -835,10 +835,15 @@ export default function InsuranceClaimDetail() {
       updates.estimate_date = changedAt;
     } else if (stageDialog.key === "awaiting_approval") {
       updates.estimate_date = changedAt;
+    } else if (stageDialog.key === "approval") {
+      updates.status = "approved";
+      updates.approved_at = new Date(changedAt).toISOString();
     } else if (stageDialog.key === "repairing") {
       updates.work_started_at = new Date(changedAt).toISOString();
       updates.status = "approved";
     } else if (stageDialog.key === "ready") {
+      updates.work_completed_at = new Date(changedAt).toISOString();
+    } else if (stageDialog.key === "invoice") {
       updates.work_completed_at = new Date(changedAt).toISOString();
     } else if (stageDialog.key === "delivered") {
       updates.delivered_at = new Date(changedAt).toISOString();
@@ -1240,7 +1245,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     queryFn: async () => {
       const { data } = await supabase
         .from("insurance_invoices" as any)
-        .select("id,invoice_number,total,paid_amount,status")
+        .select("id,invoice_number,subtotal,vat,total,paid_amount,status,issued_at")
         .eq("claim_id", existing!.id)
         .neq("status", "cancelled")
         .maybeSingle();
@@ -1431,6 +1436,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     cancelled: { label: "ملغاة", cls: "bg-muted text-muted-foreground line-through" },
   };
   const invoiceTotal = Number((activeInvoice as any)?.total || 0);
+  const invoiceVat = Number((activeInvoice as any)?.vat || 0);
   const paidTotal = (activeInvoice as any)?.paid_amount != null
     ? Number((activeInvoice as any).paid_amount || 0)
     : claimPayments.filter((p) => p.status === "cleared").reduce((sum, p) => sum + Number(p.amount || 0), 0);
@@ -1446,20 +1452,24 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
   const isAwaitingApproval = !isNew && status === "pending";
   const isApprovedClaim = status === "approved";
-  const currentClaimStepIndex = isClosedClaim
-    ? 3
-    : isDeliveredClaim || isReadyForDelivery
-      ? 3
-      : isRepairingClaim || isApprovedClaim || hasLinkedWorkOrder
-        ? 2
-        : isAwaitingApproval
-          ? 1
-          : 0;
+  const currentClaimStepIndex = isClosedClaim || isDeliveredClaim
+    ? 5
+    : activeInvoice || isReadyForDelivery
+      ? 4
+      : isRepairingClaim || hasLinkedWorkOrder
+        ? 3
+        : isApprovedClaim || isAwaitingApproval
+          ? 2
+          : estimateDate
+            ? 1
+            : 0;
   const vehicleProgress = [
-    { key: "received", label: "البيانات الأساسية", subtitle: "الاستلام والفحص", Icon: FileText, date: workshopArrivalDate || estimateDate, editable: true },
-    { key: "awaiting_approval", label: "الفحص والمرفقات", subtitle: "التقدير والمستندات", Icon: Upload, date: estimateDate, editable: true },
-    { key: "repairing", label: "الاعتماد والتنفيذ", subtitle: "الموافقة وأمر العمل", Icon: Wrench, date: workStartedAt || dateOnly((existing as any)?.approved_at), editable: true },
-    { key: "ready", label: "الفاتورة والإغلاق", subtitle: "الدفع والتسليم", Icon: PackageCheck, date: workCompletedAt || dateOnly((existing as any)?.delivered_at), editable: true },
+    { key: "received", label: "استلام المركبة", subtitle: "العميل والسيارة", Icon: ClipboardCheck, date: workshopArrivalDate || dateOnly((existing as any)?.created_at), editable: true },
+    { key: "awaiting_approval", label: "الفحص والتقدير", subtitle: "الصور والمستندات", Icon: Upload, date: estimateDate, editable: true },
+    { key: "approval", label: "اعتماد التأمين", subtitle: "الموافقة والمبالغ", Icon: ShieldCheck, date: dateOnly((existing as any)?.approved_at), editable: true },
+    { key: "repairing", label: "الإصلاح والمتابعة", subtitle: "أمر العمل والتقدم", Icon: Wrench, date: workStartedAt, editable: true },
+    { key: "invoice", label: "الفاتورة والدفع", subtitle: "الفاتورة والدفعات", Icon: Receipt, date: workCompletedAt || dateOnly((activeInvoice as any)?.created_at), editable: true },
+    { key: "delivered", label: "التسليم والإغلاق", subtitle: "التسليم والملفات", Icon: PackageCheck, date: dateOnly((existing as any)?.delivered_at), editable: true },
   ].map((step, index) => ({
     ...step,
     index,
@@ -1490,7 +1500,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
         <div className="border-t bg-slate-50/80 px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 [&>button]:h-10 [&>button]:rounded-lg [&>button]:px-5 [&>button]:text-sm [&>button]:font-semibold">
-            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2 bg-blue-800 hover:bg-blue-900">
+            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2 bg-primary hover:bg-primary/90">
               <Save size={16} /> حفظ
             </Button>
             <Button
@@ -1502,7 +1512,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <CheckCircle2 size={16} /> اعتماد / موافقة
             </Button>
             {!isNew && isApprovedClaim && hasLinkedWorkOrder ? (
-              <Button variant="default" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2 bg-blue-600 hover:bg-blue-700">
+              <Button variant="default" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2 bg-primary hover:bg-primary/90">
                 <ClipboardList size={16} /> فتح أمر العمل
               </Button>
             ) : (
@@ -1511,20 +1521,26 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 onClick={handleConvertToWorkOrder}
                 disabled={isNew || !isApprovedClaim || hasLinkedWorkOrder}
                 title={hasLinkedWorkOrder ? "يوجد أمر عمل مرتبط بالفعل" : !isApprovedClaim ? "يُنشأ أمر العمل بعد اعتماد المطالبة" : undefined}
-                className="gap-2 bg-blue-600 hover:bg-blue-700"
+                className="gap-2 bg-primary hover:bg-primary/90"
               >
                 <Wrench size={16} /> إنشاء أمر عمل
               </Button>
             )}
-            <Button
-              variant="default"
-              onClick={generateTaxInvoice}
-              disabled={isNew || hasActiveInvoice || isClosedClaim || !canIssueTaxInvoice}
-              title={hasActiveInvoice ? "توجد فاتورة مرتبطة بالفعل" : !canIssueTaxInvoice ? "تحتاج LPO أو إكمال أمر العمل/التسليم" : undefined}
-              className="gap-2 bg-emerald-600 hover:bg-emerald-700"
-            >
-              <Receipt size={16} /> إنشاء فاتورة
-            </Button>
+            {hasActiveInvoice ? (
+              <Button variant="default" onClick={() => navigate("/insurance/accounting")} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+                <Receipt size={16} /> عرض الفاتورة
+              </Button>
+            ) : (
+              <Button
+                variant="default"
+                onClick={generateTaxInvoice}
+                disabled={isNew || isClosedClaim || !canIssueTaxInvoice}
+                title={!canIssueTaxInvoice ? "تحتاج LPO أو إكمال أمر العمل/التسليم" : undefined}
+                className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+              >
+                <Receipt size={16} /> إنشاء فاتورة
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setShowSendEmail(true)} disabled={isNew} className="gap-2">
               <MessageCircle size={16} /> إرسال رسالة
             </Button>
@@ -1542,8 +1558,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       </Card>
 
       <Card className="rounded-2xl border-slate-200 bg-white px-5 py-6 shadow-sm">
-        <div className="relative grid gap-4 md:grid-cols-4">
-          <div className="absolute left-10 right-10 top-7 hidden border-t border-dashed border-blue-300 md:block" />
+        <div className="relative grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+          <div className="absolute left-10 right-10 top-7 hidden border-t border-dashed border-primary/30 md:block" />
           {vehicleProgress.map((step) => {
             const Icon = step.Icon;
             const active = step.state === "current";
@@ -1557,14 +1573,14 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   setClaimViewIndex(step.index);
                 }}
                 disabled={isNew}
-                className="relative z-10 flex flex-col items-center gap-2 rounded-xl p-2 text-center transition hover:bg-blue-50/60 disabled:cursor-not-allowed disabled:opacity-70"
+                className="relative z-10 flex flex-col items-center gap-2 rounded-xl p-2 text-center transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <span
                   className={`flex h-12 w-12 items-center justify-center rounded-full border-2 text-sm font-bold shadow-sm ${
                     claimViewIndex === step.index
-                      ? "border-blue-600 bg-blue-600 text-white"
+                      ? "border-primary bg-primary text-white"
                       : active
-                      ? "border-blue-600 bg-blue-600 text-white"
+                      ? "border-primary bg-primary text-white"
                       : done
                       ? "border-emerald-500 bg-emerald-500 text-white"
                       : "border-slate-200 bg-white text-slate-500"
@@ -1572,12 +1588,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 >
                   {done ? <CheckCircle2 size={20} /> : active ? step.index + 1 : <Icon size={20} />}
                 </span>
-                <div className={claimViewIndex === step.index ? "text-blue-700" : active ? "text-blue-700" : done ? "text-emerald-700" : "text-slate-500"}>
+                <div className={claimViewIndex === step.index ? "text-primary" : active ? "text-primary" : done ? "text-emerald-700" : "text-slate-500"}>
                   <div className="font-bold text-sm">{step.index + 1}. {step.label}</div>
                   <div className="text-xs">{step.subtitle}</div>
                   <div className="mt-1 text-[11px] text-muted-foreground">{step.date ? formatDateLatin(step.date) : "لم تُحدّث بعد"}</div>
                 </div>
-                {claimViewIndex === step.index && <span className="mt-1 h-1 w-28 rounded-full bg-blue-600" />}
+                {claimViewIndex === step.index && <span className="mt-1 h-1 w-28 rounded-full bg-primary" />}
               </button>
             );
           })}
@@ -1604,7 +1620,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         <div className="grid gap-4 xl:grid-cols-[1.15fr_0.9fr_1.1fr] [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold flex items-center gap-2 text-blue-700"><Building2 size={18} /> 1. بيانات شركة التأمين / الجهة الدافعة</h2>
+              <h2 className="font-bold flex items-center gap-2 text-primary"><Building2 size={18} /> 1. بيانات شركة التأمين / الجهة الدافعة</h2>
               {!isNew && <Button size="sm" variant="outline" onClick={() => setEditInsuranceSection((v) => !v)}>تعديل بيانات التأمين</Button>}
             </div>
             {isNew || editInsuranceSection ? (
@@ -1628,7 +1644,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold flex items-center gap-2 text-blue-700"><UserRound size={18} /> بيانات العميل</h2>
+              <h2 className="font-bold flex items-center gap-2 text-primary"><UserRound size={18} /> بيانات العميل</h2>
               {customerId && <Button size="sm" variant="outline" onClick={() => navigate(`/customers/${customerId}`)}>فتح العميل</Button>}
             </div>
             {isNew ? (
@@ -1648,7 +1664,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold flex items-center gap-2 text-blue-700"><CarFront size={18} /> 3. بيانات السيارة</h2>
+              <h2 className="font-bold flex items-center gap-2 text-primary"><CarFront size={18} /> 3. بيانات السيارة</h2>
               <div className="flex gap-2">
                 {!isNew && vehicleId && <Button size="sm" variant="outline" onClick={() => navigate(`/vehicles/${encodeURIComponent(vehicleId)}`)}>فتح المركبة</Button>}
                 {!isNew && <Button size="sm" variant="outline" onClick={() => setEditVehicleSection((v) => !v)}>تعديل</Button>}
@@ -1685,7 +1701,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
 
           <Card className="p-5 space-y-4 xl:col-span-1">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><ClipboardList size={18} /> 4. ملخص أمر العمل المرتبط</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><ClipboardList size={18} /> 4. ملخص أمر العمل المرتبط</h2>
             <div className="grid gap-3 text-sm">
               <Info label="رقم أمر العمل" value={effectiveWorkOrderId || "—"} />
               <Info label="حالة أمر العمل" value={linkedWorkOrderStatus} />
@@ -1699,7 +1715,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
 
           <Card className="p-5 xl:col-span-2">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700 mb-4"><BadgeCheck size={18} /> بطاقات ملخص سريعة</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary mb-4"><BadgeCheck size={18} /> بطاقات ملخص سريعة</h2>
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
               {[
                 ["حالة المطالبة", statusMeta[status]?.label || status, BadgeCheck],
@@ -1710,12 +1726,36 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 ["آخر تحديث", formatDateLatin((existing as any)?.updated_at || new Date()), Clock3],
               ].map(([label, value, Icon]: any) => (
                 <div key={label} className="rounded-xl border bg-slate-50 p-3 text-center">
-                  <Icon size={18} className="mx-auto mb-2 text-blue-700" />
+                  <Icon size={18} className="mx-auto mb-2 text-primary" />
                   <div className="text-[11px] text-muted-foreground">{label}</div>
                   <div className="mt-1 text-sm font-bold">{value}</div>
                 </div>
               ))}
             </div>
+          </Card>
+          <Card className="p-5 space-y-4 xl:col-span-2">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><ClipboardCheck size={18} /> استلام المركبة</h2>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Info label="تاريخ استلام المركبة" value={formatDateLatin(workshopArrivalDate || (existing as any)?.created_at || new Date())} />
+              <Info label="مستلم المركبة" value={(claimAudit as any[])[0]?.user_id || "—"} />
+              <Info label="حالة المركبة عند الوصول" value={workshopArrivalDate ? "وصلت إلى الورشة" : "لم يتم تسجيل الاستلام بعد"} />
+              <Info label="رقم الهاتف" value={ownerPhone || customer?.phone || "—"} />
+              <Info label="توقيع العميل" value={(existing as any)?.customer_signature_url ? "موجود" : "غير مسجل"} />
+              <Info label="رابط المتابعة" value={hasLinkedWorkOrder ? "جاهز عبر رابط العميل" : "ينشأ بعد ربط أمر العمل"} />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => openStageDialog(vehicleProgress[0])}>تحديث تاريخ الاستلام</Button>
+              <Button size="sm" variant="outline" onClick={openUnifiedCustomerPortal} disabled={!hasLinkedWorkOrder}>فتح رابط متابعة العميل</Button>
+            </div>
+          </Card>
+          <Card className="p-5 space-y-4">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><Clock3 size={18} /> تواريخ المطالبة</h2>
+            <Info label="فتح المطالبة" value={formatDateLatin((existing as any)?.created_at || new Date())} />
+            <Info label="دخول الورشة" value={workshopArrivalDate ? formatDateLatin(workshopArrivalDate) : "—"} />
+            <Info label="إرسال التقدير" value={estimateDate ? formatDateLatin(estimateDate) : "—"} />
+            <Info label="اعتماد التأمين" value={dateOnly((existing as any)?.approved_at) ? formatDateLatin(dateOnly((existing as any)?.approved_at)) : "—"} />
+            <Info label="بداية الإصلاح" value={workStartedAt ? formatDateLatin(workStartedAt) : "—"} />
+            <Info label="الجاهزية / التسليم" value={workCompletedAt || (existing as any)?.delivered_at ? formatDateLatin(workCompletedAt || (existing as any)?.delivered_at) : "—"} />
           </Card>
           <TimelineStrip claimAudit={claimAudit} className="xl:col-span-3" />
         </div>
@@ -1724,7 +1764,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       {claimViewIndex === 1 && (
         <div className="grid gap-4 xl:grid-cols-[1.05fr_1.05fr_0.8fr] [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
-            <div className="flex items-center justify-between"><h2 className="font-bold flex items-center gap-2 text-blue-700"><ImagePlus size={18} /> صور الحادث</h2><Badge variant="outline">{damagePhotos.length} صور</Badge></div>
+            <div className="flex items-center justify-between"><h2 className="font-bold flex items-center gap-2 text-primary"><ImagePlus size={18} /> صور الحادث</h2><Badge variant="outline">{damagePhotos.length} صور</Badge></div>
             <div className="grid grid-cols-4 gap-2">
               {damagePhotos.slice(0, 4).map((src, i) => <img key={i} src={src} className="h-20 w-full rounded-lg border object-cover" />)}
               <button type="button" className="flex h-20 items-center justify-center rounded-lg border border-dashed text-muted-foreground" onClick={() => toast.info("استخدم لوحة المستندات بالأسفل لرفع الصور")}>+</button>
@@ -1732,7 +1772,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
 
           <Card className="p-5 space-y-3">
-            <div className="flex items-center justify-between"><h2 className="font-bold flex items-center gap-2 text-blue-700"><Camera size={18} /> صور الإصلاح</h2><Button size="sm" variant="outline" onClick={() => setShowInspectionPicker(true)}>ربط فحص</Button></div>
+            <div className="flex items-center justify-between"><h2 className="font-bold flex items-center gap-2 text-primary"><Camera size={18} /> صور الإصلاح</h2><Button size="sm" variant="outline" onClick={() => setShowInspectionPicker(true)}>ربط فحص</Button></div>
             <div className="grid grid-cols-5 gap-2">
               {damagePhotos.slice(0, 5).map((src, i) => <img key={i} src={src} className="h-20 w-full rounded-lg border object-cover opacity-80" />)}
               <div className="flex h-20 items-center justify-center rounded-lg border border-dashed text-muted-foreground">+</div>
@@ -1740,7 +1780,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
 
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><FileText size={18} /> ملخص المطالبة</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><FileText size={18} /> ملخص المطالبة</h2>
             <Info label="رقم المطالبة" value={claimNumber || "—"} />
             <Info label="تاريخ الحادث" value={formatDateLatin((existing as any)?.incident_date || (existing as any)?.created_at || new Date())} />
             <Info label="شركة التأمين" value={company || "—"} />
@@ -1749,12 +1789,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
 
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><FileUp size={18} /> المستندات</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><FileUp size={18} /> المستندات</h2>
             {!isNew && id ? <ClaimDocumentsPanel claimId={id} /> : <p className="text-sm text-muted-foreground">احفظ المطالبة أولاً قبل رفع المستندات.</p>}
           </Card>
 
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><ClipboardCheck size={18} /> تقرير الفحص ROP</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><ClipboardCheck size={18} /> تقرير الفحص ROP</h2>
             <Info label="تاريخ الفحص" value={formatDateLatin(estimateDate || (existing as any)?.created_at || new Date())} />
             <Info label="الفاحص" value={(claimAudit as any[])[0]?.user_id || "—"} />
             <Info label="حالة الشاسيه" value="سليم" />
@@ -1762,7 +1802,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
 
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><CarFront size={18} /> موقع الضرر</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><CarFront size={18} /> موقع الضرر</h2>
             <div className="flex h-48 items-center justify-center rounded-xl border bg-slate-50 text-muted-foreground">
               <CarFront size={72} />
             </div>
@@ -1770,18 +1810,22 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
 
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><ShieldCheck size={18} /> تقرير LPO</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><ShieldCheck size={18} /> تقرير LPO</h2>
             <Info label="LPO" value={lpoNumber || "لم يتم إصدار LPO بعد"} />
-            <Button variant="outline" disabled={!lpoNumber}>عرض LPO</Button>
+            {lpoNumber ? (
+              <Button variant="outline" onClick={() => setShowSummary(true)}>عرض LPO / تفاصيل الاعتماد</Button>
+            ) : (
+              <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">لا يوجد LPO مرفوع حالياً. استخدم بطاقة المستندات لإضافة خطاب الاعتماد.</p>
+            )}
           </Card>
 
           <Card className="p-5 space-y-3 xl:col-span-2">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><CheckSquare size={18} /> البنود المطلوبة / الموافق عليها</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><CheckSquare size={18} /> البنود المطلوبة / الموافق عليها</h2>
             <ApprovedItemsTable uplItems={uplItems} neededParts={neededParts} />
           </Card>
 
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><Calculator size={18} /> ملخص التقدير</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><Calculator size={18} /> ملخص التقدير</h2>
             <Info label="إجمالي قطع الغيار" value={`${Number(estimatedCost || 0).toFixed(3)} ر.ع`} />
             <Info label="أجور الإصلاح" value={`${claimExpensesTotal.toFixed(3)} ر.ع`} />
             <Info label="الإجمالي" value={`${Number(approvedAmount || estimatedCost || 0).toFixed(3)} ر.ع`} />
@@ -1792,53 +1836,40 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       {claimViewIndex === 2 && (
         <div className="grid gap-4 xl:grid-cols-4 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><ShieldCheck size={18} /> اعتماد شركة التأمين</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><ShieldCheck size={18} /> اعتماد شركة التأمين</h2>
             <Badge className={status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{status === "approved" ? "معتمد" : "بانتظار الاعتماد"}</Badge>
             <Info label="تاريخ الاعتماد" value={formatDateLatin(dateOnly((existing as any)?.approved_at) || estimateDate || new Date())} />
             <Info label="رقم اعتماد التأمين" value={lpoNumber || "—"} />
             {isAwaitingApproval && <Button onClick={handleApprove} className="w-full bg-emerald-600 hover:bg-emerald-700">اعتماد نهائي</Button>}
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><UserRound size={18} /> موظف التأمين المعتمد</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><UserRound size={18} /> موظف التأمين المعتمد</h2>
             <Info label="الاسم" value={(existing as any)?.insurance_employee?.name || "—"} />
             <Info label="الجوال" value={(existing as any)?.insurance_employee?.phone || insuranceCo?.phone || "—"} />
             <Info label="البريد الإلكتروني" value={(existing as any)?.insurance_employee?.email || insuranceCo?.email || "—"} />
             <Button variant="outline" onClick={() => setShowSendEmail(true)}>تواصل مع موظف التأمين</Button>
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><Calculator size={18} /> المبالغ المعتمدة</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><Calculator size={18} /> المبالغ المعتمدة</h2>
             <Info label="إجمالي التقدير" value={`${Number(estimatedCost || 0).toFixed(3)} ر.ع`} />
             <Info label="الخصم / التحمل" value={`${Number((existing as any)?.deductible_amount || 0).toFixed(3)} ر.ع`} />
             <Info label="الإجمالي المعتمد" value={`${Number(approvedAmount || 0).toFixed(3)} ر.ع`} />
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><Wrench size={18} /> أمر العمل المرتبط</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><Wrench size={18} /> أمر العمل المرتبط</h2>
             <Info label="رقم أمر العمل" value={effectiveWorkOrderId || "—"} />
             <Info label="الحالة" value={linkedWorkOrderStatus} />
             {hasLinkedWorkOrder ? <Button onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)}>عرض أمر العمل</Button> : isApprovedClaim && <Button onClick={handleConvertToWorkOrder}>إنشاء أمر العمل</Button>}
           </Card>
 
-          <Card className="p-5 space-y-4 xl:col-span-2">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><Settings size={18} /> تقدم إصلاح المركبة</h2>
-            <div className="grid gap-3 md:grid-cols-6">
-              {["تم الاستلام", "الفك والتقييم", "الهيكل والسمكرة", "الدهان", "التجميع والفحص", "جاهزة للتسليم"].map((label, i) => (
-                <div key={label} className="text-center">
-                  <div className={`mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-full ${i <= currentClaimStepIndex + 1 ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"}`}>{i <= currentClaimStepIndex + 1 ? <CheckCircle2 size={16} /> : i + 1}</div>
-                  <div className="text-xs font-semibold">{label}</div>
-                  <div className="text-[10px] text-muted-foreground">{i <= currentClaimStepIndex + 1 ? "تم" : "في الانتظار"}</div>
-                </div>
-              ))}
-            </div>
-            <Button variant="outline" onClick={() => openStageDialog(vehicleProgress[2])}>تحديث مرحلة التنفيذ</Button>
-          </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><CheckSquare size={18} /> ملخص البنود المعتمدة</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><CheckSquare size={18} /> ملخص البنود المعتمدة</h2>
             <Info label="قطع غيار" value={`${neededParts.length} بند`} />
             <Info label="أعمال إصلاح" value={`${uplItems.length} بند`} />
             <Info label="الإجمالي المعتمد" value={`${Number(approvedAmount || 0).toFixed(3)} ر.ع`} />
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><MessagesSquare size={18} /> التواصل والإشعارات</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><MessagesSquare size={18} /> التواصل والإشعارات</h2>
             <Button variant="outline" onClick={() => setShowSendEmail(true)}>إرسال تحديث</Button>
             <Button variant="outline" onClick={() => navigate(`/messages?claim_id=${existing?.id || ""}`)}>فتح مركز الرسائل</Button>
           </Card>
@@ -1847,41 +1878,103 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       )}
 
       {claimViewIndex === 3 && (
+        <div className="grid gap-4 xl:grid-cols-4 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
+          <Card className="p-5 space-y-3">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><Wrench size={18} /> أمر العمل والإصلاح</h2>
+            <Info label="رقم أمر العمل" value={effectiveWorkOrderId || "—"} />
+            <Info label="حالة أمر العمل" value={linkedWorkOrderStatus} />
+            {hasLinkedWorkOrder ? (
+              <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)}>فتح أمر العمل</Button>
+            ) : (
+              <Button onClick={handleConvertToWorkOrder} disabled={!isApprovedClaim}>إنشاء أمر العمل</Button>
+            )}
+          </Card>
+          <Card className="p-5 space-y-4 xl:col-span-2">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><Settings size={18} /> تقدم إصلاح المركبة</h2>
+            <div className="grid gap-3 md:grid-cols-6">
+              {["استلام", "فك وتقييم", "هيكل وسمكرة", "دهان", "تجميع وفحص", "جاهزة"].map((label, i) => (
+                <div key={label} className="text-center">
+                  <div className={`mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-full ${i < 3 || isRepairingClaim || isReadyForDelivery || isDeliveredClaim ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                    {i < 3 || isRepairingClaim || isReadyForDelivery || isDeliveredClaim ? <CheckCircle2 size={16} /> : i + 1}
+                  </div>
+                  <div className="text-xs font-semibold">{label}</div>
+                  <div className="text-[10px] text-muted-foreground">{i < 3 || isRepairingClaim || isReadyForDelivery || isDeliveredClaim ? "تم / جارٍ" : "في الانتظار"}</div>
+                </div>
+              ))}
+            </div>
+            <Button variant="outline" onClick={() => openStageDialog(vehicleProgress[3])}>تحديث مرحلة الإصلاح</Button>
+          </Card>
+          <Card className="p-5 space-y-3">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><WalletCards size={18} /> مصروفات المطالبة</h2>
+            <Info label="إجمالي المصروفات" value={`${claimExpensesTotal.toFixed(3)} ر.ع`} />
+            <Button variant="outline" onClick={() => navigate(`/accounting/expenses?claim_id=${existing?.id || ""}&work_order_id=${effectiveWorkOrderId || ""}`)}>فتح / إضافة مصروف</Button>
+          </Card>
+          <Card className="p-5 space-y-3 xl:col-span-2">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><CheckSquare size={18} /> البنود المعتمدة</h2>
+            <ApprovedItemsTable uplItems={uplItems} neededParts={neededParts} />
+          </Card>
+          <Card className="p-5 space-y-3">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><ImagePlus size={18} /> صور الإصلاح</h2>
+            <div className="grid grid-cols-4 gap-2">
+              {damagePhotos.slice(0, 4).map((src, i) => <img key={i} src={src} className="h-20 w-full rounded-lg border object-cover opacity-80" />)}
+              <button type="button" className="flex h-20 items-center justify-center rounded-lg border border-dashed text-muted-foreground" onClick={() => toast.info("استخدم لوحة المستندات لرفع صور الإصلاح")}>+</button>
+            </div>
+          </Card>
+          <Card className="p-5 space-y-3">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><MessagesSquare size={18} /> تحديثات العميل</h2>
+            <Button variant="outline" onClick={() => setShowSendEmail(true)}>إرسال تحديث للعميل</Button>
+            <Button variant="outline" onClick={() => navigate(`/messages?claim_id=${existing?.id || ""}`)}>فتح مركز الرسائل</Button>
+          </Card>
+          <TimelineStrip claimAudit={claimAudit} className="xl:col-span-4" />
+        </div>
+      )}
+
+      {claimViewIndex === 4 && (
         <div className="grid gap-4 xl:grid-cols-3 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><Receipt size={18} /> ملخص الفاتورة</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><Receipt size={18} /> ملخص الفاتورة</h2>
             <Info label="رقم الفاتورة" value={(activeInvoice as any)?.invoice_number || "—"} />
             <Info label="إجمالي الفاتورة" value={`${invoiceTotal.toFixed(3)} ر.ع`} />
-            <Info label="الضريبة" value={`${(invoiceTotal * 0.05).toFixed(3)} ر.ع`} />
-            {activeInvoice ? <Button variant="outline" onClick={() => navigate("/insurance/accounting")}>عرض تفاصيل الفاتورة</Button> : <Button onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice}>إنشاء فاتورة</Button>}
+            <Info label="الضريبة" value={`${invoiceVat.toFixed(3)} ر.ع`} />
+            {activeInvoice ? <Button variant="outline" onClick={() => navigate("/insurance/accounting")}>عرض الفاتورة</Button> : <Button onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice}>إنشاء فاتورة</Button>}
           </Card>
-          <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><Wallet size={18} /> ملخص المدفوعات</h2>
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <Info label="الإجمالي" value={`${invoiceTotal.toFixed(3)} ر.ع`} />
-              <Info label="المدفوع" value={`${paidTotal.toFixed(3)} ر.ع`} />
-              <Info label="المتبقي" value={`${paymentRemaining.toFixed(3)} ر.ع`} />
+          {!isNew && id && (
+            <div className="xl:col-span-2">
+              <PaymentsSection
+                claimId={id}
+                insuranceCompanyId={companyId || (insuranceCo as any)?.id || null}
+                approvedAmount={Number(approvedAmount || 0)}
+                estimatedAmount={Number(estimatedCost || 0)}
+                status={status}
+                onAllPaid={() => id && updateStatus.mutate({ id, status: "paid" })}
+              />
             </div>
-            <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => navigate(`/insurance/payments?claim_id=${existing?.id || ""}`)}>إضافة دفعة</Button>
-          </Card>
+          )}
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><LinkIcon size={18} /> بوابة العميل</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><LinkIcon size={18} /> بوابة العميل</h2>
             <p className="text-sm text-muted-foreground">يمكن للعميل متابعة حالة المطالبة والفواتير والمدفوعات والوثائق عبر رابط واحد.</p>
             <Info label="حالة البوابة" value={hasLinkedWorkOrder ? "مفعلة" : "تحتاج أمر عمل مرتبط"} />
             <Button variant="outline" onClick={openUnifiedCustomerPortal} disabled={!hasLinkedWorkOrder}>بوابة العميل</Button>
           </Card>
+          <TimelineStrip claimAudit={claimAudit} className="xl:col-span-3" />
+        </div>
+      )}
+
+      {claimViewIndex === 5 && (
+        <div className="grid gap-4 xl:grid-cols-3 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><PackageCheck size={18} /> التسليم والإغلاق</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><PackageCheck size={18} /> التسليم والإغلاق</h2>
             <Info label="حالة التسليم" value={isDeliveredClaim ? "تم التسليم" : isReadyForDelivery ? "جاهز للتسليم" : "قيد التنفيذ"} />
             <Info label="تاريخ التسليم المتوقع" value={formatDateLatin(workCompletedAt || (existing as any)?.delivered_at || new Date())} />
-            <Button variant="outline" onClick={() => openStageDialog(vehicleProgress[3])}>تحديث التسليم</Button>
+            <Info label="مدة بقاء المركبة" value={`${Math.max(0, Math.ceil((new Date((existing as any)?.delivered_at || new Date()).getTime() - new Date(workshopArrivalDate || (existing as any)?.created_at || new Date()).getTime()) / 86400000))} يوم`} />
+            <Button variant="outline" onClick={() => openStageDialog(vehicleProgress[5])}>تأكيد التسليم</Button>
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><FolderArchive size={18} /> مستندات التسليم</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><FolderArchive size={18} /> مستندات التسليم</h2>
             {!isNew && id ? <ClaimDocumentsPanel claimId={id} /> : <p className="text-sm text-muted-foreground">احفظ المطالبة أولاً.</p>}
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-blue-700"><FileText size={18} /> ملاحظات نهائية</h2>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><FileText size={18} /> ملاحظات نهائية</h2>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} />
             <Button variant="outline" onClick={handleSave}>تعديل الملاحظة</Button>
           </Card>
@@ -2386,7 +2479,7 @@ function HeaderMetric({
 }) {
   return (
     <div className="flex min-h-[92px] items-center justify-center gap-3 px-4 py-4 text-center">
-      {icon && <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50">{icon}</div>}
+      {icon && <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">{icon}</div>}
       <div className="min-w-0 space-y-1">
         <div className="text-xs font-semibold text-slate-500">{label}</div>
         {badgeClass ? (
@@ -2394,7 +2487,7 @@ function HeaderMetric({
             <span className="truncate">{value || "—"}</span>
           </span>
         ) : (
-          <div className={`${strong ? "text-lg text-blue-700" : "text-sm text-slate-900"} truncate font-extrabold tracking-tight`}>
+          <div className={`${strong ? "text-lg text-primary" : "text-sm text-slate-900"} truncate font-extrabold tracking-tight`}>
             {value || "—"}
           </div>
         )}
@@ -2451,7 +2544,7 @@ function TimelineStrip({ claimAudit, className = "" }: { claimAudit: any[]; clas
   return (
     <Card className={`p-5 ${className}`}>
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-bold flex items-center gap-2 text-blue-700"><History size={18} /> سجل الإجراءات (Timeline)</h2>
+        <h2 className="font-bold flex items-center gap-2 text-primary"><History size={18} /> سجل الإجراءات (Timeline)</h2>
         <Badge variant="outline">{claimAudit.length} إجراء</Badge>
       </div>
       {items.length === 0 ? (
@@ -2460,8 +2553,8 @@ function TimelineStrip({ claimAudit, className = "" }: { claimAudit: any[]; clas
         <div className="grid gap-3 md:grid-cols-6">
           {items.map((item: any) => (
             <div key={item.id} className="text-center">
-              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full border bg-white text-blue-700 shadow-sm"><Clock3 size={16} /></div>
-              <div className="text-xs font-bold text-blue-700">{item.action}</div>
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full border bg-white text-primary shadow-sm"><Clock3 size={16} /></div>
+              <div className="text-xs font-bold text-primary">{item.action}</div>
               <div className="mt-1 text-[11px] text-muted-foreground">{formatDateLatin(item.created_at)}</div>
               <div className="text-[10px] text-muted-foreground truncate">{item.user_id || "—"}</div>
             </div>
@@ -2695,7 +2788,7 @@ function PaymentsSection({
                   ? "bg-green-700 text-white"
                   : linkedInvoice.status === "partial"
                   ? "bg-amber-500 text-white"
-                  : "bg-blue-500 text-white"
+                  : "bg-primary/100 text-white"
               }`}
             >
               فاتورة #{linkedInvoice.invoice_number} —{" "}
