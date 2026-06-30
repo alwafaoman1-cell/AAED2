@@ -1,5 +1,3 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -72,7 +70,8 @@ Deno.serve(async (req) => {
     const { data: userData, error: userError } = await userClient.auth.getUser();
     if (userError || !userData.user) throw new Error("unauthorized");
     const body = await req.json().catch(() => ({}));
-    if (body.confirmPhrase !== "DELETE CLOUD DATA") throw new Error("invalid_confirmation_phrase");
+    const dryRun = body.dryRun !== false;
+    if (!dryRun && body.confirmPhrase !== "DELETE CLOUD DATA") throw new Error("invalid_confirmation_phrase");
 
     const { data: profile } = await admin
       .from("profiles")
@@ -84,7 +83,7 @@ Deno.serve(async (req) => {
 
     const now = new Date().toISOString();
     const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || null;
-    const skipOtp = body.skipOtp === true;
+    const skipOtp = body.skipOtp === true || dryRun;
     if (!skipOtp && !/^\d{6}$/.test(String(body.otp || ""))) throw new Error("invalid_otp_format");
 
     if (!skipOtp) {
@@ -166,7 +165,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    const dryRun = body.dryRun !== false;
     const results: Record<string, number | string> = {};
     if (!dryRun) {
       await admin.from("job_orders").update({ claim_id: null }).eq("tenant_id", profile.tenant_id);

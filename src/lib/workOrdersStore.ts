@@ -165,7 +165,7 @@ function persist() {
 
 export function getWorkOrders(): WorkOrder[] {
   // الأحدث أولاً: حسب entryDate ثم الـ id (بصفته يبدأ بالسنة WO-YYYY-####)
-  return [...load()].sort((a, b) => {
+  return load().filter((order) => !order.deletedAt && !order.archivedAt).sort((a, b) => {
     const da = (a.entryDate || "").localeCompare(b.entryDate || "");
     if (da !== 0) return -da;
     return (b.id || "").localeCompare(a.id || "");
@@ -540,12 +540,15 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
     let ordersResult = await supabase
       .from("job_orders")
       .select("*")
+      .is("deleted_at", null)
+      .is("archived_at", null)
       .order("created_at", { ascending: false })
       .limit(5000);
     if (ordersResult.error && isMissingJobOrderColumnError(ordersResult.error)) {
       ordersResult = await supabase
         .from("job_orders")
         .select("*")
+        .is("archived_at", null)
         .order("created_at", { ascending: false })
         .limit(5000);
     }

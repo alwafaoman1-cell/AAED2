@@ -1273,6 +1273,8 @@ export default function WorkOrderDetail() {
             return;
           }
           const removed = deleteWorkOrder(order.id);
+          await refreshWorkOrdersFromCloud().catch(() => {});
+          deleteWorkOrder(order.id);
           if (removed) {
             moveToTrash({
               type: "work_order",

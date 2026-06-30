@@ -139,7 +139,7 @@ export default function SecurityDangerZone() {
       toast.error(message);
       return;
     }
-    if (!bypassOtp && !otp.trim()) {
+    if (!dryRun && !bypassOtp && !otp.trim()) {
       const message = "أرسل OTP ثم أدخل الرمز، أو استخدم تجاوز OTP المؤقت بصلاحية المالك عند تعطل البريد.";
       setStatusMessage({ type: "error", text: message });
       toast.error(message);

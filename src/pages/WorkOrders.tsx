@@ -917,6 +917,8 @@ export default function WorkOrders() {
             return;
           }
           const removed = deleteWorkOrder(deleteOrder.id);
+          await refreshWorkOrdersFromCloud().catch(() => {});
+          deleteWorkOrder(deleteOrder.id);
           if (removed) {
             moveToTrash({
               type: "work_order",
@@ -934,6 +936,7 @@ export default function WorkOrders() {
             });
             toast.success(`تم نقل ${removed.id} للمهملات`);
           }
+          setOrders([...getWorkOrders()]);
           setDeleteOrder(null);
         }}
       />
@@ -1037,6 +1040,8 @@ export default function WorkOrders() {
                 if (!order) continue;
                 await archiveWorkOrder(order, "Bulk Archive Work Order");
                 deleteWorkOrder(id);
+                await refreshWorkOrdersFromCloud().catch(() => {});
+                deleteWorkOrder(id);
                 n++;
               }
               toast.success(`تم نقل ${n} أمر إلى الأرشيف`);
@@ -1072,6 +1077,8 @@ export default function WorkOrders() {
               return;
             }
             const removed = deleteWorkOrder(id);
+            await refreshWorkOrdersFromCloud().catch(() => {});
+            deleteWorkOrder(id);
             if (removed) {
               moveToTrash({
                 type: "work_order",
@@ -1083,6 +1090,7 @@ export default function WorkOrders() {
             }
           }
           toast.success(`تم نقل ${n} أمر للمهملات`);
+          setOrders([...getWorkOrders()]);
           setSelectedIds(new Set());
           setShowBulkDelete(false);
         }}

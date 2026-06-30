@@ -65,4 +65,22 @@ describe("operational fixes contract", () => {
     expect(migration).toContain("parent_work_order_id");
     expect(migration).toContain("visit_number");
   });
+
+  it("keeps archived work orders out of active lists and allows safe reset dry runs", () => {
+    const store = read("src/lib/workOrdersStore.ts");
+    const workOrders = read("src/pages/WorkOrders.tsx");
+    const detail = read("src/pages/WorkOrderDetail.tsx");
+    const dangerZone = read("src/components/settings/SecurityDangerZone.tsx");
+    const resetFunction = read("supabase/functions/execute-cloud-reset/index.ts");
+
+    expect(store).toContain("!order.deletedAt && !order.archivedAt");
+    expect(store).toContain(".is(\"deleted_at\", null)");
+    expect(store).toContain(".is(\"archived_at\", null)");
+    expect(workOrders.match(/refreshWorkOrdersFromCloud/g)?.length || 0).toBeGreaterThanOrEqual(3);
+    expect(detail).toContain("refreshWorkOrdersFromCloud");
+    expect(dangerZone).toContain("if (!dryRun && !bypassOtp && !otp.trim())");
+    expect(resetFunction).toContain("const dryRun = body.dryRun !== false");
+    expect(resetFunction).toContain("const skipOtp = body.skipOtp === true || dryRun");
+    expect(resetFunction).toContain("if (!dryRun && body.confirmPhrase !== \"DELETE CLOUD DATA\")");
+  });
 });
