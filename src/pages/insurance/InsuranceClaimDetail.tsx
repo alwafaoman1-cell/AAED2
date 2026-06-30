@@ -1477,7 +1477,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   return (
     <div className="space-y-5 pb-12" dir="rtl">
       <span className="sr-only">Claim Management Center</span>
-      <Card className="overflow-hidden border-slate-200/80 bg-white shadow-sm">
+      <Card className="overflow-hidden rounded-2xl border-slate-200/80 bg-white shadow-sm">
         <div className="grid divide-y divide-border lg:grid-cols-7 lg:divide-x lg:divide-x-reverse lg:divide-y-0">
           <HeaderMetric label="رقم المطالبة" value={claimNumber || "—"} icon={<FileText size={18} className="text-primary" />} strong />
           <HeaderMetric label="شركة التأمين" value={company || "—"} icon={<Building2 size={18} className="text-primary" />} />
@@ -1488,9 +1488,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           <HeaderMetric label="حالة الدفع" value={paymentStatusLabel} badgeClass={paymentRemaining <= 0 && paidTotal > 0 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-700 border-slate-200"} />
         </div>
 
-        <div className="border-t bg-slate-50/70 px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2 bg-blue-700 hover:bg-blue-800">
+        <div className="border-t bg-slate-50/80 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 [&>button]:h-10 [&>button]:rounded-lg [&>button]:px-5 [&>button]:text-sm [&>button]:font-semibold">
+            <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2 bg-blue-800 hover:bg-blue-900">
               <Save size={16} /> حفظ
             </Button>
             <Button
@@ -1544,9 +1544,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       </Card>
 
-      <Card className="px-5 py-5">
+      <Card className="rounded-2xl border-slate-200 bg-white px-5 py-6 shadow-sm">
         <div className="relative grid gap-4 md:grid-cols-4">
-          <div className="absolute left-8 right-8 top-7 hidden border-t border-dashed border-blue-200 md:block" />
+          <div className="absolute left-10 right-10 top-7 hidden border-t border-dashed border-blue-300 md:block" />
           {vehicleProgress.map((step) => {
             const Icon = step.Icon;
             const active = step.state === "current";
@@ -1560,7 +1560,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   setClaimViewIndex(step.index);
                 }}
                 disabled={isNew}
-                className="relative z-10 flex flex-col items-center gap-2 rounded-xl p-2 text-center transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+                className="relative z-10 flex flex-col items-center gap-2 rounded-xl p-2 text-center transition hover:bg-blue-50/60 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <span
                   className={`flex h-12 w-12 items-center justify-center rounded-full border-2 text-sm font-bold shadow-sm ${
@@ -1580,7 +1580,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <div className="text-xs">{step.subtitle}</div>
                   <div className="mt-1 text-[11px] text-muted-foreground">{step.date ? formatDateLatin(step.date) : "لم تُحدّث بعد"}</div>
                 </div>
-                {claimViewIndex === step.index && <span className="mt-1 h-0.5 w-24 rounded-full bg-blue-600" />}
+                {claimViewIndex === step.index && <span className="mt-1 h-1 w-28 rounded-full bg-blue-600" />}
               </button>
             );
           })}
@@ -1596,7 +1596,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           { label: "المبلغ الموافق", value: `${Number(approvedAmount || 0).toFixed(3)} ر.ع`, Icon: Wallet },
           { label: "آخر تحديث", value: formatDateLatin((existing as any)?.updated_at || new Date()), Icon: Clock3 },
         ].map(({ label, value, Icon }) => (
-          <Card key={label} className="p-4">
+          <Card key={label} className="rounded-2xl border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2 text-xs text-muted-foreground"><Icon size={15} className="text-primary" /> {label}</div>
             <div className="mt-2 text-sm font-bold text-foreground truncate">{value}</div>
           </Card>
@@ -1604,7 +1604,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       </div>
 
       {claimViewIndex === 0 && (
-        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.9fr_1.1fr]">
+        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.9fr_1.1fr] [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-bold flex items-center gap-2 text-blue-700"><Building2 size={18} /> 1. بيانات شركة التأمين / الجهة الدافعة</h2>
@@ -1720,11 +1720,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               ))}
             </div>
           </Card>
+          <TimelineStrip claimAudit={claimAudit} className="xl:col-span-3" />
         </div>
       )}
 
       {claimViewIndex === 1 && (
-        <div className="grid gap-4 xl:grid-cols-[1.05fr_1.05fr_0.8fr]">
+        <div className="grid gap-4 xl:grid-cols-[1.05fr_1.05fr_0.8fr] [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
             <div className="flex items-center justify-between"><h2 className="font-bold flex items-center gap-2 text-blue-700"><ImagePlus size={18} /> صور الحادث</h2><Badge variant="outline">{damagePhotos.length} صور</Badge></div>
             <div className="grid grid-cols-4 gap-2">
@@ -1792,7 +1793,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       )}
 
       {claimViewIndex === 2 && (
-        <div className="grid gap-4 xl:grid-cols-4">
+        <div className="grid gap-4 xl:grid-cols-4 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
             <h2 className="font-bold flex items-center gap-2 text-blue-700"><ShieldCheck size={18} /> اعتماد شركة التأمين</h2>
             <Badge className={status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{status === "approved" ? "معتمد" : "بانتظار الاعتماد"}</Badge>
@@ -1849,7 +1850,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       )}
 
       {claimViewIndex === 3 && (
-        <div className="grid gap-4 xl:grid-cols-3">
+        <div className="grid gap-4 xl:grid-cols-3 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
             <h2 className="font-bold flex items-center gap-2 text-blue-700"><Receipt size={18} /> ملخص الفاتورة</h2>
             <Info label="رقم الفاتورة" value={(activeInvoice as any)?.invoice_number || "—"} />
@@ -1891,6 +1892,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       )}
 
+      {false && (
       <div className="hidden">
 
       <Card className="p-5 space-y-4">
@@ -2116,6 +2118,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       )}
 
       </div>
+      )}
 
       {/* Estimate PDF — auto-saves to archive as claim_estimate */}
       {!isNew && id && showPdf && (() => {
@@ -2359,8 +2362,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 // ════════════════════════════════════════════════════════════════════════
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-secondary/20 p-3">
-      <div className="text-[11px] text-muted-foreground mb-1">{label}</div>
+    <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+      <div className="mb-1 text-[11px] font-medium text-slate-500">{label}</div>
       <div className="font-semibold text-foreground break-words">{value || "—"}</div>
     </div>
   );
@@ -2385,20 +2388,20 @@ function HeaderMetric({
   badgeClass?: string;
 }) {
   return (
-    <div className="flex min-h-[88px] items-center justify-center gap-3 px-4 py-3 text-center">
-      {icon && <div className="shrink-0">{icon}</div>}
-      <div className="min-w-0">
-        <div className="mb-1 text-xs font-medium text-slate-500">{label}</div>
+    <div className="flex min-h-[92px] items-center justify-center gap-3 px-4 py-4 text-center">
+      {icon && <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50">{icon}</div>}
+      <div className="min-w-0 space-y-1">
+        <div className="text-xs font-semibold text-slate-500">{label}</div>
         {badgeClass ? (
-          <span className={`inline-flex max-w-full items-center justify-center rounded-full border px-3 py-1 text-xs font-bold ${badgeClass}`}>
+          <span className={`inline-flex max-w-full items-center justify-center rounded-full border px-3 py-1.5 text-xs font-bold shadow-sm ${badgeClass}`}>
             <span className="truncate">{value || "—"}</span>
           </span>
         ) : (
-          <div className={`${strong ? "text-lg text-blue-700" : "text-sm text-slate-900"} truncate font-bold`}>
+          <div className={`${strong ? "text-lg text-blue-700" : "text-sm text-slate-900"} truncate font-extrabold tracking-tight`}>
             {value || "—"}
           </div>
         )}
-        {sub && <div className="mt-1 text-[11px] text-slate-500">{sub}</div>}
+        {sub && <div className="text-[11px] font-medium text-slate-500">{sub}</div>}
       </div>
     </div>
   );
