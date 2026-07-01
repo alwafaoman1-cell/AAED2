@@ -226,6 +226,16 @@ export default function VehicleDetail() {
   const lastTrackingOpen = trackingLogRows[0]?.opened_at
     ? formatDateLatin(String(trackingLogRows[0].opened_at).slice(0, 10))
     : "-";
+  const mostUsedTrackingLink = (() => {
+    if (!trackingLogRows.length) return "-";
+    const counts = trackingLogRows.reduce<Record<string, number>>((acc, row: any) => {
+      const key = String(row.target_type || "customer_tracking");
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const [targetType, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
+    return targetType ? `${targetType} (${count})` : "-";
+  })();
 
   const photoPairs = vehicle.photoPairs || [];
 
@@ -514,6 +524,7 @@ export default function VehicleDetail() {
         <StatCard title="أول زيارة" value={firstWorkshopVisit} icon={Calendar} variant="info" />
         <StatCard title="آخر زيارة" value={lastWorkshopVisit} icon={Calendar} variant="success" />
         <StatCard title="آخر فتح للرابط" value={lastTrackingOpen} icon={Activity} variant="info" />
+        <StatCard title="الرابط الأكثر استخدامًا" value={mostUsedTrackingLink} icon={Activity} variant="info" />
         <StatCard title="إجمالي الفواتير" value={`${totalRepairCost.toLocaleString()} ر.ع`} icon={DollarSign} variant="success" />
         <StatCard title="إجمالي المصروفات" value={`${(totalParts + totalLabor + totalExtras).toLocaleString()} ر.ع`} icon={Receipt} variant="warning" />
         <StatCard title="قطع الغيار" value={`${totalParts.toLocaleString()} ر.ع`} icon={Wrench} variant="gold" />

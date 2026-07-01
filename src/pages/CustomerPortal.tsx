@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -72,9 +72,12 @@ export default function CustomerPortal() {
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const loggedOpenRef = useRef(false);
 
-  async function logPortalOpen(result: "opened" | "invalid" | "expired" | "network") {
+  async function logPortalOpen(result: "success" | "invalid" | "expired" | "network") {
     if (!token) return;
+    if (loggedOpenRef.current) return;
+    loggedOpenRef.current = true;
     try {
       await supabase.rpc("log_public_tracking_open" as any, {
         p_short_code: token,
@@ -102,17 +105,25 @@ export default function CustomerPortal() {
     setData(r as Tracking);
     setError(null);
     setLoading(false);
-    void logPortalOpen("opened");
+    void logPortalOpen("success");
   }
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => {
+    loggedOpenRef.current = false;
+    load();
+  }, [token]);
 
   // Realtime: refresh when work order updates
   useEffect(() => {
     if (!data) return;
     const ch = supabase
       .channel(`portal-${token}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "job_orders" }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "job_orders" }, () => {
+        const alreadyLogged = loggedOpenRef.current;
+        void load().finally(() => {
+          loggedOpenRef.current = alreadyLogged;
+        });
+      })
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [data?.order_number]);
