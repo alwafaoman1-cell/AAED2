@@ -28,7 +28,10 @@ export default defineConfig(({ mode }) => ({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
-        globPatterns: ["**/*.{js,css,html,svg,png,jpg,jpeg,webp,woff2}"],
+        // Do not precache index.html. The app shell must be fetched from the
+        // network on deploy so aaed-2.vercel.app cannot stay pinned to an old
+        // hashed bundle through the Service Worker.
+        globPatterns: ["**/*.{js,css,svg,png,jpg,jpeg,webp,woff2}"],
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         runtimeCaching: [
           {
