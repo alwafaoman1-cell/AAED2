@@ -4,6 +4,9 @@ import { useEffect } from "react";
 import { registerRestoreHandler } from "@/lib/trashStore";
 import { restoreWorkOrderFromTrash, type WorkOrder } from "@/lib/workOrdersStore";
 import { isUuid } from "@/lib/uuid";
+import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { customersStore, refreshCustomersFromCloud, type Customer } from "@/lib/customersStore";
 import { vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import { inventoryStore, type Part } from "@/lib/inventoryStore";
 import { staffStore, type Technician } from "@/lib/staffStore";
@@ -25,6 +28,24 @@ export function useTrashRestoreHandlers() {
         displayNumber: labelOrderNumber || payload.displayNumber,
         cloudId,
       });
+    });
+    registerRestoreHandler("customer", async (p, item) => {
+      const payload = p as Customer;
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId || !isUuid(item.entityId)) throw new Error("Cannot restore customer without a valid tenant/customer id");
+      const { error } = await supabase
+        .from("customers")
+        .update({
+          deleted_at: null,
+          archived_at: null,
+          archived: false,
+          deleted_by: null,
+        } as any)
+        .eq("tenant_id", tenantId)
+        .eq("id", item.entityId);
+      if (error) throw error;
+      await refreshCustomersFromCloud();
+      customersStore.restore({ ...payload, id: item.entityId });
     });
     registerRestoreHandler("vehicle", (p) => vehiclesStore.restore(p as Vehicle));
     registerRestoreHandler("inventory", (p) => inventoryStore.restore(p as Part));
