@@ -1,5 +1,4 @@
-// Generic localStorage-backed CRUD store factory with cross-tab realtime sync.
-// كل تغيير ينعكس فوراً في كل التبويبات/الصفحات بفضل BroadcastChannel + storage event.
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
 
 export interface BaseEntity {
   id: string;
@@ -11,74 +10,47 @@ interface StoreOptions<T extends BaseEntity> {
   storage?: boolean;
 }
 
-export function createStore<T extends BaseEntity>({ key, storage = true }: StoreOptions<T>) {
+/**
+ * Legacy synchronous CRUD facade backed by tenant_settings, not localStorage.
+ * It keeps a small in-memory cache for immediate UI rendering and writes every
+ * mutation to Supabase. Seed data is intentionally ignored in production.
+ */
+export function createStore<T extends BaseEntity>({ key }: StoreOptions<T>) {
   let cache: T[] | null = null;
+  let bootstrapped = false;
   let mutationHandler: ((event: { type: "add" | "update" | "remove" | "restore"; item: T; previous?: T }) => void) | null = null;
   const listeners = new Set<() => void>();
-  const channel: BroadcastChannel | null =
-    typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(`store:${key}`) : null;
 
   function notify() {
-    listeners.forEach((l) => {
-      try { l(); } catch {}
+    listeners.forEach((listener) => {
+      try { listener(); } catch {}
     });
   }
 
-  function reloadFromStorage() {
-    if (!storage) {
-      cache = [];
-      notify();
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(key);
-      cache = raw ? JSON.parse(raw) : [];
-    } catch {
-      cache = [];
-    }
+  function setCache(rows: T[]) {
+    cache = Array.isArray(rows) ? rows : [];
     notify();
   }
 
-  // Cross-tab: BroadcastChannel
-  if (channel && storage) {
-    channel.onmessage = () => reloadFromStorage();
-  }
-
-  // Cross-tab fallback: storage event (fires only in OTHER tabs)
-  if (typeof window !== "undefined" && storage) {
-    window.addEventListener("storage", (e) => {
-      if (e.key === key) reloadFromStorage();
-    });
+  function bootstrap() {
+    if (bootstrapped) return;
+    bootstrapped = true;
+    void readCloudSetting<T[]>(key, []).then(setCache).catch(() => undefined);
+    subscribeCloudSetting<T[]>(key, (rows) => setCache(rows || []));
   }
 
   function load(): T[] {
-    if (cache) return cache;
-    if (storage) {
-      try {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          cache = JSON.parse(raw);
-          return cache!;
-        }
-      } catch {}
-    }
-    // Production starts empty. Demo seed arrays are intentionally ignored.
-    cache = [];
-    persist(false);
+    bootstrap();
+    if (!cache) cache = [];
     return cache;
   }
 
-  function persist(broadcast = true) {
+  function persist() {
     if (!cache) return;
-    if (storage) {
-      try {
-        localStorage.setItem(key, JSON.stringify(cache));
-      } catch {}
-    }
     notify();
-    if (broadcast && channel && storage) {
-      try { channel.postMessage({ ts: Date.now() }); } catch {}
-    }
+    void writeCloudSetting<T[]>(key, cache).catch((error) => {
+      console.warn(`[createStore:${key}] Supabase setting write failed`, error);
+    });
   }
 
   return {
@@ -86,7 +58,7 @@ export function createStore<T extends BaseEntity>({ key, storage = true }: Store
       return load();
     },
     getById(id: string): T | undefined {
-      return load().find((i) => i.id === id);
+      return load().find((item) => item.id === id);
     },
     add(item: T) {
       const list = load();
@@ -96,7 +68,7 @@ export function createStore<T extends BaseEntity>({ key, storage = true }: Store
     },
     update(id: string, patch: Partial<T>) {
       const list = load();
-      const idx = list.findIndex((i) => i.id === id);
+      const idx = list.findIndex((item) => item.id === id);
       if (idx >= 0) {
         const previous = list[idx];
         list[idx] = { ...list[idx], ...patch };
@@ -106,7 +78,7 @@ export function createStore<T extends BaseEntity>({ key, storage = true }: Store
     },
     remove(id: string): T | undefined {
       const list = load();
-      const idx = list.findIndex((i) => i.id === id);
+      const idx = list.findIndex((item) => item.id === id);
       if (idx === -1) return undefined;
       const [removed] = list.splice(idx, 1);
       persist();
@@ -115,20 +87,24 @@ export function createStore<T extends BaseEntity>({ key, storage = true }: Store
     },
     restore(item: T) {
       const list = load();
-      if (list.some((i) => i.id === item.id)) return;
+      if (list.some((existing) => existing.id === item.id)) return;
       list.unshift(item);
       persist();
       mutationHandler?.({ type: "restore", item });
     },
+    replaceAll(rows: T[]) {
+      setCache(rows);
+      persist();
+    },
     subscribe(cb: () => void): () => void {
       listeners.add(cb);
+      bootstrap();
       return () => {
         listeners.delete(cb);
       };
     },
-    /** يعيد تهيئة الذاكرة من التخزين للإعدادات المحلية فقط. */
     refresh() {
-      reloadFromStorage();
+      void readCloudSetting<T[]>(key, []).then(setCache).catch(() => undefined);
     },
     setMutationHandler(handler: typeof mutationHandler) {
       mutationHandler = handler;

@@ -1,6 +1,8 @@
 // نظام إدارة الموارد البشرية HR — تخزين محلي شامل
 // عقود، رواتب، سلف، خصومات، إجازات، حضور، مكافآت، مستندات، تقييمات
 
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
+
 export type EmploymentStatus = "active" | "on_leave" | "suspended" | "terminated";
 export type ContractType = "full_time" | "part_time" | "contract" | "freelance";
 export type LeaveType = "annual" | "sick" | "emergency" | "unpaid" | "maternity" | "other";
@@ -189,12 +191,11 @@ let cache: HRDB | null = null;
 
 function read(): HRDB {
   if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(KEY);
-    cache = raw ? JSON.parse(raw) : empty();
-  } catch {
-    cache = empty();
-  }
+  cache = empty();
+  void readCloudSetting<HRDB>(KEY, empty()).then((value) => {
+    cache = { ...empty(), ...value };
+    subs.forEach((cb) => cb());
+  }).catch(() => undefined);
   return cache!;
 }
 function empty(): HRDB {
@@ -202,8 +203,17 @@ function empty(): HRDB {
 }
 function write(next: HRDB) {
   cache = next;
-  try { localStorage.setItem(KEY, JSON.stringify(next)); } catch {}
   subs.forEach((cb) => cb());
+  void writeCloudSetting(KEY, next).catch((error) => {
+    console.warn("[hrStore] Supabase write failed", error);
+  });
+}
+
+if (typeof window !== "undefined") {
+  subscribeCloudSetting<HRDB>(KEY, (value) => {
+    cache = { ...empty(), ...value };
+    subs.forEach((cb) => cb());
+  });
 }
 function uid() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();

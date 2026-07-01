@@ -8,6 +8,7 @@ import {
   FileText, Calculator, Lock, Database, Layers, Printer, Save, RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { readCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -140,10 +141,10 @@ function CellBadge({ v }: { v: Cell }) {
 const STORAGE_KEY = "alwafa_roles_perms_v1";
 
 function loadOverrides(): Record<string, Record<Role, Cell>> {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; }
+  return {};
 }
-function saveOverrides(o: Record<string, Record<Role, Cell>>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(o));
+async function saveOverrides(o: Record<string, Record<Role, Cell>>) {
+  await writeCloudSetting(STORAGE_KEY, o);
 }
 function rowKey(r: PermRow) { return `${r.moduleEn}::${r.actionEn}`; }
 
@@ -162,6 +163,12 @@ export default function RolesPermissionsPage() {
   const [roleFilter, setRoleFilter] = useState<Role | "all">("all");
   const [overrides, setOverrides] = useState<Record<string, Record<Role, Cell>>>(() => loadOverrides());
   const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    readCloudSetting<Record<string, Record<Role, Cell>>>(STORAGE_KEY, {})
+      .then((value) => setOverrides(value || {}))
+      .catch(() => undefined);
+  }, []);
 
   const effectiveRows = useMemo(() => applyOverrides(ROWS, overrides), [overrides]);
 
@@ -193,15 +200,15 @@ export default function RolesPermissionsPage() {
     setDirty(true);
   }
 
-  function handleSave() {
-    saveOverrides(overrides);
+  async function handleSave() {
+    await saveOverrides(overrides);
     setDirty(false);
     toast.success(isRtl ? "تم حفظ تعديلات الصلاحيات" : "Permissions saved");
   }
-  function handleReset() {
+  async function handleReset() {
     if (!confirm(isRtl ? "إعادة كل الصلاحيات للوضع الافتراضي؟" : "Reset all permissions to defaults?")) return;
     setOverrides({});
-    saveOverrides({});
+    await saveOverrides({});
     setDirty(false);
     toast.success(isRtl ? "تمت الإعادة للافتراضي" : "Reset to defaults");
   }

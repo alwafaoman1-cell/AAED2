@@ -3,6 +3,7 @@
 // قواعد البيانات تُحرس بـ RLS مستقلاً؛ هنا فقط نخفي/نُعطّل أزرار وصفحات.
 
 import { useAuth, AppRole } from "@/contexts/AuthContext";
+import { readCloudSetting, subscribeCloudSetting } from "./cloudSettings";
 
 export type RbacRole = AppRole; // admin | manager | technician | insurance | accountant
 export type Cell = "Y" | "N" | "P"; // مسموح / ممنوع / جزئي
@@ -89,9 +90,19 @@ export const STORAGE_KEY = "alwafa_roles_perms_v1";
 export const rowKey = (moduleEn: string, actionEn: string) => `${moduleEn}::${actionEn}`;
 
 type OverrideMap = Record<string, Partial<Record<RbacRole, Cell>>>;
+let overridesCache: OverrideMap = {};
+
+if (typeof window !== "undefined") {
+  void readCloudSetting<OverrideMap>(STORAGE_KEY, {}).then((value) => {
+    overridesCache = value || {};
+  }).catch(() => undefined);
+  subscribeCloudSetting<OverrideMap>(STORAGE_KEY, (value) => {
+    overridesCache = value || {};
+  });
+}
 
 function loadOverrides(): OverrideMap {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; }
+  return overridesCache;
 }
 
 export function getEffectiveRows(): PermRow[] {

@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { getTemplateSettings, saveTemplateSettings, subscribeTemplateSettings, type PdfTemplateSettings, getInvoiceHtml } from "@/lib/pdfGenerator";
+import { DEFAULT_PDF_TEMPLATE_SETTINGS, getTemplateSettings, saveTemplateSettings, subscribeTemplateSettings, type PdfTemplateSettings, getInvoiceHtml } from "@/lib/pdfGenerator";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { usersStore, ROLE_LABELS, ROLE_DESCRIPTIONS, type AppUser } from "@/lib/usersStore";
@@ -69,8 +69,8 @@ export default function SettingsPage() {
   };
 
   const handleReset = () => {
-    localStorage.removeItem("pdf_template_settings");
-    setSettings(getTemplateSettings());
+    saveTemplateSettings(DEFAULT_PDF_TEMPLATE_SETTINGS);
+    setSettings(DEFAULT_PDF_TEMPLATE_SETTINGS);
     toast.success("تم إعادة الإعدادات الافتراضية");
   };
 
@@ -118,7 +118,6 @@ export default function SettingsPage() {
   };
 
   const handlePreview = () => {
-    const backup = localStorage.getItem("pdf_template_settings");
     saveTemplateSettings(settings);
     setPreviewHtml(getInvoiceHtml({
       invoiceNumber: "INV-PREVIEW",
@@ -135,8 +134,6 @@ export default function SettingsPage() {
       vat: Math.round(8000 * settings.vatRate / 100),
       total: 8000 + Math.round(8000 * settings.vatRate / 100),
     }));
-    if (backup) localStorage.setItem("pdf_template_settings", backup);
-    else localStorage.removeItem("pdf_template_settings");
     setShowPreview(true);
   };
 

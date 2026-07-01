@@ -133,14 +133,6 @@ export default function NewInsuranceClaim() {
       if (cancelled) return;
       applyDraft(cloudDraft);
 
-      if (!cloudDraft) {
-        try {
-          const legacy = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
-          applyDraft(legacy);
-          if (legacy) void writeCloudSetting(cloudDraftKey, legacy).catch(() => {});
-        } catch {}
-      }
-
       const c = params.get("company");
       if (c) setDraft((current) => ({ ...current, company: c }));
       draftHydratedRef.current = true;
@@ -169,9 +161,6 @@ export default function NewInsuranceClaim() {
     const t = setTimeout(() => {
       const savedAt = Date.now();
       const payload = { savedAt, data: draft };
-      try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
-      } catch {}
       void writeCloudSetting(cloudDraftKey, payload).catch(() => {});
       savedDraftAtRef.current = savedAt;
       setSavedDraftAt(savedAt);
@@ -182,7 +171,6 @@ export default function NewInsuranceClaim() {
   const clearStoredDraft = () => {
     skipNextDraftSaveRef.current = true;
     savedDraftAtRef.current = null;
-    try { localStorage.removeItem(DRAFT_KEY); } catch {}
     void writeCloudSetting(cloudDraftKey, null).catch(() => {});
   };
 

@@ -1,6 +1,8 @@
 // إعدادات زر الإجراءات السريعة العائم (FAB)
 // يُحفظ في localStorage حتى يبقى مع المستخدم على نفس الجهاز.
 
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
+
 export type FabPosition = "bottom-right" | "bottom-left" | "bottom-center";
 
 export type QuickActionKey =
@@ -48,25 +50,31 @@ export const DEFAULT_SETTINGS: QuickActionsSettings = {
 
 type Listener = (s: QuickActionsSettings) => void;
 const listeners = new Set<Listener>();
+let cache: QuickActionsSettings = { ...DEFAULT_SETTINGS };
+let bootstrapped = false;
+
+function bootstrap() {
+  if (bootstrapped) return;
+  bootstrapped = true;
+  void readCloudSetting<QuickActionsSettings>(KEY, DEFAULT_SETTINGS).then((value) => {
+    cache = { ...DEFAULT_SETTINGS, ...value };
+    listeners.forEach((listener) => listener(cache));
+  }).catch(() => undefined);
+  subscribeCloudSetting<QuickActionsSettings>(KEY, (value) => {
+    cache = { ...DEFAULT_SETTINGS, ...value };
+    listeners.forEach((listener) => listener(cache));
+  });
+}
 
 export function getQuickActionsSettings(): QuickActionsSettings {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...DEFAULT_SETTINGS };
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_SETTINGS, ...parsed };
-  } catch {
-    return { ...DEFAULT_SETTINGS };
-  }
+  bootstrap();
+  return { ...cache, visibleActions: [...cache.visibleActions] };
 }
 
 export function saveQuickActionsSettings(s: QuickActionsSettings) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(s));
-  } catch {
-    /* ignore */
-  }
-  listeners.forEach((l) => l(s));
+  cache = { ...DEFAULT_SETTINGS, ...s };
+  listeners.forEach((l) => l(cache));
+  void writeCloudSetting(KEY, cache).catch((error) => console.warn("[quickActionsSettings] Supabase write failed", error));
 }
 
 export function subscribeQuickActionsSettings(l: Listener) {

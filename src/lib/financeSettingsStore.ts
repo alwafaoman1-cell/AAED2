@@ -1,6 +1,7 @@
 import { createStore } from "./createStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
 
 // ===== Categories =====
 export interface FinanceCategory {
@@ -26,11 +27,8 @@ export const expenseCategoriesStore = createStore<FinanceCategory>({
 // ☁️ Cloud sync for expense categories — keeps the SAME categories
 // visible across desktop + supervisor app + any device.
 // ============================================================
-const EC_LS_KEY = "alwafa_expense_categories_v1";
-
 function _replaceAllExpenseCategories(rows: FinanceCategory[]) {
-  try { localStorage.setItem(EC_LS_KEY, JSON.stringify(rows)); } catch {}
-  expenseCategoriesStore.refresh();
+  (expenseCategoriesStore as any).replaceAll?.(rows);
 }
 
 async function _pullExpenseCategoriesFromCloud(): Promise<void> {
@@ -264,23 +262,29 @@ let voucherCache: VoucherSettings | null = null;
 
 function loadVoucherSettings(): VoucherSettings {
   if (voucherCache) return voucherCache;
-  try {
-    const raw = localStorage.getItem(VOUCHER_SETTINGS_KEY);
-    if (raw) {
-      voucherCache = { ...DEFAULT_VOUCHER_SETTINGS, ...JSON.parse(raw) };
-      return voucherCache!;
-    }
-  } catch {}
   voucherCache = { ...DEFAULT_VOUCHER_SETTINGS };
+  void readCloudSetting<VoucherSettings>(VOUCHER_SETTINGS_KEY, DEFAULT_VOUCHER_SETTINGS)
+    .then((value) => {
+      voucherCache = { ...DEFAULT_VOUCHER_SETTINGS, ...value };
+      voucherListeners.forEach((cb) => cb());
+    })
+    .catch(() => undefined);
   return voucherCache;
 }
 
 function persistVoucherSettings() {
   if (!voucherCache) return;
-  try {
-    localStorage.setItem(VOUCHER_SETTINGS_KEY, JSON.stringify(voucherCache));
-  } catch {}
   voucherListeners.forEach((cb) => cb());
+  void writeCloudSetting(VOUCHER_SETTINGS_KEY, voucherCache).catch((error) => {
+    console.warn("[voucherSettings] Supabase write failed", error);
+  });
+}
+
+if (typeof window !== "undefined") {
+  subscribeCloudSetting<VoucherSettings>(VOUCHER_SETTINGS_KEY, (value) => {
+    voucherCache = { ...DEFAULT_VOUCHER_SETTINGS, ...value };
+    voucherListeners.forEach((cb) => cb());
+  });
 }
 
 export const voucherSettingsStore = {

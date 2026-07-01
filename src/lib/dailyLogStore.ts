@@ -7,6 +7,7 @@ import { salesStore, makeEmptyDoc, calculateTotals, cryptoRandom, type SalesLine
 import { customersStore } from "./customersStore";
 import { expensesStore, type ExpenseRecord } from "./expensesStore";
 import { expenseCategoriesStore, employeeCashboxesStore, voucherSettingsStore } from "./financeSettingsStore";
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
 
 export interface DailyLogRow {
   id: string;
@@ -40,16 +41,26 @@ const subs = new Set<() => void>();
 
 function load(): DailyLogRow[] {
   if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(KEY);
-    cache = raw ? JSON.parse(raw) : [];
-  } catch { cache = []; }
+  cache = [];
+  void readCloudSetting<DailyLogRow[]>(KEY, []).then((rows) => {
+    cache = Array.isArray(rows) ? rows : [];
+    subs.forEach((f) => f());
+  }).catch(() => undefined);
   return cache!;
 }
 function persist() {
   if (!cache) return;
-  try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch {}
   subs.forEach((f) => f());
+  void writeCloudSetting(KEY, cache).catch((error) => {
+    console.warn("[dailyLogStore] Supabase write failed", error);
+  });
+}
+
+if (typeof window !== "undefined") {
+  subscribeCloudSetting<DailyLogRow[]>(KEY, (rows) => {
+    cache = Array.isArray(rows) ? rows : [];
+    subs.forEach((f) => f());
+  });
 }
 
 export const dailyLogStore = {

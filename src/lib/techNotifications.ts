@@ -1,10 +1,10 @@
 // Lightweight local notifications for technicians.
-// Watches localStorage work orders and fires browser notifications when:
+// Watches work orders and fires browser notifications when:
 //  - one of "my" orders changes status
 //  - delivery date is near (heuristic: status becomes "جاهز للتسليم")
 import { subscribeWorkOrders, getWorkOrders } from "@/lib/workOrdersStore";
 
-const KEY_SNAPSHOT = "tech_notify_snapshot_v1";
+let snapshotCache: Record<string, string> = {};
 
 export function canNotify(): boolean {
   return typeof window !== "undefined" && "Notification" in window;
@@ -19,10 +19,10 @@ export async function requestNotifyPermission(): Promise<NotificationPermission>
 }
 
 function loadSnapshot(): Record<string, string> {
-  try { return JSON.parse(localStorage.getItem(KEY_SNAPSHOT) || "{}"); } catch { return {}; }
+  return snapshotCache;
 }
 function saveSnapshot(s: Record<string, string>) {
-  try { localStorage.setItem(KEY_SNAPSHOT, JSON.stringify(s)); } catch {}
+  snapshotCache = s;
 }
 
 function fire(title: string, body: string, tag?: string) {

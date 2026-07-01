@@ -1,6 +1,4 @@
-// نظام إشعارات بسيط (مثل Facebook) — يعتمد على localStorage
-// كل نشاط من auditLogStore يُولّد إشعاراً جديداً.
-import type { AuditEntry, AuditEntity, AuditAction } from "./auditLogStore";
+import type { AuditAction, AuditEntity, AuditEntry } from "./auditLogStore";
 import { notificationSound } from "./notificationSound";
 
 export interface NotificationItem {
@@ -17,33 +15,20 @@ export interface NotificationItem {
   read: boolean;
 }
 
-const KEY = "alwafa_notifications_v1";
 const MAX = 200;
-let cache: NotificationItem[] | null = null;
+let cache: NotificationItem[] = [];
 const subs = new Set<() => void>();
 
-function load(): NotificationItem[] {
-  if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(KEY);
-    cache = raw ? JSON.parse(raw) : [];
-  } catch {
-    cache = [];
-  }
-  return cache!;
-}
-function persist() {
-  if (!cache) return;
-  try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch {}
-  subs.forEach((f) => f());
+function persistSessionOnly() {
+  subs.forEach((listener) => listener());
 }
 
 export const notificationsStore = {
   list(): NotificationItem[] {
-    return [...load()];
+    return [...cache];
   },
   unreadCount(): number {
-    return load().filter((n) => !n.read).length;
+    return cache.filter((notification) => !notification.read).length;
   },
   addFromAudit(entry: AuditEntry) {
     const item: NotificationItem = {
@@ -59,44 +44,50 @@ export const notificationsStore = {
       amount: entry.amount,
       read: false,
     };
-    const list = load();
-    list.unshift(item);
-    if (list.length > MAX) list.length = MAX;
-    persist();
-    // تشغيل صوت تنبيه قصير
+    cache.unshift(item);
+    if (cache.length > MAX) cache.length = MAX;
+    persistSessionOnly();
     try { notificationSound.play(); } catch {}
   },
   markRead(id: string) {
-    const list = load();
-    const i = list.findIndex((n) => n.id === id);
-    if (i >= 0 && !list[i].read) { list[i].read = true; persist(); }
+    const item = cache.find((notification) => notification.id === id);
+    if (item && !item.read) {
+      item.read = true;
+      persistSessionOnly();
+    }
   },
   markAllRead() {
-    const list = load();
     let changed = false;
-    for (const n of list) if (!n.read) { n.read = true; changed = true; }
-    if (changed) persist();
+    for (const notification of cache) {
+      if (!notification.read) {
+        notification.read = true;
+        changed = true;
+      }
+    }
+    if (changed) persistSessionOnly();
   },
   clear() {
     cache = [];
-    persist();
+    persistSessionOnly();
   },
-  subscribe(cb: () => void) { subs.add(cb); return () => subs.delete(cb); },
+  subscribe(cb: () => void) {
+    subs.add(cb);
+    return () => subs.delete(cb);
+  },
 };
 
-/** يحدد مسار التنقّل لكل كيان عند الضغط على الإشعار */
 export function getEntityRoute(entity: AuditEntity, entityId: string): string {
   switch (entity) {
     case "work_order": return `/work-orders/${entityId}`;
-    case "invoice": return `/sales`;
+    case "invoice": return "/sales";
     case "customer": return `/customers/${entityId}`;
-    case "vehicle": return `/vehicles`;
+    case "vehicle": return "/vehicles";
     case "claim": return `/insurance/${entityId}`;
-    case "inspection": return `/inspection`;
-    case "expense": return `/accounting`;
-    case "receipt": return `/accounting/receipts`;
-    case "deposit": return `/customers`;
-    case "cashbox": return `/accounting`;
-    default: return `/`;
+    case "inspection": return "/inspection";
+    case "expense": return "/accounting";
+    case "receipt": return "/accounting/receipts";
+    case "deposit": return "/customers";
+    case "cashbox": return "/accounting";
+    default: return "/";
   }
 }

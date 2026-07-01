@@ -480,7 +480,7 @@ const LS_KEYS: Record<CloudEntity, string> = {
 
 function writeLS(key: string, rows: any[]) {
   try {
-    localStorage.setItem(key, JSON.stringify(rows));
+    void key; void rows; return;
     // إشعار التبويبات الأخرى + المتاجر المحلية بالتغيير
     try { new BroadcastChannel(`store:${key}`).postMessage({ ts: Date.now() }); } catch {}
     window.dispatchEvent(new StorageEvent("storage", { key }));

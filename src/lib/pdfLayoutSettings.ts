@@ -1,3 +1,5 @@
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
+
 // Unified PDF / Print page margin settings.
 // Every PDF generator and print window in the app wraps its content inside a `.page` div.
 // This module stores the horizontal/vertical padding (mm) for that wrapper and
@@ -27,22 +29,28 @@ let cache: PdfLayoutSettings | null = null;
 
 function load(): PdfLayoutSettings {
   if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      cache = { ...DEFAULT_PDF_LAYOUT, ...JSON.parse(raw) };
-      return cache!;
-    }
-  } catch {}
   cache = { ...DEFAULT_PDF_LAYOUT };
+  void readCloudSetting<PdfLayoutSettings>(KEY, DEFAULT_PDF_LAYOUT).then((value) => {
+    cache = { ...DEFAULT_PDF_LAYOUT, ...value };
+    listeners.forEach((cb) => cb());
+  }).catch(() => undefined);
   return cache;
 }
 
 function persist() {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(cache));
-  } catch {}
   listeners.forEach((cb) => cb());
+  if (cache) {
+    void writeCloudSetting(KEY, cache).catch((error) => {
+      console.warn("[pdfLayoutStore] Supabase write failed", error);
+    });
+  }
+}
+
+if (typeof window !== "undefined") {
+  subscribeCloudSetting<PdfLayoutSettings>(KEY, (value) => {
+    cache = { ...DEFAULT_PDF_LAYOUT, ...value };
+    listeners.forEach((cb) => cb());
+  });
 }
 
 export const pdfLayoutStore = {
@@ -121,4 +129,3 @@ export function injectPageMarginStyle(
     /* noop */
   }
 }
-

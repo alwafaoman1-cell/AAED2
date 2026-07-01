@@ -6,6 +6,7 @@ import type { DocType } from "./printTemplates/schema";
 import QRCode from "qrcode";
 import { openSanitizedPdfWindow } from "./safePdfWindow";
 import { buildPublicUrl } from "./publicAccessSettingsStore";
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
 
 /** رابط تتبع عام آمن. المفتاح يجب أن يكون tracking_token وليس رقم الأمر أو UUID الداخلي. */
 export function getTrackingUrl(trackingToken?: string): string {
@@ -128,7 +129,7 @@ interface InspectionData {
 export type StampPosition = "bottom-right" | "bottom-left" | "bottom-center" | "watermark-center";
 export type StampSize = "sm" | "md" | "lg";
 
-// Template settings stored in localStorage
+// Template settings are stored in Supabase tenant_settings.
 export interface PdfTemplateSettings {
   companyName: string;
   companyNameEn: string;
@@ -208,24 +209,19 @@ const DEFAULT_SETTINGS: PdfTemplateSettings = {
   responsibleName: "",
 };
 
+export const DEFAULT_PDF_TEMPLATE_SETTINGS: PdfTemplateSettings = { ...DEFAULT_SETTINGS };
+
 export const STAMP_SIZE_PX: Record<StampSize, number> = { sm: 100, md: 150, lg: 200 };
 
 // In-memory cache + listeners so async cloud loads can notify open screens.
-const TEMPLATE_KEY = "pdf_template_settings";
 const CLOUD_KEY = "company_template_settings_v1";
 let templateCache: PdfTemplateSettings | null = null;
 const templateListeners = new Set<() => void>();
 
 export function getTemplateSettings(): PdfTemplateSettings {
   if (templateCache) return templateCache;
-  try {
-    const saved = localStorage.getItem(TEMPLATE_KEY);
-    if (saved) {
-      templateCache = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
-      return templateCache!;
-    }
-  } catch {}
   templateCache = { ...DEFAULT_SETTINGS };
+  void loadTemplateSettingsFromCloud();
   return templateCache;
 }
 
@@ -236,24 +232,20 @@ export function subscribeTemplateSettings(cb: () => void): () => void {
 
 export function saveTemplateSettings(settings: PdfTemplateSettings) {
   templateCache = { ...settings };
-  try { localStorage.setItem(TEMPLATE_KEY, JSON.stringify(settings)); } catch {}
   templateListeners.forEach((cb) => { try { cb(); } catch {} });
-  // Fire-and-forget cloud persistence so data survives cache clears + syncs across devices.
-  import("./cloudSettings").then(({ writeCloudSetting }) =>
-    writeCloudSetting(CLOUD_KEY, settings).catch(() => {})
-  ).catch(() => {});
+  void writeCloudSetting(CLOUD_KEY, settings).catch((error) => {
+    console.warn("[pdfGenerator] Supabase template write failed", error);
+  });
 }
 
 /** Load company/template settings from cloud and merge into local cache.
  *  Call after sign-in and once at app startup. Safe to call multiple times. */
 export async function loadTemplateSettingsFromCloud(): Promise<void> {
   try {
-    const { readCloudSetting, writeCloudSetting } = await import("./cloudSettings");
     const cloud = await readCloudSetting<Partial<PdfTemplateSettings> | null>(CLOUD_KEY, null);
     if (cloud && typeof cloud === "object") {
       const merged = { ...DEFAULT_SETTINGS, ...cloud } as PdfTemplateSettings;
       templateCache = merged;
-      try { localStorage.setItem(TEMPLATE_KEY, JSON.stringify(merged)); } catch {}
       templateListeners.forEach((cb) => { try { cb(); } catch {} });
     } else {
       // First time on cloud — push current local copy up so it isn't lost on cache clear.
@@ -263,6 +255,13 @@ export async function loadTemplateSettingsFromCloud(): Promise<void> {
   } catch { /* offline / not signed in — keep local */ }
 }
 
+
+if (typeof window !== "undefined") {
+  subscribeCloudSetting<Partial<PdfTemplateSettings>>(CLOUD_KEY, (value) => {
+    templateCache = { ...DEFAULT_SETTINGS, ...value } as PdfTemplateSettings;
+    templateListeners.forEach((cb) => { try { cb(); } catch {} });
+  });
+}
 
 // Bilingual label helper
 const bi = (ar: string, en: string) =>

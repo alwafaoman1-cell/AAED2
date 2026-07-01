@@ -26,19 +26,27 @@ const subs = new Set<() => void>();
 
 function load(): MonthlySettings {
   if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      cache = { ...DEFAULTS, ...JSON.parse(raw) };
-      return cache!;
-    }
-  } catch {}
   cache = { ...DEFAULTS };
+  void readCloudSetting<MonthlySettings>(KEY, DEFAULTS).then((value) => {
+    cache = { ...DEFAULTS, ...value };
+    subs.forEach((cb) => cb());
+  }).catch(() => undefined);
   return cache;
 }
 function persist() {
-  try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch {}
   subs.forEach((cb) => cb());
+  if (cache) {
+    void writeCloudSetting(KEY, cache).catch((error) => {
+      console.warn("[monthlySettingsStore] Supabase write failed", error);
+    });
+  }
+}
+
+if (typeof window !== "undefined") {
+  subscribeCloudSetting<MonthlySettings>(KEY, (value) => {
+    cache = { ...DEFAULTS, ...value };
+    subs.forEach((cb) => cb());
+  });
 }
 
 export const monthlySettingsStore = {
@@ -53,3 +61,4 @@ export const monthlySettingsStore = {
     return load().fixedCosts.filter((f) => f.active).reduce((s, f) => s + (f.amount || 0), 0);
   },
 };
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";

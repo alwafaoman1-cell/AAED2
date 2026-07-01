@@ -56,26 +56,36 @@ let cache: Record<NumberSeries, NumberSeriesConfig> | null = null;
 
 function load(): Record<NumberSeries, NumberSeriesConfig> {
   if (cache) return cache;
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
+  cache = { ...DEFAULT_NUMBERING };
+  void readCloudSetting<Record<NumberSeries, NumberSeriesConfig>>(KEY, DEFAULT_NUMBERING)
+    .then((value) => {
       cache = { ...DEFAULT_NUMBERING };
       for (const k of Object.keys(DEFAULT_NUMBERING) as NumberSeries[]) {
-        cache[k] = { ...DEFAULT_NUMBERING[k], ...(parsed[k] || {}) };
+        cache[k] = { ...DEFAULT_NUMBERING[k], ...(value?.[k] || {}) };
       }
-      return cache;
-    }
-  } catch {}
-  cache = { ...DEFAULT_NUMBERING };
+      listeners.forEach((cb) => cb());
+    })
+    .catch(() => undefined);
   return cache;
 }
 
 function persist() {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(cache));
-  } catch {}
   listeners.forEach((cb) => cb());
+  if (cache) {
+    void writeCloudSetting(KEY, cache).catch((error) => {
+      console.warn("[numberingStore] Supabase write failed", error);
+    });
+  }
+}
+
+if (typeof window !== "undefined") {
+  subscribeCloudSetting<Record<NumberSeries, NumberSeriesConfig>>(KEY, (value) => {
+    cache = { ...DEFAULT_NUMBERING };
+    for (const k of Object.keys(DEFAULT_NUMBERING) as NumberSeries[]) {
+      cache[k] = { ...DEFAULT_NUMBERING[k], ...(value?.[k] || {}) };
+    }
+    listeners.forEach((cb) => cb());
+  });
 }
 
 export const numberingStore = {
@@ -108,3 +118,4 @@ export function resolveSeriesByPrefix(prefix: string): NumberSeriesConfig | null
   }
   return null;
 }
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";

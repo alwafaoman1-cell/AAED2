@@ -74,7 +74,7 @@ function collectLocalPhotos(): MediaItem[] {
     }
   } catch { /* ignore */ }
   try {
-    const raw = JSON.parse(localStorage.getItem("alwafa_insurance_inspections_v1") || "{}");
+    const raw = {};
     for (const [id, data] of Object.entries<any>(raw)) {
       const savedAt = data?._savedAt || "";
       const annotated: string[] = Array.isArray(data?.annotatedImages) ? [...data.annotatedImages] : [];

@@ -1,11 +1,6 @@
-// Cloud-first settings helper. Reads/writes settings to `tenant_settings`
-// table on Supabase, with localStorage as offline fallback only (not source
-// of truth). Use this for any company-wide setting that must persist across
-// devices and never get lost.
-
 import { supabase } from "@/integrations/supabase/client";
 
-const LS_PREFIX = "cloud_setting_cache:";
+const memoryCache = new Map<string, unknown>();
 
 export interface CloudSettingRecord<T = unknown> {
   key: string;
@@ -14,7 +9,7 @@ export interface CloudSettingRecord<T = unknown> {
   updated_at: string;
 }
 
-/** Read a setting (cloud first, falls back to local cache for offline). */
+/** Read a tenant setting from Supabase. Falls back only to in-memory session cache. */
 export async function readCloudSetting<T>(key: string, fallback: T): Promise<T> {
   try {
     const { data, error } = await supabase
@@ -24,27 +19,21 @@ export async function readCloudSetting<T>(key: string, fallback: T): Promise<T> 
       .maybeSingle();
     if (error) throw error;
     if (data) {
-      try { localStorage.setItem(LS_PREFIX + key, JSON.stringify(data.value)); } catch {}
+      memoryCache.set(key, data.value);
       return data.value as T;
     }
   } catch {
-    // network / not signed in — try local cache
-    try {
-      const raw = localStorage.getItem(LS_PREFIX + key);
-      if (raw) return JSON.parse(raw) as T;
-    } catch {}
+    if (memoryCache.has(key)) return memoryCache.get(key) as T;
   }
   return fallback;
 }
 
-/** Write a setting upserted by key. Bumps version automatically via trigger. */
+/** Write a tenant setting to Supabase. No secret or operational setting is cached locally. */
 export async function writeCloudSetting<T>(key: string, value: T): Promise<void> {
-  // Need tenant_id for new rows
   const { data: userRow } = await supabase.auth.getUser();
   const userId = userRow.user?.id;
   if (!userId) throw new Error("not_authenticated");
 
-  // get tenant_id from profile (no RPC dependency)
   const { data: profile } = await supabase
     .from("profiles")
     .select("tenant_id")
@@ -62,10 +51,10 @@ export async function writeCloudSetting<T>(key: string, value: T): Promise<void>
       updated_by: userId,
     }, { onConflict: "tenant_id,key" });
   if (error) throw error;
-  try { localStorage.setItem(LS_PREFIX + key, JSON.stringify(value)); } catch {}
+  memoryCache.set(key, value);
 }
 
-/** Subscribe to live changes for a setting key. Returns unsubscribe fn. */
+/** Subscribe to live tenant setting changes. */
 export function subscribeCloudSetting<T>(
   key: string,
   cb: (value: T) => void,
@@ -78,7 +67,7 @@ export function subscribeCloudSetting<T>(
       (payload) => {
         const row = (payload.new ?? payload.old) as { value?: T } | null;
         if (row?.value !== undefined) {
-          try { localStorage.setItem(LS_PREFIX + key, JSON.stringify(row.value)); } catch {}
+          memoryCache.set(key, row.value);
           cb(row.value as T);
         }
       },
@@ -87,12 +76,7 @@ export function subscribeCloudSetting<T>(
   return () => { supabase.removeChannel(channel); };
 }
 
-/** List every known cloud-setting cache key currently in localStorage (for the cache audit page). */
+/** Current in-memory setting keys, useful for diagnostics only. */
 export function listCachedCloudKeys(): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k?.startsWith(LS_PREFIX)) out.push(k.slice(LS_PREFIX.length));
-  }
-  return out;
+  return Array.from(memoryCache.keys());
 }

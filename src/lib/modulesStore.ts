@@ -1,6 +1,8 @@
 // إعدادات تفعيل/إيقاف التطبيقات والوحدات الكبرى
 // يُحفظ في localStorage لكل جهاز.
 
+import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
+
 export type ModuleKey =
   | "tech"
   | "supervisor"
@@ -45,18 +47,25 @@ export const DEFAULT_MODULES: ModulesSettings = {
 
 type Listener = (s: ModulesSettings) => void;
 const listeners = new Set<Listener>();
+let cache: ModulesSettings = { ...DEFAULT_MODULES, enabled: { ...DEFAULT_MODULES.enabled } };
+let bootstrapped = false;
+
+function bootstrap() {
+  if (bootstrapped) return;
+  bootstrapped = true;
+  void readCloudSetting<ModulesSettings>(KEY, DEFAULT_MODULES).then((value) => {
+    cache = { enabled: { ...DEFAULT_MODULES.enabled, ...(value?.enabled || {}) } };
+    listeners.forEach((listener) => listener(cache));
+  }).catch(() => undefined);
+  subscribeCloudSetting<ModulesSettings>(KEY, (value) => {
+    cache = { enabled: { ...DEFAULT_MODULES.enabled, ...(value?.enabled || {}) } };
+    listeners.forEach((listener) => listener(cache));
+  });
+}
 
 export function getModulesSettings(): ModulesSettings {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...DEFAULT_MODULES, enabled: { ...DEFAULT_MODULES.enabled } };
-    const parsed = JSON.parse(raw);
-    return {
-      enabled: { ...DEFAULT_MODULES.enabled, ...(parsed?.enabled || {}) },
-    };
-  } catch {
-    return { ...DEFAULT_MODULES, enabled: { ...DEFAULT_MODULES.enabled } };
-  }
+  bootstrap();
+  return { enabled: { ...cache.enabled } };
 }
 
 export function isModuleEnabled(key: ModuleKey): boolean {
@@ -64,14 +73,11 @@ export function isModuleEnabled(key: ModuleKey): boolean {
 }
 
 export function saveModulesSettings(s: ModulesSettings) {
+  cache = { enabled: { ...DEFAULT_MODULES.enabled, ...s.enabled } };
+  listeners.forEach((l) => l(cache));
+  void writeCloudSetting(KEY, cache).catch((error) => console.warn("[modulesStore] Supabase write failed", error));
   try {
-    localStorage.setItem(KEY, JSON.stringify(s));
-  } catch {
-    /* ignore */
-  }
-  listeners.forEach((l) => l(s));
-  try {
-    window.dispatchEvent(new CustomEvent("alwafa:modules-changed", { detail: s }));
+    window.dispatchEvent(new CustomEvent("alwafa:modules-changed", { detail: cache }));
   } catch {
     /* ignore */
   }

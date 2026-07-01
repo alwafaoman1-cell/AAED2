@@ -1,7 +1,6 @@
 import { readCloudSetting, writeCloudSetting, subscribeCloudSetting } from "@/lib/cloudSettings";
 
 const KEY = "public_access_settings";
-const CACHE_KEY = "cloud_setting_cache:" + KEY;
 
 export interface PublicAccessSettings {
   /** Empty means disabled. */
@@ -25,18 +24,11 @@ function normalizeSettings(value: Partial<PublicAccessSettings> | null | undefin
 }
 
 function readCachedSettings(): PublicAccessSettings {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return { ...DEFAULTS };
-    return normalizeSettings(JSON.parse(raw));
-  } catch {
-    return { ...DEFAULTS };
-  }
+  return { ...DEFAULTS };
 }
 
 function cacheSettings(next: PublicAccessSettings) {
   memoryCache = normalizeSettings(next);
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(memoryCache)); } catch {}
   listeners.forEach((listener) => listener(memoryCache));
 }
 

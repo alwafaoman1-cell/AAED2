@@ -14,7 +14,7 @@ async function digits(s: string | undefined | null): Promise<string> {
 /** اسم الورشة من إعدادات PDF (إن وجدت) */
 function getCompanyName(): string {
   try {
-    const raw = localStorage.getItem("alwafa_pdf_template_settings");
+    const raw = "";
     if (raw) {
       const s = JSON.parse(raw);
       return s.companyName || "ورشة الوفاء";
