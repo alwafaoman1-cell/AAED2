@@ -1,6 +1,7 @@
 import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { salesStore, type SalesDoc } from "@/lib/salesStore";
 import { getWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
+import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
 
 export const OMAN_VAT_RATE = 0.05;
 export const OMR_DECIMALS = 3;
@@ -83,7 +84,10 @@ function roundMoney(value: unknown): number {
 }
 
 export function formatOMR(value: unknown): string {
-  return `${roundMoney(value).toFixed(OMR_DECIMALS)} OMR`;
+  return formatCurrencyEnglish(roundMoney(value), {
+    minimumFractionDigits: OMR_DECIMALS,
+    maximumFractionDigits: OMR_DECIMALS,
+  });
 }
 
 export function calculateVatFromSubtotal(subtotal: unknown, vatRate = OMAN_VAT_RATE) {

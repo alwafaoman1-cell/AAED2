@@ -216,7 +216,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
 
           {/* 1) Status picker */}
           <div>
-            <p className="text-xs text-muted-foreground mb-2">١) اختر الحالة الجديدة:</p>
+            <p className="text-xs text-muted-foreground mb-2">1) اختر الحالة الجديدة:</p>
             <div className="space-y-1.5">
               {WORK_ORDER_STATUSES.map((s, i) => {
                 const isSelected = (selected || order.status) === s;
@@ -266,7 +266,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
           <div className="border border-dashed border-border rounded-lg p-3 bg-secondary/20 space-y-2">
             <p className="text-xs text-foreground flex items-center gap-1.5">
               <Camera size={13} className="text-primary" />
-              ٢) إرفاق صور <span className="text-muted-foreground">(اختياري)</span>
+              2) إرفاق صور <span className="text-muted-foreground">(اختياري)</span>
             </p>
             <div className="grid grid-cols-2 gap-2">
               <Button size="sm" variant="outline" disabled={uploading} onClick={() => cameraInput.current?.click()} className="h-9 gap-1.5 text-xs">
@@ -298,7 +298,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
 
           {/* 3) Customer message + signature gate */}
           <div>
-            <p className="text-xs text-muted-foreground mb-2">٣) رسالة العميل (تُرسل عند الضغط على «حفظ وإرسال»):</p>
+            <p className="text-xs text-muted-foreground mb-2">3) رسالة العميل (تُرسل عند الضغط على «حفظ وإرسال»):</p>
             <Textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}

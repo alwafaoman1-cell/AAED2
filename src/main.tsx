@@ -4,8 +4,10 @@ import "./index.css";
 import "./i18n";
 import { registerTechPwa } from "./lib/registerPwa";
 import { ensureCacheVersion } from "./lib/cacheVersion";
+import { installEnglishDigitGuards } from "./lib/formatters/englishDigitsRuntime";
 
 ensureCacheVersion();
+installEnglishDigitGuards();
 registerTechPwa();
 
 // Recovery for stale PWA chunks after a new deploy.

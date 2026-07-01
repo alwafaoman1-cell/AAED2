@@ -9,6 +9,7 @@
 // Display format everywhere: "<letters> <digits>"   →  "AA 12345"
 // ────────────────────────────────────────────────────────────────
 import { supabase } from "@/integrations/supabase/client";
+import { normalizePlateInput, toEnglishDigits } from "@/lib/formatters/numberFormat";
 
 // Arabic plate letters commonly used in Oman → Latin equivalents
 const AR_TO_LATIN: Record<string, string> = {
@@ -20,12 +21,12 @@ const AR_TO_LATIN: Record<string, string> = {
 
 /** Extract digits only */
 export function extractPlateDigits(input: string | null | undefined): string {
-  return (input ?? "").replace(/[^0-9]/g, "");
+  return toEnglishDigits(input ?? "").replace(/[^0-9]/g, "");
 }
 
 /** Extract English letters only (Arabic → Latin), uppercased */
 export function extractPlateLetters(input: string | null | undefined): string {
-  let s = (input ?? "").toUpperCase();
+  let s = normalizePlateInput(input ?? "");
   // Translit Arabic letters → Latin
   s = Array.from(s).map((ch) => AR_TO_LATIN[ch] ?? ch).join("");
   return s.replace(/[^A-Z]/g, "");
@@ -60,11 +61,11 @@ export function formatPlate(v: {
   plate?: string | null; // legacy local vehiclesStore shape
 } | null | undefined): string {
   if (!v) return "—";
-  const letters = (v.plate_letters ?? "").toString().trim();
-  const digits = (v.plate_number ?? "").toString().trim();
+  const letters = normalizePlateInput(v.plate_letters ?? "");
+  const digits = toEnglishDigits(v.plate_number ?? "").trim();
   if (letters || digits) return `${letters}${letters && digits ? " " : ""}${digits}`.trim() || "—";
   // Legacy fallback: single combined field
-  if (v.plate) return v.plate;
+  if (v.plate) return normalizePlateInput(v.plate);
   return "—";
 }
 
@@ -73,9 +74,9 @@ export function validatePlateParts(letters: string, digits: string): string | nu
   const L = extractPlateLetters(letters);
   const D = extractPlateDigits(digits);
   if (!D) return "رقم اللوحة مطلوب (أرقام فقط)";
-  if (D.length > 7) return "رقم اللوحة طويل جداً (٧ أرقام كحد أقصى)";
+  if (D.length > 7) return "رقم اللوحة طويل جداً (7 أرقام كحد أقصى)";
   if (!L) return "حروف اللوحة مطلوبة (إنجليزية A-Z)";
-  if (L.length > 4) return "حروف اللوحة طويلة جداً (٤ أحرف كحد أقصى)";
+  if (L.length > 4) return "حروف اللوحة طويلة جداً (4 أحرف كحد أقصى)";
   return null;
 }
 

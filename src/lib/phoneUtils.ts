@@ -1,10 +1,11 @@
 // مساعد موحّد لتطبيع أرقام الهاتف لصيغة دولية (E.164) — البادئة الافتراضية تُقرأ من الإعدادات.
 import { getDefaultCountryCode } from "./countries";
+import { normalizePhoneInput } from "@/lib/formatters/numberFormat";
 
 export function normalizePhone(input?: string | null, defaultCountry?: string): string {
   if (!input) return "";
   const dc = (defaultCountry || getDefaultCountryCode()).replace(/\D/g, "") || "968";
-  const raw = String(input).trim();
+  const raw = normalizePhoneInput(input).trim();
   const hadPlus = raw.startsWith("+");
   let n = raw.replace(/\D/g, "");
   if (!n) return "";
