@@ -1,3 +1,5 @@
+import { classifyWorkOrderCosts, type ClaimApprovalMode, type ClaimApprovalInfo } from "@/lib/workOrderCosting";
+
 // Shared in-memory store for Work Orders so other modules (Inspection) can read & sync them.
 // This is a temporary client-side store until backend wiring is added.
 
@@ -92,6 +94,10 @@ export interface WorkOrder {
   diagnosis?: string;
   laborCost?: number;
   partsCost?: number;
+  insuranceApprovedAmount?: number;
+  insuranceApprovalMode?: ClaimApprovalMode;
+  lumpSumNotItemized?: boolean;
+  paintMaterialsCost?: number;
   photos?: StagePhoto[];
   /** مصروفات إضافية داخلية (سحب، نقل، صبغ خارجي...) تُحتسب في الإجمالي */
   extraExpenses?: ExtraExpense[];
@@ -443,6 +449,7 @@ function mapCloudRow(
   r: CloudRow,
   custMap: Map<string, { name: string; phone?: string | null }>,
   vehMap: Map<string, { plate?: string | null; brand?: string | null; model?: string | null; year?: number | null; vin?: string | null; color?: string | null; imageUrl?: string | null; thumbnailUrl?: string | null }>,
+  claimMap: Map<string, ClaimApprovalInfo> = new Map(),
 ): WorkOrder {
   const c = r.customer_id ? custMap.get(r.customer_id) : undefined;
   const v = r.vehicle_id ? vehMap.get(r.vehicle_id) : undefined;
@@ -457,6 +464,17 @@ function mapCloudRow(
   const visibleBelongings = Object.fromEntries(
     Object.entries(belongings).filter(([key]) => !INTERNAL_BELONGING_KEYS.has(key)),
   );
+  const partsNeeded = Array.isArray(r.parts_needed) ? r.parts_needed : [];
+  const workItems = Array.isArray(r.work_items) ? r.work_items : [];
+  const costs = classifyWorkOrderCosts({
+    laborCost: r.labor_cost,
+    partsCost: r.parts_cost,
+    finalTotal: r.final_total,
+    subtotal: r.subtotal,
+    claim: r.claim_id ? claimMap.get(r.claim_id) || null : null,
+    partsNeeded,
+    workItems,
+  });
   return {
     id: r.order_number || r.id,
     cloudId: r.id,
@@ -489,14 +507,18 @@ function mapCloudRow(
     technician: r.technician_name || "",
     serviceType: r.service_type || "صيانة",
     status: cloudStatusToLocal(r.status),
-    totalCost: Number(r.final_total ?? r.subtotal ?? 0),
+    totalCost: costs.totalCost,
     description: r.description || undefined,
     diagnosis: r.diagnosis || r.diagnosis_notes || undefined,
-    laborCost: Number(r.labor_cost ?? 0),
-    partsCost: Number(r.parts_cost ?? 0),
+    laborCost: costs.laborCost,
+    partsCost: costs.partsCost,
+    insuranceApprovedAmount: costs.insuranceApprovedAmount,
+    insuranceApprovalMode: costs.insuranceApprovalMode,
+    lumpSumNotItemized: costs.lumpSumNotItemized,
+    paintMaterialsCost: costs.paintMaterialsCost,
     photos: Array.isArray(r.photos) ? r.photos : [],
-    partsNeeded: Array.isArray(r.parts_needed) ? r.parts_needed : [],
-    workItems: Array.isArray(r.work_items) ? r.work_items : [],
+    partsNeeded,
+    workItems,
     extraExpenses: Array.isArray(metadata?.extraExpenses) ? metadata.extraExpenses : [],
     linkedExpenseVoucherIds: Array.isArray(metadata?.linkedExpenseVoucherIds) ? metadata.linkedExpenseVoucherIds : [],
     depositApplied: Number(metadata?.depositApplied || 0),
@@ -595,6 +617,7 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
 
     const customerIds = Array.from(new Set(rows.map((r: any) => r.customer_id).filter(Boolean)));
     const vehicleIds = Array.from(new Set(rows.map((r: any) => r.vehicle_id).filter(Boolean)));
+    const claimIds = Array.from(new Set(rows.map((r: any) => r.claim_id).filter(Boolean)));
     const customerQuery = customerIds.length
       ? supabase.from("customers").select("id,name,phone").in("id", customerIds).limit(10000)
       : Promise.resolve({ data: [], error: null } as any);
@@ -612,12 +635,25 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
         .in("id", vehicleIds)
         .limit(10000);
     }
-    const [{ data: custs, error: custError }, { data: vehs, error: vehError }] = await Promise.all([
+    const claimQuery = claimIds.length
+      ? supabase
+        .from("insurance_claims")
+        .select("id,approved_amount,estimated_amount,estimation_type")
+        .in("id", claimIds)
+        .limit(10000)
+      : Promise.resolve({ data: [], error: null } as any);
+    const [
+      { data: custs, error: custError },
+      { data: vehs, error: vehError },
+      { data: claims, error: claimError },
+    ] = await Promise.all([
       customerQuery,
       Promise.resolve(vehicleQuery),
+      claimQuery,
     ]);
     if (custError) throw custError;
     if (vehError) throw vehError;
+    if (claimError) throw claimError;
 
 
     const custMap = new Map<string, any>();
@@ -633,8 +669,14 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       imageUrl: v.vehicle_cover_image_url,
       thumbnailUrl: v.vehicle_thumbnail_url,
     }));
+    const claimMap = new Map<string, ClaimApprovalInfo>();
+    (claims || []).forEach((claim: any) => claimMap.set(claim.id, {
+      approvedAmount: claim.approved_amount,
+      estimatedAmount: claim.estimated_amount,
+      estimationType: claim.estimation_type,
+    }));
 
-    const cloudOrders: WorkOrder[] = rows.map((r) => mapCloudRow(r, custMap, vehMap));
+    const cloudOrders: WorkOrder[] = rows.map((r) => mapCloudRow(r, custMap, vehMap, claimMap));
     KNOWN_CLOUD_NUMBERS.clear();
     cloudOrders.forEach((o) => KNOWN_CLOUD_NUMBERS.add(o.id));
 
@@ -936,12 +978,15 @@ function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string
 }
 
 async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
-  const [custRes, vehRes] = await Promise.all([
+  const [custRes, vehRes, claimRes] = await Promise.all([
     row.customer_id
       ? supabase.from("customers").select("id,name,phone").eq("id", row.customer_id).maybeSingle()
       : Promise.resolve({ data: null } as any),
     row.vehicle_id
       ? supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url").eq("id", row.vehicle_id).maybeSingle()
+      : Promise.resolve({ data: null } as any),
+    row.claim_id
+      ? supabase.from("insurance_claims").select("id,approved_amount,estimated_amount,estimation_type").eq("id", row.claim_id).maybeSingle()
       : Promise.resolve({ data: null } as any),
   ]);
   const custMap = new Map<string, any>();
@@ -960,7 +1005,16 @@ async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
       thumbnailUrl: v.vehicle_thumbnail_url,
     });
   }
-  return mapCloudRow(row, custMap, vehMap);
+  const claimMap = new Map<string, ClaimApprovalInfo>();
+  const claim = (claimRes as any).data;
+  if (claim?.id) {
+    claimMap.set(claim.id, {
+      approvedAmount: claim.approved_amount,
+      estimatedAmount: claim.estimated_amount,
+      estimationType: claim.estimation_type,
+    });
+  }
+  return mapCloudRow(row, custMap, vehMap, claimMap);
 }
 
 export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder> {

@@ -81,6 +81,8 @@ import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { resolveWorkOrderType } from "@/lib/workOrderType";
 import { archiveWorkOrder } from "@/lib/deletePolicy";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
+import { classifyWorkOrderCosts } from "@/lib/workOrderCosting";
+import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
 
@@ -188,9 +190,10 @@ export default function WorkOrderDetail() {
           .from("job_orders")
           .select(`
             id, order_number, status, description, diagnosis,
-            labor_cost, parts_cost, final_total, created_at,
+            labor_cost, parts_cost, final_total, subtotal, created_at,
             insurance_claim_number, insurance_company, insurance_approved,
             work_order_type, claim_id, tracking_token, tracking_expires_at, archived_at,
+            parts_needed, work_items,
             customer:customers(name, phone),
             vehicle:vehicles(brand, model, plate_number, year, color, vin_number)
           `);
@@ -198,9 +201,30 @@ export default function WorkOrderDetail() {
           ? await q.eq("id", id).maybeSingle()
           : await q.ilike("order_number", woMatch![0]).maybeSingle();
         if (!error && data) {
-          const labor = Number((data as any).labor_cost) || 0;
-          const parts = Number((data as any).parts_cost) || 0;
-          const total = Number((data as any).final_total) || labor + parts;
+          let claimInfo: { approvedAmount?: number | null; estimatedAmount?: number | null; estimationType?: string | null } | null = null;
+          if ((data as any).claim_id) {
+            const { data: claim } = await supabase
+              .from("insurance_claims")
+              .select("id,approved_amount,estimated_amount,estimation_type")
+              .eq("id", (data as any).claim_id)
+              .maybeSingle();
+            if (claim) {
+              claimInfo = {
+                approvedAmount: (claim as any).approved_amount,
+                estimatedAmount: (claim as any).estimated_amount,
+                estimationType: (claim as any).estimation_type,
+              };
+            }
+          }
+          const costs = classifyWorkOrderCosts({
+            laborCost: (data as any).labor_cost,
+            partsCost: (data as any).parts_cost,
+            finalTotal: (data as any).final_total,
+            subtotal: (data as any).subtotal,
+            claim: claimInfo,
+            partsNeeded: Array.isArray((data as any).parts_needed) ? (data as any).parts_needed : [],
+            workItems: Array.isArray((data as any).work_items) ? (data as any).work_items : [],
+          });
           const v: any = (data as any).vehicle || {};
           const c: any = (data as any).customer || {};
           const adapted: WorkOrder = {
@@ -227,13 +251,18 @@ export default function WorkOrderDetail() {
             technician: "",
             serviceType: (data as any).insurance_claim_number ? "حادث" : "صيانة",
             status: SUPA_STATUS_TO_AR[(data as any).status] || "تحت الفحص",
-            totalCost: total,
-            laborCost: labor,
-            partsCost: parts,
+            totalCost: costs.totalCost,
+            laborCost: costs.laborCost,
+            partsCost: costs.partsCost,
+            insuranceApprovedAmount: costs.insuranceApprovedAmount,
+            insuranceApprovalMode: costs.insuranceApprovalMode,
+            lumpSumNotItemized: costs.lumpSumNotItemized,
+            paintMaterialsCost: costs.paintMaterialsCost,
             diagnosis: (data as any).diagnosis || (data as any).description || "",
             description: (data as any).description || "",
             photos: [],
-            partsNeeded: [],
+            partsNeeded: Array.isArray((data as any).parts_needed) ? (data as any).parts_needed : [],
+            workItems: Array.isArray((data as any).work_items) ? (data as any).work_items : [],
           };
           void refreshWorkOrdersFromCloud().catch(() => {});
           setOrder(adapted);
@@ -810,7 +839,7 @@ export default function WorkOrderDetail() {
               <div className="grid grid-cols-2 gap-2 min-w-[180px]">
                 <div className="rounded-xl border border-border bg-card/75 p-3">
                   <p className="text-[10px] text-muted-foreground">التكلفة</p>
-                  <p className="text-sm font-bold text-primary">{order.totalCost.toLocaleString()} ر.ع</p>
+                  <p className="text-sm font-bold text-primary">{formatCurrencyEnglish(order.totalCost, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")}</p>
                 </div>
                 <div className="rounded-xl border border-border bg-card/75 p-3">
                   <p className="text-[10px] text-muted-foreground">القطع المفتوحة</p>
@@ -924,9 +953,20 @@ export default function WorkOrderDetail() {
         <Section icon={<ShieldCheck size={14} />} title="التأمين والتكلفة">
           <Row label="شركة التأمين" value={order.insurance} />
           <Row label="رقم المطالبة" value={order.claimNumber} mono />
-          <Row label="أجور العمالة" value={`${(order.laborCost ?? 0).toLocaleString()} ر.ع`} amount />
-          <Row label="قطع الغيار" value={`${(order.partsCost ?? 0).toLocaleString()} ر.ع`} amount />
-          <Row label="الإجمالي" value={`${order.totalCost.toLocaleString()} ر.ع`} highlight amount />
+          {(order.insuranceApprovedAmount ?? 0) > 0 && (
+            <Row
+              label="Insurance Approved Amount"
+              value={formatCurrencyEnglish(order.insuranceApprovedAmount || 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")}
+              highlight
+              amount
+            />
+          )}
+          {order.lumpSumNotItemized && (
+            <Row label="Lump Sum" value="Lump Sum approval, not itemized" />
+          )}
+          <Row label="أجور العمالة" value={formatCurrencyEnglish(order.laborCost ?? 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")} amount />
+          <Row label="قطع الغيار" value={formatCurrencyEnglish(order.partsCost ?? 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")} amount />
+          <Row label="الإجمالي" value={formatCurrencyEnglish(order.totalCost, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")} highlight amount />
         </Section>
       </div>
 
