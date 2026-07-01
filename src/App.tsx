@@ -123,6 +123,7 @@ const PublicAccessSettingsPage = lazy(() => import("./pages/settings/PublicAcces
 const SmsSettingsPage = lazy(() => import("./pages/settings/SmsSettingsPage"));
 const TaxSettingsPage = lazy(() => import("./pages/settings/TaxSettingsPage"));
 const IntegrationsSettingsPage = lazy(() => import("./pages/settings/IntegrationsSettingsPage"));
+const SecurityDangerZone = lazy(() => import("./components/settings/SecurityDangerZone"));
 const PaymentGatewaysPage = lazy(() => import("./pages/settings/PaymentGatewaysPage"));
 const BackupRestorePage = lazy(() => import("./pages/settings/BackupRestorePage"));
 const AiKeysSettingsPage = lazy(() => import("./pages/settings/AiKeysSettingsPage"));
@@ -332,6 +333,7 @@ const App = () => (
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/settings/tax" element={<TaxSettingsPage />} />
               <Route path="/settings/integrations" element={<IntegrationsSettingsPage />} />
+              <Route path="/settings/danger-zone" element={<ProtectedRoute roles={["admin"]}><SecurityDangerZone /></ProtectedRoute>} />
               <Route path="/settings/payment-gateways" element={<PaymentGatewaysPage />} />
               <Route path="/trash" element={<Navigate to="/settings/trash" replace />} />
               <Route path="/settings/trash" element={<ProtectedRoute roles={["admin"]}><TrashPage /></ProtectedRoute>} />

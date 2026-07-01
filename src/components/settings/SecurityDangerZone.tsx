@@ -27,9 +27,11 @@ export default function SecurityDangerZone() {
     lastTestAt: string | null;
     lastTestStatus: string | null;
   } | null>(null);
+
   const isOwnerOrSuperAdmin =
     profile?.role === "admin" ||
     (profile?.role as string | undefined) === "owner" ||
+    (profile?.role as string | undefined) === "super_admin" ||
     !!(profile as any)?.is_platform_admin;
 
   useEffect(() => {
@@ -55,7 +57,8 @@ export default function SecurityDangerZone() {
 
   useEffect(() => {
     if (!profile?.tenant_id) return;
-    void supabase.functions.invoke("save-email-provider", { body: { action: "status" } })
+    void supabase.functions
+      .invoke("save-email-provider", { body: { action: "status" } })
       .then(({ data, error }) => {
         if (!error && data?.ok) setEmailProviderStatus(data.status);
       });
@@ -93,7 +96,7 @@ export default function SecurityDangerZone() {
   }
 
   async function reauthenticate() {
-    if (!user?.email || !password) throw new Error("أدخل كلمة مرور المدير أولاً");
+    if (!user?.email || !password) throw new Error("أدخل كلمة مرور المدير أولًا");
     const { error } = await supabase.auth.signInWithPassword({ email: user.email, password });
     if (error) throw new Error("كلمة مرور المدير غير صحيحة");
   }
@@ -101,7 +104,7 @@ export default function SecurityDangerZone() {
   async function requestOtp() {
     setStatusMessage(null);
     if (!password.trim()) {
-      const message = "أدخل كلمة مرور المدير أولاً قبل إرسال OTP.";
+      const message = "أدخل كلمة مرور المدير أولًا قبل إرسال OTP.";
       setStatusMessage({ type: "error", text: message });
       toast.error(message);
       return;
@@ -128,7 +131,7 @@ export default function SecurityDangerZone() {
   async function executeReset(dryRun: boolean) {
     setStatusMessage(null);
     if (!password.trim()) {
-      const message = "أدخل كلمة مرور المدير أولاً.";
+      const message = "أدخل كلمة مرور المدير أولًا.";
       setStatusMessage({ type: "error", text: message });
       toast.error(message);
       return;
@@ -146,16 +149,21 @@ export default function SecurityDangerZone() {
       return;
     }
     if (!isOwnerOrSuperAdmin) return toast.error("هذه العملية متاحة للمالك أو Super Admin فقط");
-    if (!cloudResetEnabled) return toast.error("فعّل خيار تهيئة السحابة أولاً");
+    if (!cloudResetEnabled) return toast.error("فعّل خيار تهيئة السحابة أولًا");
     setBusy(true);
     try {
       await reauthenticate();
       const { data, error } = await supabase.functions.invoke("execute-cloud-reset", {
-        body: { otp, skipOtp: bypassOtp, confirmPhrase, dryRun, reason: bypassOtp ? "admin settings danger zone otp bypass" : "admin settings danger zone" },
+        body: {
+          otp,
+          skipOtp: bypassOtp,
+          confirmPhrase,
+          dryRun,
+          reason: bypassOtp ? "admin settings danger zone otp bypass" : "admin settings danger zone",
+        },
       });
       if (error || !data?.ok) throw new Error(getFunctionErrorMessage(error, data));
       toast.success(dryRun ? "تم فحص البيانات المرشحة للحذف" : "تم تنفيذ تهيئة السحابة");
-      console.info("[cloud reset result]", data.results);
     } catch (error: any) {
       toast.error(error?.message || "تعذر تنفيذ تهيئة السحابة");
     } finally {
@@ -218,21 +226,21 @@ export default function SecurityDangerZone() {
           <span className="space-y-1">
             <span className="block font-medium">OTP تسجيل الدخول</span>
             <span className="block text-xs text-muted-foreground">
-              يمكن إيقافه مؤقتًا إذا لم يصل البريد، ثم تفعيله بعد ضبط مفتاح مزود البريد من إعدادات التكامل.
+              يمكن إيقافه مؤقتًا إذا لم يصل البريد، ثم تفعيله بعد ضبط مزود البريد من إعدادات التكامل.
             </span>
           </span>
-          <Switch checked={loginOtpEnabled} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(v) => void saveSecuritySettings({ login_otp_enabled: v })} />
+          <Switch checked={loginOtpEnabled} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(value) => void saveSecuritySettings({ login_otp_enabled: value })} />
         </label>
         <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
           <span>السماح بتهيئة السحابة من الإعدادات</span>
-          <Switch checked={cloudResetEnabled} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(v) => void saveSecuritySettings({ cloud_reset_enabled: v })} />
+          <Switch checked={cloudResetEnabled} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(value) => void saveSecuritySettings({ cloud_reset_enabled: value })} />
         </label>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <Input type="password" placeholder="كلمة مرور المدير" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <Input inputMode="numeric" maxLength={6} placeholder={bypassOtp ? "OTP متجاوز مؤقتًا" : "OTP من البريد"} value={otp} disabled={bypassOtp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} />
-        <Input placeholder="DELETE CLOUD DATA" value={confirmPhrase} onChange={(e) => setConfirmPhrase(e.target.value)} />
+        <Input type="password" placeholder="كلمة مرور المدير" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <Input inputMode="numeric" maxLength={6} placeholder={bypassOtp ? "OTP متجاوز مؤقتًا" : "OTP من البريد"} value={otp} disabled={bypassOtp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} />
+        <Input placeholder="DELETE CLOUD DATA" value={confirmPhrase} onChange={(event) => setConfirmPhrase(event.target.value)} />
       </div>
 
       <label className="flex items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
@@ -242,17 +250,17 @@ export default function SecurityDangerZone() {
             استخدمه فقط إذا كان البريد/OTP لا يعمل. لا يزال مطلوبًا إدخال كلمة مرور المدير وعبارة DELETE CLOUD DATA.
           </span>
         </span>
-        <Switch checked={bypassOtp} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(v) => { setBypassOtp(v); if (v) setOtp(""); }} />
+        <Switch checked={bypassOtp} disabled={busy || !isOwnerOrSuperAdmin} onCheckedChange={(value) => { setBypassOtp(value); if (value) setOtp(""); }} />
       </label>
 
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" disabled={busy || !isOwnerOrSuperAdmin} onClick={requestOtp} className="gap-2">
           <ShieldCheck size={14} /> إرسال رمز تحقق للبريد
         </Button>
-        <Button type="button" variant="outline" disabled={busy || !isOwnerOrSuperAdmin} onClick={() => executeReset(true)}>
+        <Button type="button" variant="outline" disabled={busy || !isOwnerOrSuperAdmin} onClick={() => void executeReset(true)}>
           فحص قبل الحذف
         </Button>
-        <Button type="button" variant="destructive" disabled={busy || !isOwnerOrSuperAdmin} onClick={() => executeReset(false)} className="gap-2">
+        <Button type="button" variant="destructive" disabled={busy || !isOwnerOrSuperAdmin} onClick={() => void executeReset(false)} className="gap-2">
           <Trash2 size={14} /> تهيئة وحذف بيانات السحابة
         </Button>
       </div>
