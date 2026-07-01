@@ -81,6 +81,13 @@ export function startAccountingBridge() {
   expensesStore.subscribe(() => {
     try { syncExpensesToJournal(); } catch (e) { console.warn("accountingBridge: expense sync failed", e); }
   });
+  try {
+    // Pull cloud/imported expenses after the authenticated session is ready so
+    // accounting totals do not depend on an earlier empty in-memory cache.
+    expensesStore.refresh();
+  } catch (e) {
+    console.warn("accountingBridge: expense refresh failed", e);
+  }
 
   subscribeWorkOrders(() => {
     try { syncVehicleArchive(); } catch (e) { console.warn("accountingBridge: vehicle archive sync failed", e); }

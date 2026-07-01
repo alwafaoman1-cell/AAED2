@@ -653,7 +653,12 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
     ]);
     if (custError) throw custError;
     if (vehError) throw vehError;
-    if (claimError) throw claimError;
+    if (claimError) {
+      // Claim financial metadata is optional for the list view.  A schema/RLS
+      // issue on insurance_claims must not hide existing job_orders from the
+      // work-orders list; details can still load the order itself.
+      console.warn("[workOrdersStore] claim metadata lookup skipped:", claimError);
+    }
 
 
     const custMap = new Map<string, any>();
@@ -670,7 +675,7 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       thumbnailUrl: v.vehicle_thumbnail_url,
     }));
     const claimMap = new Map<string, ClaimApprovalInfo>();
-    (claims || []).forEach((claim: any) => claimMap.set(claim.id, {
+    (claimError ? [] : claims || []).forEach((claim: any) => claimMap.set(claim.id, {
       approvedAmount: claim.approved_amount,
       estimatedAmount: claim.estimated_amount,
       estimationType: claim.estimation_type,

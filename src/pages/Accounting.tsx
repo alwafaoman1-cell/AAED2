@@ -63,6 +63,7 @@ export default function Accounting() {
     const unsubJournal = journalStore.subscribe(refresh);
     const unsubExpenses = expensesStore.subscribe(refresh);
     const unsubSales = salesStore.subscribe(refresh);
+    expensesStore.refresh();
     return () => {
       unsubJournal();
       unsubExpenses();
