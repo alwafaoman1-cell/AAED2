@@ -286,7 +286,7 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5" dir="rtl">
-        {/* Quick actions: delivery receipt + tax invoice */}
+        {/* Quick actions: delivery receipt + delivery documents for insurer */}
         <div className="grid sm:grid-cols-2 gap-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/30">
           <Button
             type="button"
@@ -305,11 +305,11 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
             className="gap-2"
           >
             {loadingWo ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck2 className="w-4 h-4" />}
-            إصدار الفاتورة الضريبية
+            تجهيز أوراق التسليم للتأمين
           </Button>
           {!workOrderId && (
             <p className="text-xs text-muted-foreground sm:col-span-2">
-              يلزم وجود أمر عمل مرتبط بالمطالبة لإصدار الإقرار/الفاتورة.
+              يلزم وجود أمر عمل مرتبط بالمطالبة لإصدار إقرار التسليم وتجهيز أوراق التسليم.
             </p>
           )}
         </div>

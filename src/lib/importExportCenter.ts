@@ -63,7 +63,7 @@ export const IMPORT_EXPORT_ENTITIES: Array<{
     { key: "order_number", label: "Order Number", required: true }, { key: "customer", label: "Customer" }, { key: "phone", label: "Phone" }, { key: "plate", label: "Plate" }, { key: "status", label: "Status" },
   ] },
   { key: "expenses", labelAr: "المصروفات", labelEn: "Expenses", canImport: true, canExport: true, columns: [
-    { key: "voucher_number", label: "Voucher" }, { key: "date", label: "Date" }, { key: "category_name", label: "Category" }, { key: "beneficiary", label: "Beneficiary" }, { key: "description", label: "Description" }, { key: "amount", label: "Amount", required: true }, { key: "payment_method", label: "Payment Method" }, { key: "linked_work_order_id", label: "Work Order" }, { key: "linked_vehicle_plate", label: "Vehicle Plate" },
+    { key: "voucher_number", label: "Voucher" }, { key: "date", label: "Date" }, { key: "category_name", label: "Category" }, { key: "beneficiary", label: "Beneficiary" }, { key: "description", label: "Description" }, { key: "amount", label: "Amount", required: true }, { key: "payment_method", label: "Payment Method" }, { key: "linked_work_order_id", label: "Work Order" }, { key: "linked_vehicle_plate", label: "Vehicle Plate" }, { key: "photo", label: "Attachment" },
   ] },
   { key: "archive", labelAr: "الأرشيف", labelEn: "Archive", canImport: false, canExport: true, columns: [
     { key: "reference", label: "Reference" }, { key: "type", label: "Type" }, { key: "date", label: "Date" },
@@ -78,6 +78,20 @@ export function getEntityDefinition(entity: ImportExportEntity) {
 }
 
 export async function parseImportFile(file: File): Promise<ParsedImport> {
+  if (file.name.toLowerCase().endsWith(".json") || file.type === "application/json") {
+    const parsed = JSON.parse(await file.text());
+    const sourceRows = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.expenses)
+      ? parsed.expenses
+      : Array.isArray(parsed.rows)
+      ? parsed.rows
+      : [];
+    if (!sourceRows.length) throw new Error("JSON file does not contain importable rows");
+    const rows = sourceRows.map((row: Record<string, unknown>) => ({ ...(row || {}) }));
+    const headers = Array.from(new Set<string>(rows.flatMap((row) => Object.keys(row))));
+    return { headers, rows };
+  }
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
   const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -93,6 +107,7 @@ export function autoMapColumns(headers: string[], entity: ImportExportEntity): R
   getEntityDefinition(entity).columns.forEach((col) => {
     const candidates = [
       col.key,
+      col.key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()),
       col.label.toLowerCase().replace(/\s+/g, "_"),
       col.label.toLowerCase(),
       col.key.replace(/_/g, " "),
@@ -215,6 +230,7 @@ export async function importExpensesRows(rows: Record<string, string>[]) {
       paymentMethod: parseImportPaymentMethod(row.payment_method),
       beneficiary: row.beneficiary || undefined,
       description: row.description || undefined,
+      photo: row.photo || undefined,
       linkedWorkOrderId: row.linked_work_order_id || undefined,
       linkedVehiclePlate: row.linked_vehicle_plate || undefined,
       createdAt: new Date().toISOString(),

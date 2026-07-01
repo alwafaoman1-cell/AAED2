@@ -501,8 +501,8 @@ export default function Reports() {
             },
             {
               key: "completed-without-invoice",
-              title: isRtl ? "أوامر مكتملة بدون فاتورة" : "Completed Work Orders Without Invoice",
-              desc: isRtl ? "متابعة أوامر العمل المغلقة أو المسلّمة التي لم ترتبط بفاتورة بعد" : "Track closed or delivered work orders that are still missing invoices",
+              title: isRtl ? "المسلّمة بانتظار LPO / فاتورة" : "Delivered Waiting LPO / Invoice",
+              desc: isRtl ? "تمييز أوامر التأمين المسلّمة بانتظار LPO أو فاتورة التأمين عن أوامر النقد التي تحتاج فاتورة مبيعات" : "Separate delivered insurance work orders waiting for LPO/insurance invoice from cash jobs that need a sales invoice",
               icon: AlertTriangle,
               route: "/reports/completed-without-invoice",
               badge: isRtl ? "رقابة مالية" : "Control",

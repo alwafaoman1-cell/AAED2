@@ -14,6 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { toast } from "sonner";
 import { isUuid } from "@/lib/uuid";
+import { isInsuranceWorkOrder } from "@/lib/workOrderType";
 
 export const CLOSING_STATUSES = ["جاهز للتسليم", "تم التسليم", "مغلق", "Ready", "Completed", "Delivered", "Closed"];
 
@@ -52,13 +53,14 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
   const netProfit = revenue - finalTotal;
   const hasInvoice = !!row?.hasInvoice;
   const hasPayments = !!row && row.paidAmount > 0;
+  const isInsurance = isInsuranceWorkOrder(order);
 
   const confirm = async () => {
     if (!row) return;
     if (!source) return;
     if (source === "Manual Final Cost" && !manualReason.trim()) return;
-    if (!hasInvoice && !skipInvoice) return;
-    if (!hasInvoice && skipInvoice && (!canApproveSkip || !skipReason.trim())) return;
+    if (!isInsurance && !hasInvoice && !skipInvoice) return;
+    if (!isInsurance && !hasInvoice && skipInvoice && (!canApproveSkip || !skipReason.trim())) return;
 
     const snapshot = {
       workOrderNumber: row.workOrderNumber,
@@ -80,6 +82,8 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       netProfit,
       hasInvoice,
       hasPayments,
+      insuranceDeliveryWithoutInvoice: isInsurance && !hasInvoice,
+      insuranceFinancialStatus: isInsurance && !hasInvoice ? "Delivered - Waiting LPO / Insurance Invoice" : "",
     };
 
     setSaving(true);
@@ -97,8 +101,10 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
           status: targetStatus,
           finalCostSource: source,
           manualReason: source === "Manual Final Cost" ? manualReason.trim() : null,
-          invoiceSkipped: !hasInvoice && skipInvoice,
-          skipInvoiceReason: skipInvoice ? skipReason.trim() : null,
+          invoiceSkipped: !isInsurance && !hasInvoice && skipInvoice,
+          skipInvoiceReason: !isInsurance && skipInvoice ? skipReason.trim() : null,
+          insuranceDeliveryWithoutInvoice: isInsurance && !hasInvoice,
+          insuranceFinancialStatus: isInsurance && !hasInvoice ? "Delivered - Waiting LPO / Insurance Invoice" : null,
           approvedByRole: role,
           snapshot,
         },
@@ -119,8 +125,9 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       amount: finalTotal,
       metadata: {
         finalCostSource: source,
-        invoiceSkipped: !hasInvoice && skipInvoice,
-        skipInvoiceReason: skipReason || undefined,
+        invoiceSkipped: !isInsurance && !hasInvoice && skipInvoice,
+        skipInvoiceReason: !isInsurance ? skipReason || undefined : undefined,
+        insuranceDeliveryWithoutInvoice: isInsurance && !hasInvoice,
         manualReason: manualReason || undefined,
         snapshot,
       },
@@ -130,8 +137,8 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       status: targetStatus,
       finalCostSource: source,
       snapshot,
-      invoiceSkipped: !hasInvoice && skipInvoice,
-      skipInvoiceReason: skipInvoice ? skipReason.trim() : undefined,
+      invoiceSkipped: !isInsurance && !hasInvoice && skipInvoice,
+      skipInvoiceReason: !isInsurance && skipInvoice ? skipReason.trim() : undefined,
       manualReason: source === "Manual Final Cost" ? manualReason.trim() : undefined,
       approvedByRole: role,
       approvedAt: new Date().toISOString(),
@@ -152,7 +159,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
   const canConfirm =
     !!source &&
     (source !== "Manual Final Cost" || !!manualReason.trim()) &&
-    (hasInvoice || (skipInvoice && canApproveSkip && !!skipReason.trim()));
+    (isInsurance || hasInvoice || (skipInvoice && canApproveSkip && !!skipReason.trim()));
 
   return (
     <Card className="space-y-4 border-primary/30 bg-primary/5 p-4">
@@ -217,7 +224,38 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
         </div>
       )}
 
-      {!hasInvoice && (
+      {!hasInvoice && isInsurance && (
+        <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <div className="flex items-start gap-2 text-sm">
+            <AlertTriangle className="mt-0.5 text-primary" size={16} />
+            <div>
+              <p className="font-semibold text-primary">Insurance workflow: vehicle delivery is allowed before LPO and before the insurance invoice.</p>
+              <p className="text-xs text-muted-foreground">
+                This only confirms operational delivery. The claim remains financially open until LPO is registered, the insurance invoice is issued, and payment is collected.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+            <div className="rounded-md border bg-card p-2">Delivered / Waiting LPO</div>
+            <div className="rounded-md border bg-card p-2">Delivered / Waiting Insurance Invoice</div>
+            <div className="rounded-md border bg-card p-2">Delivered / Awaiting Insurance Payment</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {order.claimId && (
+              <>
+                <Button type="button" variant="outline" onClick={() => navigate(`/insurance/${order.claimId}?tab=delivery`)}>
+                  Upload delivery documents
+                </Button>
+                <Button type="button" variant="outline" onClick={() => navigate(`/insurance/${order.claimId}?tab=payments`)}>
+                  Register LPO / Insurance invoice later
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!hasInvoice && !isInsurance && (
         <div className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
           <div className="flex items-start gap-2 text-sm">
             <AlertTriangle className="mt-0.5 text-destructive" size={16} />

@@ -179,12 +179,12 @@ export default function ImportExportCenter() {
           <div className="rounded-xl border border-border bg-card p-4 shadow-card">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="text-sm font-semibold text-foreground">رفع Excel / CSV</h2>
+                <h2 className="text-sm font-semibold text-foreground">رفع Excel / CSV / JSON</h2>
                 <p className="text-xs text-muted-foreground">سيتم عرض معاينة قبل أي حفظ. الاستيراد الفعلي يبقى تحت مراجعة المستخدم لتجنب كسر القيود الحالية.</p>
               </div>
               <Input
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx,.xls,.csv,.json,application/json"
                 disabled={!definition.canImport || busy}
                 onChange={(event) => void handleFile(event.target.files?.[0])}
                 className="max-w-sm bg-secondary"
@@ -288,6 +288,11 @@ function PreviewTable({ rows, duplicates }: { rows: Record<string, string>[]; du
   }
   const duplicateRows = new Map(duplicates.map((d) => [d.rowIndex, d.reason]));
   const headers = Object.keys(rows[0] || {});
+  const previewValue = (value?: string) => {
+    if (!value) return "—";
+    if (value.startsWith("data:image/") || value.startsWith("data:application/pdf")) return "[attachment]";
+    return value.length > 120 ? `${value.slice(0, 120)}…` : value;
+  };
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
       <div className="max-h-[520px] overflow-auto">
@@ -305,7 +310,7 @@ function PreviewTable({ rows, duplicates }: { rows: Record<string, string>[]; du
               return (
                 <tr key={index} className={`border-t border-border ${warning ? "bg-warning/10" : "hover:bg-secondary/30"}`}>
                   <td className="p-2 text-muted-foreground">{index + 1}</td>
-                  {headers.map((header) => <td key={header} className="p-2" dir="auto">{row[header] || "—"}</td>)}
+                  {headers.map((header) => <td key={header} className="p-2" dir="auto">{previewValue(row[header])}</td>)}
                   <td className="p-2">{warning ? <span className="text-warning">{warning}</span> : <span className="text-success">جاهز</span>}</td>
                 </tr>
               );

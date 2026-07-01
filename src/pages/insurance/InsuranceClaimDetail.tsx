@@ -124,6 +124,11 @@ export default function InsuranceClaimDetail() {
   const [insuranceEmployeeId, setInsuranceEmployeeId] = useState<string | null>(null);
   const [claimNumber, setClaimNumber] = useState("");
   const [lpoNumber, setLpoNumber] = useState("");
+  const [lpoDate, setLpoDate] = useState("");
+  const [lpoAmount, setLpoAmount] = useState("");
+  const [lpoNote, setLpoNote] = useState("");
+  const [invoiceDateMode, setInvoiceDateMode] = useState<"lpo" | "lpo_plus_one" | "custom">("lpo");
+  const [customInvoiceDate, setCustomInvoiceDate] = useState("");
 
   // Vehicle owner (secondary — for contact/handover)
   const [customerId, setCustomerId] = useState("");
@@ -250,7 +255,13 @@ export default function InsuranceClaimDetail() {
     setRejectionReason(existing.rejection_reason ?? "");
     const rawNotes = existing.notes ?? "";
     const lpoMatch = rawNotes.match(/\[LPO:([^\]]+)\]/);
+    const lpoDateMatch = rawNotes.match(/\[LPO_DATE:([^\]]+)\]/);
+    const lpoAmountMatch = rawNotes.match(/\[LPO_AMOUNT:([^\]]+)\]/);
+    const lpoNoteMatch = rawNotes.match(/\[LPO_NOTE:([^\]]+)\]/);
     setLpoNumber(lpoMatch ? lpoMatch[1].trim() : "");
+    setLpoDate(lpoDateMatch ? lpoDateMatch[1].trim() : "");
+    setLpoAmount(lpoAmountMatch ? lpoAmountMatch[1].trim() : "");
+    setLpoNote(lpoNoteMatch ? lpoNoteMatch[1].trim() : "");
     setNotes(rawNotes);
     setDamagePhotos(existing.damage_photos ?? []);
     setDocuments(existing.documents ?? []);
@@ -395,13 +406,9 @@ export default function InsuranceClaimDetail() {
       }
     }
 
-    // ── LPO auto-approve: عند رفع أمر الشراء، أصدر الفاتورة الضريبية تلقائياً ──
+    // LPO is only registered here. Insurance invoice issuance remains a separate explicit action.
     if (type === "lpo" && newDocs.length > 0) {
-      toast.success("تم رفع أمر الشراء (LPO) — جاري إصدار الفاتورة الضريبية تلقائياً…");
-      // تأخير بسيط لضمان حفظ الحالة قبل توليد الفاتورة
-      setTimeout(() => {
-        try { generateTaxInvoice(); } catch (e) { console.warn("auto invoice on LPO failed", e); }
-      }, 400);
+      toast.success("تم رفع أمر الشراء (LPO). يمكن إصدار فاتورة التأمين لاحقاً من قسم الفاتورة والدفع.");
     }
   };
 
@@ -510,9 +517,19 @@ export default function InsuranceClaimDetail() {
       estimation_type: estimationType,
       upl_items: uplItems,
       notes: (() => {
-        const cleaned = (notes || "").replace(/\[LPO:[^\]]+\]\n?/g, "").trim();
-        const withLpo = lpoNumber.trim() ? `${cleaned}\n[LPO:${lpoNumber.trim()}]`.trim() : cleaned;
-        return withLpo || undefined;
+        const cleaned = (notes || "")
+          .replace(/\[LPO:[^\]]+\]\n?/g, "")
+          .replace(/\[LPO_DATE:[^\]]+\]\n?/g, "")
+          .replace(/\[LPO_AMOUNT:[^\]]+\]\n?/g, "")
+          .replace(/\[LPO_NOTE:[^\]]+\]\n?/g, "")
+          .trim();
+        const lpoTags = [
+          lpoNumber.trim() ? `[LPO:${lpoNumber.trim()}]` : "",
+          lpoDate.trim() ? `[LPO_DATE:${lpoDate.trim()}]` : "",
+          lpoAmount.trim() ? `[LPO_AMOUNT:${lpoAmount.trim()}]` : "",
+          lpoNote.trim() ? `[LPO_NOTE:${lpoNote.trim()}]` : "",
+        ].filter(Boolean);
+        return [cleaned, ...lpoTags].filter(Boolean).join("\n") || undefined;
       })(),
       damage_photos: damagePhotos,
       documents,
@@ -1001,6 +1018,9 @@ export default function InsuranceClaimDetail() {
     const cleanEstimateText = (text?: string | null) =>
       (text || "")
         .replace(/\[LPO:[^\]]+\]\n?/gi, "")
+        .replace(/\[LPO_DATE:[^\]]+\]\n?/gi, "")
+        .replace(/\[LPO_AMOUNT:[^\]]+\]\n?/gi, "")
+        .replace(/\[LPO_NOTE:[^\]]+\]\n?/gi, "")
         .split("\n")
         .filter((line) => !/\bLPO\b/i.test(line))
         .join("\n")
@@ -1236,11 +1256,21 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     rejectionReason, notes, documents, damagePhotos, existing, claimPayments,
   ]);
 
-  /** يولّد فاتورة ضريبية رسمية مع QR ZATCA TLV — يلزم CR+VAT لشركة التأمين + إكمال أمر العمل أو التسليم. */
-  const jobOrderCompleted = (existing as any)?.job_order?.status === "completed" || (existing as any)?.job_order?.status === "delivered";
-  const claimDelivered = !!(existing as any)?.delivered_at;
-  const hasLpo = documents.some((d) => d.type === "lpo");
-  const canIssueTaxInvoice = jobOrderCompleted || claimDelivered || hasLpo;
+  /** يولّد فاتورة تأمين ضريبية رسمية مع QR ZATCA TLV — لا تصدر قبل تسجيل LPO. */
+  const hasLpoDocument = documents.some((d) => d.type === "lpo");
+  const hasRegisteredLpo = !!lpoNumber.trim() || hasLpoDocument;
+  const canIssueTaxInvoice = hasRegisteredLpo;
+
+  const resolveInsuranceInvoiceDate = () => {
+    const base = lpoDate ? new Date(`${lpoDate}T12:00:00`) : new Date();
+    if (invoiceDateMode === "custom" && customInvoiceDate) return new Date(`${customInvoiceDate}T12:00:00`);
+    if (invoiceDateMode === "lpo_plus_one") {
+      const next = new Date(base);
+      next.setDate(next.getDate() + 1);
+      return next;
+    }
+    return base;
+  };
 
   // فاتورة نشطة مرتبطة بهذه المطالبة (Single Source of Truth)
   const { data: activeInvoice } = useQuery({
@@ -1260,7 +1290,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
   const generateTaxInvoice = async () => {
     if (!canIssueTaxInvoice) {
-      toast.error("لا يمكن إصدار الفاتورة الضريبية إلا بعد إكمال أمر العمل أو تسجيل تسليم المركبة");
+      toast.error("لا يمكن إنشاء فاتورة التأمين قبل تسجيل LPO أو رفع ملف LPO.");
       return;
     }
     if (!insuranceCo) {
@@ -1280,7 +1310,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
     // مبالغ من المطالبة: المبلغ المعتمد من شركة التأمين يُعتبر "غير شامل ضريبة القيمة المضافة".
     // النظام يضيف 5% VAT تلقائياً عند إصدار الفاتورة الضريبية.
-    const approvedRaw = parseFloat(approvedAmount) || parseFloat(estimatedCost) || 0;
+    const approvedRaw = parseFloat(lpoAmount) || parseFloat(approvedAmount) || parseFloat(estimatedCost) || 0;
     if (approvedRaw <= 0) {
       toast.error("لا يمكن إصدار فاتورة بمبلغ صفر — أدخل المبلغ المعتمد أولاً.");
       return;
@@ -1290,6 +1320,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     const vat = +(subtotal * VAT_RATE).toFixed(3);
     const total = +(subtotal + vat).toFixed(3);
     const invNumber = `TI-${claimNumber.replace(/[^A-Z0-9-]/gi, "")}-${new Date().getFullYear()}`;
+    const invoiceIssueDate = resolveInsuranceInvoiceDate();
 
     // QR (ZATCA TLV) من بيانات الورشة (البائع) — لا من بيانات شركة التأمين.
     const tpl = getTemplateSettings();
@@ -1298,7 +1329,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       qrDataUrl = await buildZatcaQrDataUrl({
         sellerName: tpl.companyName,
         vatNumber: tpl.vatNumber,
-        timestamp: new Date().toISOString(),
+        timestamp: invoiceIssueDate.toISOString(),
         total,
         vat,
       });
@@ -1339,7 +1370,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     }
 
     const dueDays = insuranceCo.payment_terms_days || 90;
-    const due = new Date();
+    const due = new Date(invoiceIssueDate);
     due.setDate(due.getDate() + dueDays);
 
     const html = getInsuranceTaxInvoiceHtml({
@@ -1347,7 +1378,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       template: "default",
       number: invNumber,
       invoiceNumber: invNumber,
-      issueDate: formatDateLatin(new Date()),
+      issueDate: formatDateLatin(invoiceIssueDate),
       paymentDueDate: formatDateLatin(due),
       customerName: ownerName || company,
       customFields: [],
@@ -1416,8 +1447,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             total,
             paid_amount: 0,
             status: "issued",
+            issued_at: invoiceIssueDate.toISOString(),
             due_date: due.toISOString().slice(0, 10),
-            notes: notes || null,
+            notes: [notes, lpoNote ? `LPO Note: ${lpoNote}` : ""].filter(Boolean).join("\n") || null,
             lpo_number: lpoNumber.trim() || null,
             items: persistedItems,
           } as any);
@@ -1458,6 +1490,17 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const isReadyForDelivery = !!workCompletedAt && !isDeliveredClaim && !isClosedClaim;
   const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
   const isAwaitingApproval = !isNew && status === "pending";
+  const insuranceFinancialStatus = isDeliveredClaim
+    ? paymentRemaining <= 0 && paidTotal > 0
+      ? "Closed - Paid"
+      : !hasRegisteredLpo
+        ? "Delivered - Waiting LPO"
+        : !activeInvoice
+          ? "Delivered - LPO Received"
+          : paymentRemaining > 0
+            ? "Delivered - Awaiting Insurance Payment"
+            : "Delivered - Invoice Issued"
+    : "";
   const isApprovedClaim = status === "approved";
   const currentVehicleStepIndex = isClosedClaim
     ? 8
@@ -1514,6 +1557,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               {!isNew && (existing as any)?.delivered_at && (
                 <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 border-0 shadow-sm">
                   <PackageCheck size={11} /> تم التسليم • {new Date((existing as any).delivered_at).toLocaleDateString("en-GB")}
+                </Badge>
+              )}
+              {insuranceFinancialStatus && (
+                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
+                  {insuranceFinancialStatus}
                 </Badge>
               )}
             </p>
@@ -1651,7 +1699,49 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <Label className="text-xs">رقم المطالبة *</Label>
               <Input value={claimNumber} onChange={(e) => setClaimNumber(e.target.value)} placeholder="CLM-001" />
             </div>
-            {/* LPO يُضاف لاحقاً من الفاتورة الضريبية بعد إرسالها لشركة التأمين */}
+            <div className="col-span-2 rounded-lg border border-dashed border-primary/30 bg-primary/5 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <Label className="text-xs font-bold">LPO / أمر الشراء من شركة التأمين</Label>
+                <Badge variant={hasRegisteredLpo ? "default" : "outline"}>
+                  {hasRegisteredLpo ? "LPO مسجل" : "بانتظار LPO"}
+                </Badge>
+              </div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">رقم LPO</Label>
+                  <Input value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">تاريخ LPO</Label>
+                  <Input type="date" value={lpoDate} onChange={(e) => setLpoDate(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">مبلغ LPO</Label>
+                  <Input type="number" step="0.001" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">تاريخ فاتورة التأمين</Label>
+                  <Select value={invoiceDateMode} onValueChange={(value) => setInvoiceDateMode(value as "lpo" | "lpo_plus_one" | "custom")}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="lpo">نفس تاريخ LPO</SelectItem>
+                      <SelectItem value="lpo_plus_one">اليوم التالي لـ LPO</SelectItem>
+                      <SelectItem value="custom">تاريخ مخصص</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {invoiceDateMode === "custom" && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">التاريخ المخصص</Label>
+                    <Input type="date" value={customInvoiceDate} onChange={(e) => setCustomInvoiceDate(e.target.value)} />
+                  </div>
+                )}
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label className="text-xs">ملاحظة LPO</Label>
+                  <Input value={lpoNote} onChange={(e) => setLpoNote(e.target.value)} placeholder="ملاحظة داخلية اختيارية" />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1776,7 +1866,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <Send size={16} /> إرسال رسالة للتأمين
                 </Button>
                 <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
-                  <FileUp size={16} /> رفع LPO
+                  <FileUp size={16} /> رفع مستندات التأمين
                 </Button>
                 <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
                   <Printer size={16} /> PDF
@@ -1836,11 +1926,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
             {isReadyForDelivery && (
               <>
-                {!hasActiveInvoice && (
-                  <Button variant="outline" onClick={generateTaxInvoice} disabled={!canIssueTaxInvoice} className="gap-2">
-                    <FileText size={16} /> إنشاء فاتورة
-                  </Button>
-                )}
                 <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
                   <Send size={16} /> إشعار جاهزية
                 </Button>
@@ -1855,6 +1940,16 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
             {isDeliveredClaim && (
               <>
+                {!hasRegisteredLpo && (
+                  <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
+                    <FileUp size={16} /> تسجيل / رفع LPO
+                  </Button>
+                )}
+                {hasRegisteredLpo && !hasActiveInvoice && (
+                  <Button variant="outline" onClick={generateTaxInvoice} className="gap-2">
+                    <FileText size={16} /> إنشاء فاتورة التأمين
+                  </Button>
+                )}
                 {activeInvoice && (
                   <Button variant="outline" onClick={() => setShowTaxInvoice(true)} className="gap-2">
                     <FileText size={16} /> عرض الفاتورة

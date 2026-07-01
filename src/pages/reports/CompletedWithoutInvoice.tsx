@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { buildWorkOrderAccountingRows, formatOMR } from "@/lib/accounting/core";
 import { getWorkOrderById } from "@/lib/workOrdersStore";
 import { smartBack } from "@/lib/smartBack";
+import { isInsuranceWorkOrder } from "@/lib/workOrderType";
 
 function csvCell(value: unknown) {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -35,8 +36,12 @@ export default function CompletedWithoutInvoice() {
       .filter((row) => isCompletedStatus(row.status) && !row.hasInvoice)
       .map((row) => {
         const order = getWorkOrderById(row.workOrderNumber);
+        const insuranceOrder = order ? isInsuranceWorkOrder(order) : String(row.orderType || "").toLowerCase().includes("insurance");
         return {
           ...row,
+          order,
+          insuranceOrder,
+          financialWorkflow: insuranceOrder ? "Delivered - Waiting LPO / Insurance Invoice" : "Cash invoice required",
           skipReason: order?.closingReview?.skipInvoiceReason || "",
           closedByRole: order?.closingReview?.approvedByRole || "",
         };
@@ -48,13 +53,14 @@ export default function CompletedWithoutInvoice() {
   const totalProfit = rows.reduce((sum, row) => sum + Number(row.netProfit || 0), 0);
 
   const exportCsv = () => {
-    const headers = ["Work Order", "Date", "Customer", "Vehicle", "Status", "Revenue", "Net Profit", "Skip Reason"];
+    const headers = ["Work Order", "Date", "Customer", "Vehicle", "Status", "Workflow", "Revenue", "Net Profit", "Skip Reason"];
     const lines = rows.map((row) => [
       row.workOrderNumber,
       row.date,
       row.customerName,
       row.vehiclePlate,
       row.status,
+      row.financialWorkflow,
       row.revenueExVat,
       row.netProfit,
       row.skipReason,
@@ -111,6 +117,7 @@ export default function CompletedWithoutInvoice() {
               <TableHead>العميل</TableHead>
               <TableHead>المركبة</TableHead>
               <TableHead>الحالة</TableHead>
+              <TableHead>المسار المالي</TableHead>
               <TableHead>الإيراد</TableHead>
               <TableHead>قرار التجاوز</TableHead>
               <TableHead>إجراء</TableHead>
@@ -124,18 +131,27 @@ export default function CompletedWithoutInvoice() {
                 <TableCell>{row.customerName}</TableCell>
                 <TableCell>{row.vehiclePlate || row.vehicleName}</TableCell>
                 <TableCell><Badge variant="outline">{row.status}</Badge></TableCell>
+                <TableCell>
+                  <Badge variant={row.insuranceOrder ? "secondary" : "outline"}>{row.financialWorkflow}</Badge>
+                </TableCell>
                 <TableCell>{formatOMR(row.revenueExVat)}</TableCell>
                 <TableCell className="max-w-[220px] truncate">{row.skipReason || "لا يوجد"}</TableCell>
                 <TableCell>
-                  <Button size="sm" className="gap-1" onClick={() => navigate(`/sales/invoices/new?fromWorkOrder=${encodeURIComponent(row.workOrderNumber)}`)}>
-                    <PlusCircle size={14} /> إنشاء فاتورة
-                  </Button>
+                  {row.insuranceOrder ? (
+                    <Button size="sm" variant="outline" className="gap-1" onClick={() => navigate(row.order?.claimId ? `/insurance/${row.order.claimId}` : "/insurance/claims")}>
+                      <PlusCircle size={14} /> فتح المطالبة / LPO
+                    </Button>
+                  ) : (
+                    <Button size="sm" className="gap-1" onClick={() => navigate(`/sales/invoices/new?fromWorkOrder=${encodeURIComponent(row.workOrderNumber)}`)}>
+                      <PlusCircle size={14} /> إنشاء فاتورة
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
             {!rows.length && (
               <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
                   لا توجد أوامر مكتملة بدون فاتورة حالياً.
                 </TableCell>
               </TableRow>
