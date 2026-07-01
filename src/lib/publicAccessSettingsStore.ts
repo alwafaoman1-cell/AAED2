@@ -1,11 +1,13 @@
-// إعدادات الوصول العام: كلمة مرور رئيسية إضافية تصلح لكل صفحات التتبع/مشاركة المركبات.
-// تُخزّن محلياً في localStorage لكل جهاز.
+import { readCloudSetting, writeCloudSetting, subscribeCloudSetting } from "@/lib/cloudSettings";
 
-const KEY = "alwafa_public_access_settings_v1";
+const KEY = "public_access_settings";
+const CACHE_KEY = "cloud_setting_cache:" + KEY;
 
 export interface PublicAccessSettings {
-  masterPassword: string; // فارغة = غير مفعّلة
-  publicBaseUrl: string;  // الدومين المعتمد لأرابط QR (مثال: https://temo.live). فارغ = استخدم origin الحالي.
+  /** Empty means disabled. */
+  masterPassword: string;
+  /** Public base domain for QR/portal links. Empty means use current origin. */
+  publicBaseUrl: string;
 }
 
 const DEFAULTS: PublicAccessSettings = { masterPassword: "", publicBaseUrl: "" };
@@ -13,54 +15,84 @@ const DEFAULTS: PublicAccessSettings = { masterPassword: "", publicBaseUrl: "" }
 type Listener = (s: PublicAccessSettings) => void;
 const listeners = new Set<Listener>();
 
-export function getPublicAccessSettings(): PublicAccessSettings {
+let memoryCache: PublicAccessSettings = readCachedSettings();
+
+function normalizeSettings(value: Partial<PublicAccessSettings> | null | undefined): PublicAccessSettings {
+  return {
+    masterPassword: String(value?.masterPassword || ""),
+    publicBaseUrl: String(value?.publicBaseUrl || "").trim().replace(/\/+$/, ""),
+  };
+}
+
+function readCachedSettings(): PublicAccessSettings {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    return normalizeSettings(JSON.parse(raw));
   } catch {
     return { ...DEFAULTS };
   }
 }
 
-export function savePublicAccessSettings(s: Partial<PublicAccessSettings>) {
-  const merged = { ...getPublicAccessSettings(), ...s };
-  try { localStorage.setItem(KEY, JSON.stringify(merged)); } catch {}
-  listeners.forEach((l) => l(merged));
+function cacheSettings(next: PublicAccessSettings) {
+  memoryCache = normalizeSettings(next);
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(memoryCache)); } catch {}
+  listeners.forEach((listener) => listener(memoryCache));
 }
 
-export function subscribePublicAccessSettings(l: Listener) {
-  listeners.add(l);
-  return () => listeners.delete(l);
+/**
+ * Synchronous read for code paths that must build links immediately.
+ * The source of truth is Supabase; this returns the latest in-memory/cloud cache.
+ */
+export function getPublicAccessSettings(): PublicAccessSettings {
+  return { ...memoryCache };
 }
 
-/** يطبّع كلمة السر (أرقام فقط لو الإدخال هاتف، وإلا lowercase trimmed) */
-export function normalizeAccessPwd(v: string): string {
-  const s = (v || "").trim();
-  if (/[\d\s+()-]+/.test(s) && /\d/.test(s)) return s.replace(/\D/g, "");
-  return s.toLowerCase();
+export async function loadPublicAccessSettings(): Promise<PublicAccessSettings> {
+  const value = await readCloudSetting<PublicAccessSettings>(KEY, DEFAULTS);
+  const normalized = normalizeSettings(value);
+  cacheSettings(normalized);
+  return normalized;
 }
 
-/** يعيد كلمة السر الرئيسية المطبّعة، أو "" إن لم تكن مفعّلة. */
+export async function savePublicAccessSettings(s: Partial<PublicAccessSettings>): Promise<PublicAccessSettings> {
+  const merged = normalizeSettings({ ...memoryCache, ...s });
+  await writeCloudSetting(KEY, merged);
+  cacheSettings(merged);
+  return merged;
+}
+
+export function subscribePublicAccessSettings(listener: Listener) {
+  listeners.add(listener);
+  const unsubscribeCloud = subscribeCloudSetting<PublicAccessSettings>(KEY, (value) => {
+    cacheSettings(normalizeSettings(value));
+  });
+  return () => {
+    listeners.delete(listener);
+    unsubscribeCloud();
+  };
+}
+
+/** Normalize access password: phone-like input becomes digits; text becomes lowercase trimmed. */
+export function normalizeAccessPwd(value: string): string {
+  const input = (value || "").trim();
+  if (/[\d\s+()-]+/.test(input) && /\d/.test(input)) return input.replace(/\D/g, "");
+  return input.toLowerCase();
+}
+
 export function getMasterPasswordNormalized(): string {
   return normalizeAccessPwd(getPublicAccessSettings().masterPassword);
 }
 
-/**
- * يعيد الدومين الأساسي للروابط العامة (QR / مشاركة).
- * يفضّل الإعداد المخصّص من /settings/public-access، ثم يسقط إلى origin الحالي.
- * يضمن إزالة الـ trailing slash.
- */
 export function getPublicBaseUrl(): string {
-  const cfg = (getPublicAccessSettings().publicBaseUrl || "").trim().replace(/\/+$/, "");
-  if (cfg) return cfg;
+  const configured = (getPublicAccessSettings().publicBaseUrl || "").trim().replace(/\/+$/, "");
+  if (configured) return configured;
   if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
   return "";
 }
 
-/** يبني رابطاً عاماً مستنداً للدومين المعتمد. */
 export function buildPublicUrl(path: string): string {
   const base = getPublicBaseUrl();
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return `${base}${p}`;
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${suffix}`;
 }
