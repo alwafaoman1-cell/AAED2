@@ -7,7 +7,7 @@ import {
   Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Phone,
   DollarSign, PackageCheck, ShieldCheck, Hourglass, Settings, BadgeCheck, ClipboardList,
   Receipt, Wallet, Clock3, UserRound, CarFront, CheckSquare, ImagePlus,
-  WalletCards, MessagesSquare, History, MessageCircle,
+  WalletCards, MessagesSquare, History, MessageCircle, MoreHorizontal, Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {
@@ -188,6 +189,7 @@ export default function InsuranceClaimDetail() {
   const [stageNote, setStageNote] = useState("");
   const [savingStage, setSavingStage] = useState(false);
   const [claimViewIndex, setClaimViewIndex] = useState(0);
+  const [claimWorkspaceTab, setClaimWorkspaceTab] = useState<"tracking" | "details" | "actions">("tracking");
   const claimViewTouchedRef = useRef(false);
 
   // ── شروط/ملاحظات تقدير الإصلاح (محرّرة، تُحفظ محلياً لكل tenant) ──
@@ -1480,6 +1482,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   };
   const invoiceTotal = Number((activeInvoice as any)?.total || 0);
   const invoiceVat = Number((activeInvoice as any)?.vat || 0);
+  const estimateAmountValue = Number(estimatedCost || 0);
+  const approvedAmountValue = Number(approvedAmount || 0);
+  const lpoAmountValue = Number((activeInvoice as any)?.lpo_amount || approvedAmountValue || 0);
+  const finalInvoiceAmountValue = invoiceTotal || 0;
+  const claimAmountDifference = finalInvoiceAmountValue > 0 ? finalInvoiceAmountValue - (approvedAmountValue || lpoAmountValue || estimateAmountValue) : 0;
   const paidTotal = (activeInvoice as any)?.paid_amount != null
     ? Number((activeInvoice as any).paid_amount || 0)
     : claimPayments.filter((p) => p.status === "cleared").reduce((sum, p) => sum + Number(p.amount || 0), 0);
@@ -1495,6 +1502,23 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
   const isAwaitingApproval = !isNew && status === "pending";
   const isApprovedClaim = status === "approved";
+  const vehicleArrivedLabel = workshopArrivalDate ? "نعم، وصلت الورشة" : "لا / لم يسجل الوصول";
+  const vehicleCurrentLocationLabel = isDeliveredClaim
+    ? "تم التسليم"
+    : workStartedAt || hasLinkedWorkOrder
+      ? "في الورشة"
+      : "مع العميل / غير مؤكد";
+  const workshopStatusLabel = isDeliveredClaim
+    ? "تم التسليم"
+    : isReadyForDelivery
+      ? "جاهزة"
+      : isRepairingClaim
+        ? "تحت الإصلاح"
+        : isAwaitingApproval
+          ? "بانتظار الاعتماد"
+          : workshopArrivalDate
+            ? "تحت الفحص"
+            : "لم تصل";
   const currentClaimStepIndex = status === "paid" || activeInvoice
     ? 5
     : isClosedClaim || isDeliveredClaim || isReadyForDelivery
@@ -1578,6 +1602,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 variant="default"
                 onClick={() => {
                   claimViewTouchedRef.current = true;
+                  setClaimWorkspaceTab("details");
                   setClaimViewIndex(5);
                 }}
                 disabled={isNew || isClosedClaim}
@@ -1588,7 +1613,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </Button>
             )}
             <Button variant="outline" onClick={() => setShowSendEmail(true)} disabled={isNew} className="gap-2">
-              <MessageCircle size={16} /> إرسال رسالة
+              <MessageCircle size={16} /> مراسلة التأمين
             </Button>
             <Button variant="outline" onClick={() => setShowSummary(true)} disabled={isNew} className="gap-2">
               <Printer size={16} /> PDF
@@ -1596,6 +1621,20 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Button variant="outline" onClick={openUnifiedCustomerPortal} disabled={isNew} className="gap-2">
               <LinkIcon size={16} /> رابط العميل
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2">
+                  <MoreHorizontal size={16} /> المزيد
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuItem onClick={() => setClaimWorkspaceTab("actions")}>إرسال رسالة للتأمين</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { setClaimWorkspaceTab("details"); setClaimViewIndex(5); }}>رفع LPO / الفاتورة</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => !isNew && navigate(`/insurance/${id}/audit`)} disabled={isNew}>عرض سجل الإجراءات</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowSummary(true)} disabled={isNew}>طباعة / PDF</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowCancelDialog(true)} disabled={isNew}>أرشفة / إلغاء المطالبة</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="ghost" onClick={() => smartBack(navigate, "/insurance/list")} className="gap-2 mr-auto">
               <ArrowRight size={16} /> رجوع
             </Button>
@@ -1603,6 +1642,21 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       </Card>
 
+      <Tabs value={claimWorkspaceTab} onValueChange={(value) => setClaimWorkspaceTab(value as "tracking" | "details" | "actions")} className="space-y-4">
+        <TabsList className="grid h-auto w-full grid-cols-3 rounded-2xl bg-slate-100 p-1">
+          <TabsTrigger value="tracking" className="gap-2 rounded-xl py-3 text-sm font-semibold">
+            <Activity size={16} /> Tracking
+          </TabsTrigger>
+          <TabsTrigger value="details" className="gap-2 rounded-xl py-3 text-sm font-semibold">
+            <FileText size={16} /> Details
+          </TabsTrigger>
+          <TabsTrigger value="actions" className="gap-2 rounded-xl py-3 text-sm font-semibold">
+            <Settings size={16} /> Actions
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {claimWorkspaceTab === "tracking" && (
       <Card className="rounded-2xl border-slate-200 bg-white px-5 py-6 shadow-sm">
         <div className="relative grid gap-4 md:grid-cols-3 xl:grid-cols-6">
           <div className="absolute left-10 right-10 top-7 hidden border-t border-dashed border-primary/30 md:block" />
@@ -1645,7 +1699,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           })}
         </div>
       </Card>
+      )}
 
+      {claimWorkspaceTab === "tracking" && (
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         {[
           { label: "حالة المطالبة", value: statusMeta[status]?.label || status, Icon: BadgeCheck },
@@ -1661,8 +1717,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
         ))}
       </div>
+      )}
 
-      {claimViewIndex === 0 && (
+      {claimWorkspaceTab === "details" && (
         <div className="grid gap-4 xl:grid-cols-[1.15fr_0.9fr_1.1fr] [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
@@ -1703,7 +1760,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 <Info label="البريد الإلكتروني" value={(customer as any)?.email || "—"} />
               </div>
             )}
-            <Button size="sm" variant="outline" onClick={() => setShowSendEmail(true)} disabled={isNew} className="w-full">إرسال رسالة للعميل</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => hasLinkedWorkOrder ? navigate(`/work-orders/${effectiveWorkOrderId}`) : toast.info("تواصل العميل يتم من أمر العمل بعد إنشائه.")}
+              disabled={isNew}
+              className="w-full"
+            >
+              فتح التواصل من أمر العمل
+            </Button>
           </Card>
 
           <Card className="p-5 space-y-4">
@@ -1802,10 +1867,71 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Info label="الجاهزية / التسليم" value={workCompletedAt || (existing as any)?.delivered_at ? formatDateLatin(workCompletedAt || (existing as any)?.delivered_at) : "—"} />
           </Card>
           <TimelineStrip claimAudit={claimAudit} claimId={id} className="xl:col-span-3" />
+      </div>
+      )}
+
+      {claimWorkspaceTab === "tracking" && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><CarFront size={18} /> حالة وصول المركبة</h2>
+            <div className="mt-4 grid gap-3 text-sm">
+              <Info label="هل وصلت المركبة إلى الورشة؟" value={vehicleArrivedLabel} />
+              <Info label="تاريخ ووقت الوصول" value={workshopArrivalDate ? formatDateLatin(workshopArrivalDate) : "—"} />
+              <Info label="مكان المركبة الحالي" value={vehicleCurrentLocationLabel} />
+              <Info label="حالة الورشة" value={workshopStatusLabel} />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => openStageDialog(vehicleProgress[0])}>تحديث الوصول</Button>
+              <Button size="sm" variant="outline" onClick={() => openStageDialog(vehicleProgress[Math.min(currentClaimStepIndex, vehicleProgress.length - 1)])}>تحديث المرحلة الحالية</Button>
+            </div>
+          </Card>
+
+          <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="font-bold flex items-center gap-2 text-primary"><ClipboardList size={18} /> روابط التشغيل</h2>
+            <div className="mt-4 grid gap-3 text-sm">
+              <Info label="أمر العمل" value={effectiveWorkOrderId || "غير منشأ"} />
+              <Info label="حالة أمر العمل" value={linkedWorkOrderStatus} />
+              <Info label="بوابة العميل" value={hasLinkedWorkOrder ? "متاحة من أمر العمل" : "تحتاج أمر عمل"} />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => hasLinkedWorkOrder ? navigate(`/work-orders/${effectiveWorkOrderId}`) : handleConvertToWorkOrder()} disabled={isNew || (!hasLinkedWorkOrder && !isApprovedClaim)}>
+                {hasLinkedWorkOrder ? "فتح أمر العمل" : "إنشاء أمر عمل"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={openUnifiedCustomerPortal} disabled={!hasLinkedWorkOrder}>رابط بوابة العميل</Button>
+            </div>
+          </Card>
+
+          <TimelineStrip claimAudit={claimAudit} claimId={id} />
         </div>
       )}
 
-      {claimViewIndex === 1 && (
+      {claimWorkspaceTab === "details" && (
+        <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-bold flex items-center gap-2 text-primary"><Calculator size={18} /> المبالغ والموافقة</h2>
+              <p className="text-xs text-muted-foreground">فصل واضح بين التقدير، المبلغ المعتمد، LPO، والفاتورة النهائية.</p>
+            </div>
+            {Math.abs(claimAmountDifference) > 0.001 && (
+              <Badge variant="destructive">Approved Amount differs from Final Invoice Amount</Badge>
+            )}
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-xl border bg-slate-50 p-3"><Info label="Estimate Amount" value={`${estimateAmountValue.toFixed(3)} ر.ع`} /></div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3"><Info label="Approved Amount" value={`${approvedAmountValue.toFixed(3)} ر.ع`} /></div>
+            <div className="rounded-xl border bg-slate-50 p-3"><Info label="LPO Number" value={lpoNumber || "—"} /></div>
+            <div className="rounded-xl border bg-slate-50 p-3"><Info label="LPO Amount" value={`${lpoAmountValue.toFixed(3)} ر.ع`} /></div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3"><Info label="Final Invoice Amount" value={`${finalInvoiceAmountValue.toFixed(3)} ر.ع`} /></div>
+            <div className="rounded-xl border bg-slate-50 p-3"><Info label="Paid Amount" value={`${paidTotal.toFixed(3)} ر.ع`} /></div>
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3"><Info label="Remaining Amount" value={`${paymentRemaining.toFixed(3)} ر.ع`} /></div>
+            <div className="rounded-xl border bg-slate-50 p-3"><Info label="Difference" value={`${claimAmountDifference.toFixed(3)} ر.ع`} /></div>
+            <div className="rounded-xl border bg-slate-50 p-3"><Info label="Approval Date" value={dateOnly((existing as any)?.approved_at) ? formatDateLatin(dateOnly((existing as any)?.approved_at)) : "—"} /></div>
+            <div className="rounded-xl border bg-slate-50 p-3"><Info label="Approved By" value={(existing as any)?.insurance_employee?.name || "—"} /></div>
+          </div>
+        </Card>
+      )}
+
+      {claimWorkspaceTab === "details" && (
         <div className="grid gap-4 xl:grid-cols-[1.05fr_1.05fr_0.8fr] [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
             <div className="flex items-center justify-between"><h2 className="font-bold flex items-center gap-2 text-primary"><ImagePlus size={18} /> صور الحادث</h2><Badge variant="outline">{damagePhotos.length} صور</Badge></div>
@@ -1871,7 +1997,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       )}
 
-      {claimViewIndex === 2 && (
+      {claimWorkspaceTab === "actions" && (
         <div className="grid gap-4 xl:grid-cols-4 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
             <h2 className="font-bold flex items-center gap-2 text-primary"><ShieldCheck size={18} /> اعتماد شركة التأمين</h2>
@@ -1907,15 +2033,20 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Info label="الإجمالي المعتمد" value={`${Number(approvedAmount || 0).toFixed(3)} ر.ع`} />
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-primary"><MessagesSquare size={18} /> التواصل والإشعارات</h2>
-            <Button variant="outline" onClick={() => setShowSendEmail(true)}>إرسال تحديث</Button>
-            <Button variant="outline" onClick={() => navigate(`/messages?claim_id=${existing?.id || ""}`)}>فتح مركز الرسائل</Button>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><MessagesSquare size={18} /> مراسلات شركة التأمين</h2>
+            <p className="text-sm text-muted-foreground">هذا القسم مخصص لموظف التأمين / Claims Officer / Surveyor فقط. تواصل العميل يتم من أمر العمل.</p>
+            <div className="rounded-xl border bg-slate-50 p-3 text-xs text-muted-foreground">
+              قوالب متاحة: تقرير الفحص، طلب اعتماد المطالبة، إرسال التقدير، طلب LPO، إرسال الفاتورة النهائية، طلب متابعة الدفع.
+            </div>
+            <Button variant="outline" onClick={() => setShowSendEmail(true)}>إرسال مراسلة للتأمين</Button>
+            <Button variant="outline" onClick={() => navigate(`/messages?claim_id=${existing?.id || ""}&audience=insurance`)}>فتح سجل مراسلات التأمين</Button>
+            <Button variant="ghost" onClick={() => toast.info("AI provider is not configured.")}>ترجمة بالذكاء / تحسين الصياغة</Button>
           </Card>
           <TimelineStrip claimAudit={claimAudit} claimId={id} className="xl:col-span-4" />
         </div>
       )}
 
-      {claimViewIndex === 3 && (
+      {claimWorkspaceTab === "tracking" && (
         <div className="grid gap-4 xl:grid-cols-4 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-3">
             <h2 className="font-bold flex items-center gap-2 text-primary"><Wrench size={18} /> أمر العمل والإصلاح</h2>
@@ -1954,15 +2085,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <Button variant="outline" onClick={() => hasLinkedWorkOrder ? navigate(`/work-orders/${effectiveWorkOrderId}`) : toast.info("أنشئ أمر العمل أولاً")}>فتح أمر العمل</Button>
           </Card>
           <Card className="p-5 space-y-3">
-            <h2 className="font-bold flex items-center gap-2 text-primary"><MessagesSquare size={18} /> تحديثات العميل</h2>
-            <Button variant="outline" onClick={() => setShowSendEmail(true)}>إرسال تحديث للعميل</Button>
-            <Button variant="outline" onClick={() => navigate(`/messages?claim_id=${existing?.id || ""}`)}>فتح مركز الرسائل</Button>
+            <h2 className="font-bold flex items-center gap-2 text-primary"><MessagesSquare size={18} /> تواصل العميل</h2>
+            <p className="text-sm text-muted-foreground">رسائل العميل وروابط التتبع تُدار من أمر العمل حتى لا تتكرر داخل المطالبة.</p>
+            <Button variant="outline" onClick={() => hasLinkedWorkOrder ? navigate(`/work-orders/${effectiveWorkOrderId}`) : toast.info("أنشئ أمر العمل أولًا.")}>فتح التواصل من أمر العمل</Button>
           </Card>
           <TimelineStrip claimAudit={claimAudit} claimId={id} className="xl:col-span-4" />
         </div>
       )}
 
-      {claimViewIndex === 5 && (
+      {claimWorkspaceTab === "details" && (
         <div className="grid gap-4 xl:grid-cols-3 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -2025,7 +2156,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       )}
 
-      {claimViewIndex === 4 && (
+      {claimWorkspaceTab === "actions" && (
         <div className="grid gap-4 xl:grid-cols-3 [&>div]:rounded-2xl [&>div]:border-slate-200 [&>div]:bg-white [&>div]:shadow-sm">
           {!isNew && id ? (
             <div className="xl:col-span-2">
