@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyWorkOrderCosts, roundMoney } from "@/lib/workOrderCosting";
+import { classifyWorkOrderCosts, normalizeInsuranceApprovalAmount, roundMoney } from "@/lib/workOrderCosting";
 
 describe("work order insurance costing", () => {
   it("keeps exact entered money values stable", () => {
@@ -27,6 +27,13 @@ describe("work order insurance costing", () => {
     expect(costs.laborCost).toBe(0);
     expect(costs.totalCost).toBe(0);
     expect(costs.lumpSumNotItemized).toBe(true);
+  });
+
+  it("normalizes one-cent whole approval drift without changing normal decimals", () => {
+    expect(normalizeInsuranceApprovalAmount(1200.01)).toBe(1200);
+    expect(normalizeInsuranceApprovalAmount(100.01)).toBe(100);
+    expect(normalizeInsuranceApprovalAmount(99.95)).toBe(99.95);
+    expect(normalizeInsuranceApprovalAmount(1200.5)).toBe(1200.5);
   });
 
   it("keeps explicit labour and parts categories separate", () => {

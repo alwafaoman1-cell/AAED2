@@ -27,6 +27,18 @@ export function roundMoney(value: unknown, decimals = 2): number {
   return Math.round((numeric + Number.EPSILON) * factor) / factor;
 }
 
+export function normalizeInsuranceApprovalAmount(value: unknown): number {
+  const rounded = roundMoney(value, 2);
+  if (!rounded) return 0;
+  const nearestWhole = Math.round(rounded);
+  // Legacy VAT/floating calculations sometimes stored entered whole approvals
+  // like 1200.00 as 1200.01. Correct only this one-cent whole-number drift.
+  if (Math.abs(rounded - nearestWhole) > 0 && Math.abs(rounded - nearestWhole) <= 0.011) {
+    return nearestWhole;
+  }
+  return rounded;
+}
+
 function amountsMatch(a: unknown, b: unknown, tolerance = 0.02): boolean {
   const left = roundMoney(a);
   const right = roundMoney(b);
@@ -60,7 +72,7 @@ export function classifyWorkOrderCosts(input: {
   const partsNeeded = input.partsNeeded || [];
   const workItems = input.workItems || [];
   const claim = input.claim || null;
-  const insuranceApprovedAmount = roundMoney(claim?.approvedAmount ?? claim?.estimatedAmount ?? 0);
+  const insuranceApprovedAmount = normalizeInsuranceApprovalAmount(claim?.approvedAmount ?? claim?.estimatedAmount ?? 0);
   const insuranceApprovalMode: ClaimApprovalMode =
     claim?.estimationType === "lump_sum"
       ? "lump_sum"
