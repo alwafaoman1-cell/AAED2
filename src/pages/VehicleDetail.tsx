@@ -77,21 +77,58 @@ export default function VehicleDetail() {
       return (data || []) as any[];
     },
   });
-  const { data: trackingLogRows = [] } = useQuery({
+  const { data: trackingStats } = useQuery({
     queryKey: ["vehicle_public_tracking_logs", vehicle?.cloudId],
     enabled: !!vehicle?.cloudId,
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { count, error: countError } = await supabase
         .from("public_tracking_logs" as any)
-        .select("id,short_code,target_type,opened_at,result")
+        .select("id", { count: "exact", head: true })
         .eq("vehicle_id", vehicle?.cloudId)
+        .eq("result", "success");
+      if (countError) {
+        if (/public_tracking_logs|schema cache|relation/i.test(String(countError.message || ""))) {
+          return { count: 0, lastOpenedAt: null as string | null, mostUsed: "-" };
+        }
+        throw countError;
+      }
+
+      const { data: latestRows, error: latestError } = await supabase
+        .from("public_tracking_logs" as any)
+        .select("target_type,opened_at")
+        .eq("vehicle_id", vehicle?.cloudId)
+        .eq("result", "success")
         .order("opened_at", { ascending: false })
         .limit(200);
-      if (error) {
-        if (/public_tracking_logs|schema cache|relation/i.test(String(error.message || ""))) return [];
-        throw error;
+      if (latestError) {
+        if (/public_tracking_logs|schema cache|relation/i.test(String(latestError.message || ""))) {
+          return { count: count || 0, lastOpenedAt: null as string | null, mostUsed: "-" };
+        }
+        throw latestError;
       }
-      return (data || []) as any[];
+
+      const targetTypes = Array.from(new Set((latestRows || []).map((row: any) => String(row.target_type || "customer_tracking"))));
+      const targetCounts = await Promise.all(
+        targetTypes.map(async (targetType) => {
+          const { count: targetCount, error: targetError } = await supabase
+            .from("public_tracking_logs" as any)
+            .select("id", { count: "exact", head: true })
+            .eq("vehicle_id", vehicle?.cloudId)
+            .eq("result", "success")
+            .eq("target_type", targetType);
+          if (targetError) return [targetType, 0] as const;
+          return [targetType, targetCount || 0] as const;
+        }),
+      );
+      const [topTarget, topCount] = targetCounts.sort((a, b) => b[1] - a[1])[0] || [];
+
+      const latestTrackingRows = (latestRows || []) as any[];
+
+      return {
+        count: count || 0,
+        lastOpenedAt: latestTrackingRows[0]?.opened_at ? String(latestTrackingRows[0].opened_at) : null,
+        mostUsed: topTarget ? `${topTarget} (${topCount})` : "-",
+      };
     },
   });
   const allOrders = useMemo<WorkOrder[]>(() => getWorkOrders(), [tick]);
@@ -222,20 +259,11 @@ export default function VehicleDetail() {
   const workshopVisits = orders.length + claimOnlyVisits.length;
   const firstWorkshopVisit = workshopVisitDates[0] || "-";
   const lastWorkshopVisit = workshopVisitDates[workshopVisitDates.length - 1] || "-";
-  const trackingVisits = trackingLogRows.length || Number((vehicle as any).trackingVisits || (vehicle as any).tracking_views || 0);
-  const lastTrackingOpen = trackingLogRows[0]?.opened_at
-    ? formatDateLatin(String(trackingLogRows[0].opened_at).slice(0, 10))
+  const trackingVisits = Number(trackingStats?.count || (vehicle as any).trackingVisits || (vehicle as any).tracking_views || 0);
+  const lastTrackingOpen = trackingStats?.lastOpenedAt
+    ? formatDateLatin(String(trackingStats.lastOpenedAt).slice(0, 10))
     : "-";
-  const mostUsedTrackingLink = (() => {
-    if (!trackingLogRows.length) return "-";
-    const counts = trackingLogRows.reduce<Record<string, number>>((acc, row: any) => {
-      const key = String(row.target_type || "customer_tracking");
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-    const [targetType, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
-    return targetType ? `${targetType} (${count})` : "-";
-  })();
+  const mostUsedTrackingLink = trackingStats?.mostUsed || "-";
 
   const photoPairs = vehicle.photoPairs || [];
 
