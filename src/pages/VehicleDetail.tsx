@@ -77,6 +77,23 @@ export default function VehicleDetail() {
       return (data || []) as any[];
     },
   });
+  const { data: trackingLogRows = [] } = useQuery({
+    queryKey: ["vehicle_public_tracking_logs", vehicle?.cloudId],
+    enabled: !!vehicle?.cloudId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("public_tracking_logs" as any)
+        .select("id,short_code,target_type,opened_at,result")
+        .eq("vehicle_id", vehicle?.cloudId)
+        .order("opened_at", { ascending: false })
+        .limit(200);
+      if (error) {
+        if (/public_tracking_logs|schema cache|relation/i.test(String(error.message || ""))) return [];
+        throw error;
+      }
+      return (data || []) as any[];
+    },
+  });
   const allOrders = useMemo<WorkOrder[]>(() => getWorkOrders(), [tick]);
   const orders = useMemo(
     () => allOrders.filter((o) => o.plate === decodedPlate).sort((a, b) => b.entryDate.localeCompare(a.entryDate)),
@@ -205,7 +222,10 @@ export default function VehicleDetail() {
   const workshopVisits = orders.length + claimOnlyVisits.length;
   const firstWorkshopVisit = workshopVisitDates[0] || "-";
   const lastWorkshopVisit = workshopVisitDates[workshopVisitDates.length - 1] || "-";
-  const trackingVisits = Number((vehicle as any).trackingVisits || (vehicle as any).tracking_views || 0);
+  const trackingVisits = trackingLogRows.length || Number((vehicle as any).trackingVisits || (vehicle as any).tracking_views || 0);
+  const lastTrackingOpen = trackingLogRows[0]?.opened_at
+    ? formatDateLatin(String(trackingLogRows[0].opened_at).slice(0, 10))
+    : "-";
 
   const photoPairs = vehicle.photoPairs || [];
 
@@ -493,6 +513,7 @@ export default function VehicleDetail() {
         <StatCard title="زيارات رابط التتبع" value={trackingVisits} icon={Activity} variant="info" />
         <StatCard title="أول زيارة" value={firstWorkshopVisit} icon={Calendar} variant="info" />
         <StatCard title="آخر زيارة" value={lastWorkshopVisit} icon={Calendar} variant="success" />
+        <StatCard title="آخر فتح للرابط" value={lastTrackingOpen} icon={Activity} variant="info" />
         <StatCard title="إجمالي الفواتير" value={`${totalRepairCost.toLocaleString()} ر.ع`} icon={DollarSign} variant="success" />
         <StatCard title="إجمالي المصروفات" value={`${(totalParts + totalLabor + totalExtras).toLocaleString()} ر.ع`} icon={Receipt} variant="warning" />
         <StatCard title="قطع الغيار" value={`${totalParts.toLocaleString()} ر.ع`} icon={Wrench} variant="gold" />

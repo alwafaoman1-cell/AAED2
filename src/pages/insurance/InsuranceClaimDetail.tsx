@@ -106,6 +106,7 @@ async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
 }
 
 export default function InsuranceClaimDetail() {
+  const showLegacyClaimLayout = false;
   const { id } = useParams();
   const navigate = useNavigate();
   const isNew = !id || id === "new";
@@ -2075,7 +2076,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       )}
 
-      {false && (
+      {showLegacyClaimLayout && (
       <div className="hidden">
 
       <Card className="p-5 space-y-4">

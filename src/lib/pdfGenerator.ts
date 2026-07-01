@@ -10,7 +10,7 @@ import { buildPublicUrl } from "./publicAccessSettingsStore";
 /** رابط تتبع عام آمن. المفتاح يجب أن يكون tracking_token وليس رقم الأمر أو UUID الداخلي. */
 export function getTrackingUrl(trackingToken?: string): string {
   if (!trackingToken) return "";
-  return buildPublicUrl(`/track/${encodeURIComponent(trackingToken)}`);
+  return buildPublicUrl(`/p/${encodeURIComponent(trackingToken)}`);
 }
 
 /** يبني QR كـ dataURL متزامناً (cache بسيط لتفادي إعادة التوليد) */

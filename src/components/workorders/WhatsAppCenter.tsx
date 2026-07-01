@@ -64,7 +64,7 @@ function buildTrackingLinkMessage(o: WorkOrder) {
 }
 
 function buildSignatureLinkMessage(o: WorkOrder) {
-  const link = o.trackingToken ? `${appOrigin()}/sign/${o.trackingToken}` : "";
+  const link = o.trackingToken ? `${appOrigin()}/p/${o.trackingToken}` : "";
   return [
     `مرحباً ${o.customer || ""}`,
     "يرجى مراجعة الأعمال المطلوبة واعتمادها بالتوقيع من الرابط التالي:",

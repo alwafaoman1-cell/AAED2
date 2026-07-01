@@ -36,7 +36,7 @@ export default function CustomerPortalLink({ jobOrderId, customerPhone, orderNum
   useEffect(() => { loadToken(); }, [jobOrderId]);
 
   const trackUrl = token ? `${window.location.origin}/p/${token}` : "";
-  const signUrl = token ? `${window.location.origin}/sign/${token}` : "";
+  const signUrl = trackUrl;
 
   function copy(text: string, label: string) {
     if (!text) return;

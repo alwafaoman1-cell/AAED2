@@ -73,16 +73,36 @@ export default function CustomerPortal() {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  async function logPortalOpen(result: "opened" | "invalid" | "expired" | "network") {
+    if (!token) return;
+    try {
+      await supabase.rpc("log_public_tracking_open" as any, {
+        p_short_code: token,
+        p_target_type: "customer_tracking",
+        p_user_agent: navigator.userAgent || null,
+        p_result: result,
+      });
+    } catch {
+      // Tracking logs must never break the customer portal.
+    }
+  }
+
   async function load() {
     if (!token) return;
     setLoading(true);
     const { data: res, error: err } = await supabase.rpc("get_public_tracking" as any, { p_token: token });
-    if (err) { setError("network"); setLoading(false); return; }
+    if (err) { setError("network"); setLoading(false); void logPortalOpen("network"); return; }
     const r: any = res;
-    if (r?.error) { setError(r.error); setLoading(false); return; }
+    if (r?.error) {
+      setError(r.error);
+      setLoading(false);
+      void logPortalOpen(r.error === "expired" ? "expired" : "invalid");
+      return;
+    }
     setData(r as Tracking);
     setError(null);
     setLoading(false);
+    void logPortalOpen("opened");
   }
 
   useEffect(() => { load(); }, [token]);

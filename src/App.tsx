@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -21,6 +21,12 @@ function RoleHome() {
   const { profile } = useAuth();
   if (profile?.role === "supervisor") return <Navigate to="/supervisor" replace />;
   return <HomeShortcuts />;
+}
+
+function LegacyPortalRedirect({ param = "token" }: { param?: "id" | "token" | "plate" }) {
+  const params = useParams();
+  const value = params[param] || params.token || params.id || params.plate || "";
+  return <Navigate to={value ? `/p/${encodeURIComponent(value)}` : "/"} replace />;
 }
 
 // Lazy: every other route — splits the bundle and dramatically improves first-paint
@@ -92,8 +98,6 @@ const VehicleDetail = lazy(() => import("./pages/VehicleDetail"));
 const Customers = lazy(() => import("./pages/Customers"));
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
-const PublicTracking = lazy(() => import("./pages/PublicTracking"));
-const PublicVehicleProfile = lazy(() => import("./pages/PublicVehicleProfile"));
 const CustomerPortal = lazy(() => import("./pages/CustomerPortal"));
 const TrashPage = lazy(() => import("./pages/TrashPage"));
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
@@ -138,7 +142,6 @@ const SupervisorApp = lazy(() => import("./pages/apps/SupervisorApp"));
 const InstallAppPage = lazy(() => import("./pages/InstallAppPage"));
 const AppsHub = lazy(() => import("./pages/AppsHub"));
 const SupplementApprovalPage = lazy(() => import("./pages/public/SupplementApprovalPage"));
-const WorkOrderSignPage = lazy(() => import("./pages/public/WorkOrderSignPage"));
 const VehicleBelongingsSettingsPage = lazy(() => import("./pages/settings/VehicleBelongingsSettingsPage"));
 const MessagesCenter = lazy(() => import("./pages/MessagesCenter"));
 const CustomerNotificationsSettingsPage = lazy(() => import("./pages/settings/CustomerNotificationsSettingsPage"));
@@ -196,12 +199,12 @@ const App = () => (
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/install" element={<InstallAppPage />} />
-            <Route path="/track/:id" element={<PublicTracking />} />
+            <Route path="/track/:id" element={<LegacyPortalRedirect param="id" />} />
             <Route path="/invoice/view/:token" element={<InvoicePublicView />} />
             <Route path="/p/:token" element={<CustomerPortal />} />
-            <Route path="/v/:plate" element={<PublicVehicleProfile />} />
+            <Route path="/v/:plate" element={<LegacyPortalRedirect param="plate" />} />
             <Route path="/c/approve/:token" element={<SupplementApprovalPage />} />
-            <Route path="/sign/:token" element={<WorkOrderSignPage />} />
+            <Route path="/sign/:token" element={<LegacyPortalRedirect param="token" />} />
             <Route path="/technician" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechnicianApp /></ProtectedRoute>} />
             <Route path="/technician/scan" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechQrScanPage /></ProtectedRoute>} />
             <Route path="/tech" element={<Navigate to="/technician" replace />} />
