@@ -76,8 +76,9 @@ describe("operational fixes contract", () => {
     const restoreHandlers = read("src/hooks/useTrashRestoreHandlers.ts");
 
     expect(store).toContain("!order.deletedAt && !order.archivedAt");
+    expect(store).toContain("includeArchived");
     expect(store).toContain(".is(\"deleted_at\", null)");
-    expect(store).toContain(".is(\"archived_at\", null)");
+    expect(workOrders).toContain("getWorkOrdersForAdminList");
     expect(store).toContain("Trash restore mismatch");
     expect(store).toContain("cache = cache.filter");
     expect(store).toContain("eq(\"order_number\", expectedOrderNumber)");

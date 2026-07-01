@@ -108,6 +108,7 @@ const STATUS_GROUPS: Record<string, string[]> = {
 
 const hasOrderValue = (value?: string) => !!(value && value.trim() !== "" && value.trim() !== "-");
 const isInsuranceOrder = (order: WorkOrder) => isInsuranceWorkOrder(order);
+const getWorkOrdersForAdminList = () => getWorkOrders({ includeArchived: true });
 
 function insuranceReason(order: WorkOrder) {
   if (hasOrderValue(order.insurance)) return order.insurance;
@@ -137,14 +138,14 @@ function buildWorkOrderHtml(order: WorkOrder) {
 export default function WorkOrders() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [orders, setOrders] = useState<WorkOrder[]>(getWorkOrders());
+  const [orders, setOrders] = useState<WorkOrder[]>(getWorkOrdersForAdminList());
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [ownershipFilter, setOwnershipFilter] = useState("all");
   const [technicianFilter, setTechnicianFilter] = useState("all");
   const [entryFrom, setEntryFrom] = useState("");
   const [entryTo, setEntryTo] = useState("");
-  const [archiveFilter, setArchiveFilter] = useState("current");
+  const [archiveFilter, setArchiveFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [editOrder, setEditOrder] = useState<WorkOrder | null>(null);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -177,7 +178,7 @@ export default function WorkOrders() {
   useEffect(() => {
     let cancelled = false;
     const syncVisibleOrders = () => {
-      if (!cancelled) setOrders([...getWorkOrders()]);
+      if (!cancelled) setOrders([...getWorkOrdersForAdminList()]);
     };
     const unsubscribe = subscribeWorkOrders(syncVisibleOrders);
     setIsLoadingCloudOrders(true);
@@ -940,7 +941,7 @@ export default function WorkOrders() {
             });
             toast.success(`تم نقل ${removed.id} للمهملات`);
           }
-          setOrders([...getWorkOrders()]);
+          setOrders([...getWorkOrdersForAdminList()]);
           setDeleteOrder(null);
         }}
       />
@@ -954,7 +955,7 @@ export default function WorkOrders() {
                 await updateWorkOrderInCloud(id, { status });
               }
               toast.success(`تم تحديث حالة ${selectedIds.size} أمر إلى "${status}"`);
-              setOrders([...getWorkOrders()]);
+              setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
             } catch (error: any) {
               toast.error(error?.message || "تعذر تحديث أوامر العمل في Supabase");
@@ -974,7 +975,7 @@ export default function WorkOrders() {
                 await updateWorkOrderInCloud(id, { technician: tech });
               }
               toast.success(`تم إسناد ${selectedIds.size} أمر إلى ${tech}`);
-              setOrders([...getWorkOrders()]);
+              setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
             } catch (error: any) {
               toast.error(error?.message || "تعذر إسناد أوامر العمل في Supabase");
@@ -1049,7 +1050,7 @@ export default function WorkOrders() {
                 n++;
               }
               toast.success(`تم نقل ${n} أمر إلى الأرشيف`);
-              setOrders([...getWorkOrders()]);
+              setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
             } catch (error: any) {
               toast.error(error?.message || "تعذر نقل أوامر العمل إلى الأرشيف في Supabase");
@@ -1096,7 +1097,7 @@ export default function WorkOrders() {
             }
           }
           toast.success(`تم نقل ${n} أمر للمهملات`);
-          setOrders([...getWorkOrders()]);
+          setOrders([...getWorkOrdersForAdminList()]);
           setSelectedIds(new Set());
           setShowBulkDelete(false);
         }}
@@ -1104,3 +1105,4 @@ export default function WorkOrders() {
     </div>
   );
 }
+
