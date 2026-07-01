@@ -13,6 +13,7 @@ import {
   exportRows,
   getEntityDefinition,
   IMPORT_EXPORT_ENTITIES,
+  importExpensesRows,
   logImportExportOperation,
   mapRows,
   normalizePhonesInRows,
@@ -86,6 +87,49 @@ export default function ImportExportCenter() {
     toast.success("تم تحميل قالب Excel");
   }
 
+  async function handleSaveExpenses() {
+    if (entity !== "expenses") return;
+    if (!mappedRows.length) {
+      toast.error("ارفع ملف المصروفات أولاً");
+      return;
+    }
+    if (missingRequired.length > 0) {
+      toast.error("يجب ربط حقل المبلغ قبل الحفظ");
+      return;
+    }
+    if (duplicates.length > 0) {
+      toast.error("يوجد تكرار في الملف أو أرقام سندات موجودة مسبقًا");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await importExpensesRows(mappedRows);
+      await logImportExportOperation({
+        operation: "import",
+        entity,
+        status: result.errors.length ? "failed" : "completed",
+        rowCount: result.saved.length,
+        errorCount: result.errors.length,
+      });
+      if (result.errors.length) {
+        toast.error(`تم حفظ ${result.saved.length} مصروف، وفشل ${result.errors.length}`);
+      } else {
+        toast.success(`تم حفظ ${result.saved.length} مصروف في Supabase`);
+      }
+      if (result.saved.length) {
+        setHeaders([]);
+        setRawRows([]);
+        setMappedRows([]);
+        setColumnMap({});
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ المصروفات");
+      await logImportExportOperation({ operation: "import", entity, status: "failed", rowCount: mappedRows.length, errorCount: 1 });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-border bg-gradient-to-l from-primary/15 to-card p-5 shadow-card">
@@ -157,6 +201,18 @@ export default function ImportExportCenter() {
           {missingRequired.length > 0 && mappedRows.length > 0 && (
             <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
               يجب ربط الحقول المطلوبة قبل الحفظ: {missingRequired.map((col) => col.label).join("، ")}
+            </div>
+          )}
+
+          {entity === "expenses" && mappedRows.length > 0 && (
+            <div className="flex justify-end">
+              <Button
+                className="gap-2"
+                onClick={() => void handleSaveExpenses()}
+                disabled={busy || missingRequired.length > 0 || duplicates.length > 0}
+              >
+                <CheckCircle2 size={16} /> حفظ المصروفات في Supabase
+              </Button>
             </div>
           )}
 

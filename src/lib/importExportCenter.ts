@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { customersStore } from "@/lib/customersStore";
 import { getWorkOrders } from "@/lib/workOrdersStore";
 import { expensesStore } from "@/lib/expensesStore";
+import type { ExpenseRecord } from "@/lib/expensesStore";
 import { vehiclesStore } from "@/lib/vehiclesStore";
 import { readSystemPreferences } from "@/lib/systemPreferences";
 import { toE164 } from "@/lib/phoneUtils";
@@ -61,8 +62,8 @@ export const IMPORT_EXPORT_ENTITIES: Array<{
   { key: "work_orders", labelAr: "أوامر العمل", labelEn: "Work Orders", canImport: true, canExport: true, columns: [
     { key: "order_number", label: "Order Number", required: true }, { key: "customer", label: "Customer" }, { key: "phone", label: "Phone" }, { key: "plate", label: "Plate" }, { key: "status", label: "Status" },
   ] },
-  { key: "expenses", labelAr: "المصروفات", labelEn: "Expenses", canImport: false, canExport: true, columns: [
-    { key: "voucher_number", label: "Voucher" }, { key: "date", label: "Date" }, { key: "beneficiary", label: "Beneficiary" }, { key: "amount", label: "Amount" },
+  { key: "expenses", labelAr: "المصروفات", labelEn: "Expenses", canImport: true, canExport: true, columns: [
+    { key: "voucher_number", label: "Voucher" }, { key: "date", label: "Date" }, { key: "category_name", label: "Category" }, { key: "beneficiary", label: "Beneficiary" }, { key: "description", label: "Description" }, { key: "amount", label: "Amount", required: true }, { key: "payment_method", label: "Payment Method" }, { key: "linked_work_order_id", label: "Work Order" }, { key: "linked_vehicle_plate", label: "Vehicle Plate" },
   ] },
   { key: "archive", labelAr: "الأرشيف", labelEn: "Archive", canImport: false, canExport: true, columns: [
     { key: "reference", label: "Reference" }, { key: "type", label: "Type" }, { key: "date", label: "Date" },
@@ -87,6 +88,7 @@ export async function parseImportFile(file: File): Promise<ParsedImport> {
 
 export function autoMapColumns(headers: string[], entity: ImportExportEntity): Record<string, string> {
   const normalized = new Map(headers.map((h) => [h.trim().toLowerCase().replace(/\s+/g, "_"), h]));
+  const rawHeaders = headers.map((h) => ({ raw: h, compact: h.trim().toLowerCase().replace(/\s+/g, "") }));
   const map: Record<string, string> = {};
   getEntityDefinition(entity).columns.forEach((col) => {
     const candidates = [
@@ -95,8 +97,22 @@ export function autoMapColumns(headers: string[], entity: ImportExportEntity): R
       col.label.toLowerCase(),
       col.key.replace(/_/g, " "),
     ];
+    if (entity === "expenses") {
+      if (col.key === "voucher_number") candidates.push("voucher", "سند", "رقم السند");
+      if (col.key === "date") candidates.push("التاريخ", "date");
+      if (col.key === "category_name") candidates.push("category", "التصنيف", "البند", "البند / التصنيف");
+      if (col.key === "beneficiary") candidates.push("beneficiary", "supplier", "المستفيد", "المورد", "المستفيد / المورد");
+      if (col.key === "description") candidates.push("description", "الوصف", "البيان");
+      if (col.key === "amount") candidates.push("amount", "المبلغ", "المبلغ (ر.ع)");
+      if (col.key === "payment_method") candidates.push("payment", "payment method", "طريقة الدفع");
+      if (col.key === "linked_work_order_id") candidates.push("work order", "أمر العمل", "رقم أمر العمل");
+      if (col.key === "linked_vehicle_plate") candidates.push("vehicle plate", "plate", "رقم اللوحة", "اللوحة");
+    }
     const found = candidates.map((c) => normalized.get(c)).find(Boolean);
-    if (found) map[col.key] = found;
+    const foundCompact = rawHeaders.find((header) =>
+      candidates.some((candidate) => header.compact === candidate.trim().toLowerCase().replace(/\s+/g, "")),
+    )?.raw;
+    if (found || foundCompact) map[col.key] = found || foundCompact!;
   });
   return map;
 }
@@ -117,6 +133,7 @@ export function detectDuplicates(entity: ImportExportEntity, rows: Record<string
   const existingCustomers = new Set(customersStore.getAll().map((c) => (c.phone || c.name).trim().toLowerCase()).filter(Boolean));
   const existingVehicles = new Set(vehiclesStore.getAll().map((v) => v.plate.trim().toLowerCase()).filter(Boolean));
   const existingOrders = new Set(getWorkOrders().map((o) => (o.displayNumber || o.id).trim().toLowerCase()).filter(Boolean));
+  const existingExpenses = new Set(expensesStore.getAll().map((e) => (e.voucherNumber || "").trim().toLowerCase()).filter(Boolean));
   rows.forEach((row, index) => {
     const key = entity === "customers"
       ? (row.phone || row.name || "").toLowerCase()
@@ -128,6 +145,8 @@ export function detectDuplicates(entity: ImportExportEntity, rows: Record<string
       ? (row.claim_number || "").toLowerCase()
       : entity === "invoices"
       ? (row.invoice_number || "").toLowerCase()
+      : entity === "expenses"
+      ? (row.voucher_number || "").toLowerCase()
       : "";
     if (!key) return;
     if (seen.has(key)) duplicates.push({ rowIndex: index + 1, reason: "Duplicate inside uploaded file" });
@@ -135,8 +154,82 @@ export function detectDuplicates(entity: ImportExportEntity, rows: Record<string
     if (entity === "customers" && existingCustomers.has(key)) duplicates.push({ rowIndex: index + 1, reason: "Customer already exists" });
     if (entity === "vehicles" && existingVehicles.has(key)) duplicates.push({ rowIndex: index + 1, reason: "Vehicle already exists" });
     if (entity === "work_orders" && existingOrders.has(key)) duplicates.push({ rowIndex: index + 1, reason: "Work order already exists" });
+    if (entity === "expenses" && existingExpenses.has(key)) duplicates.push({ rowIndex: index + 1, reason: "Expense voucher already exists" });
   });
   return duplicates;
+}
+
+function parseImportAmount(value: unknown): number {
+  const cleaned = String(value ?? "").replace(/[^\d.-]/g, "");
+  return Number(cleaned) || 0;
+}
+
+function parseImportDate(value: unknown): string {
+  if (!value) return new Date().toISOString().slice(0, 10);
+  const raw = String(value).trim();
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  const match = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+  if (match) {
+    const [, day, month, year] = match;
+    return `${year.length === 2 ? `20${year}` : year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  return new Date().toISOString().slice(0, 10);
+}
+
+function parseImportPaymentMethod(value: unknown): ExpenseRecord["paymentMethod"] {
+  const text = String(value || "").trim().toLowerCase();
+  if (/bank|transfer|تحويل|طھط­ظˆظٹظ„/.test(text)) return "bank_transfer";
+  if (/cheque|check|شيك|ط´ظٹظƒ/.test(text)) return "cheque";
+  if (/card|بطاقة|ط¨ط·ط§ظ‚ط©/.test(text)) return "card";
+  return "cash";
+}
+
+export async function importExpensesRows(rows: Record<string, string>[]) {
+  const errors: Array<{ rowIndex: number; error: string }> = [];
+  const saved: ExpenseRecord[] = [];
+  const existing = new Set(expensesStore.getAll().map((e) => (e.voucherNumber || "").trim().toLowerCase()).filter(Boolean));
+
+  for (const [index, row] of rows.entries()) {
+    const amount = parseImportAmount(row.amount);
+    if (amount <= 0) {
+      errors.push({ rowIndex: index + 1, error: "Amount must be greater than zero" });
+      continue;
+    }
+
+    const voucherNumber = (row.voucher_number || `EXP-IMP-${Date.now()}-${index + 1}`).trim();
+    const voucherKey = voucherNumber.toLowerCase();
+    if (existing.has(voucherKey)) {
+      errors.push({ rowIndex: index + 1, error: "Expense voucher already exists" });
+      continue;
+    }
+
+    const record: ExpenseRecord = {
+      id: crypto.randomUUID(),
+      voucherNumber,
+      date: parseImportDate(row.date),
+      amount,
+      categoryId: "",
+      categoryName: row.category_name || "Imported",
+      cashboxId: "",
+      paymentMethod: parseImportPaymentMethod(row.payment_method),
+      beneficiary: row.beneficiary || undefined,
+      description: row.description || undefined,
+      linkedWorkOrderId: row.linked_work_order_id || undefined,
+      linkedVehiclePlate: row.linked_vehicle_plate || undefined,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      const savedRecord = await expensesStore.add(record);
+      saved.push(savedRecord);
+      existing.add(voucherKey);
+    } catch (error: any) {
+      errors.push({ rowIndex: index + 1, error: error?.message || "Failed to save expense" });
+    }
+  }
+
+  return { saved, errors };
 }
 
 export async function normalizePhonesInRows(rows: Record<string, string>[]) {
