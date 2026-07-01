@@ -89,7 +89,9 @@ describe("operational fixes contract", () => {
     expect(resetFunction).toContain("const dryRun = body.dryRun !== false");
     expect(resetFunction).toContain("const skipOtp = body.skipOtp === true || dryRun");
     expect(resetFunction).toContain("if (!dryRun && body.confirmPhrase !== \"DELETE CLOUD DATA\")");
-    expect(trashStore).toContain("handler(item.payload, item)");
+    expect(trashStore).toContain("app_trash");
+    expect(trashStore).toContain("handler(current.payload, current)");
+    expect(trashStore).toContain("restore_status: \"restored\"");
     expect(restoreHandlers).toContain("isUuid(item.entityId)");
     expect(restoreHandlers).toContain("labelOrderNumber");
     expect(workOrders).toContain("payload: { ...trashed, cloudId: cloudEntityId }");

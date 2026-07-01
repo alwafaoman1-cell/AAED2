@@ -61,10 +61,14 @@ export default function TrashPage() {
     }
   }
 
-  function handlePermanent(trashId: string) {
-    permanentlyDelete(trashId);
-    setDeleteId(null);
-    toast.success("تم الحذف نهائياً");
+  async function handlePermanent(trashId: string) {
+    try {
+      await permanentlyDelete(trashId);
+      setDeleteId(null);
+      toast.success("تم الحذف نهائياً");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حذف العنصر نهائياً");
+    }
   }
 
   return (
@@ -176,7 +180,7 @@ export default function TrashPage() {
       <ConfirmDeleteDialog
         open={!!deleteId}
         onOpenChange={(o) => !o && setDeleteId(null)}
-        onConfirm={() => deleteId && handlePermanent(deleteId)}
+        onConfirm={() => deleteId && void handlePermanent(deleteId)}
         title="حذف نهائي"
         description="سيتم حذف العنصر بشكل نهائي ولا يمكن استرجاعه. هل تريد المتابعة؟"
         confirmLabel="حذف نهائياً"
@@ -185,9 +189,12 @@ export default function TrashPage() {
         open={showEmpty}
         onOpenChange={setShowEmpty}
         onConfirm={() => {
-          emptyTrash();
-          setShowEmpty(false);
-          toast.success("تم إفراغ السلة");
+          void emptyTrash()
+            .then(() => {
+              setShowEmpty(false);
+              toast.success("تم إفراغ السلة");
+            })
+            .catch((error: any) => toast.error(error?.message || "تعذر إفراغ السلة"));
         }}
         title="إفراغ سلة المهملات"
         description={`سيتم حذف ${items.length} عنصر بشكل نهائي. هذا الإجراء لا يمكن التراجع عنه.`}
