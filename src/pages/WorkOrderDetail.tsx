@@ -410,30 +410,32 @@ export default function WorkOrderDetail() {
   async function handlePrintWorkOrder() {
     // Pre-build tracking QR into the cache before sync HTML render
     const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
-    if (order!.trackingToken) await buildTrackingQrDataUrl(order!.trackingToken);
 
     // Fetch customer signature if available (from portal token)
+    let effectiveTrackingToken = order!.trackingToken;
     let customerSignatureDataUrl: string | undefined;
     let customerSignatureName: string | undefined;
     let customerSignatureDate: string | undefined;
     if (cloudJobOrderId) {
       const { data: tok } = await supabase
         .from("customer_portal_tokens")
-        .select("signature_data_url, signer_name, signed_at")
+        .select("token, signature_data_url, signer_name, signed_at")
         .eq("job_order_id", cloudJobOrderId)
         .maybeSingle();
       const t: any = tok;
+      if (t?.token) effectiveTrackingToken = t.token;
       if (t?.signature_data_url) {
         customerSignatureDataUrl = t.signature_data_url;
         customerSignatureName = t.signer_name || undefined;
         customerSignatureDate = t.signed_at ? new Date(t.signed_at).toLocaleString("en-GB") : undefined;
       }
     }
+    if (effectiveTrackingToken) await buildTrackingQrDataUrl(effectiveTrackingToken);
 
     const html = getWorkOrderHtml({
       orderNumber: order!.displayNumber || (UUID_RE.test(order!.id) ? `WO-${order!.id.slice(0, 8).toUpperCase()}` : order!.id),
       workOrderType: resolveWorkOrderType(order!),
-      trackingToken: order!.trackingToken,
+      trackingToken: effectiveTrackingToken,
       date: order!.entryDate,
       customerName: order!.customer,
       customerPhone: order!.phone,
