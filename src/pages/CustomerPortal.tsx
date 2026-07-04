@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   AlertCircle,
@@ -268,8 +268,10 @@ export default function CustomerPortal() {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const loggedOpenRef = useRef(false);
+  const firstLoadDoneRef = useRef(false);
+  const dataRef = useRef<Tracking | null>(null);
 
-  async function logPortalOpen(result: "success" | "invalid" | "expired" | "network") {
+  const logPortalOpen = useCallback(async (result: "success" | "invalid" | "expired" | "network") => {
     if (!token || loggedOpenRef.current) return;
     loggedOpenRef.current = true;
     try {
@@ -282,26 +284,27 @@ export default function CustomerPortal() {
     } catch {
       // Public tracking must never break the customer portal.
     }
-  }
+  }, [token]);
 
-  async function load() {
+  const load = useCallback(async (options?: { silent?: boolean; skipVisitLog?: boolean }) => {
     if (!token) return;
-    setLoading(true);
+    const silent = Boolean(options?.silent || firstLoadDoneRef.current || dataRef.current);
+    if (!silent) setLoading(true);
     const { data: res, error: err } = await supabase.rpc("get_public_tracking" as any, { p_token: token });
     if (err) {
-      setError("network");
+      if (!dataRef.current) setError("network");
       setLoading(false);
-      void logPortalOpen("network");
+      if (!options?.skipVisitLog) void logPortalOpen("network");
       return;
     }
     const r: any = res;
     if (r?.error) {
-      setError(r.error);
+      if (!dataRef.current) setError(r.error);
       setLoading(false);
-      void logPortalOpen(r.error === "expired" ? "expired" : "invalid");
+      if (!options?.skipVisitLog) void logPortalOpen(r.error === "expired" ? "expired" : "invalid");
       return;
     }
-    setData({
+    const nextData = {
       ...r,
       photos: Array.isArray(r?.photos) ? r.photos : [],
       supplements: Array.isArray(r?.supplements) ? r.supplements : [],
@@ -310,34 +313,36 @@ export default function CustomerPortal() {
       replaced_parts: Array.isArray(r?.replaced_parts) ? r.replaced_parts : [],
       documents: Array.isArray(r?.documents) ? r.documents : [],
       messages: Array.isArray(r?.messages) ? r.messages : [],
-    } as Tracking);
+    } as Tracking;
+    dataRef.current = nextData;
+    firstLoadDoneRef.current = true;
+    setData(nextData);
     setError(null);
     setLoading(false);
-    void logPortalOpen("success");
-  }
+    if (!options?.skipVisitLog) void logPortalOpen("success");
+  }, [token, logPortalOpen]);
 
   useEffect(() => {
     loggedOpenRef.current = false;
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+    firstLoadDoneRef.current = false;
+    dataRef.current = null;
+    setData(null);
+    setError(null);
+    void load({ silent: false });
+  }, [token, load]);
 
   useEffect(() => {
-    if (!data) return;
+    if (!data?.order_number) return;
     const ch = supabase
       .channel(`portal-${token}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "job_orders" }, () => {
-        const alreadyLogged = loggedOpenRef.current;
-        void load().finally(() => {
-          loggedOpenRef.current = alreadyLogged;
-        });
+        void load({ silent: true, skipVisitLog: true });
       })
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.order_number, token]);
+  }, [data?.order_number, token, load]);
 
   const stagesView = useMemo(() => {
     if (!data) return [];
@@ -353,7 +358,10 @@ export default function CustomerPortal() {
 
   const photosByPhase = useMemo(() => {
     const map: Record<string, PortalPhoto[]> = {};
-    (data?.photos || []).forEach((p) => {
+    (data?.photos || [])
+      .slice()
+      .sort((a, b) => String(b.uploaded_at || "").localeCompare(String(a.uploaded_at || "")))
+      .forEach((p) => {
       const k = p.phase || "in_progress";
       (map[k] = map[k] || []).push(p);
     });
@@ -601,11 +609,37 @@ export default function CustomerPortal() {
                 <div className="space-y-4">
                   {Object.entries(photosByPhase).map(([phase, items]) => (
                     <div key={phase}>
-                      <h4 className="text-xs font-bold text-primary mb-2">{PHASE_LABEL[phase] || phase}</h4>
-                      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <h4 className="text-xs font-bold text-primary">{PHASE_LABEL[phase] || phase}</h4>
+                        <span className="rounded-full border border-border bg-secondary/30 px-2 py-0.5 text-[10px] text-muted-foreground">
+                          {formatNumberEnglish(items.length)} صورة
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                         {items.map((p) => (
-                          <a key={p.id} href={p.url} target="_blank" rel="noreferrer" className="aspect-square rounded-xl overflow-hidden border border-border bg-secondary/30">
-                            <img src={p.url} alt={p.caption || ""} loading="lazy" className="w-full h-full object-cover hover:scale-105 transition-transform" />
+                          <a
+                            key={p.id}
+                            href={p.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group overflow-hidden rounded-2xl border border-border bg-background/70 shadow-sm transition hover:border-primary/40"
+                          >
+                            <div className="aspect-[4/3] overflow-hidden bg-secondary/30">
+                              <img src={p.url} alt={p.caption || PHASE_LABEL[phase] || phase} loading="lazy" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                            </div>
+                            <div className="space-y-1 p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                                  <Camera size={11} />
+                                  {PHASE_LABEL[phase] || phase}
+                                </span>
+                              </div>
+                              <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                <Clock size={11} />
+                                {formatDateTimeEnglish(p.uploaded_at)}
+                              </p>
+                              {p.caption ? <p className="line-clamp-2 text-[11px] text-foreground">{toEnglishDigits(p.caption)}</p> : null}
+                            </div>
                           </a>
                         ))}
                       </div>
