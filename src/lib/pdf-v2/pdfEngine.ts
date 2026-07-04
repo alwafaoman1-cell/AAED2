@@ -4,7 +4,6 @@ import type { PdfV2BuildInput, PdfV2Layout, PdfV2Meta } from "./documentTypes";
 import { escapeHtml, toEnglishDigits } from "./pdfFormatters";
 import { normalizePdfV2Meta } from "./pdfTemplates";
 import { pdfV2Theme } from "./pdfTheme";
-import { ensureArabicFont } from "../arabicPdfFont";
 
 function stripLegacyPrintArtifacts(html: string) {
   return html
@@ -211,9 +210,9 @@ export async function createPdfV2Blob(input: PdfV2BuildInput): Promise<Blob> {
   const orientation = layoutName === "a4-landscape" ? "landscape" : "portrait";
   const pdf = new jsPDF({ unit: "mm", format: layoutName === "qr-label" ? [layout.widthMm, layout.heightMm] : "a4", orientation });
   pdf.setProperties({ title: meta.title || meta.documentType, creator: "AAED2 PDF v2" });
-  await ensureArabicFont(pdf);
 
   const isRtl = meta.language !== "en";
+  try { (pdf as any).setR2L?.(isRtl); } catch {}
   const left = layout.margins.left;
   const right = layout.widthMm - layout.margins.right;
   const width = right - left;
