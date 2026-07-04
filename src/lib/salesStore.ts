@@ -143,6 +143,7 @@ function notify() {
 
 function rowToSalesDoc(r: any): SalesDoc {
   const m = (r.metadata || {}) as Partial<SalesDoc>;
+  const linkedWorkOrderId = r.work_order_id ? `WO-${r.work_order_id}` : undefined;
   return {
     id: r.id,
     number: r.doc_number,
@@ -165,7 +166,7 @@ function rowToSalesDoc(r: any): SalesDoc {
     paidTotal: Number(r.paid_amount || 0),
     balanceDue: Number(r.balance_due || 0),
     costCenter: m.costCenter,
-    fromDocId: r.converted_invoice_id || m.fromDocId,
+    fromDocId: m.fromDocId || linkedWorkOrderId || r.converted_invoice_id,
     fromDocType: m.fromDocType,
     payments: Array.isArray(m.payments) ? m.payments : [],
     attachments: Array.isArray(m.attachments) ? m.attachments : [],
@@ -238,6 +239,9 @@ async function refreshSalesFromCloud() {
 async function upsertSalesCloud(doc: SalesDoc) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return;
+  const fromDocId = doc.fromDocId || "";
+  const linkedWorkOrderId = fromDocId.startsWith("WO-") ? fromDocId.slice(3) : null;
+  const convertedInvoiceId = fromDocId && isUuid(fromDocId) ? fromDocId : null;
   const payload = stripUndefined({
     id: doc.id,
     tenant_id: tenantId,
@@ -256,7 +260,8 @@ async function upsertSalesCloud(doc: SalesDoc) {
     total: doc.total,
     paid_amount: doc.paidTotal,
     balance_due: doc.balanceDue,
-    converted_invoice_id: doc.fromDocId || null,
+    converted_invoice_id: convertedInvoiceId,
+    work_order_id: linkedWorkOrderId,
     vehicle_plate: doc.vehicle?.plate || null,
     vehicle_make: doc.vehicle?.make || null,
     vehicle_model: doc.vehicle?.model || null,

@@ -49,7 +49,7 @@ BEGIN
 
   SELECT * INTO v_jo
   FROM public.job_orders
-  WHERE id = v_tok.job_order_id
+  WHERE id::text = v_tok.job_order_id::text
     AND deleted_at IS NULL
     AND archived_at IS NULL;
 
@@ -57,8 +57,8 @@ BEGIN
     RETURN jsonb_build_object('error','not_found');
   END IF;
 
-  SELECT * INTO v_veh FROM public.vehicles WHERE id = v_jo.vehicle_id;
-  SELECT * INTO v_cust FROM public.customers WHERE id = v_jo.customer_id;
+  SELECT * INTO v_veh FROM public.vehicles WHERE id::text = v_jo.vehicle_id::text;
+  SELECT * INTO v_cust FROM public.customers WHERE id::text = v_jo.customer_id::text;
 
   IF v_jo.status = 'delivered' THEN
     v_stage_key := 'delivered'; v_stage_ar := 'تم التسليم'; v_stage_en := 'Delivered'; v_stage_emoji := '✅';
@@ -88,7 +88,7 @@ BEGIN
 
   SELECT COUNT(*) INTO v_pending_supps
   FROM public.work_order_supplements
-  WHERE job_order_id = v_jo.id
+  WHERE job_order_id::text = v_jo.id::text
     AND status IN ('pending_customer','pending');
 
   SELECT COALESCE(jsonb_agg(
@@ -138,14 +138,14 @@ BEGIN
   LEFT JOIN LATERAL (
     SELECT r.token
     FROM public.supplement_approval_requests r
-    WHERE r.job_order_id = s.job_order_id
-      AND s.id = ANY(r.supplement_ids)
+    WHERE r.job_order_id::text = s.job_order_id::text
+      AND s.id::text = ANY(r.supplement_ids::text[])
       AND r.status = 'pending'
       AND r.expires_at > now()
     ORDER BY r.created_at DESC
     LIMIT 1
   ) ar ON true
-  WHERE s.job_order_id = v_jo.id;
+  WHERE s.job_order_id::text = v_jo.id::text;
 
   SELECT COALESCE(jsonb_agg(
     jsonb_build_object(
@@ -162,7 +162,7 @@ BEGIN
     ORDER BY sd.date DESC, sd.created_at DESC
   ), '[]'::jsonb) INTO v_invoices
   FROM public.sales_documents sd
-  WHERE sd.work_order_id = v_jo.id
+  WHERE sd.work_order_id::text = v_jo.id::text
     AND sd.doc_type = 'invoice'
     AND sd.status <> 'cancelled';
 
@@ -177,8 +177,8 @@ BEGIN
     ORDER BY sp.date DESC, sp.created_at DESC
   ), '[]'::jsonb) INTO v_payments
   FROM public.sales_payments sp
-  JOIN public.sales_documents sd ON sd.id = sp.sales_document_id
-  WHERE sd.work_order_id = v_jo.id
+  JOIN public.sales_documents sd ON sd.id::text = sp.sales_document_id::text
+  WHERE sd.work_order_id::text = v_jo.id::text
     AND sd.doc_type = 'invoice'
     AND sd.status <> 'cancelled';
 
@@ -204,14 +204,14 @@ BEGIN
     ORDER BY n.submitted_at DESC
   ), '[]'::jsonb) INTO v_messages
   FROM public.customer_portal_notes n
-  WHERE n.job_order_id = v_jo.id
+  WHERE n.job_order_id::text = v_jo.id::text
     AND n.status IN ('approved','pending');
 
   v_eta := v_jo.estimated_completion;
 
   SELECT * INTO v_feedback
   FROM public.customer_feedback
-  WHERE job_order_id = v_jo.id
+  WHERE job_order_id::text = v_jo.id::text
   LIMIT 1;
 
   RETURN jsonb_build_object(
