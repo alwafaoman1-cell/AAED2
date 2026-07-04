@@ -141,7 +141,7 @@ export function syncWorkOrderInvoiceFromExpenses(order: WorkOrder): SyncResult {
       activity: [{ id: cryptoRandom(), at: now, text: `تم إنشاء فاتورة تلقائياً من قطع غيار أمر العمل ${order.id}` }],
       createdAt: now, updatedAt: now,
       vehicle: { plate: order.plate, make: order.vehicleType, model: order.model, year: order.year, vin: order.vin },
-      fromDocId: `WO-${order.id}`,
+      fromDocId: `WO-${order.cloudId || order.id}`,
       notes: `#WO:${order.id}`,
     };
     created = true;

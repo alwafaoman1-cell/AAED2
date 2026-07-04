@@ -161,10 +161,11 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       });
     }
     if (items.length === 0) items.push(emptyItem());
+    const workOrderCloudId = wo.cloudId || wo.id;
     return {
       ...d,
       customerName: wo.customer || d.customerName,
-      fromDocId: `WO-${wo.id}`,
+      fromDocId: `WO-${workOrderCloudId}`,
       notes: [
         `#WO:${wo.id}`,
         wo.description ? `الوصف: ${wo.description}` : "",
