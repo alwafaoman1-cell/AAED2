@@ -341,6 +341,9 @@ export const salesStore = {
     subscribers.add(cb);
     return () => subscribers.delete(cb);
   },
+  async refresh() {
+    await refreshSalesFromCloud();
+  },
   list(filter?: { type?: SalesDocType; includeDeleted?: boolean }): SalesDoc[] {
     const all = read();
     return all
