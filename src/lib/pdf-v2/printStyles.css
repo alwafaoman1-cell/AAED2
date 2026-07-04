@@ -1,0 +1,23 @@
+@media print {
+  html, body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .pdf-v2-toolbar,
+  .no-print {
+    display: none !important;
+  }
+
+  .pdf-v2-page {
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .pdf-v2-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}

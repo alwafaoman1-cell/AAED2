@@ -5,18 +5,24 @@ const root = process.cwd();
 const read = (file: string) => readFileSync(resolve(root, file), "utf8");
 
 describe("PDF pagination contract", () => {
-  it("does not clip exported PDF pages to the first A4 viewport", () => {
+  it("routes PDF generation through PDF v2 without the legacy screenshot renderer", () => {
     const htmlToPdf = read("src/lib/htmlToPdf.ts");
-    const renderer = read("src/lib/pdfDocumentRenderer.ts");
+    const engine = read("src/lib/pdf-v2/pdfEngine.ts");
+    const layout = read("src/lib/pdf-v2/pdfLayout.ts");
+    const app = read("src/App.tsx");
 
-    expect(htmlToPdf).toContain("overflow:visible!important");
-    expect(htmlToPdf).toContain("max-height:none!important");
-    expect(htmlToPdf).toContain("page-break-before:always");
-    expect(htmlToPdf).not.toContain("html.pdf-export, html.pdf-export body{background:#fff!important;margin:0!important;padding:0!important;overflow:hidden!important");
+    expect(htmlToPdf).toContain("downloadPdfV2");
+    expect(htmlToPdf).not.toContain("html2canvas(");
+    expect(htmlToPdf).not.toContain("import html2canvas");
 
-    expect(renderer).toContain('page.style.overflow = "visible"');
-    expect(renderer).toContain('page.style.maxHeight = "none"');
-    expect(renderer).not.toContain('page.style.overflow = "hidden"');
+    expect(engine).toContain("overflow:visible");
+    expect(engine).toContain("break-inside:avoid");
+    expect(engine).toContain("thead{display:table-header-group}");
+    expect(layout).toContain("widthMm: 210");
+    expect(layout).toContain("heightMm: 297");
+    expect(layout).toContain("margins: { top: 12, right: 12, bottom: 14, left: 12 }");
+    expect(app).toContain('path="/print/:documentType/:id"');
+    expect(app).toContain('path="/pdf-preview/:documentType/:id"');
   });
 
   it("keeps work order PDF VAT and totals decimal-safe", () => {

@@ -1,10 +1,8 @@
-// أدوات تصدير سجل الحركات المخزنية + ملصقات الباركود
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import JsBarcode from "jsbarcode";
 import type { StockMovement } from "./stockMovementsStore";
 import type { Part } from "./inventoryStore";
+import { downloadPdfV2, escapeHtml, formatOmr, printPdfV2 } from "./pdf-v2";
 
 const movementTypeLabel: Record<string, string> = {
   IN: "إدخال",
@@ -12,7 +10,6 @@ const movementTypeLabel: Record<string, string> = {
   TRANSFER: "تحويل",
 };
 
-/** تصدير سجل الحركات إلى Excel */
 export function exportMovementsToExcel(
   movements: StockMovement[],
   filename = "stock_movements.xlsx",
@@ -45,74 +42,59 @@ export function exportMovementsToExcel(
   );
 
   const wb = XLSX.utils.book_new();
-  const ws1 = XLSX.utils.json_to_sheet(summary);
-  const ws2 = XLSX.utils.json_to_sheet(details);
-  XLSX.utils.book_append_sheet(wb, ws1, "ملخص الحركات");
-  XLSX.utils.book_append_sheet(wb, ws2, "تفاصيل البنود");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), "ملخص الحركات");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(details), "تفاصيل البنود");
   XLSX.writeFile(wb, filename);
 }
 
-/** تصدير سجل الحركات إلى PDF */
 export function exportMovementsToPdf(
   movements: StockMovement[],
   filters: { type?: string; from?: string; to?: string; reference?: string } = {},
 ) {
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-
-  // عنوان
-  doc.setFontSize(16);
-  doc.text("Stock Movements Report - سجل الإذن المخزنية", 148, 14, { align: "center" });
-
-  doc.setFontSize(9);
   const filterParts: string[] = [];
   if (filters.type && filters.type !== "all") filterParts.push(`Type: ${filters.type}`);
   if (filters.from) filterParts.push(`From: ${filters.from}`);
   if (filters.to) filterParts.push(`To: ${filters.to}`);
   if (filters.reference) filterParts.push(`Ref: ${filters.reference}`);
   filterParts.push(`Total: ${movements.length}`);
-  doc.text(filterParts.join("  |  "), 148, 21, { align: "center" });
-  doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, 148, 27, { align: "center" });
 
-  const rows = movements.map((m) => [
-    m.id,
-    movementTypeLabel[m.type] || m.type,
-    m.date,
-    m.reference || "-",
-    m.reason,
-    m.fromLocation || "-",
-    m.toLocation || "-",
-    String(m.items.length),
-    String(m.items.reduce((s, i) => s + i.qty, 0)),
-  ]);
+  const rows = movements.map((m) => `
+    <tr>
+      <td>${escapeHtml(m.id)}</td>
+      <td>${escapeHtml(movementTypeLabel[m.type] || m.type)}</td>
+      <td>${escapeHtml(m.date)}</td>
+      <td>${escapeHtml(m.reference || "-")}</td>
+      <td>${escapeHtml(m.reason)}</td>
+      <td>${escapeHtml(m.fromLocation || "-")}</td>
+      <td>${escapeHtml(m.toLocation || "-")}</td>
+      <td>${m.items.length}</td>
+      <td>${m.items.reduce((s, i) => s + i.qty, 0)}</td>
+    </tr>
+  `).join("");
 
-  autoTable(doc, {
-    head: [["#", "Type", "Date", "Ref", "Reason", "From", "To", "Items", "Qty"]],
-    body: rows,
-    startY: 32,
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [212, 175, 55], textColor: 20, fontStyle: "bold" },
-    alternateRowStyles: { fillColor: [245, 245, 245] },
-    columnStyles: {
-      0: { cellWidth: 22, fontStyle: "bold" },
-      1: { cellWidth: 18 },
-      2: { cellWidth: 22 },
-      3: { cellWidth: 25 },
-      4: { cellWidth: 60 },
-      5: { cellWidth: 35 },
-      6: { cellWidth: 35 },
-      7: { cellWidth: 15, halign: "center" },
-      8: { cellWidth: 18, halign: "center" },
+  void downloadPdfV2(
+    {
+      html: `
+        <section class="pdf-v2-card">
+          <h2>Stock Movements Report</h2>
+          <p>${escapeHtml(filterParts.join(" | "))}</p>
+          <p>Generated: ${new Date().toLocaleString("en-GB")}</p>
+        </section>
+        <table>
+          <thead><tr><th>#</th><th>Type</th><th>Date</th><th>Ref</th><th>Reason</th><th>From</th><th>To</th><th>Items</th><th>Qty</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="9">No records</td></tr>`}</tbody>
+        </table>
+      `,
+      meta: {
+        documentType: "report",
+        title: "Stock Movements Report",
+        layout: "a4-landscape",
+      },
     },
-  });
-
-  doc.save(`stock_movements_${new Date().toISOString().slice(0, 10)}.pdf`);
+    `stock_movements_${new Date().toISOString().slice(0, 10)}`,
+  );
 }
 
-/**
- * توليد ملصقات باركود لمنتج — كل ملصق فى صفحته الخاصة بمقاس 50×30 مم
- * يضمن عدم وجود صفحات فارغة عند الطباعة، ويُفتح فى Iframe مخفى للطباعة
- * المباشرة بدون نوافذ منبثقة. كما يمكن تحميله كملف PDF.
- */
 export function printBarcodeLabels(
   part: Part,
   copies: number,
@@ -127,7 +109,6 @@ export function printBarcodeLabels(
     throw new Error("لا يوجد باركود لهذا المنتج");
   }
 
-  // باركود عالى الدقة
   const canvas = document.createElement("canvas");
   try {
     JsBarcode(canvas, part.barcode, {
@@ -142,81 +123,27 @@ export function printBarcodeLabels(
     throw new Error("فشل توليد الباركود — تأكد من صحة القيمة");
   }
   const dataUrl = canvas.toDataURL("image/png");
+  const labels = Array.from({ length: Math.max(1, copies) }, (_, i) => `
+    <div class="pdf-v2-card" style="width:46mm;min-height:25mm;margin:1mm;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;break-inside:avoid;page-break-inside:avoid">
+      ${options.showName ? `<strong>${escapeHtml(part.name)}</strong>` : ""}
+      <img src="${dataUrl}" alt="barcode-${i + 1}" style="width:40mm;height:auto;margin:1mm 0" />
+      ${options.showPartNumber && part.partNumber ? `<span>${escapeHtml(part.partNumber)}</span>` : ""}
+      ${options.showPrice ? `<strong>${formatOmr(Number(part.sellPrice || 0))}</strong>` : ""}
+    </div>
+  `).join("");
 
-  // كل ملصق صفحة مستقلة بمقاسه الفعلى — لا صفحات فارغة، وطباعة مضبوطة على الورق
-  const labelW = 50; // mm
-  const labelH = 30; // mm
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: [labelW, labelH] });
-
-  for (let i = 0; i < copies; i++) {
-    if (i > 0) doc.addPage([labelW, labelH], "landscape");
-
-    // إطار رقيق أنيق
-    doc.setDrawColor(210);
-    doc.setLineWidth(0.15);
-    doc.roundedRect(0.6, 0.6, labelW - 1.2, labelH - 1.2, 1, 1);
-
-    let cursorY = 3.5;
-
-    if (options.showName) {
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "bold");
-      const name = part.name.length > 32 ? part.name.slice(0, 32) + "…" : part.name;
-      doc.text(name, labelW / 2, cursorY, { align: "center" });
-      cursorY += 2.8;
-    }
-
-    // الباركود
-    const bcH = 13;
-    doc.addImage(dataUrl, "PNG", 3, cursorY, labelW - 6, bcH);
-    cursorY += bcH + 1.5;
-
-    if (options.showPartNumber && part.partNumber) {
-      doc.setFontSize(6);
-      doc.setFont("helvetica", "normal");
-      doc.text(part.partNumber, labelW / 2, cursorY, { align: "center" });
-      cursorY += 2.2;
-    }
-
-    if (options.showPrice) {
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.text(`${part.sellPrice} OMR`, labelW / 2, cursorY + 0.6, { align: "center" });
-    }
-  }
-
-  const fileName = `barcode_${part.partNumber || part.id}_${copies}x.pdf`;
-
-  if (options.mode === "download") {
-    doc.save(fileName);
-    return;
-  }
-
-  // طباعة عبر iframe مخفى — يمنع الصفحات الفارغة وتعدد التبويبات
-  const blob = doc.output("blob");
-  const url = URL.createObjectURL(blob);
-  const iframe = document.createElement("iframe");
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "0";
-  iframe.src = url;
-  iframe.onload = () => {
-    setTimeout(() => {
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      } catch {
-        /* noop */
-      }
-      // إزالة بعد فترة كافية للطباعة
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
-        iframe.remove();
-      }, 60_000);
-    }, 250);
+  const input = {
+    html: `<section data-pdf-layout="qr-label">${labels}</section>`,
+    meta: {
+      documentType: "qr-label" as const,
+      title: "Barcode Labels",
+      layout: "qr-label" as const,
+    },
   };
-  document.body.appendChild(iframe);
+  const fileName = `barcode_${part.partNumber || part.id}_${copies}x`;
+  if (options.mode === "download") {
+    void downloadPdfV2(input, fileName);
+  } else {
+    void printPdfV2(input);
+  }
 }
