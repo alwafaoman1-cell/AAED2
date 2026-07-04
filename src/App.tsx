@@ -350,6 +350,7 @@ const App = () => (
               <Route path="/admin/saas" element={<ProtectedRoute roles={["admin","manager"]}><SaasAdminConsole /></ProtectedRoute>} />
               <Route path="/admin/files" element={<ProtectedRoute roles={["admin","manager"]}><TenantFiles /></ProtectedRoute>} />
               <Route path="/settings/customer-notifications" element={<ProtectedRoute roles={["admin","manager"]}><CustomerNotificationsSettingsPage /></ProtectedRoute>} />
+              <Route path="/pdf/:documentType/:id" element={<PdfV2PreviewPage />} />
               <Route path="/print/:documentType/:id" element={<PdfV2PreviewPage />} />
               <Route path="/pdf-preview/:documentType/:id" element={<PdfV2PreviewPage />} />
             </Route>

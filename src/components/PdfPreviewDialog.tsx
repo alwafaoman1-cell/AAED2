@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Check, CloudUpload, Download, Loader2, Maximize2, Minimize2, Printer, X } from "lucide-react";
 import { toast } from "sonner";
 import WhatsAppShareButton from "@/components/whatsapp/WhatsAppShareButton";
-import { buildPdfV2Html, downloadPdfV2, printPdfV2, inferPdfV2Layout, type PdfV2BuildInput, type PdfV2Layout } from "@/lib/pdf-v2";
+import { buildPdfV2Html, downloadPdfV2, openPdfV2Viewer, inferPdfV2Layout, type PdfV2BuildInput, type PdfV2Layout } from "@/lib/pdf-v2";
 
 interface PdfPreviewDialogProps {
   open: boolean;
@@ -104,7 +104,7 @@ export default function PdfPreviewDialog({
   const handlePrint = async () => {
     setBusy(true);
     try {
-      await printPdfV2(input);
+      await openPdfV2Viewer(input);
     } catch (e: any) {
       toast.error(e?.message || "تعذرت الطباعة");
     } finally {

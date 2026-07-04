@@ -1,4 +1,4 @@
-import { downloadPdfV2, openPdfV2Window, printPdfV2 } from "@/lib/pdf-v2";
+import { downloadPdfV2, openPdfV2Viewer, printPdfV2InViewer } from "@/lib/pdf-v2";
 
 export async function printPdfBlob(blob: Blob): Promise<void> {
   const url = URL.createObjectURL(blob);
@@ -28,17 +28,18 @@ export async function printPdfBlob(blob: Blob): Promise<void> {
 }
 
 export function openSanitizedPdfWindow(html: string): Window | null {
-  return openPdfV2Window({
+  void openPdfV2Viewer({
     html,
     meta: {
       documentType: "generic",
       title: "PDF Preview",
     },
   });
+  return null;
 }
 
 export async function openAndPrintWindow(html: string): Promise<void> {
-  await printPdfV2({
+  await printPdfV2InViewer({
     html,
     meta: {
       documentType: "generic",
