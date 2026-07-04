@@ -32,16 +32,23 @@ export const useVehicleMakes = () =>
     },
   });
 
-export const useVehicleModels = (makeId: string | null) =>
+export const useVehicleModels = (makeId: string | string[] | null) =>
   useQuery({
     queryKey: ["vehicle_models", makeId],
-    enabled: !!makeId,
+    enabled: Array.isArray(makeId) ? makeId.length > 0 : !!makeId,
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("vehicle_models")
         .select("*")
-        .eq("make_id", makeId!)
         .order("name", { ascending: true });
+
+      if (Array.isArray(makeId)) {
+        query = query.in("make_id", makeId);
+      } else {
+        query = query.eq("make_id", makeId!);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data as VehicleModel[];
     },

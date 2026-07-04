@@ -40,7 +40,19 @@ export default function VehicleMakeModelPicker({
     () => makes.find((m) => m.name === make || (m.name_ar && m.name_ar === make)),
     [makes, make]
   );
-  const { data: models = [] } = useVehicleModels(selectedMake?.id ?? null);
+  const equivalentMakeIds = useMemo(() => {
+    if (!selectedMake) return [];
+    const selectedNames = new Set(
+      [selectedMake.name, selectedMake.name_ar].filter(Boolean).map((v) => String(v).trim().toLowerCase())
+    );
+    return makes
+      .filter((m) => {
+        const names = [m.name, m.name_ar].filter(Boolean).map((v) => String(v).trim().toLowerCase());
+        return names.some((v) => selectedNames.has(v));
+      })
+      .map((m) => m.id);
+  }, [makes, selectedMake]);
+  const { data: models = [] } = useVehicleModels(equivalentMakeIds.length ? equivalentMakeIds : null);
   const createMake = useCreateMake();
   const createModel = useCreateModel();
 
