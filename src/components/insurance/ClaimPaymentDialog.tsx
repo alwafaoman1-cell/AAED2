@@ -16,6 +16,7 @@ import {
 } from "@/hooks/useClaimPayments";
 import { previewInsurancePayment } from "@/lib/insuranceAccounting";
 import JournalPreview from "@/components/accounting/JournalPreview";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 
 interface Props {
   open: boolean;
@@ -143,9 +144,9 @@ export default function ClaimPaymentDialog({
           <div className="space-y-1.5">
             <Label>المبلغ *</Label>
             <Input
-              type="number" min={0} step="0.01"
+              type="text" inputMode="decimal" min={0} step="0.01"
               value={amount}
-              onChange={(e) => setAmount(Number(e.target.value) || 0)}
+              onChange={(e) => setAmount(parseMoneyInput(e.target.value))}
             />
           </div>
 
@@ -251,4 +252,3 @@ export default function ClaimPaymentDialog({
     </Dialog>
   );
 }
-

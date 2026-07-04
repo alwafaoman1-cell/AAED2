@@ -66,6 +66,8 @@ import Can from "@/components/Can";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { expensesStore } from "@/lib/expensesStore";
 import { isUuid } from "@/lib/uuid";
+import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 
 
 const insuranceCompanies = [
@@ -483,7 +485,7 @@ export default function InsuranceClaimDetail() {
     () => uplItems.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0),
     [uplItems]
   );
-  const effectiveEstimate = estimationType === "upl" ? uplTotal : (parseFloat(estimatedCost) || 0);
+  const effectiveEstimate = estimationType === "upl" ? uplTotal : (parseMoneyInput(estimatedCost) || 0);
 
   // ── Save ──
   const buildPayload = async () => {
@@ -505,7 +507,7 @@ export default function InsuranceClaimDetail() {
       insurance_employee_id: insuranceEmployeeId,
       estimated_amount: effectiveEstimate,
       estimated_cost: effectiveEstimate,
-      approved_amount: parseFloat(approvedAmount) || 0,
+      approved_amount: parseMoneyInput(approvedAmount) || 0,
       vehicle_owner_name: ownerName || null,
       vehicle_owner_phone: ownerPhone || null,
       vehicle_make: vehicleMake || null,
@@ -627,7 +629,7 @@ export default function InsuranceClaimDetail() {
       insurance_employee_id: insuranceEmployeeId,
       estimated_amount: effectiveEstimate,
       estimated_cost: effectiveEstimate,
-      approved_amount: parseFloat(approvedAmount) || 0,
+      approved_amount: parseMoneyInput(approvedAmount) || 0,
       vehicle_owner_name: ownerName || null,
       vehicle_owner_phone: ownerPhone || null,
       vehicle_make: vehicleMake || null,
@@ -699,7 +701,7 @@ export default function InsuranceClaimDetail() {
       // نستمر في الاعتماد لكن نحذر فقط
     }
     updateStatus.mutate(
-      { id, status: "approved", approved_amount: parseFloat(approvedAmount) },
+      { id, status: "approved", approved_amount: parseMoneyInput(approvedAmount) },
       {
         onSuccess: async (verified: any) => {
           hydrateFromVerifiedClaim(verified);
@@ -819,7 +821,7 @@ export default function InsuranceClaimDetail() {
       technician: "",
       serviceType: "إصلاح تأمين",
       status: "بانتظار قطع الغيار",
-      totalCost: parseFloat(approvedAmount) || 0,
+      totalCost: parseMoneyInput(approvedAmount) || 0,
       description: `محوّل من مطالبة تأمين ${claimNumber} — ${company}\nمالك السيارة: ${effectiveCustomerName} (${effectivePhone || "—"})`,
       partsCost: 0,
       laborCost: 0,
@@ -1014,7 +1016,7 @@ export default function InsuranceClaimDetail() {
 
   const buildPdf = useMemo(() => () => {
     const ex: any = existing || {};
-    const subtotal = parseFloat(estimatedCost) || 0;
+    const subtotal = parseMoneyInput(estimatedCost) || 0;
     const cleanEstimateText = (text?: string | null) =>
       (text || "")
         .replace(/\[LPO:[^\]]+\]\n?/gi, "")
@@ -1057,7 +1059,7 @@ export default function InsuranceClaimDetail() {
         quantity: Number(u.quantity) || 1,
         unit_price: Number(u.unit_price) || 0,
       })) : undefined,
-      approvedAmount: approvedAmount ? parseFloat(approvedAmount) : null,
+      approvedAmount: approvedAmount ? parseMoneyInput(approvedAmount) : null,
       deductibleAmount: Number(ex.deductible_amount) || 0,
       notes: [cleanEstimateText(estimateTerms), cleanEstimateText(notes)].filter(Boolean).join("\n\n") || null,
       damagePhotos: damagePhotos || [],
@@ -1113,8 +1115,8 @@ export default function InsuranceClaimDetail() {
     const color = (vehicle as any)?.color || vehicleColor || "—";
 
     const totalPaid = (claimPayments || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
-    const approvedNum = parseFloat(approvedAmount) || 0;
-    const estimatedNum = parseFloat(estimatedCost) || 0;
+    const approvedNum = parseMoneyInput(approvedAmount) || 0;
+    const estimatedNum = parseMoneyInput(estimatedCost) || 0;
     const remaining = Math.max(0, approvedNum - totalPaid);
     const statusLabel = ({ pending: "بانتظار الموافقة", approved: "تمت الموافقة", rejected: "مرفوضة", paid: "مدفوعة", cancelled: "ملغاة" } as any)[status] || status;
 
@@ -1308,17 +1310,18 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       return;
     }
 
-    // مبالغ من المطالبة: المبلغ المعتمد من شركة التأمين يُعتبر "غير شامل ضريبة القيمة المضافة".
-    // النظام يضيف 5% VAT تلقائياً عند إصدار الفاتورة الضريبية.
-    const approvedRaw = parseFloat(lpoAmount) || parseFloat(approvedAmount) || parseFloat(estimatedCost) || 0;
+    // مبالغ من المطالبة: المبلغ المعتمد من شركة التأمين يُعتبر الإجمالي النهائي الشامل للضريبة.
+    // نعرض صافي ما قبل VAT والـ VAT كتفصيل فقط، بدون تغيير إجمالي الاعتماد.
+    const approvedRaw = parseMoneyInput(lpoAmount) || parseMoneyInput(approvedAmount) || parseMoneyInput(estimatedCost) || 0;
     if (approvedRaw <= 0) {
       toast.error("لا يمكن إصدار فاتورة بمبلغ صفر — أدخل المبلغ المعتمد أولاً.");
       return;
     }
     const VAT_RATE = 0.05;
-    const subtotal = +approvedRaw.toFixed(3);
-    const vat = +(subtotal * VAT_RATE).toFixed(3);
-    const total = +(subtotal + vat).toFixed(3);
+    const approvedBreakdown = splitVatInclusiveAmount(approvedRaw, VAT_RATE);
+    const subtotal = approvedBreakdown.subtotalBeforeVat;
+    const vat = approvedBreakdown.vatAmount;
+    const total = approvedBreakdown.totalIncludingVat;
     const invNumber = `TI-${claimNumber.replace(/[^A-Z0-9-]/gi, "")}-${new Date().getFullYear()}`;
     const invoiceIssueDate = resolveInsuranceInvoiceDate();
 
@@ -1717,7 +1720,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">مبلغ LPO</Label>
-                  <Input type="number" step="0.001" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
+                    <Input type="text" inputMode="decimal" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">تاريخ فاتورة التأمين</Label>
@@ -2373,7 +2376,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label>المبلغ المقدر للإصلاح (ر.ع)</Label>
-                  <Input type="number" step="0.01" value={estimatedCost} onChange={(e) => setEstimatedCost(e.target.value)} placeholder="0.00" className="text-lg font-semibold" />
+                        <Input type="text" inputMode="decimal" value={estimatedCost} onChange={(e) => setEstimatedCost(e.target.value)} placeholder="0.00" className="text-lg font-semibold" />
                   <p className="text-xs text-muted-foreground">سيُستخدم في PDF التقدير المُرسل لشركة التأمين.</p>
                 </div>
                 <div className="space-y-1.5">
@@ -2417,7 +2420,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 </div>
                 <div className="space-y-1.5">
                   <Label>المبلغ الموافق عليه (ر.ع) *</Label>
-                  <Input type="number" step="0.01" value={approvedAmount} onChange={(e) => setApprovedAmount(e.target.value)} placeholder="0.00" className="text-lg font-semibold text-success" data-amount="true" />
+                        <Input type="text" inputMode="decimal" value={approvedAmount} onChange={(e) => setApprovedAmount(e.target.value)} placeholder="0.00" className="text-lg font-semibold text-success" data-amount="true" />
                 </div>
             </div>
 
@@ -2481,7 +2484,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </div>
               <div className="p-3 bg-success/10 rounded-lg">
                 <div className="text-xs text-muted-foreground mb-1">المبلغ الموافق</div>
-                <div className="font-bold text-success" data-amount="true">{parseFloat(approvedAmount || "0").toFixed(3)} ر.ع</div>
+                <div className="font-bold text-success" data-amount="true">{parseMoneyInput(approvedAmount || "0").toFixed(3)} ر.ع</div>
               </div>
             </div>
 
@@ -2573,8 +2576,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <PaymentsSection
               claimId={id}
               insuranceCompanyId={companyId}
-              approvedAmount={parseFloat(approvedAmount) || 0}
-              estimatedAmount={parseFloat(estimatedCost) || 0}
+              approvedAmount={parseMoneyInput(approvedAmount) || 0}
+              estimatedAmount={parseMoneyInput(estimatedCost) || 0}
               status={status}
               onAllPaid={() => updateStatus.mutate({ id, status: "paid" }, { onSuccess: () => setStatus("paid") })}
             />
@@ -2808,8 +2811,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           open={showCancelDialog}
           onClose={() => setShowCancelDialog(false)}
           claim={existing}
-          approvedAmount={parseFloat(approvedAmount) || 0}
-          estimatedAmount={parseFloat(estimatedCost) || 0}
+          approvedAmount={parseMoneyInput(approvedAmount) || 0}
+          estimatedAmount={parseMoneyInput(estimatedCost) || 0}
           isSubmitting={updateStatus.isPending}
           onConfirm={async ({ reason }) => {
             await new Promise<void>((resolve, reject) => {
@@ -3052,15 +3055,17 @@ function PaymentsSection({
   const vatRate = taxSettings.taxEnabled === false ? 0 : (Number(taxSettings.vatRate) || 0) / 100;
 
   // الأولوية للفاتورة المرتبطة
+  const fallbackClaimTotal = approvedAmount > 0 ? approvedAmount : estimatedAmount;
+  const fallbackBreakdown = splitVatInclusiveAmount(fallbackClaimTotal, vatRate);
   const approvedNet = linkedInvoice
     ? Number(linkedInvoice.subtotal) || 0
-    : (approvedAmount > 0 ? approvedAmount : estimatedAmount);
+    : fallbackBreakdown.subtotalBeforeVat;
   const vatAmount = linkedInvoice
     ? Number(linkedInvoice.vat) || 0
-    : +(approvedNet * vatRate).toFixed(3);
+    : fallbackBreakdown.vatAmount;
   const baseAmount = linkedInvoice
     ? Number(linkedInvoice.total) || 0
-    : +(approvedNet + vatAmount).toFixed(3);
+    : fallbackBreakdown.totalIncludingVat;
 
   const totalPaid = linkedInvoice
     ? Number(linkedInvoice.paid_amount) || 0

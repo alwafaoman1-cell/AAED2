@@ -653,8 +653,17 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       Promise.resolve(vehicleQuery),
       claimQuery,
     ]);
-    if (custError) throw custError;
-    if (vehError) throw vehError;
+    if (custError) {
+      // Customer names/phones are display metadata. A temporary RLS/schema issue
+      // on customers must not make all job_orders disappear from the work-orders
+      // list or detail route.
+      console.warn("[workOrdersStore] customer metadata lookup skipped:", custError);
+    }
+    if (vehError) {
+      // Vehicle metadata is optional for rendering the list; keep the core order
+      // visible and let the detail page show missing vehicle fields gracefully.
+      console.warn("[workOrdersStore] vehicle metadata lookup skipped:", vehError);
+    }
     if (claimError) {
       // Claim financial metadata is optional for the list view.  A schema/RLS
       // issue on insurance_claims must not hide existing job_orders from the
@@ -664,9 +673,9 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
 
 
     const custMap = new Map<string, any>();
-    (custs || []).forEach((c: any) => custMap.set(c.id, { name: c.name, phone: c.phone }));
+    (custError ? [] : custs || []).forEach((c: any) => custMap.set(c.id, { name: c.name, phone: c.phone }));
     const vehMap = new Map<string, any>();
-    (vehs || []).forEach((v: any) => vehMap.set(v.id, {
+    (vehError ? [] : vehs || []).forEach((v: any) => vehMap.set(v.id, {
       plate: [v.plate_letters, v.plate_number].filter(Boolean).join(" ").trim(),
       brand: v.brand,
       model: v.model,

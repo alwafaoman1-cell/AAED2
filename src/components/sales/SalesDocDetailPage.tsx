@@ -33,6 +33,7 @@ import {
 import SalesStatusBadge from "./SalesStatusBadge";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import TemplatePicker from "@/components/print/TemplatePicker";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { getInvoiceHtml, getQuoteHtml, getTemplateSettings } from "@/lib/pdfGenerator";
 import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
 import UnifiedSendButton from "@/components/UnifiedSendButton";
@@ -649,7 +650,7 @@ function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: (
           </div>
           <div>
             <Label>{isAr ? "القيمة (قابلة للتعديل — يمكن إدخال دفعة جزئية)" : "Amount (editable — partial payments allowed)"}</Label>
-            <Input type="number" step="0.001" value={amount} onChange={(e) => { setAmount(Number(e.target.value)); setMarkFullPaid(false); }} />
+            <Input type="text" inputMode="decimal" step="0.001" value={amount} onChange={(e) => { setAmount(parseMoneyInput(e.target.value)); setMarkFullPaid(false); }} />
           </div>
           <div>
             <Label>{isAr ? "طريقة الدفع" : "Method"}</Label>

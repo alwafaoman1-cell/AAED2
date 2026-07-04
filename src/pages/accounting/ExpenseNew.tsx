@@ -38,6 +38,7 @@ import AiWriteButton from "@/components/ai/AiWriteButton";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Checkbox } from "@/components/ui/checkbox";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 
 type ReportPeriod = "all" | "day" | "month" | "year";
 
@@ -52,6 +53,7 @@ export default function ExpenseNew() {
       voucherSettingsStore.subscribe(() => force((n) => n + 1)),
       expensesStore.subscribe(() => force((n) => n + 1)),
     ];
+    expensesStore.refresh();
     return () => subs.forEach((u) => u());
   }, []);
 
@@ -121,7 +123,7 @@ export default function ExpenseNew() {
   };
 
   const handleSave = async () => {
-    const value = parseFloat(amount);
+    const value = parseMoneyInput(amount);
     if (!value || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
     if (!categoryId) return toast.error("اختر تصنيف المصروف");
     if (!cashboxId) return toast.error("اختر الخزينة");
@@ -543,7 +545,7 @@ export default function ExpenseNew() {
           </div>
           <div className="space-y-2">
             <Label>المبلغ (ر.ع)</Label>
-            <Input type="number" min="0" step="0.001" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.000" />
+            <Input type="text" inputMode="decimal" min="0" step="0.001" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.000" />
           </div>
           <div className="space-y-2">
             <Label>تصنيف المصروف</Label>

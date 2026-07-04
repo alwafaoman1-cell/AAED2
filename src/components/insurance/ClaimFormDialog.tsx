@@ -10,6 +10,7 @@ import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
 import { supabase } from "@/integrations/supabase/client";
 import { isUuid } from "@/lib/uuid";
 import { Link } from "react-router-dom";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 
 interface Props {
   open: boolean;
@@ -59,7 +60,7 @@ export default function ClaimFormDialog({ open, onOpenChange }: Props) {
         job_order_id: jobOrderId,
         claim_number: claimNumber,
         insurance_company: company,
-        estimated_amount: parseFloat(amount),
+        estimated_amount: parseMoneyInput(amount),
         notes: notes || undefined,
       },
       {
@@ -164,7 +165,7 @@ export default function ClaimFormDialog({ open, onOpenChange }: Props) {
           {/* Estimated Amount */}
           <div className="space-y-1.5">
             <Label>المبلغ المقدر (ر.ع)</Label>
-            <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+            <Input type="text" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
           </div>
 
           {/* Notes */}

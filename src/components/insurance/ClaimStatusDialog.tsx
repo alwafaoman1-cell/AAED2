@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useUpdateClaimStatus, InsuranceClaim } from "@/hooks/useInsuranceClaims";
 import { CheckCircle, XCircle, DollarSign } from "lucide-react";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 
 interface Props {
   open: boolean;
@@ -25,7 +26,7 @@ export default function ClaimStatusDialog({ open, onOpenChange, claim }: Props) 
       {
         id: claim.id,
         status,
-        approved_amount: status === "approved" ? parseFloat(approvedAmount || String(claim.estimated_amount)) : undefined,
+        approved_amount: status === "approved" ? parseMoneyInput(approvedAmount || String(claim.estimated_amount)) : undefined,
         rejection_reason: status === "rejected" ? rejectionReason : undefined,
       },
       { onSuccess: () => onOpenChange(false) }
@@ -50,7 +51,8 @@ export default function ClaimStatusDialog({ open, onOpenChange, claim }: Props) 
               <div className="space-y-1.5">
                 <Label>المبلغ المعتمد (ر.ع)</Label>
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={approvedAmount}
                   onChange={(e) => setApprovedAmount(e.target.value)}
                   placeholder={String(claim.estimated_amount)}

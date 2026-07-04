@@ -81,7 +81,7 @@ import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { resolveWorkOrderType } from "@/lib/workOrderType";
 import { archiveWorkOrder } from "@/lib/deletePolicy";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
-import { classifyWorkOrderCosts } from "@/lib/workOrderCosting";
+import { classifyWorkOrderCosts, splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
@@ -362,6 +362,18 @@ export default function WorkOrderDetail() {
   const photos = order.photos || [];
   // رقم العرض الاحترافي للأمر (WO-YYYY-NNNNN). يُستخدم في كل الواجهات والـPDF بدل الـUUID.
   const displayNo = order.displayNumber || (UUID_RE.test(order.id) ? `WO-${order.id.slice(0, 8).toUpperCase()}` : order.id);
+  const insuranceApprovedBreakdown = splitVatInclusiveAmount(order.insuranceApprovedAmount || 0, 0.05);
+  const hasInsuranceApprovedAmount = insuranceApprovedBreakdown.totalIncludingVat > 0;
+  const displayedClaimTotal =
+    hasInsuranceApprovedAmount
+      ? insuranceApprovedBreakdown.totalIncludingVat
+      : Number(order.totalCost) || 0;
+  const displayedLaborCharges =
+    Number(order.laborCost) > 0
+      ? Number(order.laborCost)
+      : hasInsuranceApprovedAmount && Number(order.partsCost || 0) <= 0
+        ? insuranceApprovedBreakdown.subtotalBeforeVat
+        : 0;
 
   async function handlePrintWorkOrder() {
     // Pre-build tracking QR into the cache before sync HTML render
@@ -953,20 +965,26 @@ export default function WorkOrderDetail() {
         <Section icon={<ShieldCheck size={14} />} title="التأمين والتكلفة">
           <Row label="شركة التأمين" value={order.insurance} />
           <Row label="رقم المطالبة" value={order.claimNumber} mono />
-          {(order.insuranceApprovedAmount ?? 0) > 0 && (
+          {hasInsuranceApprovedAmount && (
             <Row
               label="Insurance Approved Amount"
-              value={formatCurrencyEnglish(order.insuranceApprovedAmount || 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")}
+              value={formatCurrencyEnglish(insuranceApprovedBreakdown.totalIncludingVat, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "OMR")}
               highlight
               amount
             />
           )}
+          {hasInsuranceApprovedAmount && (
+            <>
+              <Row label="Subtotal before VAT" value={formatCurrencyEnglish(insuranceApprovedBreakdown.subtotalBeforeVat, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "OMR")} amount />
+              <Row label="VAT 5%" value={formatCurrencyEnglish(insuranceApprovedBreakdown.vatAmount, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "OMR")} amount />
+            </>
+          )}
           {order.lumpSumNotItemized && (
             <Row label="Lump Sum" value="Lump Sum approval, not itemized" />
           )}
-          <Row label="أجور العمالة" value={formatCurrencyEnglish(order.laborCost ?? 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")} amount />
+          <Row label="Labor Charges" value={formatCurrencyEnglish(displayedLaborCharges, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "OMR")} amount />
           <Row label="قطع الغيار" value={formatCurrencyEnglish(order.partsCost ?? 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")} amount />
-          <Row label="الإجمالي" value={formatCurrencyEnglish(order.totalCost, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")} highlight amount />
+          <Row label="Total Including VAT" value={formatCurrencyEnglish(displayedClaimTotal, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "OMR")} highlight amount />
         </Section>
       </div>
 

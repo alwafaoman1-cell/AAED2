@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyWorkOrderCosts, normalizeInsuranceApprovalAmount, roundMoney } from "@/lib/workOrderCosting";
+import { splitVatInclusiveAmount, classifyWorkOrderCosts, normalizeInsuranceApprovalAmount, roundMoney } from "@/lib/workOrderCosting";
 
 describe("work order insurance costing", () => {
   it("keeps exact entered money values stable", () => {
@@ -51,5 +51,23 @@ describe("work order insurance costing", () => {
     });
     expect(withExplicitPart.partsCost).toBe(1200);
     expect(withExplicitPart.totalCost).toBe(1200);
+  });
+
+  it("treats entered claim approval amounts as VAT-inclusive final totals", () => {
+    expect(splitVatInclusiveAmount(2500)).toEqual({
+      subtotalBeforeVat: 2380.95,
+      vatAmount: 119.05,
+      totalIncludingVat: 2500,
+    });
+    expect(splitVatInclusiveAmount("1,200.00")).toEqual({
+      subtotalBeforeVat: 1142.86,
+      vatAmount: 57.14,
+      totalIncludingVat: 1200,
+    });
+    expect(splitVatInclusiveAmount(100)).toEqual({
+      subtotalBeforeVat: 95.24,
+      vatAmount: 4.76,
+      totalIncludingVat: 100,
+    });
   });
 });

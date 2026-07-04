@@ -4,6 +4,7 @@
 import { getTemplateSettings, type PdfTemplateSettings } from "./pdfGenerator";
 import { formatDateLatin } from "./numberUtils";
 import { durationLevel, durationHex } from "./claimDurationStatus";
+import { splitVatInclusiveAmount } from "./workOrderCosting";
 
 export type CollectionStatus = "paid" | "partial" | "pending" | "overdue" | "n/a";
 
@@ -107,9 +108,17 @@ export function getInsuranceWorkshopReportHtml(data: WorkshopReportData): string
   const active = order.filter((k) => cols[k]);
 
   const totalEstimated = rows.reduce((a, r) => a + (r.estimatedAmount || 0), 0);
-  const totalApproved = rows.reduce((a, r) => a + (r.approvedAmount || 0), 0);
-  const totalVat = +(totalApproved * vatRate).toFixed(3);
-  const totalWithVat = +(totalApproved + totalVat).toFixed(3);
+  const totalBreakdown = rows.reduce((a, r) => {
+    const breakdown = splitVatInclusiveAmount(r.approvedAmount || 0, vatRate);
+    return {
+      subtotal: a.subtotal + breakdown.subtotalBeforeVat,
+      vat: a.vat + breakdown.vatAmount,
+      total: a.total + breakdown.totalIncludingVat,
+    };
+  }, { subtotal: 0, vat: 0, total: 0 });
+  const totalApproved = +totalBreakdown.subtotal.toFixed(3);
+  const totalVat = +totalBreakdown.vat.toFixed(3);
+  const totalWithVat = +totalBreakdown.total.toFixed(3);
   const totalPaid = rows.reduce((a, r) => a + (r.paidAmount || 0), 0);
   const delivered = rows.filter((r) => r.deliveredDate).length;
   const inProgress = rows.length - delivered;
@@ -124,9 +133,10 @@ export function getInsuranceWorkshopReportHtml(data: WorkshopReportData): string
   };
 
   const renderCell = (k: WorkshopColumnKey, r: WorkshopReportRow): string => {
-    const approved = r.approvedAmount || 0;
-    const vat = +(approved * vatRate).toFixed(3);
-    const gross = +(approved + vat).toFixed(3);
+    const breakdown = splitVatInclusiveAmount(r.approvedAmount || 0, vatRate);
+    const approved = breakdown.subtotalBeforeVat;
+    const vat = breakdown.vatAmount;
+    const gross = breakdown.totalIncludingVat;
     const lvl = durationLevel(r.inWorkshopDays);
     const dCol = durationHex(lvl);
     const col = r.collectionStatus ?? "n/a";

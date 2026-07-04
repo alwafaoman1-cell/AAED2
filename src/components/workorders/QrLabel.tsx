@@ -1,4 +1,5 @@
 import { QRCodeSVG } from "qrcode.react";
+import { useEffect, useState } from "react";
 import { Printer, X, Lock, Copy, ExternalLink, Download, Shield, Car } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -7,6 +8,7 @@ import { openAndPrintWindow } from "@/lib/safePdfWindow";
 import { getTrackingUrl } from "@/lib/pdfGenerator";
 import { resolveWorkOrderType, workOrderTypeLabel } from "@/lib/workOrderType";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   order: WorkOrder | null;
@@ -15,9 +17,28 @@ interface Props {
 }
 
 export default function QrLabel({ order, open, onClose }: Props) {
+  const [portalToken, setPortalToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPortalToken() {
+      setPortalToken(null);
+      if (!order?.cloudId || !open) return;
+      const { data } = await supabase
+        .from("customer_portal_tokens")
+        .select("token")
+        .eq("job_order_id", order.cloudId)
+        .maybeSingle();
+      if (!cancelled) setPortalToken((data as any)?.token || null);
+    }
+    loadPortalToken();
+    return () => { cancelled = true; };
+  }, [order?.cloudId, open]);
+
   if (!order) return null;
   const orderType = resolveWorkOrderType(order);
-  const trackUrl = getTrackingUrl(order.trackingToken);
+  const effectiveTrackingToken = portalToken || order.trackingToken;
+  const trackUrl = getTrackingUrl(effectiveTrackingToken);
   const effectivePwd = (order.phone || "").trim();
   const typeColor = orderType === "insurance" ? "#0369a1" : "#047857";
   const TypeIcon = orderType === "insurance" ? Shield : Car;

@@ -174,9 +174,26 @@ export function detectDuplicates(entity: ImportExportEntity, rows: Record<string
   return duplicates;
 }
 
+function readImportField(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") return String(value).trim();
+  }
+  return "";
+}
+
 function parseImportAmount(value: unknown): number {
   const cleaned = String(value ?? "").replace(/[^\d.-]/g, "");
   return Number(cleaned) || 0;
+}
+
+function safeImportedAttachment(value: unknown): string | undefined {
+  const raw = String(value || "").trim();
+  if (!raw) return undefined;
+  // Large inline camera photos in backup JSON can exceed Supabase row/request
+  // limits. Do not let attachments block the accounting expense itself.
+  if (raw.startsWith("data:") && raw.length > 200_000) return undefined;
+  return raw;
 }
 
 function parseImportDate(value: unknown): string {
@@ -206,13 +223,13 @@ export async function importExpensesRows(rows: Record<string, string>[]) {
   const existing = new Set(expensesStore.getAll().map((e) => (e.voucherNumber || "").trim().toLowerCase()).filter(Boolean));
 
   for (const [index, row] of rows.entries()) {
-    const amount = parseImportAmount(row.amount);
+    const amount = parseImportAmount(readImportField(row, "amount"));
     if (amount <= 0) {
       errors.push({ rowIndex: index + 1, error: "Amount must be greater than zero" });
       continue;
     }
 
-    const voucherNumber = (row.voucher_number || `EXP-IMP-${Date.now()}-${index + 1}`).trim();
+    const voucherNumber = (readImportField(row, "voucher_number", "voucherNumber") || `EXP-IMP-${Date.now()}-${index + 1}`).trim();
     const voucherKey = voucherNumber.toLowerCase();
     if (existing.has(voucherKey)) {
       errors.push({ rowIndex: index + 1, error: "Expense voucher already exists" });
@@ -222,17 +239,21 @@ export async function importExpensesRows(rows: Record<string, string>[]) {
     const record: ExpenseRecord = {
       id: crypto.randomUUID(),
       voucherNumber,
-      date: parseImportDate(row.date),
+      date: parseImportDate(readImportField(row, "date")),
       amount,
-      categoryId: "",
-      categoryName: row.category_name || "Imported",
-      cashboxId: "",
-      paymentMethod: parseImportPaymentMethod(row.payment_method),
-      beneficiary: row.beneficiary || undefined,
-      description: row.description || undefined,
-      photo: row.photo || undefined,
-      linkedWorkOrderId: row.linked_work_order_id || undefined,
-      linkedVehiclePlate: row.linked_vehicle_plate || undefined,
+      categoryId: readImportField(row, "category_id", "categoryId"),
+      categoryName: readImportField(row, "category_name", "categoryName") || "Imported",
+      cashboxId: readImportField(row, "cashbox_id", "cashboxId"),
+      cashboxName: readImportField(row, "cashbox_name", "cashboxName") || undefined,
+      paymentMethod: parseImportPaymentMethod(readImportField(row, "payment_method", "paymentMethod")),
+      beneficiary: readImportField(row, "beneficiary") || undefined,
+      description: readImportField(row, "description") || undefined,
+      photo: safeImportedAttachment(readImportField(row, "photo")),
+      linkedWorkOrderId: readImportField(row, "linked_work_order_id", "linkedWorkOrderId") || undefined,
+      linkedVehiclePlate: readImportField(row, "linked_vehicle_plate", "linkedVehiclePlate") || undefined,
+      reference: readImportField(row, "reference") || undefined,
+      supplierTaxNumber: readImportField(row, "supplierTaxNumber", "supplier_tax_number") || undefined,
+      supplierInvoiceNumber: readImportField(row, "supplierInvoiceNumber", "supplier_invoice_number") || undefined,
       createdAt: new Date().toISOString(),
     };
 
@@ -245,6 +266,7 @@ export async function importExpensesRows(rows: Record<string, string>[]) {
     }
   }
 
+  expensesStore.refresh();
   return { saved, errors };
 }
 

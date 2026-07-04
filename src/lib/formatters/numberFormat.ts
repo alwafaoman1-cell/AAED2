@@ -26,6 +26,13 @@ export function normalizeNumericInput(value: unknown): string {
     .replace(/,/g, "");
 }
 
+export function parseMoneyInput(value: unknown): number {
+  const normalized = normalizeNumericInput(value);
+  if (!normalized || normalized === "-" || normalized === "+" || normalized === ".") return 0;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export function normalizePhoneInput(value: unknown): string {
   return toEnglishDigits(value).replace(/[^\d+]/g, "");
 }

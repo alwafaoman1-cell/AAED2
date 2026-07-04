@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
+import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 
 const VAT_RATE = 0.05;
 
@@ -64,9 +65,10 @@ export async function bulkCreateSeparateInvoices(
     }
 
     const amount = Number(claim.approved_amount) || Number(claim.estimated_amount) || 0;
-    const subtotal = amount;
-    const vat = +(subtotal * VAT_RATE).toFixed(3);
-    const total = +(subtotal + vat).toFixed(3);
+    const breakdown = splitVatInclusiveAmount(amount, VAT_RATE);
+    const subtotal = breakdown.subtotalBeforeVat;
+    const vat = breakdown.vatAmount;
+    const total = breakdown.totalIncludingVat;
     // تاريخ التسليم الأصلي للمطالبة (الفواتير القديمة تأخذ تاريخها الفعلي)
     const issuedAt = (claim as any).delivered_at || claim.updated_at || new Date().toISOString();
 
@@ -189,7 +191,7 @@ export async function bulkCreateGroupedInvoices(
     if (!eligible.length) continue;
 
     const items = eligible.map((c) => {
-      const amt = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
+      const amt = splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, VAT_RATE).subtotalBeforeVat;
       const plate = (c as any).vehicle_plate ?? c.vehicle?.plate_number ?? "";
       return {
         description: `مطالبة ${c.claim_number}${plate ? ` — ${plate}` : ""}`,
@@ -197,9 +199,9 @@ export async function bulkCreateGroupedInvoices(
         unit_price: amt,
       };
     });
-    const subtotal = items.reduce((s, i) => s + i.unit_price * i.quantity, 0);
-    const vat = +(subtotal * VAT_RATE).toFixed(3);
-    const total = +(subtotal + vat).toFixed(3);
+    const subtotal = +items.reduce((s, i) => s + i.unit_price * i.quantity, 0).toFixed(2);
+    const total = +eligible.reduce((s, c) => s + splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, VAT_RATE).totalIncludingVat, 0).toFixed(2);
+    const vat = +(total - subtotal).toFixed(2);
     // Latest delivery date in the group
     const issuedAt = eligible
       .map((c) => (c as any).delivered_at)

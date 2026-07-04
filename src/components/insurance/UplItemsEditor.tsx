@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 
 export interface UplItem {
   description: string;
@@ -62,16 +63,16 @@ export default function UplItemsEditor({ items, onChange, readOnly }: Props) {
                 />
                 <Input
                   className="col-span-2 text-center"
-                  type="number" min="0" step="1"
+                  type="text" inputMode="decimal" min="0" step="1"
                   value={it.quantity}
-                  onChange={(e) => update(i, { quantity: parseFloat(e.target.value) || 0 })}
+                  onChange={(e) => update(i, { quantity: parseMoneyInput(e.target.value) })}
                   disabled={readOnly}
                 />
                 <Input
                   className="col-span-2 text-center"
-                  type="number" min="0" step="0.01"
+                  type="text" inputMode="decimal" min="0" step="0.01"
                   value={it.unit_price}
-                  onChange={(e) => update(i, { unit_price: parseFloat(e.target.value) || 0 })}
+                  onChange={(e) => update(i, { unit_price: parseMoneyInput(e.target.value) })}
                   disabled={readOnly}
                 />
                 <div className="col-span-1 text-center font-semibold text-sm">

@@ -15,6 +15,7 @@ import VehiclePickerDialog from "./VehiclePickerDialog";
 import { saveVehicleToCloud, vehiclesStore } from "@/lib/vehiclesStore";
 import { getWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
 import { stockMovementsStore } from "@/lib/stockMovementsStore";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -660,11 +661,12 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
                     </td>
                     <td className="py-1.5 px-2">
                       <Input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         min={0}
                         step="0.01"
                         value={i.quantity}
-                        onChange={(e) => updateItem(i.id, { quantity: parseFloat(e.target.value) || 0 })}
+                        onChange={(e) => updateItem(i.id, { quantity: parseMoneyInput(e.target.value) })}
                         className={`h-9 text-center ${overStock ? "border-warning" : ""}`}
                       />
                       {overStock && (
@@ -673,9 +675,9 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
                         </div>
                       )}
                     </td>
-                    <td className="py-1.5 px-2"><Input type="number" min={0} step="0.001" value={i.unitPrice} onChange={(e) => updateItem(i.id, { unitPrice: parseFloat(e.target.value) || 0 })} className="h-9 text-center" /></td>
-                    <td className="py-1.5 px-2"><Input type="number" min={0} max={100} value={i.discount} onChange={(e) => updateItem(i.id, { discount: parseFloat(e.target.value) || 0 })} className="h-9 text-center" /></td>
-                    <td className="py-1.5 px-2"><Input type="number" min={0} max={100} value={i.tax} onChange={(e) => updateItem(i.id, { tax: parseFloat(e.target.value) || 0 })} className="h-9 text-center" /></td>
+                    <td className="py-1.5 px-2"><Input type="text" inputMode="decimal" min={0} step="0.001" value={i.unitPrice} onChange={(e) => updateItem(i.id, { unitPrice: parseMoneyInput(e.target.value) })} className="h-9 text-center" /></td>
+                    <td className="py-1.5 px-2"><Input type="text" inputMode="decimal" min={0} max={100} value={i.discount} onChange={(e) => updateItem(i.id, { discount: parseMoneyInput(e.target.value) })} className="h-9 text-center" /></td>
+                    <td className="py-1.5 px-2"><Input type="text" inputMode="decimal" min={0} max={100} value={i.tax} onChange={(e) => updateItem(i.id, { tax: parseMoneyInput(e.target.value) })} className="h-9 text-center" /></td>
                     <td className="py-1.5 px-2 text-center text-xs font-medium text-foreground">{fmt(lineTotal)} ر.ع</td>
                     <td className="py-1.5 px-2 text-center"><button onClick={() => removeItem(i.id)} className="p-1.5 rounded-md hover:bg-destructive/10 text-destructive"><Trash2 size={14} /></button></td>
                   </tr>
@@ -696,7 +698,7 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
           <div className="flex justify-between"><span className="text-muted-foreground">المجموع الفرعي / Subtotal</span><span className="text-foreground font-medium">{fmt(totals.subtotal)} ر.ع</span></div>
           <div className="flex items-center justify-between gap-2">
             <span className="text-muted-foreground">خصم إجمالي %</span>
-            <Input type="number" min={0} max={100} value={form.globalDiscount} onChange={(e) => setForm({ ...form, globalDiscount: parseFloat(e.target.value) || 0 })} className="h-8 w-24 text-center" />
+            <Input type="text" inputMode="decimal" min={0} max={100} value={form.globalDiscount} onChange={(e) => setForm({ ...form, globalDiscount: parseMoneyInput(e.target.value) })} className="h-8 w-24 text-center" />
           </div>
           <div className="flex justify-between"><span className="text-muted-foreground">إجمالي الخصم / Discount</span><span className="text-destructive font-medium">- {fmt(totals.discountTotal)} ر.ع</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">الضريبة / VAT</span><span className="text-foreground font-medium">{fmt(totals.taxTotal)} ر.ع</span></div>

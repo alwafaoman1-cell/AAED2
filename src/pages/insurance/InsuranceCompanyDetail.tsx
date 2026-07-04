@@ -25,6 +25,7 @@ import { journalStore } from "@/lib/journalStore";
 import JournalPreview, { entryToPreviewLine } from "@/components/accounting/JournalPreview";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import InsuranceEmployeesManager from "@/components/insurance/InsuranceEmployeesManager";
+import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 
 const CLAIM_STATUS_AR: Record<string, string> = {
   pending: "بانتظار الاعتماد",
@@ -105,9 +106,11 @@ export default function InsuranceCompanyDetail() {
   const claimReceivable = (c: any): number => {
     const inv = claimInvoiceMap.get(c.id);
     if (inv) return Number(inv.total) || 0;
-    const net = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
-    return net > 0 ? +(net * (1 + vatRate)).toFixed(3) : 0;
+    return splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate).totalIncludingVat;
   };
+
+  const claimApprovalBreakdown = (c: any) =>
+    splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate);
 
   const totalApproved = claims.reduce((s, c) => s + claimReceivable(c), 0);
   const totalPaid = (payments ?? [])
@@ -525,8 +528,9 @@ export default function InsuranceCompanyDetail() {
                 const cPays = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
                 const paid = cPays.reduce((s, p) => s + Number(p.amount), 0);
                 const inv = claimInvoiceMap.get(c.id);
-                const net = inv ? Number(inv.subtotal) || 0 : (Number(c.approved_amount) || Number(c.estimated_amount) || 0);
-                const vat = inv ? Number(inv.vat) || 0 : +(net * vatRate).toFixed(3);
+                const fallback = claimApprovalBreakdown(c);
+                const net = inv ? Number(inv.subtotal) || 0 : fallback.subtotalBeforeVat;
+                const vat = inv ? Number(inv.vat) || 0 : fallback.vatAmount;
                 const gross = claimReceivable(c);
                 const rem = +(gross - paid).toFixed(3);
                 return {
@@ -580,8 +584,9 @@ export default function InsuranceCompanyDetail() {
                 const cPayments = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
                 const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
                 const inv = claimInvoiceMap.get(c.id);
-                const net = inv ? Number(inv.subtotal) || 0 : (Number(c.approved_amount) || Number(c.estimated_amount) || 0);
-                const vat = inv ? Number(inv.vat) || 0 : +(net * vatRate).toFixed(3);
+                const fallback = claimApprovalBreakdown(c);
+                const net = inv ? Number(inv.subtotal) || 0 : fallback.subtotalBeforeVat;
+                const vat = inv ? Number(inv.vat) || 0 : fallback.vatAmount;
                 const gross = claimReceivable(c);
                 const rem = +(gross - paid).toFixed(3);
                 const ageRow = agingRows.find((r) => r.claimId === c.id);
@@ -631,8 +636,9 @@ export default function InsuranceCompanyDetail() {
                 const cPays = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
                 const paid = cPays.reduce((s, p) => s + Number(p.amount), 0);
                 const inv = claimInvoiceMap.get(c.id);
-                const net = inv ? Number(inv.subtotal) || 0 : (Number(c.approved_amount) || Number(c.estimated_amount) || 0);
-                const vat = inv ? Number(inv.vat) || 0 : +(net * vatRate).toFixed(3);
+                const fallback = claimApprovalBreakdown(c);
+                const net = inv ? Number(inv.subtotal) || 0 : fallback.subtotalBeforeVat;
+                const vat = inv ? Number(inv.vat) || 0 : fallback.vatAmount;
                 const gross = claimReceivable(c);
                 return { net: a.net + net, vat: a.vat + vat, gross: a.gross + gross, paid: a.paid + paid };
               }, { net: 0, vat: 0, gross: 0, paid: 0 });

@@ -2,6 +2,7 @@
 // Uses shared template settings for logo, colors, stamp.
 import { getTemplateSettings, type PdfTemplateSettings } from "./pdfGenerator";
 import { renderWithCustomTemplate } from "./printTemplates/resolver";
+import { splitVatInclusiveAmount } from "./workOrderCosting";
 
 export interface StatementClaim {
   claim_number: string;
@@ -81,8 +82,7 @@ export function getInsuranceStatementHtml(data: StatementData): string {
   const fallbackDebit0 = data.claims
     .filter((c) => !invoicedClaimSet0.has((c.claim_number ?? "").trim()))
     .reduce((s, c) => {
-      const net = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
-      return s + (net > 0 ? +(net * (1 + vatRate0)).toFixed(3) : 0);
+      return s + splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate0).totalIncludingVat;
     }, 0);
   const totalInvoiced = +(invoiceDebit0 + fallbackDebit0).toFixed(3);
   const totalPaid = data.payments
@@ -102,7 +102,7 @@ export function getInsuranceStatementHtml(data: StatementData): string {
 
   // ── Build unified ledger — Single Source of Truth ──
   // Debit  = invoice.total (VAT-inclusive) for every active (non-cancelled) invoice.
-  //          Claims without an invoice fall back to approved/estimated + VAT.
+  //          Claims without an invoice fall back to approved/estimated as a VAT-inclusive total.
   // Credit = every non-bounced claim payment.
   type Row = { date: string; ref: string; desc: string; debit: number; credit: number };
   const rows: Row[] = [];
@@ -127,15 +127,13 @@ export function getInsuranceStatementHtml(data: StatementData): string {
 
   data.claims.forEach((c) => {
     if (invoicedClaimNumbers.has((c.claim_number ?? "").trim())) return; // عرض المطالبة عن طريق فاتورتها فقط
-    const net = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
-    if (net <= 0) return;
-    const vat = +(net * vatRate).toFixed(3);
-    const gross = +(net + vat).toFixed(3);
+    const fallback = splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate);
+    if (fallback.totalIncludingVat <= 0) return;
     rows.push({
       date: c.created_at,
       ref: c.claim_number,
-      desc: `مطالبة (بدون فاتورة) — صافي ${fmt(net)} + VAT ${fmt(vat)}`,
-      debit: gross,
+      desc: `Claim without invoice — Subtotal ${fmt(fallback.subtotalBeforeVat)} + VAT ${fmt(fallback.vatAmount)}`,
+      debit: fallback.totalIncludingVat,
       credit: 0,
     });
   });

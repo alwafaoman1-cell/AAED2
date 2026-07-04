@@ -39,6 +39,53 @@ export function normalizeInsuranceApprovalAmount(value: unknown): number {
   return rounded;
 }
 
+export function splitVatInclusiveAmount(totalIncludingVat: unknown, vatRate = 0.05): {
+  subtotalBeforeVat: number;
+  vatAmount: number;
+  totalIncludingVat: number;
+} {
+  const total = normalizeInsuranceApprovalAmount(totalIncludingVat);
+  const rate = Number(vatRate);
+  if (!total || !Number.isFinite(rate) || rate <= 0) {
+    return {
+      subtotalBeforeVat: total,
+      vatAmount: 0,
+      totalIncludingVat: total,
+    };
+  }
+
+  const subtotalBeforeVat = roundMoney(total / (1 + rate), 2);
+  const vatAmount = roundMoney(total - subtotalBeforeVat, 2);
+  return {
+    subtotalBeforeVat,
+    vatAmount,
+    totalIncludingVat: total,
+  };
+}
+
+export function calculateVatExclusiveAmount(subtotalBeforeVat: unknown, vatRate = 0.05): {
+  subtotalBeforeVat: number;
+  vatAmount: number;
+  totalIncludingVat: number;
+} {
+  const subtotal = normalizeInsuranceApprovalAmount(subtotalBeforeVat);
+  const rate = Number(vatRate);
+  if (!subtotal || !Number.isFinite(rate) || rate <= 0) {
+    return {
+      subtotalBeforeVat: subtotal,
+      vatAmount: 0,
+      totalIncludingVat: subtotal,
+    };
+  }
+
+  const vatAmount = roundMoney(subtotal * rate, 2);
+  return {
+    subtotalBeforeVat: subtotal,
+    vatAmount,
+    totalIncludingVat: roundMoney(subtotal + vatAmount, 2),
+  };
+}
+
 function amountsMatch(a: unknown, b: unknown, tolerance = 0.02): boolean {
   const left = roundMoney(a);
   const right = roundMoney(b);

@@ -30,6 +30,7 @@ import { ensureVehicleForCustomer, findExistingVehicle, type VehicleIdentityMatc
 import { isUuid } from "@/lib/uuid";
 import { toE164 } from "@/lib/phoneUtils";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 
 // ───────────────────── أنواع داخلية ─────────────────────
 // ⚠️ هذه الصفحة من منظور "الكراج": نستلم سيارة من شركة تأمين ونطالبها بالمستحقات.
@@ -224,7 +225,7 @@ export default function NewInsuranceClaim() {
     () => draft.uplItems.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0),
     [draft.uplItems]
   );
-  const finalEstimate = draft.estimationType === "upl" ? uplTotal : Number(draft.estimatedCost) || 0;
+  const finalEstimate = draft.estimationType === "upl" ? uplTotal : parseMoneyInput(draft.estimatedCost);
   const vatAmount = finalEstimate * 0.05;
   const finalWithVat = finalEstimate + vatAmount;
 
@@ -240,7 +241,7 @@ export default function NewInsuranceClaim() {
         (draft.customerId || draft.ownerName.trim())
       );
       case 2: return !!draft.incidentDate;
-      case 3: return draft.estimationType === "upl" ? draft.uplItems.length > 0 && uplTotal > 0 : Number(draft.estimatedCost) > 0;
+      case 3: return draft.estimationType === "upl" ? draft.uplItems.length > 0 && uplTotal > 0 : parseMoneyInput(draft.estimatedCost) > 0;
       case 4: return true;
       default: return false;
     }
@@ -269,7 +270,7 @@ export default function NewInsuranceClaim() {
       case 2: return draft.incidentDate ? null : "حدد تاريخ التقدير";
       case 3: return draft.estimationType === "upl"
         ? (draft.uplItems.length > 0 && uplTotal > 0 ? null : "أضف بنود التسعير بقيم صحيحة")
-        : (Number(draft.estimatedCost) > 0 ? null : "أدخل المبلغ المطالب به");
+        : (parseMoneyInput(draft.estimatedCost) > 0 ? null : "أدخل المبلغ المطالب به");
       default: return null;
     }
   };
@@ -1174,7 +1175,7 @@ function Step3({
         <div className="space-y-1.5">
           <Label>المبلغ المطالب به (ر.ع) *</Label>
           <Input
-            type="number"
+            type="text"
             value={draft.estimatedCost}
             onChange={(e) => update({ estimatedCost: e.target.value })}
             placeholder="0.000"
