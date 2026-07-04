@@ -192,14 +192,30 @@ export default function WorkOrderDetail() {
             id, order_number, status, description, diagnosis,
             labor_cost, parts_cost, final_total, subtotal, created_at,
             insurance_claim_number, insurance_company, insurance_approved,
-            work_order_type, claim_id, tracking_token, tracking_expires_at, archived_at,
+            work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at,
             parts_needed, work_items,
             customer:customers(name, phone),
             vehicle:vehicles(brand, model, plate_number, year, color, vin_number)
           `);
-        const { data, error } = isUuid
+        let { data, error } = isUuid
           ? await q.eq("id", id).maybeSingle()
           : await q.ilike("order_number", woMatch![0]).maybeSingle();
+        if (error || !data) {
+          const baseQuery = supabase
+            .from("job_orders")
+            .select(`
+              id, order_number, status, description, diagnosis,
+              labor_cost, parts_cost, final_total, subtotal, created_at,
+              insurance_claim_number, insurance_company, insurance_approved,
+              work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at,
+              parts_needed, work_items
+            `);
+          const baseResult = isUuid
+            ? await baseQuery.eq("id", id).maybeSingle()
+            : await baseQuery.ilike("order_number", woMatch![0]).maybeSingle();
+          data = baseResult.data as any;
+          error = baseResult.error as any;
+        }
         if (!error && data) {
           let claimInfo: { approvedAmount?: number | null; estimatedAmount?: number | null; estimationType?: string | null } | null = null;
           if ((data as any).claim_id) {
@@ -225,8 +241,24 @@ export default function WorkOrderDetail() {
             partsNeeded: Array.isArray((data as any).parts_needed) ? (data as any).parts_needed : [],
             workItems: Array.isArray((data as any).work_items) ? (data as any).work_items : [],
           });
-          const v: any = (data as any).vehicle || {};
-          const c: any = (data as any).customer || {};
+          let v: any = (data as any).vehicle || {};
+          let c: any = (data as any).customer || {};
+          if (!c.name && (data as any).customer_id) {
+            const { data: customerRow } = await supabase
+              .from("customers")
+              .select("name, phone")
+              .eq("id", (data as any).customer_id)
+              .maybeSingle();
+            c = customerRow || c;
+          }
+          if (!v.plate_number && (data as any).vehicle_id) {
+            const { data: vehicleRow } = await supabase
+              .from("vehicles")
+              .select("brand, model, plate_number, year, color, vin_number")
+              .eq("id", (data as any).vehicle_id)
+              .maybeSingle();
+            v = vehicleRow || v;
+          }
           const adapted: WorkOrder = {
             id: (data as any).order_number || (data as any).id,
             cloudId: (data as any).id,
