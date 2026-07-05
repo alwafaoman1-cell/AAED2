@@ -4,6 +4,7 @@ import type { PdfV2BuildInput, PdfV2Layout, PdfV2Meta } from "./documentTypes";
 import { escapeHtml, toEnglishDigits } from "./pdfFormatters";
 import { normalizePdfV2Meta } from "./pdfTemplates";
 import { pdfV2Theme } from "./pdfTheme";
+import { buildPdfLayoutRuntimeCss, getPdfLayoutSettings, type PdfLayoutSettings } from "../pdfLayoutSettings";
 
 function stripLegacyPrintArtifacts(html: string) {
   return html
@@ -24,8 +25,20 @@ function documentLabel(meta: PdfV2Meta) {
   return escapeHtml(title);
 }
 
+function shouldShowCompanyDetail(line: string, settings: PdfLayoutSettings): boolean {
+  const value = (line || "").toLowerCase();
+  if (!settings.showCr && /(cr|commercial|سجل|السجل|تجاري|التجاري)/i.test(line)) return false;
+  if (!settings.showVat && /(vat|tax|ضريب|الضريبي|القيمة المضافة)/i.test(line)) return false;
+  if (!settings.showEmail && /(@|email|e-mail|بريد|الإلكتروني)/i.test(line)) return false;
+  if (!settings.showPhone && /(\+?\d[\d\s-]{5,}|phone|mobile|tel|هاتف|جوال|اتصال)/i.test(line)) return false;
+  if (!settings.showAddress && /(oman|muscat|address|سلطنة|عمان|مسقط|عنوان|شارع|منطقة)/i.test(line)) return false;
+  return Boolean(value.trim());
+}
+
 export function buildPdfV2Html(input: PdfV2BuildInput): string {
   const meta = normalizePdfV2Meta(input.meta);
+  const runtimeLayout = getPdfLayoutSettings();
+  const companyDetails = (meta.companyDetails || []).filter((line) => shouldShowCompanyDetail(line, runtimeLayout));
   const layoutName: PdfV2Layout = meta.layout || inferPdfV2Layout(input.html);
   const layout = getPdfV2Layout(layoutName);
   const dir = meta.language === "en" ? "ltr" : "rtl";
@@ -79,6 +92,7 @@ export function buildPdfV2Html(input: PdfV2BuildInput): string {
     .no-print,.print-bar,.pdf-v2-toolbar{display:none!important}
     .page{width:auto!important;min-height:auto!important;margin:0!important;padding:0!important;box-shadow:none!important;overflow:visible!important}
     ${qrMode ? `.pdf-v2-header,.pdf-v2-footer{display:none}.pdf-v2-page{display:flex;align-items:center;justify-content:center;padding:${pagePadding};min-height:${layout.heightMm}mm}` : ""}
+    ${buildPdfLayoutRuntimeCss()}
     @media print{
       html,body{background:#fff!important}
       .pdf-v2-preview-root{display:block;padding:0}
@@ -100,7 +114,7 @@ export function buildPdfV2Html(input: PdfV2BuildInput): string {
           <div class="pdf-v2-logo">AAED</div>
           <div>
             <div class="pdf-v2-company">${escapeHtml(meta.companyName)}</div>
-            ${(meta.companyDetails || []).map((line) => `<div class="pdf-v2-company-line">${escapeHtml(line)}</div>`).join("")}
+            ${companyDetails.map((line) => `<div class="pdf-v2-company-line">${escapeHtml(line)}</div>`).join("")}
           </div>
         </div>
         <div class="pdf-v2-doc-meta">

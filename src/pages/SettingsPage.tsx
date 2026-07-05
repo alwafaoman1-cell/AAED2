@@ -91,6 +91,21 @@ export default function SettingsPage() {
     toast.success("تم رفع الشعار — اضغط حفظ لتثبيته");
   };
 
+  const handleRemoveStamp = async () => {
+    const previousStampUrl = settings.stampUrl;
+    const next = { ...settings, stampUrl: undefined };
+    setSettings(next);
+    if (stampRef.current) stampRef.current.value = "";
+    try {
+      await saveTemplateSettings(next);
+      const { removeCompanyStampFromStorage } = await import("@/lib/pdfStampStorage");
+      await removeCompanyStampFromStorage(previousStampUrl);
+      toast.success("تم حذف ختم الشركة من الإعدادات");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حذف ختم الشركة");
+    }
+  };
+
   const handleRemoveLogo = () => {
     setSettings(prev => ({ ...prev, logoUrl: undefined }));
     if (fileRef.current) fileRef.current.value = "";
@@ -109,6 +124,21 @@ export default function SettingsPage() {
     }
     if (file.size > 5 * 1024 * 1024) {
       toast.error("حجم الصورة يجب أن يكون أقل من 5 ميجابايت");
+      return;
+    }
+    if (field === "stampUrl") {
+      try {
+        const { uploadCompanyStampToStorage } = await import("@/lib/pdfStampStorage");
+        const stampUrl = await uploadCompanyStampToStorage(file);
+        const next = { ...settings, stampUrl, stampEnabled: true };
+        setSettings(next);
+        await saveTemplateSettings(next);
+        toast.success("تم رفع ختم الشركة وحفظه في Supabase");
+      } catch (error: any) {
+        toast.error(error?.message || "تعذر رفع ختم الشركة");
+      } finally {
+        if (stampRef.current) stampRef.current.value = "";
+      }
       return;
     }
     const { fileToWebpDataUrl } = await import("@/lib/imageToWebp");
@@ -525,7 +555,7 @@ export default function SettingsPage() {
                   <ImageIcon size={12} /> {settings.stampUrl ? "تغيير" : "رفع"}
                 </Button>
                 {settings.stampUrl && (
-                  <Button variant="ghost" size="sm" onClick={() => { setSettings(p => ({ ...p, stampUrl: undefined })); if (stampRef.current) stampRef.current.value = ""; }} className="text-destructive gap-1.5 text-xs h-7">
+                  <Button variant="ghost" size="sm" onClick={handleRemoveStamp} className="text-destructive gap-1.5 text-xs h-7">
                     <X size={12} /> إزالة
                   </Button>
                 )}

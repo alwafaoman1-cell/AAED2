@@ -277,7 +277,7 @@ tbody tr:nth-child(even) { background: #fafbfc }
         <div>المدير المسؤول / Manager</div>
         <div class="line">${s.responsibleName ?? ""}</div>
       </div>
-      ${s.stampUrl ? `<img class="stamp-img" src="${s.stampUrl}" alt="ختم" />` : `<div class="signature-box"><div>ختم الورشة</div><div class="line">&nbsp;</div></div>`}
+      ${s.stampUrl ? `<img class="stamp-img" src="${s.stampUrl}" alt="Company Stamp" />` : `<div class="signature-box"><div>Company Stamp / ختم الشركة</div></div>`}
     </div>
 
     <div class="footer">

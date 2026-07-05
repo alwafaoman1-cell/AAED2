@@ -276,7 +276,7 @@ function referenceInsuranceInvoiceStyles(): string {
     .signature-line{height:19mm;display:flex;align-items:end}
     .signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}
     .signature-line img{max-height:18mm;max-width:48mm;object-fit:contain}
-    .stamp-placeholder{border:2px solid #2459a6;border-radius:4px;height:19mm;display:flex;align-items:center;justify-content:center;color:#2459a6;font-weight:800;text-align:center;font-size:9.5px;padding:2mm}
+    .stamp-placeholder{border:1px dashed #cbd5e1;border-radius:4px;height:19mm;display:flex;align-items:center;justify-content:center;color:#64748b;font-weight:700;text-align:center;font-size:9.5px;padding:2mm;background:#fff}
     .stamp-placeholder img{max-height:17mm;max-width:62mm;object-fit:contain}
     .legal{text-align:center;color:#42536c;font-size:9px;line-height:1.45;margin:5mm 8mm 0;break-inside:avoid;page-break-inside:avoid}
     .footer{position:static!important;margin-top:4mm;border-top:2px solid #d9a11e;text-align:center;color:#53657f;font-size:9px;padding-top:2mm;font-family:'Inter','Noto Sans Arabic',sans-serif;break-inside:avoid;page-break-inside:avoid}
@@ -320,7 +320,7 @@ function renderReferenceInsuranceInvoice(p: {
     : "∿";
   const stamp = s.stampEnabled && s.stampOnInvoice && s.stampUrl
     ? `<img src="${e(s.stampUrl)}" alt="stamp"/>`
-    : `${e(s.companyName)}<br/>${e(s.companyNameEn)}<br/>CR : ${e(s.commercialReg)}`;
+    : "";
   const signature = s.signatureUrl
     ? `<img src="${e(s.signatureUrl)}" alt="signature"/>`
     : "";
@@ -530,7 +530,7 @@ function footerHtml(s: PdfTemplateSettings) {
 
 function stampBlock(s: PdfTemplateSettings, on: boolean) {
   if (!s.stampEnabled || !on || !s.stampUrl) return "";
-  return `<div class="signature-area"><div class="sig"><div class="name">التوقيع / Signature</div><div class="area">${s.signatureUrl ? `<img src="${s.signatureUrl}" alt="signature" />` : ""}</div><div class="lbl">${s.responsibleName || "Authorized Signature"}</div></div><div class="sig"><div class="name">ختم الشركة / Company Stamp</div><div class="area"><img src="${s.stampUrl}" alt="stamp" /></div><div class="lbl">${s.companyNameEn}</div></div></div>`;
+  return `<div class="signature-area"><div class="sig"><div class="name">التوقيع / Signature</div><div class="area">${s.signatureUrl ? `<img src="${s.signatureUrl}" alt="signature" />` : ""}</div><div class="lbl">${s.responsibleName || "Authorized Signature"}</div></div><div class="sig"><div class="name">ختم الشركة / Company Stamp</div><div class="area"><img src="${s.stampUrl}" alt="stamp" /></div></div></div>`;
 }
 
 // ─────────────────────────────────────────────────────────────────
