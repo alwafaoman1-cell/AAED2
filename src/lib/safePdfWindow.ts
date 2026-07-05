@@ -1,4 +1,8 @@
-import { downloadPdfV2, openPdfV2Viewer, printPdfV2InViewer } from "@/lib/pdf-v2";
+// Sanitizes generated PDF HTML before opening in a new window.
+// Mitigates stored XSS from user-controlled fields interpolated into PDF templates.
+import DOMPurify from "dompurify";
+import { injectPageMarginStyle } from "./pdfLayoutSettings";
+import { generatePdfFromHtml, DEFAULT_MARGINS } from "./htmlToPdf";
 
 export async function printPdfBlob(blob: Blob): Promise<void> {
   const url = URL.createObjectURL(blob);
@@ -28,37 +32,54 @@ export async function printPdfBlob(blob: Blob): Promise<void> {
 }
 
 export function openSanitizedPdfWindow(html: string): Window | null {
-  void openPdfV2Viewer({
-    html,
-    meta: {
-      documentType: "generic",
-      title: "PDF Preview",
-    },
+  const clean = DOMPurify.sanitize(html, {
+    WHOLE_DOCUMENT: true,
+    ADD_TAGS: ["style", "link", "meta"],
+    ADD_ATTR: ["target", "dir", "lang"],
   });
-  return null;
+  const win = window.open("", "_blank", "noopener,noreferrer");
+  if (!win) return null;
+  try {
+    // Defensive: ensure no opener reference remains
+    (win as any).opener = null;
+  } catch {
+    /* noop */
+  }
+  win.document.open();
+  win.document.write(clean);
+  win.document.close();
+  // Inject the unified page-margin override so every printed document respects
+  // the operator's configured margins from /settings/pdf-layout.
+  try { injectPageMarginStyle(win.document); } catch { /* noop */ }
+  return win;
 }
 
+/**
+ * Opens a sanitized HTML window and triggers print() only after the document
+ * is fully loaded (images, fonts, layout). Prevents the "blank print preview"
+ * race that happens with a fixed setTimeout.
+ */
 export async function openAndPrintWindow(html: string): Promise<void> {
-  await printPdfV2InViewer({
-    html,
-    meta: {
-      documentType: "generic",
-      title: "Print",
-    },
+  const clean = DOMPurify.sanitize(html, {
+    WHOLE_DOCUMENT: true,
+    ADD_TAGS: ["style", "link", "meta"],
+    ADD_ATTR: ["target", "dir", "lang"],
   });
+  const blob = await generatePdfFromHtml({
+    htmlContent: clean,
+    fileName: `print-${Date.now()}`,
+    download: false,
+    margins: DEFAULT_MARGINS,
+  });
+  await printPdfBlob(blob);
 }
 
 export async function printCurrentPageAsPdf(fileName = "report"): Promise<void> {
-  const blob = await downloadPdfV2(
-    {
-      html: document.documentElement.outerHTML,
-      meta: {
-        documentType: "report",
-        title: fileName,
-      },
-    },
+  const blob = await generatePdfFromHtml({
+    htmlContent: document.documentElement.outerHTML,
     fileName,
-    false,
-  );
+    download: false,
+    margins: DEFAULT_MARGINS,
+  });
   await printPdfBlob(blob);
 }

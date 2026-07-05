@@ -149,7 +149,6 @@ const CustomerNotificationsSettingsPage = lazy(() => import("./pages/settings/Cu
 const AdminNotifications = lazy(() => import("./pages/AdminNotifications"));
 const SaasAdminConsole = lazy(() => import("./pages/admin/SaasAdminConsole"));
 const TenantFiles = lazy(() => import("./pages/admin/TenantFiles"));
-const PdfV2PreviewPage = lazy(() => import("./pages/PdfV2PreviewPage"));
 
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
@@ -206,7 +205,6 @@ const App = () => (
             <Route path="/p/:token" element={<CustomerPortal />} />
             <Route path="/v/:plate" element={<LegacyPortalRedirect param="plate" />} />
             <Route path="/c/approve/:token" element={<SupplementApprovalPage />} />
-            <Route path="/pdf/:documentType/:id" element={<PdfV2PreviewPage />} />
             <Route path="/sign/:token" element={<LegacyPortalRedirect param="token" />} />
             <Route path="/technician" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechnicianApp /></ProtectedRoute>} />
             <Route path="/technician/scan" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechQrScanPage /></ProtectedRoute>} />
@@ -351,8 +349,6 @@ const App = () => (
               <Route path="/admin/saas" element={<ProtectedRoute roles={["admin","manager"]}><SaasAdminConsole /></ProtectedRoute>} />
               <Route path="/admin/files" element={<ProtectedRoute roles={["admin","manager"]}><TenantFiles /></ProtectedRoute>} />
               <Route path="/settings/customer-notifications" element={<ProtectedRoute roles={["admin","manager"]}><CustomerNotificationsSettingsPage /></ProtectedRoute>} />
-              <Route path="/print/:documentType/:id" element={<PdfV2PreviewPage />} />
-              <Route path="/pdf-preview/:documentType/:id" element={<PdfV2PreviewPage />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />
