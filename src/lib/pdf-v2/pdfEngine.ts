@@ -31,8 +31,10 @@ export function buildPdfV2Html(input: PdfV2BuildInput): string {
   const dir = meta.language === "en" ? "ltr" : "rtl";
   const lang = meta.language || "ar";
   const body = sanitizePdfV2Html(input.html);
-  const pagePadding = `${layout.margins.top}mm ${layout.margins.right}mm ${layout.margins.bottom}mm ${layout.margins.left}mm`;
   const qrMode = layoutName === "qr-label";
+  const safeBottom = Math.max(layout.margins.bottom, qrMode ? layout.margins.bottom : 15);
+  const safeTop = Math.max(layout.margins.top, qrMode ? layout.margins.top : 10);
+  const pagePadding = `${safeTop}mm ${layout.margins.right}mm ${safeBottom}mm ${layout.margins.left}mm`;
 
   return `<!doctype html>
 <html lang="${lang}" dir="${dir}">
@@ -46,28 +48,30 @@ export function buildPdfV2Html(input: PdfV2BuildInput): string {
     html,body{margin:0;padding:0;background:#eef2f7;color:${pdfV2Theme.colors.ink};font-family:${lang === "en" ? pdfV2Theme.fonts.latin : pdfV2Theme.fonts.arabic};font-size:10.5px;line-height:1.42}
     .pdf-v2-preview-root{min-height:100vh;padding:14px;display:flex;justify-content:center;align-items:flex-start}
     .pdf-v2-page{width:${layout.widthMm}mm;min-height:${layout.heightMm}mm;background:#fff;padding:${pagePadding};box-shadow:0 8px 30px rgba(15,23,42,.18);position:relative;overflow:visible}
-    .pdf-v2-header{display:flex;align-items:flex-start;justify-content:space-between;gap:9mm;border-bottom:1px solid ${pdfV2Theme.colors.line};padding-bottom:3mm;margin-bottom:0;break-inside:avoid;page-break-inside:avoid}
+    .pdf-v2-header{display:flex;align-items:flex-start;justify-content:space-between;gap:7mm;border-bottom:1px solid ${pdfV2Theme.colors.line};padding-bottom:2.5mm;margin-bottom:0;break-inside:avoid;page-break-inside:avoid}
     .pdf-v2-brand{display:flex;align-items:center;gap:3mm;min-width:0}
-    .pdf-v2-logo{width:16mm;height:16mm;border:1px solid ${pdfV2Theme.colors.primary};border-radius:2mm;background:#fff;color:${pdfV2Theme.colors.primary};display:flex;align-items:center;justify-content:center;font-weight:900;font-size:9px;letter-spacing:.4px;flex:0 0 auto}
-    .pdf-v2-company{font-size:13px;font-weight:900;color:${pdfV2Theme.colors.ink};white-space:normal}
+    .pdf-v2-logo{width:14mm;height:14mm;border:1px solid ${pdfV2Theme.colors.primary};border-radius:2mm;background:#fff;color:${pdfV2Theme.colors.primary};display:flex;align-items:center;justify-content:center;font-weight:900;font-size:8px;letter-spacing:.4px;flex:0 0 auto}
+    .pdf-v2-company{font-size:12px;font-weight:900;color:${pdfV2Theme.colors.ink};white-space:normal}
     .pdf-v2-company-line{font-size:8.5px;color:${pdfV2Theme.colors.muted};margin-top:.8mm}
     .pdf-v2-doc-meta{text-align:${dir === "rtl" ? "left" : "right"};font-size:9px;color:${pdfV2Theme.colors.muted};min-width:36mm}
-    .pdf-v2-doc-title{font-size:14px;color:${pdfV2Theme.colors.primary};font-weight:900;margin-bottom:1mm}
-    .pdf-v2-title-band{display:flex;align-items:center;justify-content:space-between;gap:6mm;background:${pdfV2Theme.colors.primary};color:#fff;border-radius:1.5mm;margin:3mm 0;padding:2mm 3mm;border-inline-start:3mm solid ${pdfV2Theme.colors.accent};break-inside:avoid;page-break-inside:avoid}
+    .pdf-v2-doc-title{font-size:13px;color:${pdfV2Theme.colors.primary};font-weight:900;margin-bottom:1mm}
+    .pdf-v2-title-band{display:flex;align-items:center;justify-content:space-between;gap:5mm;background:${pdfV2Theme.colors.primary};color:#fff;border-radius:1.5mm;margin:2.5mm 0;padding:1.8mm 2.5mm;border-inline-start:3mm solid ${pdfV2Theme.colors.accent};break-inside:avoid;page-break-inside:avoid}
     .pdf-v2-title-band strong{font-size:12px}
     .pdf-v2-title-band span{font-size:8.5px;opacity:.95}
-    .pdf-v2-vehicle-strip{border:1px solid ${pdfV2Theme.colors.line};background:#f8fafc;border-radius:1.5mm;margin:0 0 4mm;padding:2mm 3mm;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2mm;font-size:8.5px;break-inside:avoid;page-break-inside:avoid}
+    .pdf-v2-vehicle-strip{border:1px solid ${pdfV2Theme.colors.line};background:#f8fafc;border-radius:1.5mm;margin:0 0 3mm;padding:1.7mm 2.5mm;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2mm;font-size:8.3px;break-inside:avoid;page-break-inside:avoid}
     .pdf-v2-vehicle-strip b{color:${pdfV2Theme.colors.primary};display:block;font-size:8px}
-    .pdf-v2-content{min-height:${qrMode ? "42mm" : "220mm"}}
-    .pdf-v2-footer{display:flex;justify-content:space-between;gap:8mm;border-top:1px solid ${pdfV2Theme.colors.line};padding-top:2.5mm;margin-top:5mm;color:${pdfV2Theme.colors.muted};font-size:7.8px;break-inside:avoid;page-break-inside:avoid}
-    .pdf-v2-card,.pdf-card,.card{border:1px solid ${pdfV2Theme.colors.line};border-radius:1.8mm;padding:3mm;background:#fff;margin-bottom:3mm;break-inside:avoid;page-break-inside:avoid}
+    .pdf-v2-content{min-height:${qrMode ? "42mm" : "auto"}}
+    .pdf-v2-footer{display:flex;justify-content:space-between;gap:8mm;border-top:1px solid ${pdfV2Theme.colors.line};padding-top:2.3mm;margin-top:6mm;color:${pdfV2Theme.colors.muted};font-size:7.8px;break-inside:avoid;page-break-inside:avoid;clear:both}
+    .pdf-v2-signature-stamp,.pdf-signature-stamp,.signatures,.signature-area,.stamp-row{break-inside:avoid;page-break-inside:avoid;clear:both}
+    .pdf-v2-signature-stamp,.pdf-signature-stamp{margin-top:7mm;display:grid;grid-template-columns:1fr 1.15fr;gap:9mm;align-items:end;min-height:23mm}
+    .pdf-v2-card,.pdf-card,.card{border:1px solid ${pdfV2Theme.colors.line};border-radius:1.8mm;padding:2.5mm;background:#fff;margin-bottom:2.5mm;break-inside:avoid;page-break-inside:avoid}
     .pdf-v2-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4mm}
     h1,h2,h3,h4{margin:0 0 3mm;break-after:avoid;page-break-after:avoid;color:${pdfV2Theme.colors.ink}}
     table{width:100%;border-collapse:collapse;margin:3mm 0;break-inside:auto;page-break-inside:auto}
     thead{display:table-header-group}
     tfoot{display:table-footer-group}
     tr{break-inside:avoid;page-break-inside:avoid}
-    th,td{border:1px solid ${pdfV2Theme.colors.line};padding:1.8mm 2.2mm;vertical-align:top}
+    th,td{border:1px solid ${pdfV2Theme.colors.line};padding:1.5mm 1.8mm;vertical-align:top}
     th{background:${pdfV2Theme.colors.primary};font-weight:800;color:#fff}
     .pdf-v2-totals,.totals{margin-inline-start:auto;max-width:72mm;border:1px solid ${pdfV2Theme.colors.line};border-radius:1.5mm;padding:2mm 3mm;background:#fafafa}
     .pdf-v2-qr,.qr-box{margin-top:4mm;display:flex;align-items:center;gap:3mm;break-inside:avoid;page-break-inside:avoid}

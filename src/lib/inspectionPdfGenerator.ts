@@ -181,8 +181,8 @@ export function generateInspectionReportPdf(data: InspectionReportData) {
 @page{size:A4;margin:0}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Noto Sans Arabic','Inter',sans-serif;direction:rtl;color:#1a1a2e;background:#f8f9fa;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.page{width:210mm;min-height:297mm;margin:10mm auto;background:white;padding:12mm 18mm;box-shadow:0 2px 20px rgba(0,0,0,.1);position:relative}
-.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #d4a537;padding-bottom:12px;margin-bottom:20px}
+.page{width:210mm;min-height:297mm;margin:8mm auto;background:white;padding:12mm 12mm 15mm;box-shadow:0 2px 20px rgba(0,0,0,.1);position:relative;overflow:visible}
+.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #d4a537;padding-bottom:10px;margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
 .company-info h1{font-size:20px;font-weight:700;color:#1a1a2e;margin-bottom:1px}
 .company-info .en{font-size:12px;color:#444;margin-bottom:6px;font-family:'Inter',sans-serif;font-weight:600}
 .company-info .det{font-size:9px;color:#888;line-height:1.8}
@@ -198,12 +198,12 @@ body{font-family:'Noto Sans Arabic','Inter',sans-serif;direction:rtl;color:#1a1a
 .info-row .val{color:#1a1a2e;font-weight:600;flex:1}
 .section-title{font-size:12px;font-weight:600;color:#d4a537;border-right:3px solid #d4a537;padding-right:8px;margin:15px 0 8px;display:flex;align-items:baseline;gap:8px}
 .section-title .en{font-size:10px;color:#888;font-family:'Inter',sans-serif;font-weight:500;text-transform:uppercase;letter-spacing:0.5px}
-.footer{position:absolute;bottom:12mm;left:18mm;right:18mm;text-align:center;font-size:8.5px;color:#aaa;border-top:1px solid #eee;padding-top:8px;line-height:1.6}
+.footer{position:static!important;margin-top:7mm;text-align:center;font-size:8.5px;color:#8a94a6;border-top:1px solid #eee;padding-top:2.5mm;line-height:1.45;break-inside:avoid;page-break-inside:avoid;clear:both}
 .footer .en{display:block;font-family:'Inter',sans-serif;color:#bbb}
 .print-bar{text-align:center;padding:12px;background:#1a1a2e;position:sticky;top:0;z-index:100}
 .print-bar button{padding:8px 25px;margin:0 6px;border:none;border-radius:6px;font-family:'Noto Sans Arabic',sans-serif;font-size:13px;font-weight:600;cursor:pointer;color:white}
 .btn-p{background:linear-gradient(135deg,#d4a537,#c49a2f)}.btn-c{background:#444}
-@media print{.print-bar{display:none!important}html,body{background:white!important;padding:0!important;margin:0!important}.page{margin:0!important;box-shadow:none!important;width:100%!important}}
+@media print{.print-bar{display:none!important}html,body{background:white!important;padding:0!important;margin:0!important}.page{margin:0!important;box-shadow:none!important;width:210mm!important;min-height:297mm!important;overflow:visible!important}}
 </style>
 </head>
 <body>

@@ -94,6 +94,7 @@ const PDF_EXPORT_CSS = `
     min-height:0!important;
     max-height:none!important;
     overflow:visible!important;
+    padding-bottom:max(14mm, var(--pdf-bottom-safe-space, 14mm))!important;
   }
   html.pdf-export .page + .page{page-break-before:always!important;break-before:page!important}
   /* Table integrity — never cut rows or headers across pages */
@@ -103,6 +104,22 @@ const PDF_EXPORT_CSS = `
   html.pdf-export tr,html.pdf-export td,html.pdf-export th,html.pdf-export li,html.pdf-export .pdf-keep,html.pdf-export .no-break{page-break-inside:avoid!important;break-inside:avoid!important}
   html.pdf-export h1,html.pdf-export h2,html.pdf-export h3,html.pdf-export h4{page-break-after:avoid!important;break-after:avoid!important}
   html.pdf-export img{max-width:100%!important;height:auto!important}
+  html.pdf-export .footer,
+  html.pdf-export .pdf-flow-footer{
+    position:static!important;
+    margin-top:7mm!important;
+    clear:both!important;
+    break-inside:avoid!important;
+    page-break-inside:avoid!important;
+  }
+  html.pdf-export .pdf-signature-stamp,
+  html.pdf-export .signatures,
+  html.pdf-export .signature-area,
+  html.pdf-export .stamp-row{
+    break-inside:avoid!important;
+    page-break-inside:avoid!important;
+    clear:both!important;
+  }
 `;
 
 const cropCanvasWhitespace = (source: HTMLCanvasElement, preservePx = 28): HTMLCanvasElement => {

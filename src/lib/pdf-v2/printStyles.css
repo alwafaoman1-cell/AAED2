@@ -12,8 +12,20 @@
 
   .pdf-v2-page {
     box-shadow: none !important;
+    overflow: visible !important;
     break-after: page;
     page-break-after: always;
+  }
+
+  .pdf-v2-footer,
+  .pdf-v2-signature-stamp,
+  .pdf-signature-stamp,
+  .signatures,
+  .signature-area,
+  .stamp-row {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    clear: both !important;
   }
 
   .pdf-v2-page:last-child {

@@ -272,22 +272,22 @@ function getBaseStyles(s: PdfTemplateSettings) {
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;direction:rtl;color:#1a1a2e;background:#f8f9fa;padding:0}
-    .page{width:210mm;min-height:297mm;margin:10mm auto;background:white;padding:15mm 18mm;box-shadow:0 2px 20px rgba(0,0,0,0.1);position:relative}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${s.primaryColor};padding-bottom:15px;margin-bottom:25px}
-    .company-info h1{font-size:20px;font-weight:700;color:#1a1a2e;margin-bottom:2px}
-    .company-info .en-name{font-size:13px;color:#444;font-weight:600;margin-bottom:6px;font-family:'Inter',sans-serif;letter-spacing:0.3px}
-    .company-info .details{font-size:9.5px;color:#888;line-height:1.7}
+    .page{width:210mm;min-height:297mm;margin:8mm auto;background:white;padding:12mm 12mm 15mm;box-shadow:0 2px 20px rgba(0,0,0,0.1);position:relative;overflow:visible}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${s.primaryColor};padding-bottom:10px;margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
+    .company-info h1{font-size:17px;font-weight:700;color:#1a1a2e;margin-bottom:2px}
+    .company-info .en-name{font-size:11.5px;color:#444;font-weight:600;margin-bottom:4px;font-family:'Inter',sans-serif;letter-spacing:0.3px}
+    .company-info .details{font-size:8.8px;color:#888;line-height:1.55}
     .company-info .details .en-line{font-family:'Inter',sans-serif;direction:ltr;text-align:right;display:block}
-    .doc-badge{background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor,-15)});color:white;padding:10px 20px;border-radius:8px;text-align:center;min-width:160px}
+    .doc-badge{background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor,-15)});color:white;padding:8px 16px;border-radius:7px;text-align:center;min-width:145px}
     .doc-badge .label-ar{font-size:11px;opacity:0.95;font-weight:600}
     .doc-badge .label-en{font-size:9px;opacity:0.85;font-family:'Inter',sans-serif;letter-spacing:0.5px;text-transform:uppercase}
     .doc-badge .number{font-size:17px;font-weight:700;direction:ltr;font-family:'Inter',sans-serif;margin:3px 0}
     .doc-badge .date{font-size:9.5px;opacity:0.85;font-family:'Inter',sans-serif;direction:ltr}
 
-    .section-title{font-size:13px;font-weight:600;color:${s.primaryColor};border-right:3px solid ${s.primaryColor};padding-right:10px;margin:18px 0 10px 0;display:flex;align-items:baseline;gap:10px}
+    .section-title{font-size:12.5px;font-weight:600;color:${s.primaryColor};border-right:3px solid ${s.primaryColor};padding-right:9px;margin:14px 0 8px 0;display:flex;align-items:baseline;gap:10px;break-after:avoid;page-break-after:avoid}
     .section-title .en{font-size:10px;color:#888;font-weight:500;font-family:'Inter',sans-serif;text-transform:uppercase;letter-spacing:0.8px}
 
-    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 30px;margin-bottom:18px}
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px 22px;margin-bottom:12px}
     .info-row{display:flex;gap:8px;font-size:11.5px;padding:3px 0;align-items:baseline}
     .info-row .label{color:#888;min-width:130px;font-weight:500;font-size:11px}
     .info-row .label .en{font-size:9px;color:#aaa;font-family:'Inter',sans-serif;display:block;line-height:1}
@@ -297,28 +297,35 @@ function getBaseStyles(s: PdfTemplateSettings) {
     .bi .ar{font-size:inherit}
     .bi .en{font-size:0.78em;color:#999;font-family:'Inter',sans-serif;font-weight:500;letter-spacing:0.3px}
 
-    table{width:100%;border-collapse:collapse;margin:12px 0;font-size:11.5px;page-break-inside:auto}
+    table{width:100%;border-collapse:collapse;margin:9px 0;font-size:11px;page-break-inside:auto}
     thead{display:table-header-group}
     tfoot{display:table-footer-group}
     tr,td,th{page-break-inside:avoid;break-inside:avoid}
-    thead th{background:#1a1a2e;color:white;padding:9px 10px;text-align:right;font-weight:600;font-size:10.5px;vertical-align:top}
+    thead th{background:#1a1a2e;color:white;padding:7px 8px;text-align:right;font-weight:600;font-size:10px;vertical-align:top}
     thead th .en{display:block;font-size:8.5px;color:#bbb;font-family:'Inter',sans-serif;font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-top:1px}
     thead th:first-child{border-radius:0 6px 6px 0}
     thead th:last-child{border-radius:6px 0 0 6px}
-    tbody td{padding:9px 10px;border-bottom:1px solid #eee}
+    tbody td{padding:7px 8px;border-bottom:1px solid #eee}
     tbody tr:hover{background:#fafafa}
 
-    .totals-box{margin-top:18px;margin-right:auto;width:280px;border:2px solid #eee;border-radius:8px;overflow:hidden}
+    .totals-box{margin-top:12px;margin-right:auto;width:280px;border:2px solid #eee;border-radius:8px;overflow:hidden;break-inside:avoid;page-break-inside:avoid}
     .totals-row{display:flex;justify-content:space-between;align-items:center;padding:7px 14px;font-size:11.5px;gap:10px}
     .totals-row:not(:last-child){border-bottom:1px solid #eee}
     .totals-row .amount{font-family:'Inter',sans-serif;font-weight:600;direction:ltr}
     .totals-row.total{background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor,-15)});color:white;font-weight:700;font-size:13.5px}
 
-    .notes-box{margin-top:18px;padding:11px 14px;background:#f8f9fa;border-radius:8px;border-right:3px solid ${s.primaryColor};font-size:10.5px;color:#555;line-height:1.7}
+    .notes-box{margin-top:12px;padding:9px 12px;background:#f8f9fa;border-radius:8px;border-right:3px solid ${s.primaryColor};font-size:10.3px;color:#555;line-height:1.55;break-inside:avoid;page-break-inside:avoid}
     .notes-box .label-en{display:block;font-size:9px;color:#999;font-family:'Inter',sans-serif;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
 
-    .footer{position:absolute;bottom:12mm;left:18mm;right:18mm;text-align:center;font-size:8.5px;color:#aaa;border-top:1px solid #eee;padding-top:8px;line-height:1.6}
+    .footer,.pdf-flow-footer{position:static!important;margin-top:7mm;text-align:center;font-size:8.5px;color:#8a94a6;border-top:1px solid #e5e7eb;padding-top:2.5mm;line-height:1.45;break-inside:avoid;page-break-inside:avoid;clear:both}
     .footer .en{display:block;font-family:'Inter',sans-serif;color:#bbb}
+    .pdf-signature-stamp{margin-top:7mm;display:grid;grid-template-columns:1fr 1.15fr;gap:10mm;align-items:end;break-inside:avoid;page-break-inside:avoid;clear:both;min-height:24mm}
+    .pdf-signature-stamp .pdf-signature-box,.pdf-signature-stamp .pdf-stamp-box{min-height:23mm;text-align:center}
+    .pdf-signature-stamp .pdf-stamp-box{border:1.5px solid #2459a6;border-radius:4px;padding:2mm;color:#2459a6;font-weight:800;display:flex;align-items:center;justify-content:center}
+    .pdf-signature-stamp .pdf-signature-line{height:18mm;display:flex;align-items:flex-end;justify-content:center}
+    .pdf-signature-stamp .pdf-signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}
+    .pdf-signature-stamp img{max-height:21mm;max-width:70mm;object-fit:contain}
+    .pdf-signature-title,.pdf-stamp-title{font-size:10.5px;font-weight:800;color:#263b57;margin-bottom:2mm}
 
     .status-badge{display:inline-flex;flex-direction:column;align-items:center;padding:4px 12px;border-radius:14px;font-size:10.5px;font-weight:600;line-height:1.2}
     .status-badge .en{font-size:8.5px;font-weight:500;font-family:'Inter',sans-serif;opacity:0.85}
@@ -330,7 +337,7 @@ function getBaseStyles(s: PdfTemplateSettings) {
 
     .currency{font-family:'Inter',sans-serif;direction:ltr;display:inline-block}
 
-    @media print{body{background:white;padding:0}.page{margin:0;box-shadow:none;width:100%}}
+    @media print{body{background:white;padding:0}.page{margin:0;box-shadow:none;width:210mm;min-height:297mm;overflow:visible;break-after:page;page-break-after:always}.page:last-child{break-after:auto;page-break-after:auto}}
   `;
 }
 
@@ -400,6 +407,40 @@ function footerHtml(s: PdfTemplateSettings) {
   </div>`;
 }
 
+export function pdfSignatureStampSectionHtml(options: {
+  signatureUrl?: string;
+  stampUrl?: string;
+  responsibleName?: string;
+  companyName?: string;
+  companyNameEn?: string;
+  commercialReg?: string;
+  signatureTitle?: string;
+  stampTitle?: string;
+}): string {
+  const signatureTitle = options.signatureTitle || "التوقيع / SIGNATURE";
+  const stampTitle = options.stampTitle || "ختم الشركة / COMPANY STAMP";
+  const signature = options.signatureUrl
+    ? `<img src="${options.signatureUrl}" alt="signature" />`
+    : `<div class="pdf-signature-line"></div>`;
+  const responsible = options.responsibleName
+    ? `<div style="font-size:10px;color:#555;font-weight:600;margin-top:2mm;text-align:center;">${options.responsibleName}</div>`
+    : "";
+  const stamp = options.stampUrl
+    ? `<img src="${options.stampUrl}" alt="stamp" />`
+    : `<div>${options.companyName || "Company Stamp"}<br/>${options.companyNameEn || ""}${options.commercialReg ? `<br/>CR: ${options.commercialReg}` : ""}</div>`;
+  return `<section class="pdf-signature-stamp pdf-keep no-break">
+    <div class="pdf-signature-box">
+      <div class="pdf-signature-title">${signatureTitle}</div>
+      ${signature}
+      ${responsible}
+    </div>
+    <div>
+      <div class="pdf-stamp-title">${stampTitle}</div>
+      <div class="pdf-stamp-box">${stamp}</div>
+    </div>
+  </section>`;
+}
+
 /**
  * Renders the stamp + signature block based on template settings.
  * @param docType - which document type (toggles read from settings)
@@ -418,6 +459,17 @@ export function stampSignatureHtml(
     inspection: s.stampOnInspection,
   };
   if (!enabledMap[docType]) return "";
+  const requestedStampPosition = s.stampPosition;
+  if (requestedStampPosition !== "watermark-center") {
+    return pdfSignatureStampSectionHtml({
+      signatureUrl: s.signatureUrl,
+      stampUrl: s.stampUrl,
+      responsibleName: s.responsibleName,
+      companyName: s.companyName,
+      companyNameEn: s.companyNameEn,
+      commercialReg: s.commercialReg,
+    });
+  }
   if (!s.stampUrl && !s.signatureUrl) return "";
 
   const size = STAMP_SIZE_PX[s.stampSize] || 150;
@@ -1552,7 +1604,7 @@ function renderInsuranceTaxInvoiceReference(data: InsuranceTaxInvoiceData): stri
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
     *{box-sizing:border-box} html,body{margin:0;padding:0;background:#fff;color:#10213c}
     body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;font-size:11px}
-    .page{width:210mm;min-height:297mm;margin:0 auto;padding:22mm 18mm 11mm;background:#fff;position:relative;overflow:hidden}
+    .page{width:210mm;min-height:297mm;margin:0 auto;padding:12mm 12mm 15mm;background:#fff;position:relative;overflow:visible}
     .mono,.money{font-family:'Inter','Noto Sans Arabic',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:embed}
     .top{display:grid;grid-template-columns:64mm 1fr;gap:18mm;align-items:start;direction:ltr}.invoice-card{width:54mm;background:#0f243e;color:#fff;border-radius:3px;text-align:center;padding:7mm 5mm 4mm;box-shadow:0 2px 5px rgba(15,36,62,.18)}
     .invoice-card .ar{font-size:13px;font-weight:700;margin-bottom:2mm}.invoice-card .en{font-family:'Inter',sans-serif;font-size:10px;font-weight:700;letter-spacing:.5px;margin-bottom:2mm}.invoice-card .no{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;line-height:1}
@@ -1562,14 +1614,14 @@ function renderInsuranceTaxInvoiceReference(data: InsuranceTaxInvoiceData): stri
     .rule{height:1px;background:#d8dee8;margin:10mm 0 4.5mm}.claim-box{border:1px solid #cfd8e6;border-radius:2px;min-height:19mm;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:3mm 5mm;margin-bottom:4mm;direction:ltr}.claim-box .claim{text-align:left;direction:ltr}
     .label{font-family:'Inter','Noto Sans Arabic',sans-serif;text-transform:uppercase;font-size:9px;color:#475b76;font-weight:800;letter-spacing:.25px;margin-bottom:2mm}.big-val{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:15px;font-weight:800;color:#10213c}
     .insurance-side{display:flex;align-items:center;justify-content:flex-end;gap:4mm;text-align:center;direction:rtl}.insurance-logo{width:18mm;height:18mm;border:1px solid #d8dee8;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden;color:#0f766e;font-weight:800}.insurance-logo img{max-width:16mm;max-height:16mm;object-fit:contain}
-    .vehicle-box{border:1px solid #cfd8e6;border-radius:2px;display:grid;grid-template-columns:1fr 1fr 43mm;min-height:30mm;overflow:hidden;margin-bottom:4mm;direction:ltr}.vehicle-cell{padding:6mm 5mm 4mm;text-align:center}.vehicle-cell.color{text-align:left}.vehicle-cell .v{font-size:14px;font-weight:800;color:#10213c}.vehicle-cell .sub{font-family:'Inter',sans-serif;font-size:10px;color:#61728a;margin-top:4mm}
+    .vehicle-box{border:1px solid #cfd8e6;border-radius:2px;display:grid;grid-template-columns:1fr 1fr 38mm;min-height:25mm;overflow:hidden;margin-bottom:3mm;direction:ltr;break-inside:avoid;page-break-inside:avoid}.vehicle-cell{padding:4.5mm 4mm 3mm;text-align:center}.vehicle-cell.color{text-align:left}.vehicle-cell .v{font-size:13px;font-weight:800;color:#10213c}.vehicle-cell .sub{font-family:'Inter',sans-serif;font-size:9px;color:#61728a;margin-top:2mm}
     .plate-box{background:#0f243e;color:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:5mm}.plate-no{border:1px solid rgba(255,255,255,.8);min-width:22mm;text-align:center;padding:4mm 5mm;font-family:'Inter',sans-serif;font-size:19px;font-weight:800;margin-bottom:3mm}.plate-label{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:9px;font-weight:800;color:#fff}
     .bill-row{border-top:1px solid #d8dee8;border-bottom:1px solid #d8dee8;display:grid;grid-template-columns:1fr 1fr 1fr 1.25fr;gap:7mm;padding:5mm 0;margin:4mm 0 5mm;text-align:center;direction:ltr}.bill-row .cell:last-child{text-align:right}.bill-row .v{font-size:12px;font-weight:800;color:#10213c}.bill-row .sub{font-size:9px;color:#64748b;margin-top:1.5mm}
     table.items{width:100%;border-collapse:collapse;margin-top:1mm;font-size:11px}.items thead th{border-bottom:1px solid #d8dee8;padding:0 3mm 3mm;color:#475b76;font-family:'Inter','Noto Sans Arabic',sans-serif;font-weight:800;text-align:right}.items thead th.c,.items tbody td.c{text-align:center}.items thead th.l,.items tbody td.l{text-align:left}.items tbody td{padding:7mm 3mm;border-bottom:1px solid #e3e8f0;vertical-align:top;color:#10213c}.items .desc{font-size:13px;font-weight:800;line-height:1.7}.items .desc small{display:block;font-family:'Inter',sans-serif;font-size:11px;margin-top:1mm}
-    .summary-box{border:1px solid #cfd8e6;border-radius:2px;margin-top:5mm;display:grid;grid-template-columns:1fr 48mm;gap:9mm;padding:4mm 7mm 4mm 5mm;align-items:center;direction:ltr}.total-line{display:grid;grid-template-columns:26mm 1fr 28mm;gap:4mm;align-items:center;padding:2mm 0;color:#31445f}.total-line .cur{font-family:'Inter',sans-serif;font-size:10px;font-weight:700}.total-line .lbl{text-align:right;font-weight:700;color:#475b76}.total-line .amount{font-family:'Inter',sans-serif;text-align:left;font-weight:800;color:#10213c}.payable{margin-top:3mm;background:#0f243e;color:#fff;border-radius:2px;display:grid;grid-template-columns:1fr 38mm;align-items:center;padding:5mm 7mm}.payable .p-label{text-align:right;font-size:15px;font-weight:800}.payable .p-label span{display:block;font-family:'Inter',sans-serif;font-size:10px;margin-top:1mm;font-weight:700}.payable .p-amount{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;text-align:left}.payable .cur-small{font-size:9px;font-weight:500;margin-top:1mm}
+    .summary-box{border:1px solid #cfd8e6;border-radius:2px;margin-top:4mm;display:grid;grid-template-columns:1fr 43mm;gap:7mm;padding:3mm 5mm;align-items:center;direction:ltr;break-inside:avoid;page-break-inside:avoid}.total-line{display:grid;grid-template-columns:24mm 1fr 26mm;gap:3mm;align-items:center;padding:1.5mm 0;color:#31445f}.total-line .cur{font-family:'Inter',sans-serif;font-size:9px;font-weight:700}.total-line .lbl{text-align:right;font-weight:700;color:#475b76}.total-line .amount{font-family:'Inter',sans-serif;text-align:left;font-weight:800;color:#10213c}.payable{margin-top:2mm;background:#0f243e;color:#fff;border-radius:2px;display:grid;grid-template-columns:1fr 36mm;align-items:center;padding:4mm 6mm}.payable .p-label{text-align:right;font-size:13px;font-weight:800}.payable .p-label span{display:block;font-family:'Inter',sans-serif;font-size:9px;margin-top:1mm;font-weight:700}.payable .p-amount{font-family:'Inter',sans-serif;font-size:22px;font-weight:800;text-align:left}.payable .cur-small{font-size:8px;font-weight:500;margin-top:1mm}
     .qr-box{text-align:center;justify-self:end}.qr-frame{border:1px solid #cfd8e6;padding:3mm;background:#fff;width:39mm;height:39mm;display:flex;align-items:center;justify-content:center}.qr-frame img{width:33mm;height:33mm;object-fit:contain}.qr-caption{font-family:'Inter',sans-serif;color:#66758d;margin-top:2mm;font-size:10px}
-    .signatures{display:grid;grid-template-columns:1fr 1.3fr;gap:16mm;align-items:end;margin:8mm 9mm 0;direction:ltr}.sig-title,.stamp-title{font-size:11px;font-weight:800;color:#263b57;margin-bottom:3mm}.signature-line{height:23mm;display:flex;align-items:end}.signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}.signature-line img{max-height:18mm;max-width:48mm;object-fit:contain}.stamp-placeholder{border:2px solid #2459a6;border-radius:4px;height:23mm;display:flex;align-items:center;justify-content:center;color:#2459a6;font-weight:800;text-align:center;font-size:10px;padding:2mm}.stamp-placeholder img{max-height:21mm;max-width:70mm;object-fit:contain}
-    .legal{text-align:center;color:#42536c;font-size:10px;line-height:1.8;margin:8mm 8mm 0}.footer{position:absolute;left:18mm;right:18mm;bottom:6mm;border-top:2px solid #d9a11e;text-align:center;color:#53657f;font-size:10px;padding-top:3mm;font-family:'Inter','Noto Sans Arabic',sans-serif}@media print{body{background:#fff}.page{margin:0;box-shadow:none}.footer{bottom:6mm}}
+    .signatures{display:grid;grid-template-columns:1fr 1.3fr;gap:12mm;align-items:end;margin:6mm 9mm 0;direction:ltr;break-inside:avoid;page-break-inside:avoid}.sig-title,.stamp-title{font-size:10.5px;font-weight:800;color:#263b57;margin-bottom:2mm}.signature-line{height:19mm;display:flex;align-items:end}.signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}.signature-line img{max-height:16mm;max-width:48mm;object-fit:contain}.stamp-placeholder{border:2px solid #2459a6;border-radius:4px;height:19mm;display:flex;align-items:center;justify-content:center;color:#2459a6;font-weight:800;text-align:center;font-size:9.5px;padding:2mm}.stamp-placeholder img{max-height:17mm;max-width:62mm;object-fit:contain}
+    .legal{text-align:center;color:#42536c;font-size:9px;line-height:1.45;margin:5mm 8mm 0;break-inside:avoid;page-break-inside:avoid}.footer{position:static!important;margin-top:4mm;border-top:2px solid #d9a11e;text-align:center;color:#53657f;font-size:9px;padding-top:2mm;font-family:'Inter','Noto Sans Arabic',sans-serif;break-inside:avoid;page-break-inside:avoid}@media print{body{background:#fff}.page{margin:0;box-shadow:none;overflow:visible}.footer{position:static!important}}
   `;
   const body = `<div class="page">
     <div class="top"><div><div class="invoice-card"><div class="ar">فاتورة ضريبية</div><div class="en">TAX INVOICE</div><div class="no">${invoiceRefEscape(data.invoiceNumber)}</div></div><div class="invoice-date">${invoiceRefEscape(data.issueDate)}</div></div>
@@ -1618,7 +1670,7 @@ function renderInsuranceTaxInvoiceReferenceClean(data: InsuranceTaxInvoiceData):
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
     *{box-sizing:border-box} html,body{margin:0;padding:0;background:#fff;color:#10213c}
     body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;font-size:11px}
-    .page{width:210mm;min-height:297mm;margin:0 auto;padding:22mm 18mm 11mm;background:#fff;position:relative;overflow:hidden}
+    .page{width:210mm;min-height:297mm;margin:0 auto;padding:12mm 12mm 15mm;background:#fff;position:relative;overflow:visible}
     .mono,.money{font-family:'Inter','Noto Sans Arabic',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:embed}
     .top{display:grid;grid-template-columns:64mm 1fr;gap:18mm;align-items:start;direction:ltr}.invoice-card{width:54mm;background:#0f243e;color:#fff;border-radius:3px;text-align:center;padding:7mm 5mm 4mm;box-shadow:0 2px 5px rgba(15,36,62,.18)}
     .invoice-card .ar{font-size:13px;font-weight:700;margin-bottom:2mm}.invoice-card .en{font-family:'Inter',sans-serif;font-size:10px;font-weight:700;letter-spacing:.5px;margin-bottom:2mm}.invoice-card .no{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;line-height:1}
@@ -1628,14 +1680,14 @@ function renderInsuranceTaxInvoiceReferenceClean(data: InsuranceTaxInvoiceData):
     .rule{height:1px;background:#d8dee8;margin:10mm 0 4.5mm}.claim-box{border:1px solid #cfd8e6;border-radius:2px;min-height:19mm;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:3mm 5mm;margin-bottom:4mm;direction:ltr}.claim-box .claim{text-align:left;direction:ltr}
     .label{font-family:'Inter','Noto Sans Arabic',sans-serif;text-transform:uppercase;font-size:9px;color:#475b76;font-weight:800;letter-spacing:.25px;margin-bottom:2mm}.big-val{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:15px;font-weight:800;color:#10213c}
     .insurance-side{display:flex;align-items:center;justify-content:flex-end;gap:4mm;text-align:center;direction:rtl}.insurance-logo{width:18mm;height:18mm;border:1px solid #d8dee8;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden;color:#0f766e;font-weight:800}.insurance-logo img{max-width:16mm;max-height:16mm;object-fit:contain}
-    .vehicle-box{border:1px solid #cfd8e6;border-radius:2px;display:grid;grid-template-columns:1fr 1fr 43mm;min-height:30mm;overflow:hidden;margin-bottom:4mm;direction:ltr}.vehicle-cell{padding:6mm 5mm 4mm;text-align:center}.vehicle-cell.color{text-align:left}.vehicle-cell .v{font-size:14px;font-weight:800;color:#10213c}.vehicle-cell .sub{font-family:'Inter',sans-serif;font-size:10px;color:#61728a;margin-top:4mm}
+    .vehicle-box{border:1px solid #cfd8e6;border-radius:2px;display:grid;grid-template-columns:1fr 1fr 38mm;min-height:25mm;overflow:hidden;margin-bottom:3mm;direction:ltr;break-inside:avoid;page-break-inside:avoid}.vehicle-cell{padding:4.5mm 4mm 3mm;text-align:center}.vehicle-cell.color{text-align:left}.vehicle-cell .v{font-size:13px;font-weight:800;color:#10213c}.vehicle-cell .sub{font-family:'Inter',sans-serif;font-size:9px;color:#61728a;margin-top:2mm}
     .plate-box{background:#0f243e;color:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:5mm}.plate-no{border:1px solid rgba(255,255,255,.8);min-width:22mm;text-align:center;padding:4mm 5mm;font-family:'Inter',sans-serif;font-size:19px;font-weight:800;margin-bottom:3mm}.plate-label{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:9px;font-weight:800;color:#fff}
     .bill-row{border-top:1px solid #d8dee8;border-bottom:1px solid #d8dee8;display:grid;grid-template-columns:1fr 1fr 1fr 1.25fr;gap:7mm;padding:5mm 0;margin:4mm 0 5mm;text-align:center;direction:ltr}.bill-row .cell:last-child{text-align:right}.bill-row .v{font-size:12px;font-weight:800;color:#10213c}.bill-row .sub{font-size:9px;color:#64748b;margin-top:1.5mm}
     table.items{width:100%;border-collapse:collapse;margin-top:1mm;font-size:11px}.items thead th{border-bottom:1px solid #d8dee8;padding:0 3mm 3mm;color:#475b76;font-family:'Inter','Noto Sans Arabic',sans-serif;font-weight:800;text-align:right}.items thead th.c,.items tbody td.c{text-align:center}.items thead th.l,.items tbody td.l{text-align:left}.items tbody td{padding:7mm 3mm;border-bottom:1px solid #e3e8f0;vertical-align:top;color:#10213c}.items .desc{font-size:13px;font-weight:800;line-height:1.7}.items .desc small{display:block;font-family:'Inter',sans-serif;font-size:11px;margin-top:1mm}
-    .summary-box{border:1px solid #cfd8e6;border-radius:2px;margin-top:5mm;display:grid;grid-template-columns:1fr 48mm;gap:9mm;padding:4mm 7mm 4mm 5mm;align-items:center;direction:ltr}.total-line{display:grid;grid-template-columns:26mm 1fr 28mm;gap:4mm;align-items:center;padding:2mm 0;color:#31445f}.total-line .cur{font-family:'Inter',sans-serif;font-size:10px;font-weight:700}.total-line .lbl{text-align:right;font-weight:700;color:#475b76}.total-line .amount{font-family:'Inter',sans-serif;text-align:left;font-weight:800;color:#10213c}.payable{margin-top:3mm;background:#0f243e;color:#fff;border-radius:2px;display:grid;grid-template-columns:1fr 38mm;align-items:center;padding:5mm 7mm}.payable .p-label{text-align:right;font-size:15px;font-weight:800}.payable .p-label span{display:block;font-family:'Inter',sans-serif;font-size:10px;margin-top:1mm;font-weight:700}.payable .p-amount{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;text-align:left}.payable .cur-small{font-size:9px;font-weight:500;margin-top:1mm}
+    .summary-box{border:1px solid #cfd8e6;border-radius:2px;margin-top:4mm;display:grid;grid-template-columns:1fr 43mm;gap:7mm;padding:3mm 5mm;align-items:center;direction:ltr;break-inside:avoid;page-break-inside:avoid}.total-line{display:grid;grid-template-columns:24mm 1fr 26mm;gap:3mm;align-items:center;padding:1.5mm 0;color:#31445f}.total-line .cur{font-family:'Inter',sans-serif;font-size:9px;font-weight:700}.total-line .lbl{text-align:right;font-weight:700;color:#475b76}.total-line .amount{font-family:'Inter',sans-serif;text-align:left;font-weight:800;color:#10213c}.payable{margin-top:2mm;background:#0f243e;color:#fff;border-radius:2px;display:grid;grid-template-columns:1fr 36mm;align-items:center;padding:4mm 6mm}.payable .p-label{text-align:right;font-size:13px;font-weight:800}.payable .p-label span{display:block;font-family:'Inter',sans-serif;font-size:9px;margin-top:1mm;font-weight:700}.payable .p-amount{font-family:'Inter',sans-serif;font-size:22px;font-weight:800;text-align:left}.payable .cur-small{font-size:8px;font-weight:500;margin-top:1mm}
     .qr-box{text-align:center;justify-self:end}.qr-frame{border:1px solid #cfd8e6;padding:3mm;background:#fff;width:39mm;height:39mm;display:flex;align-items:center;justify-content:center}.qr-frame img{width:33mm;height:33mm;object-fit:contain}.qr-caption{font-family:'Inter',sans-serif;color:#66758d;margin-top:2mm;font-size:10px}
-    .signatures{display:grid;grid-template-columns:1fr 1.3fr;gap:16mm;align-items:end;margin:8mm 9mm 0;direction:ltr}.sig-title,.stamp-title{font-size:11px;font-weight:800;color:#263b57;margin-bottom:3mm}.signature-line{height:23mm;display:flex;align-items:end}.signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}.signature-line img{max-height:18mm;max-width:48mm;object-fit:contain}.stamp-placeholder{border:2px solid #2459a6;border-radius:4px;height:23mm;display:flex;align-items:center;justify-content:center;color:#2459a6;font-weight:800;text-align:center;font-size:10px;padding:2mm}.stamp-placeholder img{max-height:21mm;max-width:70mm;object-fit:contain}
-    .legal{text-align:center;color:#42536c;font-size:10px;line-height:1.8;margin:8mm 8mm 0}.footer{position:absolute;left:18mm;right:18mm;bottom:6mm;border-top:2px solid #d9a11e;text-align:center;color:#53657f;font-size:10px;padding-top:3mm;font-family:'Inter','Noto Sans Arabic',sans-serif}@media print{body{background:#fff}.page{margin:0;box-shadow:none}.footer{bottom:6mm}}
+    .signatures{display:grid;grid-template-columns:1fr 1.3fr;gap:12mm;align-items:end;margin:6mm 9mm 0;direction:ltr;break-inside:avoid;page-break-inside:avoid}.sig-title,.stamp-title{font-size:10.5px;font-weight:800;color:#263b57;margin-bottom:2mm}.signature-line{height:19mm;display:flex;align-items:end}.signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}.signature-line img{max-height:16mm;max-width:48mm;object-fit:contain}.stamp-placeholder{border:2px solid #2459a6;border-radius:4px;height:19mm;display:flex;align-items:center;justify-content:center;color:#2459a6;font-weight:800;text-align:center;font-size:9.5px;padding:2mm}.stamp-placeholder img{max-height:17mm;max-width:62mm;object-fit:contain}
+    .legal{text-align:center;color:#42536c;font-size:9px;line-height:1.45;margin:5mm 8mm 0;break-inside:avoid;page-break-inside:avoid}.footer{position:static!important;margin-top:4mm;border-top:2px solid #d9a11e;text-align:center;color:#53657f;font-size:9px;padding-top:2mm;font-family:'Inter','Noto Sans Arabic',sans-serif;break-inside:avoid;page-break-inside:avoid}@media print{body{background:#fff}.page{margin:0;box-shadow:none;overflow:visible}.footer{position:static!important}}
   `;
   const body = `<div class="page">
     <div class="top"><div><div class="invoice-card"><div class="ar">فاتورة ضريبية</div><div class="en">TAX INVOICE</div><div class="no">${invoiceRefEscape(data.invoiceNumber)}</div></div><div class="invoice-date">${invoiceRefEscape(data.issueDate)}</div></div>
