@@ -1489,7 +1489,105 @@ export interface InsuranceTaxInvoiceData extends InsuranceEstimateData {
   lpoNumber?: string;             // رقم أمر الشراء الصادر من شركة التأمين (LPO)
 }
 
+function invoiceRefEscape(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return toEnglishDigits(String(value))
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function invoiceRefMoney(value: number): string {
+  return (Number(value) || 0).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+
+function invoiceRefCustom(data: InsuranceTaxInvoiceData, labels: string[]): string {
+  const fields = Array.isArray(data.customFields) ? data.customFields : [];
+  const found = fields.find((f) => labels.some((label) => String(f.label || "").toLowerCase().includes(label.toLowerCase())));
+  return found?.value || "";
+}
+
+function renderInsuranceTaxInvoiceReference(data: InsuranceTaxInvoiceData): string {
+  const s = getTemplateSettings();
+  const subtotal = Number(data.subtotal) || 0;
+  const vatAmount = Number(data.taxTotal) || Number((subtotal * ((s.vatRate || 5) / 100)).toFixed(3));
+  const total = Number(data.total) || Number((subtotal + vatAmount).toFixed(3));
+  const vatRate = subtotal > 0 ? Number(((vatAmount / subtotal) * 100).toFixed(3)) : (Number(s.vatRate) || 5);
+  const vehicleParts = String(data.vehicleInfo || "").split(" - ");
+  const vehicle = vehicleParts[0] || data.vehicleInfo || "—";
+  const year = vehicleParts[1] || "";
+  const vin = invoiceRefCustom(data, ["vin", "chassis", "هيكل"]) || "—";
+  const color = invoiceRefCustom(data, ["color", "لون"]) || "—";
+  const billToContact = invoiceRefCustom(data, ["contact", "مسؤول", "employee"]) || data.customerName || "";
+  const logo = s.logoUrl ? `<img src="${invoiceRefEscape(s.logoUrl)}" alt="logo"/>` : `<span class="logo-fallback"></span>`;
+  const insuranceLogo = invoiceRefCustom(data, ["insurance logo", "logo url"]) || "";
+  const insuranceLogoHtml = insuranceLogo ? `<img src="${invoiceRefEscape(insuranceLogo)}" alt="insurance logo"/>` : "∿";
+  const stamp = s.stampEnabled && s.stampOnInvoice && s.stampUrl
+    ? `<img src="${invoiceRefEscape(s.stampUrl)}" alt="stamp"/>`
+    : `${invoiceRefEscape(s.companyName)}<br/>${invoiceRefEscape(s.companyNameEn)}<br/>CR : ${invoiceRefEscape(s.commercialReg)}`;
+  const signature = s.signatureUrl
+    ? `<img src="${invoiceRefEscape(s.signatureUrl)}" alt="signature"/>`
+    : "";
+  const itemRows = (data.items || []).filter((item) => String(item.description || "").trim()).map((item, index) => {
+    const qty = Number(item.quantity) || 0;
+    const rate = Number(item.unitPrice) || 0;
+    const line = Number((qty * rate).toFixed(3));
+    return `<tr>
+      <td class="c mono">${index + 1}</td>
+      <td class="desc">${invoiceRefEscape(item.description)}<small>${invoiceRefEscape(data.claimNumber)}</small></td>
+      <td class="c mono">${invoiceRefMoney(qty)}</td>
+      <td class="l mono">${invoiceRefMoney(rate)}</td>
+      <td class="l mono">${invoiceRefMoney(line)}</td>
+    </tr>`;
+  }).join("") || `<tr>
+      <td class="c mono">1</td>
+      <td class="desc">إصلاح أضرار المركبة - مطالبة<small>${invoiceRefEscape(data.claimNumber)}</small></td>
+      <td class="c mono">1.000</td>
+      <td class="l mono">${invoiceRefMoney(subtotal)}</td>
+      <td class="l mono">${invoiceRefMoney(subtotal)}</td>
+    </tr>`;
+  const styles = `
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
+    *{box-sizing:border-box} html,body{margin:0;padding:0;background:#fff;color:#10213c}
+    body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;font-size:11px}
+    .page{width:210mm;min-height:297mm;margin:0 auto;padding:22mm 18mm 11mm;background:#fff;position:relative;overflow:hidden}
+    .mono,.money{font-family:'Inter','Noto Sans Arabic',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:embed}
+    .top{display:grid;grid-template-columns:64mm 1fr;gap:18mm;align-items:start}.invoice-card{width:54mm;background:#0f243e;color:#fff;border-radius:3px;text-align:center;padding:7mm 5mm 4mm;box-shadow:0 2px 5px rgba(15,36,62,.18)}
+    .invoice-card .ar{font-size:13px;font-weight:700;margin-bottom:2mm}.invoice-card .en{font-family:'Inter',sans-serif;font-size:10px;font-weight:700;letter-spacing:.5px;margin-bottom:2mm}.invoice-card .no{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;line-height:1}
+    .invoice-date{width:54mm;text-align:center;margin-top:4mm;color:#53657f;font-family:'Inter',sans-serif;font-size:12px}
+    .company{display:flex;align-items:flex-start;justify-content:flex-end;gap:8mm;text-align:right;padding-top:1mm}.company-text h1{font-size:20px;line-height:1.25;margin:0 0 1mm;font-weight:800;color:#10213c}.company-text .en{font-family:'Inter',sans-serif;font-size:13px;font-weight:700;margin-bottom:5mm}.company-text .meta{font-family:'Inter','Noto Sans Arabic',sans-serif;color:#52647f;font-size:11px;line-height:1.7}
+    .logo-box{width:26mm;height:32mm;display:flex;align-items:flex-start;justify-content:center;border-inline-start:1px solid #cdd6e3;padding-inline-start:5mm}.logo-box img{max-width:23mm;max-height:30mm;object-fit:contain}.logo-fallback{width:20mm;height:25mm;background:#0f243e;border:2px solid #d9a11e;clip-path:polygon(50% 0,95% 45%,50% 100%,5% 45%)}
+    .rule{height:1px;background:#d8dee8;margin:10mm 0 4.5mm}.claim-box{border:1px solid #cfd8e6;border-radius:2px;min-height:19mm;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:3mm 5mm;margin-bottom:4mm}.claim-box .claim{text-align:left;direction:ltr}
+    .label{font-family:'Inter','Noto Sans Arabic',sans-serif;text-transform:uppercase;font-size:9px;color:#475b76;font-weight:800;letter-spacing:.25px;margin-bottom:2mm}.big-val{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:15px;font-weight:800;color:#10213c}
+    .insurance-side{display:flex;align-items:center;justify-content:flex-start;gap:4mm;text-align:center}.insurance-logo{width:18mm;height:18mm;border:1px solid #d8dee8;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden;color:#0f766e;font-weight:800}.insurance-logo img{max-width:16mm;max-height:16mm;object-fit:contain}
+    .vehicle-box{border:1px solid #cfd8e6;border-radius:2px;display:grid;grid-template-columns:1fr 1fr 43mm;min-height:30mm;overflow:hidden;margin-bottom:4mm}.vehicle-cell{padding:6mm 5mm 4mm;text-align:center}.vehicle-cell.color{text-align:left}.vehicle-cell .v{font-size:14px;font-weight:800;color:#10213c}.vehicle-cell .sub{font-family:'Inter',sans-serif;font-size:10px;color:#61728a;margin-top:4mm}
+    .plate-box{background:#0f243e;color:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:5mm}.plate-no{border:1px solid rgba(255,255,255,.8);min-width:22mm;text-align:center;padding:4mm 5mm;font-family:'Inter',sans-serif;font-size:19px;font-weight:800;margin-bottom:3mm}.plate-label{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:9px;font-weight:800;color:#fff}
+    .bill-row{border-top:1px solid #d8dee8;border-bottom:1px solid #d8dee8;display:grid;grid-template-columns:1fr 1fr 1fr 1.25fr;gap:7mm;padding:5mm 0;margin:4mm 0 5mm;text-align:center}.bill-row .cell:last-child{text-align:right}.bill-row .v{font-size:12px;font-weight:800;color:#10213c}.bill-row .sub{font-size:9px;color:#64748b;margin-top:1.5mm}
+    table.items{width:100%;border-collapse:collapse;margin-top:1mm;font-size:11px}.items thead th{border-bottom:1px solid #d8dee8;padding:0 3mm 3mm;color:#475b76;font-family:'Inter','Noto Sans Arabic',sans-serif;font-weight:800;text-align:right}.items thead th.c,.items tbody td.c{text-align:center}.items thead th.l,.items tbody td.l{text-align:left}.items tbody td{padding:7mm 3mm;border-bottom:1px solid #e3e8f0;vertical-align:top;color:#10213c}.items .desc{font-size:13px;font-weight:800;line-height:1.7}.items .desc small{display:block;font-family:'Inter',sans-serif;font-size:11px;margin-top:1mm}
+    .summary-box{border:1px solid #cfd8e6;border-radius:2px;margin-top:5mm;display:grid;grid-template-columns:1fr 48mm;gap:9mm;padding:4mm 7mm 4mm 5mm;align-items:center}.total-line{display:grid;grid-template-columns:26mm 1fr 28mm;gap:4mm;align-items:center;padding:2mm 0;color:#31445f}.total-line .cur{font-family:'Inter',sans-serif;font-size:10px;font-weight:700}.total-line .lbl{text-align:right;font-weight:700;color:#475b76}.total-line .amount{font-family:'Inter',sans-serif;text-align:left;font-weight:800;color:#10213c}.payable{margin-top:3mm;background:#0f243e;color:#fff;border-radius:2px;display:grid;grid-template-columns:1fr 38mm;align-items:center;padding:5mm 7mm}.payable .p-label{text-align:right;font-size:15px;font-weight:800}.payable .p-label span{display:block;font-family:'Inter',sans-serif;font-size:10px;margin-top:1mm;font-weight:700}.payable .p-amount{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;text-align:left}.payable .cur-small{font-size:9px;font-weight:500;margin-top:1mm}
+    .qr-box{text-align:center;justify-self:end}.qr-frame{border:1px solid #cfd8e6;padding:3mm;background:#fff;width:39mm;height:39mm;display:flex;align-items:center;justify-content:center}.qr-frame img{width:33mm;height:33mm;object-fit:contain}.qr-caption{font-family:'Inter',sans-serif;color:#66758d;margin-top:2mm;font-size:10px}
+    .signatures{display:grid;grid-template-columns:1fr 1.3fr;gap:16mm;align-items:end;margin:8mm 9mm 0}.sig-title,.stamp-title{font-size:11px;font-weight:800;color:#263b57;margin-bottom:3mm}.signature-line{height:23mm;display:flex;align-items:end}.signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}.signature-line img{max-height:18mm;max-width:48mm;object-fit:contain}.stamp-placeholder{border:2px solid #2459a6;border-radius:4px;height:23mm;display:flex;align-items:center;justify-content:center;color:#2459a6;font-weight:800;text-align:center;font-size:10px;padding:2mm}.stamp-placeholder img{max-height:21mm;max-width:70mm;object-fit:contain}
+    .legal{text-align:center;color:#42536c;font-size:10px;line-height:1.8;margin:8mm 8mm 0}.footer{position:absolute;left:18mm;right:18mm;bottom:6mm;border-top:2px solid #d9a11e;text-align:center;color:#53657f;font-size:10px;padding-top:3mm;font-family:'Inter','Noto Sans Arabic',sans-serif}@media print{body{background:#fff}.page{margin:0;box-shadow:none}.footer{bottom:6mm}}
+  `;
+  const body = `<div class="page">
+    <div class="top"><div><div class="invoice-card"><div class="ar">فاتورة ضريبية</div><div class="en">TAX INVOICE</div><div class="no">${invoiceRefEscape(data.invoiceNumber)}</div></div><div class="invoice-date">${invoiceRefEscape(data.issueDate)}</div></div>
+    <div class="company"><div class="company-text"><h1>${invoiceRefEscape(s.companyName)}</h1><div class="en">${invoiceRefEscape(s.companyNameEn)}</div><div class="meta">CR: ${invoiceRefEscape(s.commercialReg)} : السجل التجاري<br/>VAT: ${invoiceRefEscape(s.vatNumber)} : الرقم الضريبي<br/>${invoiceRefEscape(s.email)} • ${invoiceRefEscape(s.phone)}<br/>${invoiceRefEscape(s.address)}</div></div><div class="logo-box">${logo}</div></div></div>
+    <div class="rule"></div>
+    <div class="claim-box"><div class="claim"><div class="label"># CLAIM</div><div class="big-val">${invoiceRefEscape(data.claimNumber)}</div></div><div class="insurance-side"><div><div class="label">INSURANCE PROVIDER / شركة التأمين</div><div class="big-val">${invoiceRefEscape(data.insuranceCompany)}</div></div><div class="insurance-logo">${insuranceLogoHtml}</div></div></div>
+    <div class="vehicle-box"><div class="vehicle-cell color"><div class="label">اللون / COLOR</div><div class="v">${invoiceRefEscape(color)}</div><div class="sub">${invoiceRefEscape(data.lpoNumber || "—")}</div></div><div class="vehicle-cell"><div class="label">المركبة / VEHICLE</div><div class="v">${invoiceRefEscape([vehicle, year].filter(Boolean).join(" - ") || "—")}</div><div class="sub">VIN / رقم الهيكل</div><div class="v mono" style="font-size:12px">${invoiceRefEscape(vin)}</div></div><div class="plate-box"><div class="plate-no">${invoiceRefEscape(data.vehiclePlate || "—")}</div><div class="plate-label">PLATE / رقم اللوحة</div></div></div>
+    <div class="bill-row"><div class="cell"><div class="label">تاريخ الاستحقاق / تاريخ الحقاق</div><div class="label">DUE DATE</div><div class="v mono">${invoiceRefEscape(data.paymentDueDate || data.dueDate || "—")}</div></div><div class="cell"><div class="label">الرقم التجاري</div><div class="label">COMMERCIAL ID</div><div class="v mono">${invoiceRefEscape(data.insuranceCommercialRegistration || "—")}</div></div><div class="cell"><div class="label">الرقم الضريبي</div><div class="label">VAT REG / VAT</div><div class="v mono">${invoiceRefEscape(data.insuranceTaxNumber || "—")}</div></div><div class="cell"><div class="label">إلى / BILL TO</div><div class="v">${invoiceRefEscape(data.insuranceCompany)}</div>${billToContact ? `<div class="sub">${invoiceRefEscape(billToContact)}</div>` : ""}</div></div>
+    <table class="items"><thead><tr><th class="c">#</th><th>الوصف / DESCRIPTION</th><th class="c">الكمية / QTY</th><th class="l">الوحدة / RATE</th><th class="l">الإجمالي / TOTAL</th></tr></thead><tbody>${itemRows}</tbody></table>
+    <div class="summary-box"><div class="totals"><div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(subtotal)}</span><span class="lbl">Subtotal / المجموع الفرعي</span></div><div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(vatAmount)}</span><span class="lbl">VAT ${invoiceRefMoney(vatRate).replace(".000", "")}% / ضريبة القيمة المضافة</span></div><div class="payable"><div class="p-amount">${invoiceRefMoney(total)}<div class="cur-small">OMR / ريال عماني</div></div><div class="p-label">الإجمالي المستحق<span>TOTAL PAYABLE</span></div></div></div><div class="qr-box"><div class="qr-frame">${data.qrDataUrl ? `<img src="${invoiceRefEscape(data.qrDataUrl)}" alt="QR"/>` : "QR"}</div><div class="qr-caption">ZATCA TLV QR</div></div></div>
+    <div class="signatures"><div><div class="sig-title">التوقيع / SIGNATURE</div><div class="signature-line">${signature}</div></div><div><div class="stamp-title">ختم الشركة / COMPANY STAMP</div><div class="stamp-placeholder">${stamp}</div></div></div>
+    <div class="legal"><strong>إفادة قانونية:</strong> هذه فاتورة ضريبية صادرة وفقًا لأنظمة الضرائب المعمول بها في سلطنة عمان وغير مصرح رد ضريبة QR.</div><div class="footer">${invoiceRefEscape(s.companyNameEn)} • © ${new Date().getFullYear()} • ${invoiceRefEscape(s.companyName)}</div>
+  </div>`;
+  return wrapHtml(`Tax Invoice ${data.invoiceNumber}`, styles, body);
+}
+
 export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): string {
+  return renderInsuranceTaxInvoiceReference(data);
   const custom = tryCustomTemplate("insurance_tax_invoice", { ...data, ...getTemplateSettings() }, `InsuranceTaxInvoice ${(data as any).invoiceNumber || ""}`);
   if (custom) return custom;
   const s = getTemplateSettings();
