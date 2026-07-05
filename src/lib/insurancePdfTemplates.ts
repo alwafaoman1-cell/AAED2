@@ -216,13 +216,13 @@ function referenceInsuranceInvoiceStyles(): string {
     body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;font-size:11px}
     .page{width:210mm;min-height:297mm;margin:0 auto;padding:22mm 18mm 11mm;background:#fff;position:relative;overflow:hidden}
     .mono,.num,.money{font-family:'Inter','Noto Sans Arabic',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:embed}
-    .top{display:grid;grid-template-columns:64mm 1fr;gap:18mm;align-items:start;margin-top:0}
+    .top{display:grid;grid-template-columns:64mm 1fr;gap:18mm;align-items:start;margin-top:0;direction:ltr}
     .invoice-card{width:54mm;background:#0f243e;color:#fff;border-radius:3px;text-align:center;padding:7mm 5mm 4mm;box-shadow:0 2px 5px rgba(15,36,62,.18)}
     .invoice-card .ar{font-size:13px;font-weight:700;margin-bottom:2mm}
     .invoice-card .en{font-family:'Inter',sans-serif;font-size:10px;font-weight:700;letter-spacing:.5px;margin-bottom:2mm}
     .invoice-card .no{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;line-height:1}
     .invoice-date{width:54mm;text-align:center;margin-top:4mm;color:#53657f;font-family:'Inter',sans-serif;font-size:12px}
-    .company{display:flex;align-items:flex-start;justify-content:flex-end;gap:8mm;text-align:right;padding-top:1mm}
+    .company{display:flex;align-items:flex-start;justify-content:flex-end;gap:8mm;text-align:right;padding-top:1mm;direction:rtl}
     .company-text h1{font-size:20px;line-height:1.25;margin:0 0 1mm;font-weight:800;color:#10213c}
     .company-text .en{font-family:'Inter',sans-serif;font-size:13px;font-weight:700;margin-bottom:5mm}
     .company-text .meta{font-family:'Inter','Noto Sans Arabic',sans-serif;color:#52647f;font-size:11px;line-height:1.7}
@@ -230,14 +230,14 @@ function referenceInsuranceInvoiceStyles(): string {
     .logo-box img{max-width:23mm;max-height:30mm;object-fit:contain}
     .logo-fallback{width:20mm;height:25mm;background:#0f243e;border:2px solid #d9a11e;clip-path:polygon(50% 0,95% 45%,50% 100%,5% 45%);display:block}
     .rule{height:1px;background:#d8dee8;margin:10mm 0 4.5mm}
-    .claim-box{border:1px solid #cfd8e6;border-radius:2px;min-height:19mm;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:3mm 5mm;margin-bottom:4mm}
+    .claim-box{border:1px solid #cfd8e6;border-radius:2px;min-height:19mm;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:3mm 5mm;margin-bottom:4mm;direction:ltr}
     .claim-box .claim{text-align:left;direction:ltr}
     .label{font-family:'Inter','Noto Sans Arabic',sans-serif;text-transform:uppercase;font-size:9px;color:#475b76;font-weight:800;letter-spacing:.25px;margin-bottom:2mm}
     .big-val{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:15px;font-weight:800;color:#10213c}
-    .insurance-side{display:flex;align-items:center;justify-content:flex-start;gap:4mm;text-align:center}
+    .insurance-side{display:flex;align-items:center;justify-content:flex-end;gap:4mm;text-align:center;direction:rtl}
     .insurance-logo{width:18mm;height:18mm;border:1px solid #d8dee8;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden;color:#0f766e;font-weight:800}
     .insurance-logo img{max-width:16mm;max-height:16mm;object-fit:contain}
-    .vehicle-box{border:1px solid #cfd8e6;border-radius:2px;display:grid;grid-template-columns:1fr 1fr 43mm;min-height:30mm;overflow:hidden;margin-bottom:4mm}
+    .vehicle-box{border:1px solid #cfd8e6;border-radius:2px;display:grid;grid-template-columns:1fr 1fr 43mm;min-height:30mm;overflow:hidden;margin-bottom:4mm;direction:ltr}
     .vehicle-cell{padding:6mm 5mm 4mm;text-align:center}
     .vehicle-cell.color{text-align:left}
     .vehicle-cell .v{font-size:14px;font-weight:800;color:#10213c}
@@ -245,7 +245,7 @@ function referenceInsuranceInvoiceStyles(): string {
     .plate-box{background:#0f243e;color:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:5mm}
     .plate-no{border:1px solid rgba(255,255,255,.8);min-width:22mm;text-align:center;padding:4mm 5mm;font-family:'Inter',sans-serif;font-size:19px;font-weight:800;margin-bottom:3mm}
     .plate-label{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:9px;font-weight:800;color:#fff}
-    .bill-row{border-top:1px solid #d8dee8;border-bottom:1px solid #d8dee8;display:grid;grid-template-columns:1fr 1fr 1fr 1.25fr;gap:7mm;padding:5mm 0;margin:4mm 0 5mm;text-align:center}
+    .bill-row{border-top:1px solid #d8dee8;border-bottom:1px solid #d8dee8;display:grid;grid-template-columns:1fr 1fr 1fr 1.25fr;gap:7mm;padding:5mm 0;margin:4mm 0 5mm;text-align:center;direction:ltr}
     .bill-row .cell:last-child{text-align:right}
     .bill-row .v{font-size:12px;font-weight:800;color:#10213c}
     .bill-row .sub{font-size:9px;color:#64748b;margin-top:1.5mm}
@@ -256,7 +256,7 @@ function referenceInsuranceInvoiceStyles(): string {
     .items tbody td{padding:7mm 3mm;border-bottom:1px solid #e3e8f0;vertical-align:top;color:#10213c}
     .items .desc{font-size:13px;font-weight:800;line-height:1.7}
     .items .desc small{display:block;font-family:'Inter',sans-serif;font-size:11px;margin-top:1mm}
-    .summary-box{border:1px solid #cfd8e6;border-radius:2px;margin-top:5mm;display:grid;grid-template-columns:1fr 48mm;gap:9mm;padding:4mm 7mm 4mm 5mm;align-items:center}
+    .summary-box{border:1px solid #cfd8e6;border-radius:2px;margin-top:5mm;display:grid;grid-template-columns:1fr 48mm;gap:9mm;padding:4mm 7mm 4mm 5mm;align-items:center;direction:ltr}
     .totals{max-width:94mm}
     .total-line{display:grid;grid-template-columns:26mm 1fr 28mm;gap:4mm;align-items:center;padding:2mm 0;color:#31445f}
     .total-line .cur{font-family:'Inter',sans-serif;font-size:10px;font-weight:700}
@@ -271,7 +271,7 @@ function referenceInsuranceInvoiceStyles(): string {
     .qr-frame{border:1px solid #cfd8e6;padding:3mm;background:#fff;width:39mm;height:39mm;display:flex;align-items:center;justify-content:center}
     .qr-frame img{width:33mm;height:33mm;object-fit:contain}
     .qr-caption{font-family:'Inter',sans-serif;color:#66758d;margin-top:2mm;font-size:10px}
-    .signatures{display:grid;grid-template-columns:1fr 1.3fr;gap:16mm;align-items:end;margin:8mm 9mm 0}
+    .signatures{display:grid;grid-template-columns:1fr 1.3fr;gap:16mm;align-items:end;margin:8mm 9mm 0;direction:ltr}
     .sig-title,.stamp-title{font-size:11px;font-weight:800;color:#263b57;margin-bottom:3mm}
     .signature-line{height:23mm;display:flex;align-items:end}
     .signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}
