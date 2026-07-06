@@ -46,28 +46,28 @@ export interface StatementData {
   bankAccountName?: string | null;
   periodFrom?: string;
   periodTo?: string;
-  /** نسبة VAT المستخدمة لاحتساب الدين على المطالبات بدون فاتورة (افتراضي 0.05). */
+  /** ظ†ط³ط¨ط© VAT ط§ظ„ظ…ط³طھط®ط¯ظ…ط© ظ„ط§ط­طھط³ط§ط¨ ط§ظ„ط¯ظٹظ† ط¹ظ„ظ‰ ط§ظ„ظ…ط·ط§ظ„ط¨ط§طھ ط¨ط¯ظˆظ† ظپط§طھظˆط±ط© (ط§ظپطھط±ط§ط¶ظٹ 0.05). */
   vatRate?: number;
   claims: StatementClaim[];
-  /** الفواتير الضريبية المصدرة لمطالبات هذه الشركة — هي مصدر الدين الفعلي. */
+  /** ط§ظ„ظپظˆط§طھظٹط± ط§ظ„ط¶ط±ظٹط¨ظٹط© ط§ظ„ظ…طµط¯ط±ط© ظ„ظ…ط·ط§ظ„ط¨ط§طھ ظ‡ط°ظ‡ ط§ظ„ط´ط±ظƒط© â€” ظ‡ظٹ ظ…طµط¯ط± ط§ظ„ط¯ظٹظ† ط§ظ„ظپط¹ظ„ظٹ. */
   invoices?: StatementInvoice[];
   payments: StatementPayment[];
 }
 
 const METHOD_LABELS: Record<string, string> = {
-  bank_transfer: "تحويل بنكي",
-  cheque: "شيك",
-  offset: "مقاصة",
-  cash: "نقدي",
+  bank_transfer: "طھط­ظˆظٹظ„ ط¨ظ†ظƒظٹ",
+  cheque: "ط´ظٹظƒ",
+  offset: "ظ…ظ‚ط§طµط©",
+  cash: "ظ†ظ‚ط¯ظٹ",
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: "معلق",
-  cleared: "محصل",
-  bounced: "مرتجع",
-  approved: "معتمدة",
-  paid: "مدفوعة",
-  rejected: "مرفوضة",
+  pending: "ظ…ط¹ظ„ظ‚",
+  cleared: "ظ…ط­طµظ„",
+  bounced: "ظ…ط±طھط¬ط¹",
+  approved: "ظ…ط¹طھظ…ط¯ط©",
+  paid: "ظ…ط¯ظپظˆط¹ط©",
+  rejected: "ظ…ط±ظپظˆط¶ط©",
 };
 
 function fmt(n: number) { return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -90,9 +90,9 @@ export function getInsuranceStatementHtml(data: StatementData): string {
     .reduce((s, p: any) => s + (Number(p.amount) || 0), 0);
   try {
     const custom = renderWithCustomTemplate("insurance_statement", {
-      insuranceCompany: (data as any).companyName || (data as any).insuranceCompany || "—",
+      insuranceCompany: (data as any).companyName || (data as any).insuranceCompany || "â€”",
       date: new Date().toLocaleDateString("en-GB"),
-      period: (data as any).period || "—",
+      period: (data as any).period || "â€”",
       claimsCount: data.claims.length,
       totalInvoiced, totalPaid, balance: +(totalInvoiced - totalPaid).toFixed(3),
     }, "Insurance Statement");
@@ -100,9 +100,9 @@ export function getInsuranceStatementHtml(data: StatementData): string {
   } catch {}
   const s: PdfTemplateSettings = getTemplateSettings();
 
-  // ── Build unified ledger — Single Source of Truth ──
-  // Debit  = invoice.total (VAT-inclusive) for every active (non-cancelled) invoice.
-  //          Claims without an invoice fall back to approved/estimated as a VAT-inclusive total.
+  // â”€â”€ Build unified ledger â€” Single Source of Truth â”€â”€
+  // Debit  = invoice.total (VAT-exclusive input + VAT on top) for every active (non-cancelled) invoice.
+  //          Claims without an invoice fall back to approved/estimated as a VAT-exclusive input + VAT on top total.
   // Credit = every non-bounced claim payment.
   type Row = { date: string; ref: string; desc: string; debit: number; credit: number };
   const rows: Row[] = [];
@@ -118,7 +118,7 @@ export function getInsuranceStatementHtml(data: StatementData): string {
       rows.push({
         date: inv.issued_at,
         ref: `FAT ${inv.invoice_number}${inv.claim_number ? ` / ${inv.claim_number}` : ""}`,
-        desc: `فاتورة ضريبية — صافي ${fmt(Number(inv.subtotal) || 0)} + VAT ${fmt(Number(inv.vat) || 0)}`,
+        desc: `ظپط§طھظˆط±ط© ط¶ط±ظٹط¨ظٹط© â€” طµط§ظپظٹ ${fmt(Number(inv.subtotal) || 0)} + VAT ${fmt(Number(inv.vat) || 0)}`,
         debit: Number(inv.total) || 0,
         credit: 0,
       });
@@ -126,13 +126,13 @@ export function getInsuranceStatementHtml(data: StatementData): string {
   });
 
   data.claims.forEach((c) => {
-    if (invoicedClaimNumbers.has((c.claim_number ?? "").trim())) return; // عرض المطالبة عن طريق فاتورتها فقط
+    if (invoicedClaimNumbers.has((c.claim_number ?? "").trim())) return; // ط¹ط±ط¶ ط§ظ„ظ…ط·ط§ظ„ط¨ط© ط¹ظ† ط·ط±ظٹظ‚ ظپط§طھظˆط±طھظ‡ط§ ظپظ‚ط·
     const fallback = splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate);
     if (fallback.totalIncludingVat <= 0) return;
     rows.push({
       date: c.created_at,
       ref: c.claim_number,
-      desc: `Claim without invoice — Subtotal ${fmt(fallback.subtotalBeforeVat)} + VAT ${fmt(fallback.vatAmount)}`,
+      desc: `Claim without invoice â€” Subtotal ${fmt(fallback.subtotalBeforeVat)} + VAT ${fmt(fallback.vatAmount)}`,
       debit: fallback.totalIncludingVat,
       credit: 0,
     });
@@ -144,7 +144,7 @@ export function getInsuranceStatementHtml(data: StatementData): string {
       rows.push({
         date: p.payment_date,
         ref: p.payment_number,
-        desc: `دفعة - ${METHOD_LABELS[p.payment_method] ?? p.payment_method}${p.reference_number ? ` (${p.reference_number})` : ""}`,
+        desc: `ط¯ظپط¹ط© - ${METHOD_LABELS[p.payment_method] ?? p.payment_method}${p.reference_number ? ` (${p.reference_number})` : ""}`,
         debit: 0,
         credit: Number(p.amount) || 0,
       });
@@ -158,15 +158,15 @@ export function getInsuranceStatementHtml(data: StatementData): string {
   const finalBalance = totalDebit - totalCredit;
 
   const periodLabel = data.periodFrom || data.periodTo
-    ? `${data.periodFrom ? fmtDate(data.periodFrom) : "البداية"} → ${data.periodTo ? fmtDate(data.periodTo) : "اليوم"}`
-    : "كل الفترات";
+    ? `${data.periodFrom ? fmtDate(data.periodFrom) : "ط§ظ„ط¨ط¯ط§ظٹط©"} â†’ ${data.periodTo ? fmtDate(data.periodTo) : "ط§ظ„ظٹظˆظ…"}`
+    : "ظƒظ„ ط§ظ„ظپطھط±ط§طھ";
 
   return `
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>كشف حساب - ${data.companyName}</title>
+  <title>ظƒط´ظپ ط­ط³ط§ط¨ - ${data.companyName}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap');
     @page{size:A4 landscape;margin:0}
@@ -221,58 +221,58 @@ export function getInsuranceStatementHtml(data: StatementData): string {
         <h1>${s.companyName}</h1>
         <div class="details">
           ${s.address ?? ""}<br/>
-          ${s.phone ? `هاتف: ${s.phone}` : ""}${s.email ? ` • ${s.email}` : ""}<br/>
-          ${s.vatNumber ? `الرقم الضريبي: ${s.vatNumber}` : ""}
+          ${s.phone ? `ظ‡ط§طھظپ: ${s.phone}` : ""}${s.email ? ` â€¢ ${s.email}` : ""}<br/>
+          ${s.vatNumber ? `ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ: ${s.vatNumber}` : ""}
         </div>
       </div>
       <div class="badge">
-        <div class="t">كشف حساب شركة تأمين</div>
+        <div class="t">ظƒط´ظپ ط­ط³ط§ط¨ ط´ط±ظƒط© طھط£ظ…ظٹظ†</div>
         <div class="d">Insurance Account Statement</div>
         <div class="d" style="margin-top:8px">${formatDateLatin(new Date())}</div>
       </div>
     </div>
 
     <div class="info-block">
-      <h3>بيانات شركة التأمين</h3>
+      <h3>ط¨ظٹط§ظ†ط§طھ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†</h3>
       <div class="info-grid">
-        <div class="info-row"><span class="l">اسم الشركة:</span><span class="v">${data.companyName}${data.branchCity ? ` — ${data.branchCity}` : ""}</span></div>
-        <div class="info-row"><span class="l">جهة الاتصال:</span><span class="v">${data.contactPerson ?? "-"}</span></div>
-        <div class="info-row"><span class="l">السجل التجاري:</span><span class="v">${data.commercialRegistration ?? "-"}</span></div>
-        <div class="info-row"><span class="l">الرقم الضريبي:</span><span class="v">${data.taxNumber ?? "-"}</span></div>
-        <div class="info-row"><span class="l">الهاتف:</span><span class="v">${data.phone ?? "-"}</span></div>
-        <div class="info-row"><span class="l">البريد:</span><span class="v">${data.email ?? "-"}</span></div>
-        ${data.address ? `<div class="info-row"><span class="l">العنوان:</span><span class="v">${data.address}</span></div>` : ""}
-        ${data.poBox ? `<div class="info-row"><span class="l">ص.ب / الرمز البريدي:</span><span class="v">${data.poBox}</span></div>` : ""}
-        <div class="info-row"><span class="l">الفترة:</span><span class="v">${periodLabel}</span></div>
-        <div class="info-row"><span class="l">عدد المطالبات:</span><span class="v">${data.claims.length}</span></div>
+        <div class="info-row"><span class="l">ط§ط³ظ… ط§ظ„ط´ط±ظƒط©:</span><span class="v">${data.companyName}${data.branchCity ? ` â€” ${data.branchCity}` : ""}</span></div>
+        <div class="info-row"><span class="l">ط¬ظ‡ط© ط§ظ„ط§طھطµط§ظ„:</span><span class="v">${data.contactPerson ?? "-"}</span></div>
+        <div class="info-row"><span class="l">ط§ظ„ط³ط¬ظ„ ط§ظ„طھط¬ط§ط±ظٹ:</span><span class="v">${data.commercialRegistration ?? "-"}</span></div>
+        <div class="info-row"><span class="l">ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ:</span><span class="v">${data.taxNumber ?? "-"}</span></div>
+        <div class="info-row"><span class="l">ط§ظ„ظ‡ط§طھظپ:</span><span class="v">${data.phone ?? "-"}</span></div>
+        <div class="info-row"><span class="l">ط§ظ„ط¨ط±ظٹط¯:</span><span class="v">${data.email ?? "-"}</span></div>
+        ${data.address ? `<div class="info-row"><span class="l">ط§ظ„ط¹ظ†ظˆط§ظ†:</span><span class="v">${data.address}</span></div>` : ""}
+        ${data.poBox ? `<div class="info-row"><span class="l">طµ.ط¨ / ط§ظ„ط±ظ…ط² ط§ظ„ط¨ط±ظٹط¯ظٹ:</span><span class="v">${data.poBox}</span></div>` : ""}
+        <div class="info-row"><span class="l">ط§ظ„ظپطھط±ط©:</span><span class="v">${periodLabel}</span></div>
+        <div class="info-row"><span class="l">ط¹ط¯ط¯ ط§ظ„ظ…ط·ط§ظ„ط¨ط§طھ:</span><span class="v">${data.claims.length}</span></div>
       </div>
     </div>
 
     ${(data.bankName || data.iban) ? `
     <div class="info-block" style="border-right-color:#1e3a8a;background:#f0f7ff;">
-      <h3 style="color:#1e3a8a;">بيانات التحويل البنكي / Bank Transfer</h3>
+      <h3 style="color:#1e3a8a;">ط¨ظٹط§ظ†ط§طھ ط§ظ„طھط­ظˆظٹظ„ ط§ظ„ط¨ظ†ظƒظٹ / Bank Transfer</h3>
       <div class="info-grid">
-        ${data.bankName ? `<div class="info-row"><span class="l">البنك:</span><span class="v">${data.bankName}</span></div>` : ""}
-        ${data.bankAccountName ? `<div class="info-row"><span class="l">اسم الحساب:</span><span class="v">${data.bankAccountName}</span></div>` : ""}
+        ${data.bankName ? `<div class="info-row"><span class="l">ط§ظ„ط¨ظ†ظƒ:</span><span class="v">${data.bankName}</span></div>` : ""}
+        ${data.bankAccountName ? `<div class="info-row"><span class="l">ط§ط³ظ… ط§ظ„ط­ط³ط§ط¨:</span><span class="v">${data.bankAccountName}</span></div>` : ""}
         ${data.iban ? `<div class="info-row" style="grid-column:1/-1;"><span class="l">IBAN:</span><span class="v" style="font-family:monospace;direction:ltr;letter-spacing:1px;">${data.iban}</span></div>` : ""}
       </div>
     </div>` : ""}
 
-    <h3 style="font-size:14px;color:${s.primaryColor};margin:14px 0 8px">حركة الحساب</h3>
+    <h3 style="font-size:14px;color:${s.primaryColor};margin:14px 0 8px">ط­ط±ظƒط© ط§ظ„ط­ط³ط§ط¨</h3>
 
     <table>
       <thead>
         <tr>
-          <th>التاريخ</th>
-          <th>المرجع</th>
-          <th>البيان</th>
-          <th class="num">مدين (ر.ع)</th>
-          <th class="num">دائن (ر.ع)</th>
-          <th class="num">الرصيد</th>
+          <th>ط§ظ„طھط§ط±ظٹط®</th>
+          <th>ط§ظ„ظ…ط±ط¬ط¹</th>
+          <th>ط§ظ„ط¨ظٹط§ظ†</th>
+          <th class="num">ظ…ط¯ظٹظ† (ط±.ط¹)</th>
+          <th class="num">ط¯ط§ط¦ظ† (ط±.ط¹)</th>
+          <th class="num">ط§ظ„ط±طµظٹط¯</th>
         </tr>
       </thead>
       <tbody>
-        ${rows.length === 0 ? `<tr><td colspan="6" style="text-align:center;padding:24px;color:#888">لا توجد حركات في هذه الفترة</td></tr>` : ""}
+        ${rows.length === 0 ? `<tr><td colspan="6" style="text-align:center;padding:24px;color:#888">ظ„ط§ طھظˆط¬ط¯ ط­ط±ظƒط§طھ ظپظٹ ظ‡ط°ظ‡ ط§ظ„ظپطھط±ط©</td></tr>` : ""}
         ${rows.map((r) => {
           runningBalance += r.debit - r.credit;
           return `
@@ -290,27 +290,27 @@ export function getInsuranceStatementHtml(data: StatementData): string {
     </table>
 
     <div class="totals">
-      <div class="item"><div class="l">إجمالي المدين</div><div class="v debit">${fmt(totalDebit)}</div></div>
-      <div class="item"><div class="l">إجمالي الدائن</div><div class="v credit">${fmt(totalCredit)}</div></div>
-      <div class="item"><div class="l">عدد الحركات</div><div class="v">${rows.length}</div></div>
+      <div class="item"><div class="l">ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ط¯ظٹظ†</div><div class="v debit">${fmt(totalDebit)}</div></div>
+      <div class="item"><div class="l">ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط¯ط§ط¦ظ†</div><div class="v credit">${fmt(totalCredit)}</div></div>
+      <div class="item"><div class="l">ط¹ط¯ط¯ ط§ظ„ط­ط±ظƒط§طھ</div><div class="v">${rows.length}</div></div>
     </div>
 
     <div class="balance">
-      <span class="l">${finalBalance >= 0 ? "الرصيد المستحق على شركة التأمين" : "رصيد لصالح شركة التأمين"}</span>
-      <span class="v">${fmt(Math.abs(finalBalance))} ر.ع</span>
+      <span class="l">${finalBalance >= 0 ? "ط§ظ„ط±طµظٹط¯ ط§ظ„ظ…ط³طھط­ظ‚ ط¹ظ„ظ‰ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†" : "ط±طµظٹط¯ ظ„طµط§ظ„ط­ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†"}</span>
+      <span class="v">${fmt(Math.abs(finalBalance))} ط±.ط¹</span>
     </div>
 
     <div class="stamp-area">
       <div class="signature-box">
-        <div>المحاسب / المسؤول</div>
+        <div>ط§ظ„ظ…ط­ط§ط³ط¨ / ط§ظ„ظ…ط³ط¤ظˆظ„</div>
         <div class="line">${s.responsibleName ?? ""}</div>
       </div>
-      ${s.stampUrl ? `<img class="stamp-img" src="${s.stampUrl}" alt="Company Stamp" />` : `<div class="signature-box"><div>Company Stamp / ختم الشركة</div></div>`}
+      ${s.stampUrl ? `<img class="stamp-img" src="${s.stampUrl}" alt="Company Stamp" />` : `<div class="signature-box"><div>Company Stamp / ط®طھظ… ط§ظ„ط´ط±ظƒط©</div></div>`}
     </div>
 
     <div class="footer">
       <span>${s.footerText ?? ""}</span>
-      <span>${s.companyName} • ${new Date().toLocaleString("ar-OM")}</span>
+      <span>${s.companyName} â€¢ ${new Date().toLocaleString("ar-OM")}</span>
     </div>
   </div>
 

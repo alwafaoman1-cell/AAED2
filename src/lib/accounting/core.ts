@@ -1,10 +1,9 @@
 import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { salesStore, type SalesDoc } from "@/lib/salesStore";
 import { getWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
-import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
+import { calculateVatExclusive, formatOMR as formatMoneyOMR, roundMoney as roundOmaniMoney, OMAN_VAT_RATE, OMR_DECIMALS } from "@/lib/money";
 
-export const OMAN_VAT_RATE = 0.05;
-export const OMR_DECIMALS = 3;
+export { OMAN_VAT_RATE, OMR_DECIMALS };
 
 export type AccountingCostSource = "Actual Expenses" | "Estimated Costs" | "Manual Final Cost";
 export type AccountingExpenseCategory = "spare_parts" | "labour" | "towing" | "purchase" | "other";
@@ -78,25 +77,19 @@ export interface DataQualityIssue {
 }
 
 function roundMoney(value: unknown): number {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return 0;
-  return Math.round(num * 1000) / 1000;
+  return roundOmaniMoney(value);
 }
 
 export function formatOMR(value: unknown): string {
-  return formatCurrencyEnglish(roundMoney(value), {
-    minimumFractionDigits: OMR_DECIMALS,
-    maximumFractionDigits: OMR_DECIMALS,
-  });
+  return formatMoneyOMR(value);
 }
 
 export function calculateVatFromSubtotal(subtotal: unknown, vatRate = OMAN_VAT_RATE) {
-  const cleanSubtotal = roundMoney(subtotal);
-  const vat = roundMoney(cleanSubtotal * vatRate);
+  const breakdown = calculateVatExclusive(subtotal, vatRate);
   return {
-    subtotal: cleanSubtotal,
-    vat,
-    total: roundMoney(cleanSubtotal + vat),
+    subtotal: breakdown.subtotalBeforeVat,
+    vat: breakdown.vatAmount,
+    total: breakdown.totalIncludingVat,
   };
 }
 
@@ -188,10 +181,9 @@ export function buildWorkOrderAccountingRows(range?: AccountingDateRange): WorkO
     .map((order) => {
       const orderInvoices = docsForWorkOrder(order, invoices);
       const revenue = revenueFromInvoices(orderInvoices);
-      const fallbackRevenue = orderInvoices.length ? 0 : roundMoney(order.totalCost);
-      const revenueExVat = roundMoney(revenue.revenueExVat || fallbackRevenue);
+      const revenueExVat = roundMoney(revenue.revenueExVat);
       const vatOutput = roundMoney(revenue.vatOutput);
-      const invoiceTotal = roundMoney(revenue.invoiceTotal || revenueExVat + vatOutput);
+      const invoiceTotal = roundMoney(revenue.invoiceTotal);
       const paidAmount = roundMoney(revenue.paidAmount);
       const expenses = expensesForWorkOrder(order);
       const actualSparePartsCost = roundMoney(expenses.filter((e) => expenseCategory(e) === "spare_parts").reduce((sum, e) => sum + Number(e.amount || 0), 0));

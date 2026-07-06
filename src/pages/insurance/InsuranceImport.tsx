@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { calculateVatExclusive, calculateVatInclusive } from "@/lib/money";
 
 interface ClaimRow {
   claim_ref: string;
@@ -40,36 +41,36 @@ interface LogLine { kind: "info" | "ok" | "err"; msg: string; }
 
 const HEADER_MAP_CLAIM: Record<string, keyof ClaimRow> = {
   "claim_ref*": "claim_ref", "claim_ref": "claim_ref",
-  "تاريخ المطالبة*": "claim_date", "تاريخ المطالبة": "claim_date",
-  "رقم المطالبة": "claim_number",
-  "شركة التأمين*": "insurance_company", "شركة التأمين": "insurance_company",
-  "رقم الوثيقة": "policy_number",
-  "اسم العميل*": "customer_name", "اسم العميل": "customer_name",
-  "هاتف العميل": "customer_phone",
-  "رقم اللوحة*": "plate", "رقم اللوحة": "plate",
-  "الماركة*": "brand", "الماركة": "brand",
-  "الموديل*": "model", "الموديل": "model",
-  "سنة الصنع": "year", "اللون": "color", "رقم الشاسيه": "vin", "VIN": "vin",
-  "المبلغ المقدر": "estimated_amount", "تقدير": "estimated_amount",
-  "المبلغ المعتمد": "approved_amount",
-  "شامل الضريبة": "total_with_vat", "الإجمالي شامل الضريبة": "total_with_vat",
-  "الحالة": "status", "ملاحظات": "notes",
+  "طھط§ط±ظٹط® ط§ظ„ظ…ط·ط§ظ„ط¨ط©*": "claim_date", "طھط§ط±ظٹط® ط§ظ„ظ…ط·ط§ظ„ط¨ط©": "claim_date",
+  "ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط©": "claim_number",
+  "ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†*": "insurance_company", "ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†": "insurance_company",
+  "ط±ظ‚ظ… ط§ظ„ظˆط«ظٹظ‚ط©": "policy_number",
+  "ط§ط³ظ… ط§ظ„ط¹ظ…ظٹظ„*": "customer_name", "ط§ط³ظ… ط§ظ„ط¹ظ…ظٹظ„": "customer_name",
+  "ظ‡ط§طھظپ ط§ظ„ط¹ظ…ظٹظ„": "customer_phone",
+  "ط±ظ‚ظ… ط§ظ„ظ„ظˆط­ط©*": "plate", "ط±ظ‚ظ… ط§ظ„ظ„ظˆط­ط©": "plate",
+  "ط§ظ„ظ…ط§ط±ظƒط©*": "brand", "ط§ظ„ظ…ط§ط±ظƒط©": "brand",
+  "ط§ظ„ظ…ظˆط¯ظٹظ„*": "model", "ط§ظ„ظ…ظˆط¯ظٹظ„": "model",
+  "ط³ظ†ط© ط§ظ„طµظ†ط¹": "year", "ط§ظ„ظ„ظˆظ†": "color", "ط±ظ‚ظ… ط§ظ„ط´ط§ط³ظٹظ‡": "vin", "VIN": "vin",
+  "ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ظ‚ط¯ط±": "estimated_amount", "طھظ‚ط¯ظٹط±": "estimated_amount",
+  "ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ط¹طھظ…ط¯": "approved_amount",
+  "ط´ط§ظ…ظ„ ط§ظ„ط¶ط±ظٹط¨ط©": "total_with_vat", "ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ط´ط§ظ…ظ„ ط§ظ„ط¶ط±ظٹط¨ط©": "total_with_vat",
+  "ط§ظ„ط­ط§ظ„ط©": "status", "ظ…ظ„ط§ط­ط¸ط§طھ": "notes",
 };
 const HEADER_MAP_ITEM: Record<string, keyof ItemRow> = {
   "claim_ref*": "claim_ref", "claim_ref": "claim_ref",
-  "البيان*": "description", "البيان": "description",
-  "الكمية": "quantity", "السعر*": "unit_price", "السعر": "unit_price",
-  "النوع": "type",
+  "ط§ظ„ط¨ظٹط§ظ†*": "description", "ط§ظ„ط¨ظٹط§ظ†": "description",
+  "ط§ظ„ظƒظ…ظٹط©": "quantity", "ط§ظ„ط³ط¹ط±*": "unit_price", "ط§ظ„ط³ط¹ط±": "unit_price",
+  "ط§ظ„ظ†ظˆط¹": "type",
 };
 const HEADER_MAP_PAY: Record<string, keyof PaymentRow> = {
   "claim_ref*": "claim_ref", "claim_ref": "claim_ref",
-  "تاريخ الدفع*": "payment_date", "تاريخ الدفع": "payment_date",
-  "المبلغ*": "amount", "المبلغ": "amount",
-  "طريقة الدفع*": "payment_method", "طريقة الدفع": "payment_method",
-  "رقم المرجع": "reference_number",
-  "البنك": "bank_name",
-  "تاريخ استحقاق الشيك": "cheque_due_date",
-  "ملاحظات": "notes",
+  "طھط§ط±ظٹط® ط§ظ„ط¯ظپط¹*": "payment_date", "طھط§ط±ظٹط® ط§ظ„ط¯ظپط¹": "payment_date",
+  "ط§ظ„ظ…ط¨ظ„ط؛*": "amount", "ط§ظ„ظ…ط¨ظ„ط؛": "amount",
+  "ط·ط±ظٹظ‚ط© ط§ظ„ط¯ظپط¹*": "payment_method", "ط·ط±ظٹظ‚ط© ط§ظ„ط¯ظپط¹": "payment_method",
+  "ط±ظ‚ظ… ط§ظ„ظ…ط±ط¬ط¹": "reference_number",
+  "ط§ظ„ط¨ظ†ظƒ": "bank_name",
+  "طھط§ط±ظٹط® ط§ط³طھط­ظ‚ط§ظ‚ ط§ظ„ط´ظٹظƒ": "cheque_due_date",
+  "ظ…ظ„ط§ط­ط¸ط§طھ": "notes",
 };
 
 function toIso(v: any): string | null {
@@ -114,18 +115,18 @@ export default function InsuranceImport() {
     // Minimal client-side template
     const wb = XLSX.utils.book_new();
     const claims = [Object.keys(HEADER_MAP_CLAIM).filter(k => !k.includes("*") || true).slice(0, 22)];
-    const items = [["claim_ref*","البيان*","الكمية","السعر*","النوع"]];
-    const pays = [["claim_ref*","تاريخ الدفع*","المبلغ*","طريقة الدفع*","رقم المرجع","البنك","تاريخ استحقاق الشيك","ملاحظات"]];
+    const items = [["claim_ref*","ط§ظ„ط¨ظٹط§ظ†*","ط§ظ„ظƒظ…ظٹط©","ط§ظ„ط³ط¹ط±*","ط§ظ„ظ†ظˆط¹"]];
+    const pays = [["claim_ref*","طھط§ط±ظٹط® ط§ظ„ط¯ظپط¹*","ط§ظ„ظ…ط¨ظ„ط؛*","ط·ط±ظٹظ‚ط© ط§ظ„ط¯ظپط¹*","ط±ظ‚ظ… ط§ظ„ظ…ط±ط¬ط¹","ط§ظ„ط¨ظ†ظƒ","طھط§ط±ظٹط® ط§ط³طھط­ظ‚ط§ظ‚ ط§ظ„ط´ظٹظƒ","ظ…ظ„ط§ط­ط¸ط§طھ"]];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ["claim_ref*","تاريخ المطالبة*","رقم المطالبة","شركة التأمين*","رقم الوثيقة","اسم العميل*","هاتف العميل","رقم اللوحة*","الماركة*","الموديل*","سنة الصنع","اللون","رقم الشاسيه","المبلغ المقدر","المبلغ المعتمد","الحالة","ملاحظات"],
-      ["CLM001","2026-04-15","CLM-2026-001","أكسا للتأمين","POL-1","أحمد محمد","96891234567","12345 أ","تويوتا","كامري",2022,"أبيض","",450,420,"approved",""],
-    ]), "المطالبات");
+      ["claim_ref*","طھط§ط±ظٹط® ط§ظ„ظ…ط·ط§ظ„ط¨ط©*","ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط©","ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†*","ط±ظ‚ظ… ط§ظ„ظˆط«ظٹظ‚ط©","ط§ط³ظ… ط§ظ„ط¹ظ…ظٹظ„*","ظ‡ط§طھظپ ط§ظ„ط¹ظ…ظٹظ„","ط±ظ‚ظ… ط§ظ„ظ„ظˆط­ط©*","ط§ظ„ظ…ط§ط±ظƒط©*","ط§ظ„ظ…ظˆط¯ظٹظ„*","ط³ظ†ط© ط§ظ„طµظ†ط¹","ط§ظ„ظ„ظˆظ†","ط±ظ‚ظ… ط§ظ„ط´ط§ط³ظٹظ‡","ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ظ‚ط¯ط±","ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ط¹طھظ…ط¯","ط§ظ„ط­ط§ظ„ط©","ظ…ظ„ط§ط­ط¸ط§طھ"],
+      ["CLM001","2026-04-15","CLM-2026-001","ط£ظƒط³ط§ ظ„ظ„طھط£ظ…ظٹظ†","POL-1","ط£ط­ظ…ط¯ ظ…ط­ظ…ط¯","96891234567","12345 ط£","طھظˆظٹظˆطھط§","ظƒط§ظ…ط±ظٹ",2022,"ط£ط¨ظٹط¶","",450,420,"approved",""],
+    ]), "ط§ظ„ظ…ط·ط§ظ„ط¨ط§طھ");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      items[0], ["CLM001","صبغ الصدام",1,200,"labor"], ["CLM001","قطع غيار",1,220,"parts"]
-    ]), "بنود الفاتورة");
+      items[0], ["CLM001","طµط¨ط؛ ط§ظ„طµط¯ط§ظ…",1,200,"labor"], ["CLM001","ظ‚ط·ط¹ ط؛ظٹط§ط±",1,220,"parts"]
+    ]), "ط¨ظ†ظˆط¯ ط§ظ„ظپط§طھظˆط±ط©");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      pays[0], ["CLM001","2026-05-01",399,"bank_transfer","TRX-1","بنك مسقط","",""]
-    ]), "الدفعات");
+      pays[0], ["CLM001","2026-05-01",399,"bank_transfer","TRX-1","ط¨ظ†ظƒ ظ…ط³ظ‚ط·","",""]
+    ]), "ط§ظ„ط¯ظپط¹ط§طھ");
     XLSX.writeFile(wb, "insurance_import_template.xlsx");
   }
 
@@ -138,10 +139,10 @@ export default function InsuranceImport() {
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array", cellDates: true });
-      const claimsSheet = wb.Sheets["المطالبات"];
-      const itemsSheet = wb.Sheets["بنود الفاتورة"];
-      const paySheet = wb.Sheets["الدفعات"];
-      if (!claimsSheet) throw new Error("صفحة 'المطالبات' غير موجودة في الملف");
+      const claimsSheet = wb.Sheets["ط§ظ„ظ…ط·ط§ظ„ط¨ط§طھ"];
+      const itemsSheet = wb.Sheets["ط¨ظ†ظˆط¯ ط§ظ„ظپط§طھظˆط±ط©"];
+      const paySheet = wb.Sheets["ط§ظ„ط¯ظپط¹ط§طھ"];
+      if (!claimsSheet) throw new Error("طµظپط­ط© 'ط§ظ„ظ…ط·ط§ظ„ط¨ط§طھ' ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط© ظپظٹ ط§ظ„ظ…ظ„ظپ");
 
       const claimRows: ClaimRow[] = XLSX.utils.sheet_to_json<any>(claimsSheet, { defval: "" })
         .map(r => mapRow<ClaimRow>(r, HEADER_MAP_CLAIM))
@@ -149,7 +150,7 @@ export default function InsuranceImport() {
           ...r,
           customer_name: r.customer_name && String(r.customer_name).trim() && String(r.customer_name) !== "0"
             ? String(r.customer_name).trim()
-            : `عميل ${r.plate || r.claim_ref}`,
+            : `ط¹ظ…ظٹظ„ ${r.plate || r.claim_ref}`,
         }))
         .filter(r => r.claim_ref && r.plate);
       const itemRows: ItemRow[] = itemsSheet
@@ -163,26 +164,26 @@ export default function InsuranceImport() {
             .filter(r => r.claim_ref && r.amount)
         : [];
 
-      log("info", `تم القراءة: ${claimRows.length} مطالبة، ${itemRows.length} بند، ${payRows.length} دفعة`);
+      log("info", `طھظ… ط§ظ„ظ‚ط±ط§ط،ط©: ${claimRows.length} ظ…ط·ط§ظ„ط¨ط©طŒ ${itemRows.length} ط¨ظ†ط¯طŒ ${payRows.length} ط¯ظپط¹ط©`);
 
       // Cache existing customers/vehicles
       const tenantId = profile.tenant_id;
       const refToClaimId: Record<string, string> = {};
       const refToCompany: Record<string, { id: string | null; name: string }> = {};
 
-      // ── فحص التكرارات داخل الملف نفسه (نفس claim_ref أو نفس claim_number)
+      // â”€â”€ ظپط­طµ ط§ظ„طھظƒط±ط§ط±ط§طھ ط¯ط§ط®ظ„ ط§ظ„ظ…ظ„ظپ ظ†ظپط³ظ‡ (ظ†ظپط³ claim_ref ط£ظˆ ظ†ظپط³ claim_number)
       const seenRef = new Set<string>();
       const seenNum = new Set<string>();
       const dedupedRows: ClaimRow[] = [];
       for (const r of claimRows) {
         if (seenRef.has(r.claim_ref)) {
-          duplicatesCount++; dupList.push(`مكرر داخل الملف: ${r.claim_ref}`);
-          log("err", `⚠ مكرر داخل الملف: claim_ref=${r.claim_ref} — تم تجاهله`);
+          duplicatesCount++; dupList.push(`ظ…ظƒط±ط± ط¯ط§ط®ظ„ ط§ظ„ظ…ظ„ظپ: ${r.claim_ref}`);
+          log("err", `Duplicate row inside file: claim_ref=${r.claim_ref} - skipped`);
           continue;
         }
         if (r.claim_number && seenNum.has(r.claim_number)) {
-          duplicatesCount++; dupList.push(`رقم مطالبة مكرر داخل الملف: ${r.claim_number}`);
-          log("err", `⚠ رقم مطالبة مكرر داخل الملف: ${r.claim_number} — تم تجاهله`);
+          duplicatesCount++; dupList.push(`ط±ظ‚ظ… ظ…ط·ط§ظ„ط¨ط© ظ…ظƒط±ط± ط¯ط§ط®ظ„ ط§ظ„ظ…ظ„ظپ: ${r.claim_number}`);
+          log("err", `Duplicate claim number inside file: ${r.claim_number} - skipped`);
           continue;
         }
         seenRef.add(r.claim_ref);
@@ -190,7 +191,7 @@ export default function InsuranceImport() {
         dedupedRows.push(r);
       }
 
-      // ── فحص التكرار مع قاعدة البيانات (نفس claim_number لنفس tenant)
+      // â”€â”€ ظپط­طµ ط§ظ„طھظƒط±ط§ط± ظ…ط¹ ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ (ظ†ظپط³ claim_number ظ„ظ†ظپط³ tenant)
       const existingNums = new Set<string>();
       const numbersToCheck = dedupedRows.map(r => r.claim_number).filter(Boolean) as string[];
       if (numbersToCheck.length) {
@@ -204,8 +205,8 @@ export default function InsuranceImport() {
 
       const finalRows = dedupedRows.filter(r => {
         if (r.claim_number && existingNums.has(r.claim_number)) {
-          duplicatesCount++; dupList.push(`موجود مسبقاً: ${r.claim_number}`);
-          log("err", `⚠ مطالبة موجودة مسبقاً في النظام: ${r.claim_number} — تم تجاهلها`);
+          duplicatesCount++; dupList.push(`ظ…ظˆط¬ظˆط¯ ظ…ط³ط¨ظ‚ط§ظ‹: ${r.claim_number}`);
+          log("err", `Claim already exists in the system: ${r.claim_number} - skipped`);
           return false;
         }
         return true;
@@ -252,7 +253,7 @@ export default function InsuranceImport() {
             if (!vehicleId) {
               const { data, error } = await supabase.from("vehicles").insert({
                 tenant_id: tenantId, customer_id: customerId,
-                brand: r.brand || "غير محدد", model: r.model || "غير محدد",
+                brand: r.brand || "ط؛ظٹط± ظ…ط­ط¯ط¯", model: r.model || "ط؛ظٹط± ظ…ط­ط¯ط¯",
                 plate_number: D || String(r.plate),
                 plate_letters: L,
                 plate_country: "OM",
@@ -312,10 +313,10 @@ export default function InsuranceImport() {
           if (claimErr) throw claimErr;
           refToClaimId[r.claim_ref] = (claimData as any).id;
           claimsCount++;
-          log("ok", `✓ مطالبة ${claimNumber}`);
+          log("ok", `âœ“ ظ…ط·ط§ظ„ط¨ط© ${claimNumber}`);
         } catch (e: any) {
           errors++;
-          log("err", `✗ صف ${r.claim_ref}: ${e.message}`);
+          log("err", `âœ— طµظپ ${r.claim_ref}: ${e.message}`);
         }
       }
 
@@ -339,19 +340,21 @@ export default function InsuranceImport() {
       for (const r of finalRows) {
         if (!grouped[r.claim_ref] && (claimAmountMap[r.claim_ref].approved > 0 || claimAmountMap[r.claim_ref].totalWithVat > 0)) {
           const amt = claimAmountMap[r.claim_ref];
-          // المبلغ يُعامَل كـ شامل الضريبة (5%): subtotal = total/1.05
-          const totalIncVat = amt.totalWithVat > 0 ? amt.totalWithVat : amt.approved;
-          const subtotal = +(totalIncVat / 1.05).toFixed(3);
-          const total = totalIncVat;
-          const vat = +(total - subtotal).toFixed(3);
-          grouped[r.claim_ref] = [{ claim_ref: r.claim_ref, description: "أعمال إصلاح حسب التقدير المعتمد", quantity: 1, unit_price: subtotal }];
+          // Explicit total_with_vat imports are split only when that column is provided; approved amounts remain VAT-exclusive.
+          const breakdown = amt.totalWithVat > 0
+            ? calculateVatInclusive(amt.totalWithVat)
+            : calculateVatExclusive(amt.approved);
+          const subtotal = breakdown.subtotalBeforeVat;
+          const total = breakdown.totalIncludingVat;
+          const vat = breakdown.vatAmount;
+          grouped[r.claim_ref] = [{ claim_ref: r.claim_ref, description: "ط£ط¹ظ…ط§ظ„ ط¥طµظ„ط§ط­ ط­ط³ط¨ ط§ظ„طھظ‚ط¯ظٹط± ط§ظ„ظ…ط¹طھظ…ط¯", quantity: 1, unit_price: subtotal }];
           (claimAmountMap[r.claim_ref] as any)._override = { subtotal, vat, total };
         }
       }
 
       for (const ref of Object.keys(grouped)) {
         const claimId = refToClaimId[ref];
-        if (!claimId) { log("err", `بنود فاتورة بدون مطالبة: ${ref}`); errors++; continue; }
+        if (!claimId) { log("err", `ط¨ظ†ظˆط¯ ظپط§طھظˆط±ط© ط¨ط¯ظˆظ† ظ…ط·ط§ظ„ط¨ط©: ${ref}`); errors++; continue; }
         const items = grouped[ref].map(it => ({
           description: it.description,
           quantity: num(it.quantity, 1),
@@ -375,15 +378,15 @@ export default function InsuranceImport() {
           issued_at: issuedAt,
           created_at: issuedAt,
         } as any);
-        if (error) { log("err", `فاتورة ${ref}: ${error.message}`); errors++; }
-        else { invoicesCount++; log("ok", `✓ فاتورة ${ref}`); }
+        if (error) { log("err", `ظپط§طھظˆط±ط© ${ref}: ${error.message}`); errors++; }
+        else { invoicesCount++; log("ok", `âœ“ ظپط§طھظˆط±ط© ${ref}`); }
       }
 
       // 6. Payments
       setProgress(90);
       for (const p of payRows) {
         const claimId = refToClaimId[p.claim_ref];
-        if (!claimId) { log("err", `دفعة بدون مطالبة: ${p.claim_ref}`); errors++; continue; }
+        if (!claimId) { log("err", `ط¯ظپط¹ط© ط¨ط¯ظˆظ† ظ…ط·ط§ظ„ط¨ط©: ${p.claim_ref}`); errors++; continue; }
         const method = ["bank_transfer","cheque","offset","cash"].includes(p.payment_method) ? p.payment_method : "bank_transfer";
         const date = toIso(p.payment_date) ?? new Date().toISOString().slice(0,10);
         const { error } = await supabase.from("claim_payments" as any).insert({
@@ -401,20 +404,20 @@ export default function InsuranceImport() {
           notes: p.notes || null,
           created_at: date + "T00:00:00Z",
         } as any);
-        if (error) { log("err", `دفعة ${p.claim_ref}: ${error.message}`); errors++; }
-        else { paymentsCount++; log("ok", `✓ دفعة ${p.claim_ref}`); }
+        if (error) { log("err", `ط¯ظپط¹ط© ${p.claim_ref}: ${error.message}`); errors++; }
+        else { paymentsCount++; log("ok", `âœ“ ط¯ظپط¹ط© ${p.claim_ref}`); }
       }
 
       setProgress(100);
       setDuplicates(dupList);
       setSummary({ claims: claimsCount, invoices: invoicesCount, payments: paymentsCount, errors, duplicates: duplicatesCount });
       if (duplicatesCount > 0) {
-        toast.warning(`اكتمل الاستيراد مع تنبيه: ${duplicatesCount} مكرر تم تجاهله`, { duration: 8000 });
+        toast.warning(`ط§ظƒطھظ…ظ„ ط§ظ„ط§ط³طھظٹط±ط§ط¯ ظ…ط¹ طھظ†ط¨ظٹظ‡: ${duplicatesCount} ظ…ظƒط±ط± طھظ… طھط¬ط§ظ‡ظ„ظ‡`, { duration: 8000 });
       } else {
-        toast.success(`اكتمل الاستيراد — ${claimsCount} مطالبة، ${invoicesCount} فاتورة، ${paymentsCount} دفعة`);
+        toast.success(`ط§ظƒطھظ…ظ„ ط§ظ„ط§ط³طھظٹط±ط§ط¯ â€” ${claimsCount} ظ…ط·ط§ظ„ط¨ط©طŒ ${invoicesCount} ظپط§طھظˆط±ط©طŒ ${paymentsCount} ط¯ظپط¹ط©`);
       }
     } catch (e: any) {
-      log("err", `فشل الاستيراد: ${e.message}`);
+      log("err", `ظپط´ظ„ ط§ظ„ط§ط³طھظٹط±ط§ط¯: ${e.message}`);
       toast.error(e.message);
     } finally {
       setBusy(false);
@@ -427,14 +430,14 @@ export default function InsuranceImport() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Upload className="text-primary" /> استيراد مطالبات Excel
+            <Upload className="text-primary" /> ط§ط³طھظٹط±ط§ط¯ ظ…ط·ط§ظ„ط¨ط§طھ Excel
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            ارفع ملف Excel لإنشاء مطالبات وفواتير ودفعات بالتواريخ الأصلية. سيتم إنشاء أوامر العمل تلقائياً عند اعتماد المطالبة.
+            ط§ط±ظپط¹ ظ…ظ„ظپ Excel ظ„ط¥ظ†ط´ط§ط، ظ…ط·ط§ظ„ط¨ط§طھ ظˆظپظˆط§طھظٹط± ظˆط¯ظپط¹ط§طھ ط¨ط§ظ„طھظˆط§ط±ظٹط® ط§ظ„ط£طµظ„ظٹط©. ط³ظٹطھظ… ط¥ظ†ط´ط§ط، ط£ظˆط§ظ…ط± ط§ظ„ط¹ظ…ظ„ طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ†ط¯ ط§ط¹طھظ…ط§ط¯ ط§ظ„ظ…ط·ط§ظ„ط¨ط©.
           </p>
         </div>
         <Button variant="outline" onClick={downloadTemplate}>
-          <Download className="ml-2 h-4 w-4" /> تنزيل القالب
+          <Download className="ml-2 h-4 w-4" /> طھظ†ط²ظٹظ„ ط§ظ„ظ‚ط§ظ„ط¨
         </Button>
       </div>
 
@@ -450,7 +453,7 @@ export default function InsuranceImport() {
           />
           <label htmlFor="xlsx-input" className="cursor-pointer">
             <Button variant="secondary" asChild>
-              <span>اختر ملف Excel</span>
+              <span>ط§ط®طھط± ظ…ظ„ظپ Excel</span>
             </Button>
           </label>
           {file && <div className="mt-3 text-sm">{file.name} ({(file.size / 1024).toFixed(1)} KB)</div>}
@@ -459,7 +462,7 @@ export default function InsuranceImport() {
         {file && (
           <div className="mt-4 flex justify-end">
             <Button onClick={handleImport} disabled={busy} size="lg">
-              {busy ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" /> جارِ الاستيراد...</> : "بدء الاستيراد"}
+              {busy ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" /> ط¬ط§ط±ظگ ط§ظ„ط§ط³طھظٹط±ط§ط¯...</> : "ط¨ط¯ط، ط§ظ„ط§ط³طھظٹط±ط§ط¯"}
             </Button>
           </div>
         )}
@@ -475,11 +478,11 @@ export default function InsuranceImport() {
       {summary && (
         <Card className="p-6">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div><div className="text-2xl font-bold text-green-500">{summary.claims}</div><div className="text-xs text-muted-foreground">مطالبات</div></div>
-            <div><div className="text-2xl font-bold text-blue-500">{summary.invoices}</div><div className="text-xs text-muted-foreground">فواتير</div></div>
-            <div><div className="text-2xl font-bold text-purple-500">{summary.payments}</div><div className="text-xs text-muted-foreground">دفعات</div></div>
-            <div><div className={`text-2xl font-bold ${summary.duplicates ? "text-amber-500" : "text-muted-foreground"}`}>{summary.duplicates}</div><div className="text-xs text-muted-foreground">مكررات</div></div>
-            <div><div className={`text-2xl font-bold ${summary.errors ? "text-destructive" : "text-muted-foreground"}`}>{summary.errors}</div><div className="text-xs text-muted-foreground">أخطاء</div></div>
+            <div><div className="text-2xl font-bold text-green-500">{summary.claims}</div><div className="text-xs text-muted-foreground">ظ…ط·ط§ظ„ط¨ط§طھ</div></div>
+            <div><div className="text-2xl font-bold text-blue-500">{summary.invoices}</div><div className="text-xs text-muted-foreground">ظپظˆط§طھظٹط±</div></div>
+            <div><div className="text-2xl font-bold text-purple-500">{summary.payments}</div><div className="text-xs text-muted-foreground">ط¯ظپط¹ط§طھ</div></div>
+            <div><div className={`text-2xl font-bold ${summary.duplicates ? "text-amber-500" : "text-muted-foreground"}`}>{summary.duplicates}</div><div className="text-xs text-muted-foreground">ظ…ظƒط±ط±ط§طھ</div></div>
+            <div><div className={`text-2xl font-bold ${summary.errors ? "text-destructive" : "text-muted-foreground"}`}>{summary.errors}</div><div className="text-xs text-muted-foreground">ط£ط®ط·ط§ط،</div></div>
           </div>
         </Card>
       )}
@@ -487,12 +490,12 @@ export default function InsuranceImport() {
       {duplicates.length > 0 && (
         <Card className="p-4 border-amber-500/50 bg-amber-500/5">
           <div className="font-semibold mb-2 text-amber-600 flex items-center gap-2">
-            <AlertCircle size={16} /> تنبيه: {duplicates.length} سجل مكرر تم تجاهله
+            <AlertCircle size={16} /> طھظ†ط¨ظٹظ‡: {duplicates.length} ط³ط¬ظ„ ظ…ظƒط±ط± طھظ… طھط¬ط§ظ‡ظ„ظ‡
           </div>
           <ScrollArea className="h-40">
             <div className="space-y-1 text-sm">
               {duplicates.map((d, i) => (
-                <div key={i} className="text-amber-700 dark:text-amber-400">• {d}</div>
+                <div key={i} className="text-amber-700 dark:text-amber-400">â€¢ {d}</div>
               ))}
             </div>
           </ScrollArea>
@@ -501,7 +504,7 @@ export default function InsuranceImport() {
 
       {logs.length > 0 && (
         <Card className="p-4">
-          <div className="font-semibold mb-2">سجل العمليات</div>
+          <div className="font-semibold mb-2">ط³ط¬ظ„ ط§ظ„ط¹ظ…ظ„ظٹط§طھ</div>
           <ScrollArea className="h-64">
             <div className="space-y-1 text-sm font-mono">
               {logs.map((l, i) => (

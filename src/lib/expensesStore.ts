@@ -6,12 +6,26 @@ import type { PaymentMethod } from "./financeSettingsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isUuid } from "@/lib/uuid";
+import { calculateVatExclusive, roundMoney } from "@/lib/money";
+
+export type ExpenseAccountingType =
+  | "workshop_general"
+  | "cash_vehicle_parts"
+  | "insurance_claim"
+  | "other_direct_vehicle"
+  | "unassigned";
 
 export interface ExpenseRecord {
   id: string;
   voucherNumber: string;
   date: string;
   amount: number;
+  expenseType?: ExpenseAccountingType;
+  costCenter?: string;
+  subtotal?: number;
+  vatAmount?: number;
+  total?: number;
+  isVatApplicable?: boolean;
   categoryId: string;
   categoryName?: string;
   cashboxId: string;
@@ -58,6 +72,29 @@ export function getExpensePartRevenue(e: ExpenseRecord): number {
   return e.unitSellPrice * e.partQty;
 }
 
+export function inferExpenseAccountingType(e: Partial<ExpenseRecord>): ExpenseAccountingType {
+  const text = [e.categoryName, e.description, e.partName, e.reference].filter(Boolean).join(" ").toLowerCase();
+  if (e.claimId || e.sourceClaimId) return "insurance_claim";
+  if (e.partName || /spare|part|قطع|غيار/.test(text)) return "cash_vehicle_parts";
+  if (e.vehicleId || e.linkedVehiclePlate || e.linkedWorkOrderId || e.sourceWorkOrderId) return "other_direct_vehicle";
+  if (/general|overhead|rent|utility|workshop|عام|ورشة|ايجار|كهرباء/.test(text)) return "workshop_general";
+  return "unassigned";
+}
+
+export function normalizeExpenseAccountingFields(e: ExpenseRecord): ExpenseRecord {
+  const isVatApplicable = e.isVatApplicable ?? true;
+  const subtotal = roundMoney(e.subtotal ?? e.amount);
+  const vatAmount = isVatApplicable ? calculateVatExclusive(subtotal).vatAmount : 0;
+  const total = roundMoney(e.total ?? subtotal + vatAmount);
+  const expenseType = e.expenseType || inferExpenseAccountingType(e);
+  const costCenter = e.costCenter || (
+    expenseType === "workshop_general"
+      ? "workshop_general"
+      : e.claimId || e.sourceClaimId || e.linkedWorkOrderId || e.sourceWorkOrderId || e.vehicleId || e.linkedVehiclePlate || "unassigned"
+  );
+  return { ...e, expenseType, costCenter, subtotal, vatAmount, total, isVatApplicable };
+}
+
 // ---------------- in-memory cache + sync ----------------
 let cache: ExpenseRecord[] = [];
 let hydrated = false;
@@ -75,6 +112,12 @@ function rowToRecord(r: any): ExpenseRecord {
     voucherNumber: r.voucher_number,
     date: r.date,
     amount: Number(r.amount || 0),
+    expenseType: (r.expense_type || meta.expenseType || "unassigned") as ExpenseAccountingType,
+    costCenter: r.cost_center || meta.costCenter || undefined,
+    subtotal: Number(r.subtotal ?? meta.subtotal ?? r.amount ?? 0),
+    vatAmount: Number(r.vat_amount ?? meta.vatAmount ?? 0),
+    total: Number(r.total ?? meta.total ?? r.amount ?? 0),
+    isVatApplicable: r.is_vat_applicable ?? meta.isVatApplicable ?? true,
     categoryId: r.category_id || "",
     categoryName: r.category_name || undefined,
     cashboxId: r.cashbox_id || "",
@@ -94,8 +137,8 @@ function rowToRecord(r: any): ExpenseRecord {
     edited: meta.edited,
     refunded: meta.refunded,
     refundedAt: meta.refundedAt,
-    supplierTaxNumber: meta.supplierTaxNumber,
-    supplierInvoiceNumber: meta.supplierInvoiceNumber,
+    supplierTaxNumber: r.supplier_tax_number || meta.supplierTaxNumber,
+    supplierInvoiceNumber: r.supplier_invoice_number || meta.supplierInvoiceNumber,
     partId: meta.partId,
     partName: meta.partName,
     partNumber: meta.partNumber,
@@ -114,7 +157,14 @@ function rowToRecord(r: any): ExpenseRecord {
 }
 
 function recordToRow(e: ExpenseRecord, tenantId: string) {
+  e = normalizeExpenseAccountingFields(e);
   const meta: Record<string, any> = {};
+  meta.expenseType = e.expenseType || "unassigned";
+  meta.costCenter = e.costCenter || "unassigned";
+  meta.subtotal = e.subtotal ?? e.amount;
+  meta.vatAmount = e.vatAmount ?? 0;
+  meta.total = e.total ?? e.amount;
+  meta.isVatApplicable = e.isVatApplicable ?? true;
   if (e.reference !== undefined) meta.reference = e.reference;
   if (e.edited !== undefined) meta.edited = e.edited;
   if (e.refunded !== undefined) meta.refunded = e.refunded;
@@ -152,6 +202,14 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     cashbox_id: e.cashboxId || null,
     cashbox_name: e.cashboxName || null,
     payment_method: e.paymentMethod || "cash",
+    expense_type: e.expenseType || "unassigned",
+    cost_center: e.costCenter || "unassigned",
+    subtotal: Number(e.subtotal ?? e.amount ?? 0),
+    vat_amount: Number(e.vatAmount ?? 0),
+    total: Number(e.total ?? e.amount ?? 0),
+    is_vat_applicable: e.isVatApplicable ?? true,
+    supplier_tax_number: e.supplierTaxNumber || null,
+    supplier_invoice_number: e.supplierInvoiceNumber || null,
     beneficiary: e.beneficiary || null,
     description: e.description || null,
     linked_work_order_id: e.linkedWorkOrderId || null,
@@ -166,6 +224,27 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     deleted_at: e.deletedAt || null,
     archived_at: e.archivedAt || null,
   };
+}
+
+function stripExpenseAccountingColumns(row: Record<string, any>) {
+  const {
+    expense_type,
+    cost_center,
+    subtotal,
+    vat_amount,
+    total,
+    is_vat_applicable,
+    supplier_tax_number,
+    supplier_invoice_number,
+    ...legacy
+  } = row;
+  return legacy;
+}
+
+function isMissingAccountingColumnError(error: any): boolean {
+  const msg = String(error?.message || error?.details || "");
+  return /expense_type|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|subtotal|total/.test(msg)
+    && /column|schema|cache/i.test(msg);
 }
 
 async function hydrateFromCloud() {
@@ -248,10 +327,18 @@ export const expensesStore = {
     const tenantId = await getCurrentTenantId();
     if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
     const row = recordToRow(item, tenantId);
-    const { data, error } = await (supabase.from("expenses") as any)
+    let { data, error } = await (supabase.from("expenses") as any)
       .upsert(row)
       .select("*")
       .single();
+    if (error && isMissingAccountingColumnError(error)) {
+      const retry = await (supabase.from("expenses") as any)
+        .upsert(stripExpenseAccountingColumns(row as any))
+        .select("*")
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) throw error;
     if (!data?.id) throw new Error("تعذر تأكيد حفظ المصروف في Supabase");
     const saved = rowToRecord(data);
@@ -270,13 +357,23 @@ export const expensesStore = {
     const row = recordToRow(next, tenantId);
     // Remove tenant_id from update payload to avoid changing it.
     const { tenant_id, id: _id, ...updatable } = row as any;
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("expenses")
       .update(updatable)
       .eq("tenant_id", tenantId)
       .eq("id", id)
       .select("*")
       .single();
+    if (error && isMissingAccountingColumnError(error)) {
+      const retry = await (supabase.from("expenses") as any)
+        .update(stripExpenseAccountingColumns(updatable))
+        .eq("tenant_id", tenantId)
+        .eq("id", id)
+        .select("*")
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) throw error;
     if (!data?.id) throw new Error("تعذر تأكيد تحديث المصروف في Supabase");
     cache[idx] = rowToRecord(data);

@@ -39,6 +39,7 @@ import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
+import { calculateVatExclusive, roundMoney } from "@/lib/money";
 
 type ReportPeriod = "all" | "day" | "month" | "year";
 
@@ -80,7 +81,7 @@ export default function ExpenseNew() {
   const [description, setDescription] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [linkedVehiclePlate, setLinkedVehiclePlate] = useState<string>("");
-  // حقول ضريبية للمورد (لتقرير الضريبة الرسمي)
+  // ط­ظ‚ظˆظ„ ط¶ط±ظٹط¨ظٹط© ظ„ظ„ظ…ظˆط±ط¯ (ظ„طھظ‚ط±ظٹط± ط§ظ„ط¶ط±ظٹط¨ط© ط§ظ„ط±ط³ظ…ظٹ)
   const [supplierCompany, setSupplierCompany] = useState<string>("");
   const [supplierTaxNumber, setSupplierTaxNumber] = useState<string>("");
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState<string>("");
@@ -124,21 +125,21 @@ export default function ExpenseNew() {
 
   const handleSave = async () => {
     const value = parseMoneyInput(amount);
-    if (!value || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
-    if (!categoryId) return toast.error("اختر تصنيف المصروف");
-    if (!cashboxId) return toast.error("اختر الخزينة");
-    if (settings.paymentVoucherRequirePhoto && !photo && !editingId) return toast.error("صورة الإيصال مطلوبة");
+    if (!value || value <= 0) return toast.error("ط£ط¯ط®ظ„ ظ…ط¨ظ„ط؛ط§ظ‹ طµط­ظٹط­ط§ظ‹");
+    if (!categoryId) return toast.error("ط§ط®طھط± طھطµظ†ظٹظپ ط§ظ„ظ…طµط±ظˆظپ");
+    if (!cashboxId) return toast.error("ط§ط®طھط± ط§ظ„ط®ط²ظٹظ†ط©");
+    if (settings.paymentVoucherRequirePhoto && !photo && !editingId) return toast.error("طµظˆط±ط© ط§ظ„ط¥ظٹطµط§ظ„ ظ…ط·ظ„ظˆط¨ط©");
 
     const cat = categories.find((c) => c.id === categoryId);
     const cb = employeeCashboxesStore.getAll().find((c) => c.id === cashboxId);
-    const isPartsCat = !!cat && /قطع غيار/.test(cat.name);
+    const isPartsCat = !!cat && /ظ‚ط·ط¹ ط؛ظٹط§ط±/.test(cat.name);
     const linkedVehicle = linkedVehiclePlate
       ? vehiclesStore.getAll().find((v) => v.plate === linkedVehiclePlate)
       : undefined;
     const vehicleFields: Partial<ExpenseRecord> = isPartsCat && linkedVehiclePlate
       ? {
           linkedVehiclePlate,
-          linkedVehicleName: linkedVehicle ? `${linkedVehicle.type} — ${linkedVehicle.plate}` : linkedVehiclePlate,
+          linkedVehicleName: linkedVehicle ? `${linkedVehicle.type} â€” ${linkedVehicle.plate}` : linkedVehiclePlate,
         }
       : { linkedVehiclePlate: undefined, linkedVehicleName: undefined };
 
@@ -158,18 +159,18 @@ export default function ExpenseNew() {
           ...vehicleFields,
           });
         } catch (error: any) {
-          toast.error(error?.message || "تعذر تحديث المصروف في Supabase");
+          toast.error(error?.message || "طھط¹ط°ط± طھط­ط¯ظٹط« ط§ظ„ظ…طµط±ظˆظپ ظپظٹ Supabase");
           return;
         }
         if (oldCb) employeeCashboxesStore.update(oldCb.id, { currentBalance: oldCb.currentBalance + old.amount });
         if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
         logActivity({
           action: "update", entity: "expense", entityId: old.voucherNumber,
-          label: `${cat?.name || "مصروف"}`,
-          description: `تعديل المبلغ من ${old.amount.toLocaleString()} إلى ${value.toLocaleString()} ر.ع`,
+          label: `${cat?.name || "ظ…طµط±ظˆظپ"}`,
+          description: `طھط¹ط¯ظٹظ„ ط§ظ„ظ…ط¨ظ„ط؛ ظ…ظ† ${old.amount.toLocaleString()} ط¥ظ„ظ‰ ${value.toLocaleString()} ط±.ط¹`,
           amount: value,
         });
-        toast.success(`تم تحديث سند الصرف ${old.voucherNumber}`);
+        toast.success(`طھظ… طھط­ط¯ظٹط« ط³ظ†ط¯ ط§ظ„طµط±ظپ ${old.voucherNumber}`);
       }
       resetForm();
       return;
@@ -195,17 +196,17 @@ export default function ExpenseNew() {
     try {
       await expensesStore.add(record);
     } catch (error: any) {
-      toast.error(error?.message || "تعذر حفظ المصروف في Supabase");
+      toast.error(error?.message || "طھط¹ط°ط± ط­ظپط¸ ط§ظ„ظ…طµط±ظˆظپ ظپظٹ Supabase");
       return;
     }
     if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
     logActivity({
       action: "create", entity: "expense", entityId: number,
-      label: `${cat?.name || "مصروف"} — ${beneficiary || "بدون مستفيد"}`,
-      description: `إضافة سند صرف بقيمة ${value.toLocaleString()} ر.ع`,
+      label: `${cat?.name || "ظ…طµط±ظˆظپ"} â€” ${beneficiary || "ط¨ط¯ظˆظ† ظ…ط³طھظپظٹط¯"}`,
+      description: `ط¥ط¶ط§ظپط© ط³ظ†ط¯ طµط±ظپ ط¨ظ‚ظٹظ…ط© ${value.toLocaleString()} ط±.ط¹`,
       amount: value,
     });
-    toast.success(`تم حفظ سند الصرف ${number}`);
+    toast.success(`طھظ… ط­ظپط¸ ط³ظ†ط¯ ط§ظ„طµط±ظپ ${number}`);
     resetForm();
   };
 
@@ -236,11 +237,11 @@ export default function ExpenseNew() {
       if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance + rec.amount });
       logActivity({
         action: "delete", entity: "expense", entityId: rec.voucherNumber,
-        label: `${rec.categoryName || "مصروف"}`,
-        description: `حذف سند صرف بقيمة ${rec.amount.toLocaleString()} ر.ع`,
+        label: `${rec.categoryName || "ظ…طµط±ظˆظپ"}`,
+        description: `ط­ط°ظپ ط³ظ†ط¯ طµط±ظپ ط¨ظ‚ظٹظ…ط© ${rec.amount.toLocaleString()} ط±.ط¹`,
         amount: rec.amount,
       });
-      toast.success(`تم حذف سند الصرف ${rec.voucherNumber}`);
+      toast.success(`طھظ… ط­ط°ظپ ط³ظ†ط¯ ط§ظ„طµط±ظپ ${rec.voucherNumber}`);
     }
     setDeleteId(null);
   };
@@ -258,14 +259,14 @@ export default function ExpenseNew() {
       photo: rec.photo,
     });
     setPdfHtml(html);
-    setPdfTitle(`سند صرف ${rec.voucherNumber}`);
+    setPdfTitle(`ط³ظ†ط¯ طµط±ظپ ${rec.voucherNumber}`);
     setPdfOpen(true);
   };
 
   const handleEmail = (rec: ExpenseRecord) => {
-    const subject = encodeURIComponent(`سند صرف ${rec.voucherNumber}`);
+    const subject = encodeURIComponent(`ط³ظ†ط¯ طµط±ظپ ${rec.voucherNumber}`);
     const body = encodeURIComponent(
-      `رقم السند: ${rec.voucherNumber}\nالتاريخ: ${rec.date}\nالمبلغ: ${rec.amount.toLocaleString()} ر.ع\nالمستفيد: ${rec.beneficiary || "-"}\nالتصنيف: ${rec.categoryName || "-"}\nالبيان: ${rec.description || "-"}`
+      `ط±ظ‚ظ… ط§ظ„ط³ظ†ط¯: ${rec.voucherNumber}\nط§ظ„طھط§ط±ظٹط®: ${rec.date}\nط§ظ„ظ…ط¨ظ„ط؛: ${rec.amount.toLocaleString()} ط±.ط¹\nط§ظ„ظ…ط³طھظپظٹط¯: ${rec.beneficiary || "-"}\nط§ظ„طھطµظ†ظٹظپ: ${rec.categoryName || "-"}\nط§ظ„ط¨ظٹط§ظ†: ${rec.description || "-"}`
     );
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
@@ -314,7 +315,7 @@ export default function ExpenseNew() {
       try {
         await expensesStore.remove(rec.id);
       } catch (error: any) {
-        toast.error(error?.message || `تعذر حذف سند الصرف ${rec.voucherNumber} من Supabase`);
+        toast.error(error?.message || `طھط¹ط°ط± ط­ط°ظپ ط³ظ†ط¯ ط§ظ„طµط±ظپ ${rec.voucherNumber} ظ…ظ† Supabase`);
         return;
       }
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === rec.cashboxId);
@@ -322,29 +323,29 @@ export default function ExpenseNew() {
       refundTotal += rec.amount;
       logActivity({
         action: "delete", entity: "expense", entityId: rec.voucherNumber,
-        label: `${rec.categoryName || "مصروف"}`,
-        description: `حذف سند صرف بقيمة ${rec.amount.toLocaleString()} ر.ع`,
+        label: `${rec.categoryName || "ظ…طµط±ظˆظپ"}`,
+        description: `ط­ط°ظپ ط³ظ†ط¯ طµط±ظپ ط¨ظ‚ظٹظ…ط© ${rec.amount.toLocaleString()} ط±.ط¹`,
         amount: rec.amount,
       });
     }
-    toast.success(`تم حذف ${bulk.count} سند صرف (إجمالي مُسترجع: ${refundTotal.toLocaleString()} ر.ع)`);
+    toast.success(`طھظ… ط­ط°ظپ ${bulk.count} ط³ظ†ط¯ طµط±ظپ (ط¥ط¬ظ…ط§ظ„ظٹ ظ…ظڈط³طھط±ط¬ط¹: ${refundTotal.toLocaleString()} ط±.ط¹)`);
     bulk.clear();
     setDeleteMultipleOpen(false);
   };
 
   const exportSelectedCsv = () => {
     if (bulk.count === 0) return;
-    const headers = ["رقم السند", "التاريخ", "المبلغ", "التصنيف", "الخزينة", "طريقة الدفع", "المستفيد", "البيان"];
+    const headers = ["ط±ظ‚ظ… ط§ظ„ط³ظ†ط¯", "ط§ظ„طھط§ط±ظٹط®", "ط§ظ„ظ…ط¨ظ„ط؛", "ط§ظ„طھطµظ†ظٹظپ", "ط§ظ„ط®ط²ظٹظ†ط©", "ط·ط±ظٹظ‚ط© ط§ظ„ط¯ظپط¹", "ط§ظ„ظ…ط³طھظپظٹط¯", "ط§ظ„ط¨ظٹط§ظ†"];
     const rows = bulk.selectedItems.map((r) => [
       r.voucherNumber, r.date, r.amount, r.categoryName || "", r.cashboxName || "",
       PAYMENT_METHOD_LABELS[r.paymentMethod], r.beneficiary || "", (r.description || "").replace(/[\n,]/g, " "),
     ]);
     exportRowsAsCsv(`expenses-selected-${new Date().toISOString().slice(0,10)}.csv`, headers, rows);
-    toast.success("تم تصدير السجلات المحددة");
+    toast.success("طھظ… طھطµط¯ظٹط± ط§ظ„ط³ط¬ظ„ط§طھ ط§ظ„ظ…ط­ط¯ط¯ط©");
   };
 
   const exportCsv = () => {
-    const headers = ["رقم السند", "التاريخ", "المبلغ", "التصنيف", "الخزينة", "طريقة الدفع", "المستفيد", "البيان"];
+    const headers = ["ط±ظ‚ظ… ط§ظ„ط³ظ†ط¯", "ط§ظ„طھط§ط±ظٹط®", "ط§ظ„ظ…ط¨ظ„ط؛", "ط§ظ„طھطµظ†ظٹظپ", "ط§ظ„ط®ط²ظٹظ†ط©", "ط·ط±ظٹظ‚ط© ط§ظ„ط¯ظپط¹", "ط§ظ„ظ…ط³طھظپظٹط¯", "ط§ظ„ط¨ظٹط§ظ†"];
     const rows = filtered.map((r) => [
       r.voucherNumber, r.date, r.amount, r.categoryName || "", r.cashboxName || "",
       PAYMENT_METHOD_LABELS[r.paymentMethod], r.beneficiary || "", (r.description || "").replace(/[\n,]/g, " "),
@@ -357,25 +358,25 @@ export default function ExpenseNew() {
     a.download = `expenses-report-${reportPeriod}-${reportDate}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success("تم تصدير التقرير");
+    toast.success("طھظ… طھطµط¯ظٹط± ط§ظ„طھظ‚ط±ظٹط±");
   };
 
   const printReport = () => {
-    const periodLabel = reportPeriod === "day" ? `يومي - ${reportDate}` :
-      reportPeriod === "month" ? `شهري - ${reportDate.slice(0, 7)}` :
-      reportPeriod === "year" ? `سنوي - ${reportDate.slice(0, 4)}` : "كامل الفترة";
+    const periodLabel = reportPeriod === "day" ? `ظٹظˆظ…ظٹ - ${reportDate}` :
+      reportPeriod === "month" ? `ط´ظ‡ط±ظٹ - ${reportDate.slice(0, 7)}` :
+      reportPeriod === "year" ? `ط³ظ†ظˆظٹ - ${reportDate.slice(0, 4)}` : "ظƒط§ظ…ظ„ ط§ظ„ظپطھط±ط©";
     const rowsHtml = filtered.map((r, i) => `
       <tr>
         <td>${i + 1}</td><td>${r.voucherNumber}</td><td>${r.date}</td>
         <td>${r.categoryName || "-"}</td><td>${r.beneficiary || "-"}</td>
         <td>${PAYMENT_METHOD_LABELS[r.paymentMethod]}</td>
-        <td style="text-align:left;font-weight:600;">${r.amount.toLocaleString()} ر.ع</td>
+        <td style="text-align:left;font-weight:600;">${r.amount.toLocaleString()} ط±.ط¹</td>
       </tr>`).join("");
     const catHtml = Object.entries(totals.byCategory).map(([k, v]) =>
-      `<tr><td>${k}</td><td style="text-align:left;">${v.toLocaleString()} ر.ع</td></tr>`
+      `<tr><td>${k}</td><td style="text-align:left;">${v.toLocaleString()} ط±.ط¹</td></tr>`
     ).join("");
     const html = `<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/>
-      <title>تقرير المصروفات</title>
+      <title>طھظ‚ط±ظٹط± ط§ظ„ظ…طµط±ظˆظپط§طھ</title>
       <style>
         body{font-family:Tahoma,sans-serif;padding:20px;color:#1a1a2e}
         h1{border-bottom:3px solid #dc2626;padding-bottom:8px}
@@ -389,40 +390,38 @@ export default function ExpenseNew() {
         @media print{html,body{padding:0!important;margin:0!important}}
         body{padding:14mm}
       </style></head><body>
-      <h1>تقرير المصروفات</h1>
-      <div class="meta">الفترة: ${periodLabel} • عدد السندات: ${totals.count}</div>
+      <h1>طھظ‚ط±ظٹط± ط§ظ„ظ…طµط±ظˆظپط§طھ</h1>
+      <div class="meta">ط§ظ„ظپطھط±ط©: ${periodLabel} â€¢ ط¹ط¯ط¯ ط§ظ„ط³ظ†ط¯ط§طھ: ${totals.count}</div>
       <div class="summary">
-        <h3>الإجمالي: ${totals.total.toLocaleString()} ر.ع</h3>
-        <table><thead><tr><th>التصنيف</th><th>الإجمالي</th></tr></thead><tbody>${catHtml}</tbody></table>
+        <h3>ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ: ${totals.total.toLocaleString()} ط±.ط¹</h3>
+        <table><thead><tr><th>ط§ظ„طھطµظ†ظٹظپ</th><th>ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ</th></tr></thead><tbody>${catHtml}</tbody></table>
       </div>
       <table><thead><tr>
-        <th>#</th><th>رقم السند</th><th>التاريخ</th><th>التصنيف</th><th>المستفيد</th><th>طريقة الدفع</th><th>المبلغ</th>
+        <th>#</th><th>ط±ظ‚ظ… ط§ظ„ط³ظ†ط¯</th><th>ط§ظ„طھط§ط±ظٹط®</th><th>ط§ظ„طھطµظ†ظٹظپ</th><th>ط§ظ„ظ…ط³طھظپظٹط¯</th><th>ط·ط±ظٹظ‚ط© ط§ظ„ط¯ظپط¹</th><th>ط§ظ„ظ…ط¨ظ„ط؛</th>
       </tr></thead><tbody>${rowsHtml}</tbody></table>
       </body></html>`;
     openAndPrintWindow(html);
   };
 
-  // ===== تقرير ضريبي رسمي: يعرض فقط المصروفات التي تحمل بيانات فاتورة المورد (رقم ضريبي/رقم فاتورة) =====
+  // ===== طھظ‚ط±ظٹط± ط¶ط±ظٹط¨ظٹ ط±ط³ظ…ظٹ: ظٹط¹ط±ط¶ ظپظ‚ط· ط§ظ„ظ…طµط±ظˆظپط§طھ ط§ظ„طھظٹ طھط­ظ…ظ„ ط¨ظٹط§ظ†ط§طھ ظپط§طھظˆط±ط© ط§ظ„ظ…ظˆط±ط¯ (ط±ظ‚ظ… ط¶ط±ظٹط¨ظٹ/ط±ظ‚ظ… ظپط§طھظˆط±ط©) =====
   const taxRows = useMemo(
     () => filtered.filter((r) => r.supplierTaxNumber || r.supplierInvoiceNumber),
     [filtered]
   );
-  const VAT_RATE = 0.05;
   const taxTotals = useMemo(() => {
-    // المبلغ المُدخل شامل الضريبة → استخرج الوعاء والضريبة
-    const totalIncl = taxRows.reduce((s, r) => s + r.amount, 0);
-    const base = totalIncl / (1 + VAT_RATE);
-    const vat = totalIncl - base;
-    return { base, vat, totalIncl, count: taxRows.length };
+    const base = roundMoney(taxRows.reduce((s, r) => s + r.amount, 0));
+    const vat = calculateVatExclusive(base).vatAmount;
+    return { base, vat, totalIncl: roundMoney(base + vat), count: taxRows.length };
   }, [taxRows]);
 
   const printTaxReport = () => {
-    const periodLabel = reportPeriod === "day" ? `يومي - ${reportDate}` :
-      reportPeriod === "month" ? `شهري - ${reportDate.slice(0, 7)}` :
-      reportPeriod === "year" ? `سنوي - ${reportDate.slice(0, 4)}` : "كامل الفترة";
+    const periodLabel = reportPeriod === "day" ? `ظٹظˆظ…ظٹ - ${reportDate}` :
+      reportPeriod === "month" ? `ط´ظ‡ط±ظٹ - ${reportDate.slice(0, 7)}` :
+      reportPeriod === "year" ? `ط³ظ†ظˆظٹ - ${reportDate.slice(0, 4)}` : "ظƒط§ظ…ظ„ ط§ظ„ظپطھط±ط©";
     const rows = taxRows.map((r, i) => {
-      const base = r.amount / (1 + VAT_RATE);
-      const vat = r.amount - base;
+      const breakdown = calculateVatExclusive(r.amount);
+      const base = breakdown.subtotalBeforeVat;
+      const vat = breakdown.vatAmount;
       return `<tr>
         <td>${i + 1}</td>
         <td>${r.date}</td>
@@ -432,11 +431,11 @@ export default function ExpenseNew() {
         <td>${r.categoryName || "-"}</td>
         <td style="text-align:left">${base.toFixed(3)}</td>
         <td style="text-align:left">${vat.toFixed(3)}</td>
-        <td style="text-align:left;font-weight:700">${r.amount.toFixed(3)}</td>
+        <td style="text-align:left;font-weight:700">${breakdown.totalIncludingVat.toFixed(3)}</td>
       </tr>`;
     }).join("");
     const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"/>
-      <title>تقرير ضريبة المدخلات</title>
+      <title>طھظ‚ط±ظٹط± ط¶ط±ظٹط¨ط© ط§ظ„ظ…ط¯ط®ظ„ط§طھ</title>
       <style>
         body{font-family:Tahoma,sans-serif;padding:14mm;color:#1a1a2e}
         h1{border-bottom:3px solid #0ea5e9;padding-bottom:8px;margin:0 0 6px}
@@ -449,32 +448,33 @@ export default function ExpenseNew() {
         .summary div span{font-size:15px;font-weight:700;color:#0c4a6e}
         @page{size:A4;margin:0}
       </style></head><body>
-      <h1>🧾 تقرير ضريبة القيمة المضافة — المدخلات (5%)</h1>
-      <div class="meta">الفترة: ${periodLabel} • عدد الفواتير: ${taxTotals.count} • تاريخ التقرير: ${new Date().toISOString().slice(0,10)}</div>
+      <h1>ًں§¾ طھظ‚ط±ظٹط± ط¶ط±ظٹط¨ط© ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظ…ط¶ط§ظپط© â€” ط§ظ„ظ…ط¯ط®ظ„ط§طھ (5%)</h1>
+      <div class="meta">ط§ظ„ظپطھط±ط©: ${periodLabel} â€¢ ط¹ط¯ط¯ ط§ظ„ظپظˆط§طھظٹط±: ${taxTotals.count} â€¢ طھط§ط±ظٹط® ط§ظ„طھظ‚ط±ظٹط±: ${new Date().toISOString().slice(0,10)}</div>
       <div class="summary">
-        <div><b>الوعاء الضريبي</b><span>${taxTotals.base.toFixed(3)} ر.ع</span></div>
-        <div><b>ضريبة المدخلات (5%)</b><span>${taxTotals.vat.toFixed(3)} ر.ع</span></div>
-        <div><b>الإجمالي شامل الضريبة</b><span>${taxTotals.totalIncl.toFixed(3)} ر.ع</span></div>
-        <div><b>عدد الفواتير</b><span>${taxTotals.count}</span></div>
+        <div><b>ط§ظ„ظˆط¹ط§ط، ط§ظ„ط¶ط±ظٹط¨ظٹ</b><span>${taxTotals.base.toFixed(3)} ط±.ط¹</span></div>
+        <div><b>ط¶ط±ظٹط¨ط© ط§ظ„ظ…ط¯ط®ظ„ط§طھ (5%)</b><span>${taxTotals.vat.toFixed(3)} ط±.ط¹</span></div>
+        <div><b>ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ط´ط§ظ…ظ„ ط§ظ„ط¶ط±ظٹط¨ط©</b><span>${taxTotals.totalIncl.toFixed(3)} ط±.ط¹</span></div>
+        <div><b>ط¹ط¯ط¯ ط§ظ„ظپظˆط§طھظٹط±</b><span>${taxTotals.count}</span></div>
       </div>
       <table>
         <thead><tr>
-          <th>#</th><th>التاريخ</th><th>رقم الفاتورة</th><th>اسم المورد</th>
-          <th>الرقم الضريبي</th><th>التصنيف</th><th>الوعاء</th><th>VAT 5%</th><th>الإجمالي</th>
+          <th>#</th><th>ط§ظ„طھط§ط±ظٹط®</th><th>ط±ظ‚ظ… ط§ظ„ظپط§طھظˆط±ط©</th><th>ط§ط³ظ… ط§ظ„ظ…ظˆط±ط¯</th>
+          <th>ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ</th><th>ط§ظ„طھطµظ†ظٹظپ</th><th>ط§ظ„ظˆط¹ط§ط،</th><th>VAT 5%</th><th>ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ</th>
         </tr></thead>
-        <tbody>${rows || `<tr><td colspan="9" style="text-align:center;padding:20px;color:#999">لا توجد فواتير ضريبية في الفترة المحددة. أضف الرقم الضريبي ورقم الفاتورة عند تسجيل المصروف.</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="9" style="text-align:center;padding:20px;color:#999">ظ„ط§ طھظˆط¬ط¯ ظپظˆط§طھظٹط± ط¶ط±ظٹط¨ظٹط© ظپظٹ ط§ظ„ظپطھط±ط© ط§ظ„ظ…ط­ط¯ط¯ط©. ط£ط¶ظپ ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ ظˆط±ظ‚ظ… ط§ظ„ظپط§طھظˆط±ط© ط¹ظ†ط¯ طھط³ط¬ظٹظ„ ط§ظ„ظ…طµط±ظˆظپ.</td></tr>`}</tbody>
       </table>
-      <p style="font-size:10px;color:#666;margin-top:20px">تقرير معد للأغراض الضريبية — جهاز الضرائب — سلطنة عُمان. المبالغ بالريال العُماني (ر.ع).</p>
+      <p style="font-size:10px;color:#666;margin-top:20px">طھظ‚ط±ظٹط± ظ…ط¹ط¯ ظ„ظ„ط£ط؛ط±ط§ط¶ ط§ظ„ط¶ط±ظٹط¨ظٹط© â€” ط¬ظ‡ط§ط² ط§ظ„ط¶ط±ط§ط¦ط¨ â€” ط³ظ„ط·ظ†ط© ط¹ظڈظ…ط§ظ†. ط§ظ„ظ…ط¨ط§ظ„ط؛ ط¨ط§ظ„ط±ظٹط§ظ„ ط§ظ„ط¹ظڈظ…ط§ظ†ظٹ (ط±.ط¹).</p>
       </body></html>`;
     openAndPrintWindow(html);
   };
 
   const exportTaxCsv = () => {
-    const headers = ["#","التاريخ","رقم الفاتورة","اسم المورد","الرقم الضريبي","التصنيف","الوعاء","VAT 5%","الإجمالي"];
+    const headers = ["#","ط§ظ„طھط§ط±ظٹط®","ط±ظ‚ظ… ط§ظ„ظپط§طھظˆط±ط©","ط§ط³ظ… ط§ظ„ظ…ظˆط±ط¯","ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ","ط§ظ„طھطµظ†ظٹظپ","ط§ظ„ظˆط¹ط§ط،","VAT 5%","ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ"];
     const rows = taxRows.map((r, i) => {
-      const base = r.amount / (1 + VAT_RATE);
-      const vat = r.amount - base;
-      return [i+1, r.date, r.supplierInvoiceNumber||"", r.beneficiary||"", r.supplierTaxNumber||"", r.categoryName||"", base.toFixed(3), vat.toFixed(3), r.amount.toFixed(3)];
+      const breakdown = calculateVatExclusive(r.amount);
+      const base = breakdown.subtotalBeforeVat;
+      const vat = breakdown.vatAmount;
+      return [i+1, r.date, r.supplierInvoiceNumber||"", r.beneficiary||"", r.supplierTaxNumber||"", r.categoryName||"", breakdown.subtotalBeforeVat.toFixed(3), breakdown.vatAmount.toFixed(3), breakdown.totalIncludingVat.toFixed(3)];
     });
     const csv = "\uFEFF" + [headers, ...rows].map(row => row.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -484,7 +484,7 @@ export default function ExpenseNew() {
     a.download = `tax-input-vat-${reportPeriod}-${reportDate}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success("تم تصدير التقرير الضريبي");
+    toast.success("طھظ… طھطµط¯ظٹط± ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ط¶ط±ظٹط¨ظٹ");
   };
 
 
@@ -493,16 +493,16 @@ export default function ExpenseNew() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <MinusCircle className="text-destructive" size={24} /> إدارة المصروفات
+            <MinusCircle className="text-destructive" size={24} /> ط¥ط¯ط§ط±ط© ط§ظ„ظ…طµط±ظˆظپط§طھ
           </h1>
-          <p className="text-sm text-muted-foreground">إنشاء سندات الصرف، البحث، والتقارير المالية</p>
+          <p className="text-sm text-muted-foreground">ط¥ظ†ط´ط§ط، ط³ظ†ط¯ط§طھ ط§ظ„طµط±ظپطŒ ط§ظ„ط¨ط­ط«طŒ ظˆط§ظ„طھظ‚ط§ط±ظٹط± ط§ظ„ظ…ط§ظ„ظٹط©</p>
         </div>
         <div className="flex gap-2">
           <Button onClick={() => setBulkOpen(true)} className="gap-2">
-            <Plus size={16} /> إضافة عدة بنود
+            <Plus size={16} /> ط¥ط¶ط§ظپط© ط¹ط¯ط© ط¨ظ†ظˆط¯
           </Button>
           <Button variant="outline" onClick={() => smartBack(navigate, "/accounting")}>
-            <ArrowRight size={16} className="ml-1" /> رجوع
+            <ArrowRight size={16} className="ml-1" /> ط±ط¬ظˆط¹
           </Button>
         </div>
       </div>
@@ -511,28 +511,28 @@ export default function ExpenseNew() {
       <div className="bg-card border border-border rounded-xl p-6 shadow-card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-foreground flex items-center gap-2">
-            {editingId ? <><Pencil size={16} /> تعديل سند صرف</> : <><Plus size={16} /> سند صرف جديد</>}
+            {editingId ? <><Pencil size={16} /> طھط¹ط¯ظٹظ„ ط³ظ†ط¯ طµط±ظپ</> : <><Plus size={16} /> ط³ظ†ط¯ طµط±ظپ ط¬ط¯ظٹط¯</>}
           </h2>
           {editingId && (
-            <Button variant="ghost" size="sm" onClick={resetForm}>إلغاء التعديل</Button>
+            <Button variant="ghost" size="sm" onClick={resetForm}>ط¥ظ„ط؛ط§ط، ط§ظ„طھط¹ط¯ظٹظ„</Button>
           )}
         </div>
 
-        {/* تعبئة تلقائية من صورة الفاتورة */}
+        {/* طھط¹ط¨ط¦ط© طھظ„ظ‚ط§ط¦ظٹط© ظ…ظ† طµظˆط±ط© ط§ظ„ظپط§طھظˆط±ط© */}
         <div className="flex items-center justify-between gap-3 bg-primary/5 border border-primary/20 rounded-lg p-3 mb-4">
           <div className="text-xs">
-            <div className="font-medium text-foreground">⚡ تعبئة من صورة الفاتورة بالذكاء</div>
-            <div className="text-muted-foreground">صوّر إيصال المصروف أو فاتورة الشراء، وسنستخرج المبلغ والتاريخ والمورد</div>
+            <div className="font-medium text-foreground">âڑ، طھط¹ط¨ط¦ط© ظ…ظ† طµظˆط±ط© ط§ظ„ظپط§طھظˆط±ط© ط¨ط§ظ„ط°ظƒط§ط،</div>
+            <div className="text-muted-foreground">طµظˆظ‘ط± ط¥ظٹطµط§ظ„ ط§ظ„ظ…طµط±ظˆظپ ط£ظˆ ظپط§طھظˆط±ط© ط§ظ„ط´ط±ط§ط،طŒ ظˆط³ظ†ط³طھط®ط±ط¬ ط§ظ„ظ…ط¨ظ„ط؛ ظˆط§ظ„طھط§ط±ظٹط® ظˆط§ظ„ظ…ظˆط±ط¯</div>
           </div>
           <AiExtractButton
             schema="expense_receipt"
-            label="تعبئة من فاتورة"
+            label="طھط¹ط¨ط¦ط© ظ…ظ† ظپط§طھظˆط±ط©"
             onExtracted={(d) => {
               if (d.total) setAmount(String(d.total).replace(/[^\d.]/g, ""));
               if (d.date) setDate(d.date);
               if (d.vendor) setBeneficiary(d.vendor);
               if (d.notes || d.invoice_number) {
-                setDescription([d.notes, d.invoice_number && `رقم الفاتورة: ${d.invoice_number}`].filter(Boolean).join(" — "));
+                setDescription([d.notes, d.invoice_number && `ط±ظ‚ظ… ط§ظ„ظپط§طھظˆط±ط©: ${d.invoice_number}`].filter(Boolean).join(" â€” "));
               }
             }}
           />
@@ -540,37 +540,37 @@ export default function ExpenseNew() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
-            <Label>التاريخ</Label>
+            <Label>ط§ظ„طھط§ط±ظٹط®</Label>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label>المبلغ (ر.ع)</Label>
+            <Label>ط§ظ„ظ…ط¨ظ„ط؛ (ط±.ط¹)</Label>
             <Input type="text" inputMode="decimal" min="0" step="0.001" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.000" />
           </div>
           <div className="space-y-2">
-            <Label>تصنيف المصروف</Label>
+            <Label>طھطµظ†ظٹظپ ط§ظ„ظ…طµط±ظˆظپ</Label>
             <Select value={categoryId} onValueChange={setCategoryId}>
-              <SelectTrigger><SelectValue placeholder="اختر التصنيف" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="ط§ط®طھط± ط§ظ„طھطµظ†ظٹظپ" /></SelectTrigger>
               <SelectContent>
                 {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>الخزينة</Label>
+            <Label>ط§ظ„ط®ط²ظٹظ†ط©</Label>
             <Select value={cashboxId} onValueChange={setCashboxId}>
-              <SelectTrigger><SelectValue placeholder="اختر الخزينة" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="ط§ط®طھط± ط§ظ„ط®ط²ظٹظ†ط©" /></SelectTrigger>
               <SelectContent>
                 {cashboxes.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.cashboxName} — {c.currentBalance.toLocaleString()} ر.ع
+                    {c.cashboxName} â€” {c.currentBalance.toLocaleString()} ط±.ط¹
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>طريقة الدفع</Label>
+            <Label>ط·ط±ظٹظ‚ط© ط§ظ„ط¯ظپط¹</Label>
             <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -581,50 +581,50 @@ export default function ExpenseNew() {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>المستفيد / المورد</Label>
-            <Input value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} placeholder="اسم المستفيد" />
+            <Label>ط§ظ„ظ…ط³طھظپظٹط¯ / ط§ظ„ظ…ظˆط±ط¯</Label>
+            <Input value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} placeholder="ط§ط³ظ… ط§ظ„ظ…ط³طھظپظٹط¯" />
           </div>
 
-          {/* ===== حقول ضريبية رسمية للمورد (لتقرير الضريبة) ===== */}
+          {/* ===== ط­ظ‚ظˆظ„ ط¶ط±ظٹط¨ظٹط© ط±ط³ظ…ظٹط© ظ„ظ„ظ…ظˆط±ط¯ (ظ„طھظ‚ط±ظٹط± ط§ظ„ط¶ط±ظٹط¨ط©) ===== */}
           <div className="md:col-span-3 bg-primary/5 border border-primary/20 rounded-lg p-3">
             <div className="text-xs font-semibold text-primary mb-2 flex items-center gap-1">
-              🧾 بيانات الفاتورة الضريبية للمورد (اختياري — تظهر في التقرير الضريبي)
+              ًں§¾ ط¨ظٹط§ظ†ط§طھ ط§ظ„ظپط§طھظˆط±ط© ط§ظ„ط¶ط±ظٹط¨ظٹط© ظ„ظ„ظ…ظˆط±ط¯ (ط§ط®طھظٹط§ط±ظٹ â€” طھط¸ظ‡ط± ظپظٹ ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ط¶ط±ظٹط¨ظٹ)
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-xs">اسم الشركة / المورد</Label>
-                <Input value={supplierCompany} onChange={(e) => setSupplierCompany(e.target.value)} placeholder="اسم الشركة كما في الفاتورة" />
+                <Label className="text-xs">ط§ط³ظ… ط§ظ„ط´ط±ظƒط© / ط§ظ„ظ…ظˆط±ط¯</Label>
+                <Input value={supplierCompany} onChange={(e) => setSupplierCompany(e.target.value)} placeholder="ط§ط³ظ… ط§ظ„ط´ط±ظƒط© ظƒظ…ط§ ظپظٹ ط§ظ„ظپط§طھظˆط±ط©" />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">الرقم الضريبي للمورد</Label>
+                <Label className="text-xs">ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ ظ„ظ„ظ…ظˆط±ط¯</Label>
                 <Input value={supplierTaxNumber} onChange={(e) => setSupplierTaxNumber(e.target.value)} placeholder="OMxxxxxxxxx" />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">رقم فاتورة المورد</Label>
+                <Label className="text-xs">ط±ظ‚ظ… ظپط§طھظˆط±ط© ط§ظ„ظ…ظˆط±ط¯</Label>
                 <Input value={supplierInvoiceNumber} onChange={(e) => setSupplierInvoiceNumber(e.target.value)} placeholder="INV-..." />
               </div>
             </div>
           </div>
 
-          {/* السيارة المرتبطة — يظهر فقط لتصنيف "قطع غيار" */}
+          {/* ط§ظ„ط³ظٹط§ط±ط© ط§ظ„ظ…ط±طھط¨ط·ط© â€” ظٹط¸ظ‡ط± ظپظ‚ط· ظ„طھطµظ†ظٹظپ "ظ‚ط·ط¹ ط؛ظٹط§ط±" */}
           {(() => {
             const cat = categories.find((c) => c.id === categoryId);
-            const isParts = !!cat && /قطع غيار/.test(cat.name);
+            const isParts = !!cat && /ظ‚ط·ط¹ ط؛ظٹط§ط±/.test(cat.name);
             if (!isParts) return null;
             const allVehicles = vehiclesStore.getAll();
             return (
               <div className="space-y-2 md:col-span-2 bg-warning/5 border border-warning/30 rounded-lg p-3">
                 <Label className="flex items-center gap-2">
-                  🚗 السيارة المرتبطة بالقطعة
-                  <span className="text-xs text-muted-foreground">(لتتبع تكلفة كل سيارة)</span>
+                  ًںڑ— ط§ظ„ط³ظٹط§ط±ط© ط§ظ„ظ…ط±طھط¨ط·ط© ط¨ط§ظ„ظ‚ط·ط¹ط©
+                  <span className="text-xs text-muted-foreground">(ظ„طھطھط¨ط¹ طھظƒظ„ظپط© ظƒظ„ ط³ظٹط§ط±ط©)</span>
                 </Label>
                 <Select value={linkedVehiclePlate || "__none__"} onValueChange={(v) => setLinkedVehiclePlate(v === "__none__" ? "" : v)}>
-                  <SelectTrigger><SelectValue placeholder="اختر السيارة" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="ط§ط®طھط± ط§ظ„ط³ظٹط§ط±ط©" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">— بدون ربط —</SelectItem>
+                    <SelectItem value="__none__">â€” ط¨ط¯ظˆظ† ط±ط¨ط· â€”</SelectItem>
                     {allVehicles.map((v) => (
                       <SelectItem key={v.id} value={v.plate}>
-                        {v.plate} — {v.type} ({v.owner})
+                        {v.plate} â€” {v.type} ({v.owner})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -634,19 +634,19 @@ export default function ExpenseNew() {
           })()}
           <div className="space-y-2 md:col-span-2">
             <div className="flex items-center justify-between">
-              <Label>البيان / التفاصيل</Label>
+              <Label>ط§ظ„ط¨ظٹط§ظ† / ط§ظ„طھظپط§طµظٹظ„</Label>
               <AiWriteButton
                 value={description}
                 onChange={setDescription}
-                context={`سند صرف بقيمة ${amount} ر.ع للمستفيد ${beneficiary || "-"}`}
-                placeholder="مثال: اكتب وصفاً لمصروف صيانة مكتب"
+                context={`ط³ظ†ط¯ طµط±ظپ ط¨ظ‚ظٹظ…ط© ${amount} ط±.ط¹ ظ„ظ„ظ…ط³طھظپظٹط¯ ${beneficiary || "-"}`}
+                placeholder="ظ…ط«ط§ظ„: ط§ظƒطھط¨ ظˆطµظپط§ظ‹ ظ„ظ…طµط±ظˆظپ طµظٹط§ظ†ط© ظ…ظƒطھط¨"
               />
             </div>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="تفاصيل المصروف..." rows={2} />
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="طھظپط§طµظٹظ„ ط§ظ„ظ…طµط±ظˆظپ..." rows={2} />
           </div>
           <div className="space-y-2">
             <Label>
-              صورة الإيصال
+              طµظˆط±ط© ط§ظ„ط¥ظٹطµط§ظ„
               {settings.paymentVoucherRequirePhoto && <span className="text-destructive mr-1">*</span>}
             </Label>
             <Input
@@ -655,13 +655,13 @@ export default function ExpenseNew() {
               capture={settings.paymentVoucherAllowCamera ? "environment" : undefined}
               onChange={handlePhoto}
             />
-            {photo && <img src={photo} alt="إيصال" className="mt-2 max-h-24 rounded-lg border border-border" />}
+            {photo && <img src={photo} alt="ط¥ظٹطµط§ظ„" className="mt-2 max-h-24 rounded-lg border border-border" />}
           </div>
         </div>
 
         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
           <Button onClick={handleSave} className="gap-2">
-            <Save size={16} /> {editingId ? "حفظ التعديلات" : "حفظ سند الصرف"}
+            <Save size={16} /> {editingId ? "ط­ظپط¸ ط§ظ„طھط¹ط¯ظٹظ„ط§طھ" : "ط­ظپط¸ ط³ظ†ط¯ ط§ظ„طµط±ظپ"}
           </Button>
         </div>
       </div>
@@ -669,8 +669,8 @@ export default function ExpenseNew() {
       {/* === List + Reports === */}
       <Tabs defaultValue="list" dir="rtl" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="list"><FileText size={14} className="ml-1" /> قائمة المصروفات</TabsTrigger>
-          <TabsTrigger value="reports"><CalendarIcon size={14} className="ml-1" /> التقارير</TabsTrigger>
+          <TabsTrigger value="list"><FileText size={14} className="ml-1" /> ظ‚ط§ط¦ظ…ط© ط§ظ„ظ…طµط±ظˆظپط§طھ</TabsTrigger>
+          <TabsTrigger value="reports"><CalendarIcon size={14} className="ml-1" /> ط§ظ„طھظ‚ط§ط±ظٹط±</TabsTrigger>
         </TabsList>
 
         <TabsContent value="list" className="space-y-4">
@@ -680,16 +680,16 @@ export default function ExpenseNew() {
               <div className="relative md:col-span-2">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
                 <Input
-                  placeholder="ابحث برقم السند / المستفيد / البيان..."
+                  placeholder="ط§ط¨ط­ط« ط¨ط±ظ‚ظ… ط§ظ„ط³ظ†ط¯ / ط§ظ„ظ…ط³طھظپظٹط¯ / ط§ظ„ط¨ظٹط§ظ†..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pr-9"
                 />
               </div>
               <Select value={filterCategory} onValueChange={setFilterCategory}>
-                <SelectTrigger><SelectValue placeholder="كل التصنيفات" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="ظƒظ„ ط§ظ„طھطµظ†ظٹظپط§طھ" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">كل التصنيفات</SelectItem>
+                  <SelectItem value="all">ظƒظ„ ط§ظ„طھطµظ†ظٹظپط§طھ</SelectItem>
                   {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -698,21 +698,21 @@ export default function ExpenseNew() {
                   <Download size={14} /> CSV
                 </Button>
                 <Button variant="outline" onClick={printReport} className="flex-1 gap-1">
-                  <Printer size={14} /> طباعة
+                  <Printer size={14} /> ط·ط¨ط§ط¹ط©
                 </Button>
               </div>
             </div>
 
             {/* Summary chips */}
             <div className="flex flex-wrap gap-2 mb-4">
-              <Badge variant="secondary" className="text-sm">عدد السندات: {totals.count}</Badge>
-              <Badge variant="destructive" className="text-sm">الإجمالي: {totals.total.toLocaleString()} ر.ع</Badge>
+              <Badge variant="secondary" className="text-sm">ط¹ط¯ط¯ ط§ظ„ط³ظ†ط¯ط§طھ: {totals.count}</Badge>
+              <Badge variant="destructive" className="text-sm">ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ: {totals.total.toLocaleString()} ط±.ط¹</Badge>
             </div>
 
             {/* Table */}
             {filtered.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground text-sm">
-                لا توجد مصروفات مطابقة
+                ظ„ط§ طھظˆط¬ط¯ ظ…طµط±ظˆظپط§طھ ظ…ط·ط§ط¨ظ‚ط©
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -724,17 +724,17 @@ export default function ExpenseNew() {
                           checked={bulk.allChecked}
                           data-state={bulk.someChecked ? "indeterminate" : undefined}
                           onCheckedChange={bulk.toggleAll}
-                          aria-label="تحديد الكل"
+                          aria-label="طھط­ط¯ظٹط¯ ط§ظ„ظƒظ„"
                         />
                       </TableHead>
-                      <TableHead className="text-right">رقم السند</TableHead>
-                      <TableHead className="text-right">التاريخ</TableHead>
-                      <TableHead className="text-right">التصنيف</TableHead>
-                      <TableHead className="text-right">السيارة</TableHead>
-                      <TableHead className="text-right">المستفيد</TableHead>
-                      <TableHead className="text-right">الخزينة</TableHead>
-                      <TableHead className="text-right">المبلغ</TableHead>
-                      <TableHead className="text-right">إجراءات</TableHead>
+                      <TableHead className="text-right">ط±ظ‚ظ… ط§ظ„ط³ظ†ط¯</TableHead>
+                      <TableHead className="text-right">ط§ظ„طھط§ط±ظٹط®</TableHead>
+                      <TableHead className="text-right">ط§ظ„طھطµظ†ظٹظپ</TableHead>
+                      <TableHead className="text-right">ط§ظ„ط³ظٹط§ط±ط©</TableHead>
+                      <TableHead className="text-right">ط§ظ„ظ…ط³طھظپظٹط¯</TableHead>
+                      <TableHead className="text-right">ط§ظ„ط®ط²ظٹظ†ط©</TableHead>
+                      <TableHead className="text-right">ط§ظ„ظ…ط¨ظ„ط؛</TableHead>
+                      <TableHead className="text-right">ط¥ط¬ط±ط§ط،ط§طھ</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -744,7 +744,7 @@ export default function ExpenseNew() {
                           <Checkbox
                             checked={bulk.isSelected(r.id)}
                             onCheckedChange={() => bulk.toggle(r.id)}
-                            aria-label={`تحديد ${r.voucherNumber}`}
+                            aria-label={`طھط­ط¯ظٹط¯ ${r.voucherNumber}`}
                           />
                         </TableCell>
                         <TableCell className="font-mono text-xs">{r.voucherNumber}</TableCell>
@@ -760,23 +760,23 @@ export default function ExpenseNew() {
                         <TableCell className="text-xs">{r.beneficiary || "-"}</TableCell>
                         <TableCell className="text-xs">{r.cashboxName || "-"}</TableCell>
                         <TableCell className="text-xs font-bold text-destructive">
-                          {r.amount.toLocaleString()} ر.ع
+                          {r.amount.toLocaleString()} ط±.ط¹
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">
-                            <Button size="icon" variant="ghost" className="h-7 w-7" title="عرض / PDF" onClick={() => openPdf(r)}>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="ط¹ط±ط¶ / PDF" onClick={() => openPdf(r)}>
                               <FileText size={14} />
                             </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" title="طباعة" onClick={() => { openPdf(r); }}>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="ط·ط¨ط§ط¹ط©" onClick={() => { openPdf(r); }}>
                               <Printer size={14} />
                             </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" title="إرسال بالبريد" onClick={() => handleEmail(r)}>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="ط¥ط±ط³ط§ظ„ ط¨ط§ظ„ط¨ط±ظٹط¯" onClick={() => handleEmail(r)}>
                               <Mail size={14} />
                             </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" title="تعديل" onClick={() => handleEdit(r)}>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="طھط¹ط¯ظٹظ„" onClick={() => handleEdit(r)}>
                               <Pencil size={14} />
                             </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="حذف" onClick={() => setDeleteId(r.id)}>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="ط­ط°ظپ" onClick={() => setDeleteId(r.id)}>
                               <Trash2 size={14} />
                             </Button>
                           </div>
@@ -785,12 +785,12 @@ export default function ExpenseNew() {
                     ))}
                   </TableBody>
                 </Table>
-                <BulkActionBar count={bulk.count} onClear={bulk.clear} label="محدد">
+                <BulkActionBar count={bulk.count} onClear={bulk.clear} label="ظ…ط­ط¯ط¯">
                   <Button variant="outline" size="sm" className="gap-1" onClick={exportSelectedCsv}>
                     <Download size={14} /> CSV
                   </Button>
                   <Button variant="destructive" size="sm" className="gap-1" onClick={() => setDeleteMultipleOpen(true)}>
-                    <Trash2 size={14} /> حذف
+                    <Trash2 size={14} /> ط­ط°ظپ
                   </Button>
                 </BulkActionBar>
               </div>
@@ -800,34 +800,34 @@ export default function ExpenseNew() {
 
         <TabsContent value="reports" className="space-y-4">
           <div className="bg-card border border-border rounded-xl p-6 shadow-card">
-            <h3 className="font-semibold text-foreground mb-4">إعدادات التقرير</h3>
+            <h3 className="font-semibold text-foreground mb-4">ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„طھظ‚ط±ظٹط±</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="space-y-2">
-                <Label>الفترة</Label>
+                <Label>ط§ظ„ظپطھط±ط©</Label>
                 <Select value={reportPeriod} onValueChange={(v) => setReportPeriod(v as ReportPeriod)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">كل الفترات</SelectItem>
-                    <SelectItem value="day">يومي</SelectItem>
-                    <SelectItem value="month">شهري</SelectItem>
-                    <SelectItem value="year">سنوي</SelectItem>
+                    <SelectItem value="all">ظƒظ„ ط§ظ„ظپطھط±ط§طھ</SelectItem>
+                    <SelectItem value="day">ظٹظˆظ…ظٹ</SelectItem>
+                    <SelectItem value="month">ط´ظ‡ط±ظٹ</SelectItem>
+                    <SelectItem value="year">ط³ظ†ظˆظٹ</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               {reportPeriod !== "all" && (
                 <div className="space-y-2">
                   <Label>
-                    {reportPeriod === "day" ? "اليوم" : reportPeriod === "month" ? "الشهر (أي تاريخ ضمنه)" : "السنة (أي تاريخ ضمنها)"}
+                    {reportPeriod === "day" ? "ط§ظ„ظٹظˆظ…" : reportPeriod === "month" ? "ط§ظ„ط´ظ‡ط± (ط£ظٹ طھط§ط±ظٹط® ط¶ظ…ظ†ظ‡)" : "ط§ظ„ط³ظ†ط© (ط£ظٹ طھط§ط±ظٹط® ط¶ظ…ظ†ظ‡ط§)"}
                   </Label>
                   <Input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} />
                 </div>
               )}
               <div className="space-y-2">
-                <Label>التصنيف</Label>
+                <Label>ط§ظ„طھطµظ†ظٹظپ</Label>
                 <Select value={filterCategory} onValueChange={setFilterCategory}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">كل التصنيفات</SelectItem>
+                    <SelectItem value="all">ظƒظ„ ط§ظ„طھطµظ†ظٹظپط§طھ</SelectItem>
                     {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -837,25 +837,25 @@ export default function ExpenseNew() {
             {/* Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4">
-                <p className="text-xs text-muted-foreground">الإجمالي</p>
-                <p className="text-2xl font-bold text-destructive">{totals.total.toLocaleString()} ر.ع</p>
+                <p className="text-xs text-muted-foreground">ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ</p>
+                <p className="text-2xl font-bold text-destructive">{totals.total.toLocaleString()} ط±.ط¹</p>
               </div>
               <div className="bg-secondary/30 border border-border rounded-lg p-4">
-                <p className="text-xs text-muted-foreground">عدد السندات</p>
+                <p className="text-xs text-muted-foreground">ط¹ط¯ط¯ ط§ظ„ط³ظ†ط¯ط§طھ</p>
                 <p className="text-2xl font-bold text-foreground">{totals.count}</p>
               </div>
               <div className="bg-secondary/30 border border-border rounded-lg p-4">
-                <p className="text-xs text-muted-foreground">متوسط السند</p>
+                <p className="text-xs text-muted-foreground">ظ…طھظˆط³ط· ط§ظ„ط³ظ†ط¯</p>
                 <p className="text-2xl font-bold text-foreground">
-                  {totals.count ? (totals.total / totals.count).toFixed(3) : "0.000"} ر.ع
+                  {totals.count ? (totals.total / totals.count).toFixed(3) : "0.000"} ط±.ط¹
                 </p>
               </div>
             </div>
 
             {/* By category breakdown */}
-            <h4 className="font-semibold text-sm text-foreground mb-3">التوزيع حسب التصنيف</h4>
+            <h4 className="font-semibold text-sm text-foreground mb-3">ط§ظ„طھظˆط²ظٹط¹ ط­ط³ط¨ ط§ظ„طھطµظ†ظٹظپ</h4>
             {Object.keys(totals.byCategory).length === 0 ? (
-              <p className="text-muted-foreground text-sm">لا توجد بيانات</p>
+              <p className="text-muted-foreground text-sm">ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ</p>
             ) : (
               <div className="space-y-2 mb-6">
                 {Object.entries(totals.byCategory)
@@ -866,7 +866,7 @@ export default function ExpenseNew() {
                       <div key={name}>
                         <div className="flex justify-between text-xs mb-1">
                           <span className="text-foreground">{name}</span>
-                          <span className="text-muted-foreground">{val.toLocaleString()} ر.ع ({pct.toFixed(1)}%)</span>
+                          <span className="text-muted-foreground">{val.toLocaleString()} ط±.ط¹ ({pct.toFixed(1)}%)</span>
                         </div>
                         <div className="h-2 bg-secondary rounded-full overflow-hidden">
                           <div className="h-full bg-destructive" style={{ width: `${pct}%` }} />
@@ -879,20 +879,20 @@ export default function ExpenseNew() {
 
             <div className="flex gap-2 pt-4 border-t border-border flex-wrap">
               <Button onClick={printReport} className="gap-2">
-                <Printer size={16} /> طباعة التقرير
+                <Printer size={16} /> ط·ط¨ط§ط¹ط© ط§ظ„طھظ‚ط±ظٹط±
               </Button>
               <Button variant="outline" onClick={exportCsv} className="gap-2">
-                <Download size={16} /> تصدير CSV
+                <Download size={16} /> طھطµط¯ظٹط± CSV
               </Button>
               <Button onClick={printTaxReport} className="gap-2 bg-sky-600 hover:bg-sky-700 text-white">
-                🧾 تقرير ضريبي رسمي (PDF)
+                ًں§¾ طھظ‚ط±ظٹط± ط¶ط±ظٹط¨ظٹ ط±ط³ظ…ظٹ (PDF)
               </Button>
               <Button variant="outline" onClick={exportTaxCsv} className="gap-2 border-sky-500 text-sky-700">
-                <Download size={16} /> تقرير ضريبي CSV
+                <Download size={16} /> طھظ‚ط±ظٹط± ط¶ط±ظٹط¨ظٹ CSV
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground mt-2">
-              💡 يشمل التقرير الضريبي فقط المصروفات التي تحمل <b>الرقم الضريبي للمورد</b> أو <b>رقم فاتورة المورد</b> (عدد الفواتير الحالي: {taxRows.length})
+              ًں’، ظٹط´ظ…ظ„ ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ط¶ط±ظٹط¨ظٹ ظپظ‚ط· ط§ظ„ظ…طµط±ظˆظپط§طھ ط§ظ„طھظٹ طھط­ظ…ظ„ <b>ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ ظ„ظ„ظ…ظˆط±ط¯</b> ط£ظˆ <b>ط±ظ‚ظ… ظپط§طھظˆط±ط© ط§ظ„ظ…ظˆط±ط¯</b> (ط¹ط¯ط¯ ط§ظ„ظپظˆط§طھظٹط± ط§ظ„ط­ط§ظ„ظٹ: {taxRows.length})
             </p>
 
           </div>
@@ -911,17 +911,17 @@ export default function ExpenseNew() {
         open={!!deleteId}
         onOpenChange={(o) => !o && setDeleteId(null)}
         onConfirm={handleDelete}
-        title="حذف سند الصرف"
-        description="سيتم استرجاع المبلغ إلى الخزينة. هل أنت متأكد؟"
+        title="ط­ط°ظپ ط³ظ†ط¯ ط§ظ„طµط±ظپ"
+        description="ط³ظٹطھظ… ط§ط³طھط±ط¬ط§ط¹ ط§ظ„ظ…ط¨ظ„ط؛ ط¥ظ„ظ‰ ط§ظ„ط®ط²ظٹظ†ط©. ظ‡ظ„ ط£ظ†طھ ظ…طھط£ظƒط¯طں"
       />
 
       <ConfirmDeleteDialog
         open={deleteMultipleOpen}
         onOpenChange={setDeleteMultipleOpen}
         onConfirm={handleDeleteMultiple}
-        title="حذف مصروفات محددة"
-        description={`سيتم حذف ${bulk.count} سند صرف واسترجاع المبالغ إلى الخزائن. لا يمكن التراجع بعد الحذف.`}
-        confirmLabel="حذف المحدد"
+        title="ط­ط°ظپ ظ…طµط±ظˆظپط§طھ ظ…ط­ط¯ط¯ط©"
+        description={`ط³ظٹطھظ… ط­ط°ظپ ${bulk.count} ط³ظ†ط¯ طµط±ظپ ظˆط§ط³طھط±ط¬ط§ط¹ ط§ظ„ظ…ط¨ط§ظ„ط؛ ط¥ظ„ظ‰ ط§ظ„ط®ط²ط§ط¦ظ†. ظ„ط§ ظٹظ…ظƒظ† ط§ظ„طھط±ط§ط¬ط¹ ط¨ط¹ط¯ ط§ظ„ط­ط°ظپ.`}
+        confirmLabel="ط­ط°ظپ ط§ظ„ظ…ط­ط¯ط¯"
         destructive
       />
 

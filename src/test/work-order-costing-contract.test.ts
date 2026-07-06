@@ -53,21 +53,21 @@ describe("work order insurance costing", () => {
     expect(withExplicitPart.totalCost).toBe(1200);
   });
 
-  it("treats entered claim approval amounts as VAT-inclusive final totals", () => {
+  it("treats entered claim approval amounts as VAT-exclusive subtotals", () => {
     expect(splitVatInclusiveAmount(2500)).toEqual({
-      subtotalBeforeVat: 2380.95,
-      vatAmount: 119.05,
-      totalIncludingVat: 2500,
+      subtotalBeforeVat: 2500,
+      vatAmount: 125,
+      totalIncludingVat: 2625,
     });
     expect(splitVatInclusiveAmount("1,200.00")).toEqual({
-      subtotalBeforeVat: 1142.86,
-      vatAmount: 57.14,
-      totalIncludingVat: 1200,
+      subtotalBeforeVat: 1200,
+      vatAmount: 60,
+      totalIncludingVat: 1260,
     });
     expect(splitVatInclusiveAmount(100)).toEqual({
-      subtotalBeforeVat: 95.24,
-      vatAmount: 4.76,
-      totalIncludingVat: 100,
+      subtotalBeforeVat: 100,
+      vatAmount: 5,
+      totalIncludingVat: 105,
     });
   });
 });

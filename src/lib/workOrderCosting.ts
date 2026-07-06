@@ -1,4 +1,5 @@
 import type { NeededPart, WorkItem } from "@/lib/workOrdersStore";
+import { calculateVatExclusive, roundMoney as roundOmaniMoney } from "@/lib/money";
 
 export type ClaimApprovalMode = "lump_sum" | "upl" | "unknown";
 
@@ -19,12 +20,7 @@ export interface ClassifiedWorkOrderCosts {
 }
 
 export function roundMoney(value: unknown, decimals = 2): number {
-  const numeric = typeof value === "string"
-    ? Number(value.replace(/,/g, "").trim())
-    : Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  const factor = 10 ** decimals;
-  return Math.round((numeric + Number.EPSILON) * factor) / factor;
+  return roundOmaniMoney(value, decimals);
 }
 
 export function normalizeInsuranceApprovalAmount(value: unknown): number {
@@ -44,23 +40,9 @@ export function splitVatInclusiveAmount(totalIncludingVat: unknown, vatRate = 0.
   vatAmount: number;
   totalIncludingVat: number;
 } {
-  const total = normalizeInsuranceApprovalAmount(totalIncludingVat);
-  const rate = Number(vatRate);
-  if (!total || !Number.isFinite(rate) || rate <= 0) {
-    return {
-      subtotalBeforeVat: total,
-      vatAmount: 0,
-      totalIncludingVat: total,
-    };
-  }
-
-  const subtotalBeforeVat = roundMoney(total / (1 + rate), 2);
-  const vatAmount = roundMoney(total - subtotalBeforeVat, 2);
-  return {
-    subtotalBeforeVat,
-    vatAmount,
-    totalIncludingVat: total,
-  };
+  // Compatibility wrapper: older callers used this name, but the business rule is now
+  // explicit VAT-exclusive pricing. The value entered by the user is the subtotal.
+  return calculateVatExclusive(normalizeInsuranceApprovalAmount(totalIncludingVat), vatRate);
 }
 
 export function calculateVatExclusiveAmount(subtotalBeforeVat: unknown, vatRate = 0.05): {
@@ -68,22 +50,7 @@ export function calculateVatExclusiveAmount(subtotalBeforeVat: unknown, vatRate 
   vatAmount: number;
   totalIncludingVat: number;
 } {
-  const subtotal = normalizeInsuranceApprovalAmount(subtotalBeforeVat);
-  const rate = Number(vatRate);
-  if (!subtotal || !Number.isFinite(rate) || rate <= 0) {
-    return {
-      subtotalBeforeVat: subtotal,
-      vatAmount: 0,
-      totalIncludingVat: subtotal,
-    };
-  }
-
-  const vatAmount = roundMoney(subtotal * rate, 2);
-  return {
-    subtotalBeforeVat: subtotal,
-    vatAmount,
-    totalIncludingVat: roundMoney(subtotal + vatAmount, 2),
-  };
+  return calculateVatExclusive(normalizeInsuranceApprovalAmount(subtotalBeforeVat), vatRate);
 }
 
 function amountsMatch(a: unknown, b: unknown, tolerance = 0.02): boolean {
