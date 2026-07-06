@@ -163,6 +163,10 @@ export default function InsuranceClaimDetail() {
   const estimateDateRef = useRef<HTMLInputElement>(null);
   const workshopArrivalDateRef = useRef<HTMLInputElement>(null);
   const workStartedAtRef = useRef<HTMLInputElement>(null);
+  const lpoNumberRef = useRef<HTMLInputElement>(null);
+  const lpoDateRef = useRef<HTMLInputElement>(null);
+  const lpoAmountRef = useRef<HTMLInputElement>(null);
+  const lpoNoteRef = useRef<HTMLInputElement>(null);
 
   // Media & docs
   const [damagePhotos, setDamagePhotos] = useState<string[]>([]);
@@ -559,7 +563,15 @@ export default function InsuranceClaimDetail() {
     started: workStartedAtRef.current?.value || workStartedAt || "",
   });
 
+  const getLpoValues = () => ({
+    number: lpoNumberRef.current?.value || lpoNumber || "",
+    date: lpoDateRef.current?.value || lpoDate || "",
+    amount: lpoAmountRef.current?.value || lpoAmount || "",
+    note: lpoNoteRef.current?.value || lpoNote || "",
+  });
+
   const buildNotesWithLpo = () => {
+    const lpo = getLpoValues();
     const cleaned = (notes || "")
       .replace(/\[LPO:[^\]]+\]\n?/g, "")
       .replace(/\[LPO_DATE:[^\]]+\]\n?/g, "")
@@ -567,10 +579,10 @@ export default function InsuranceClaimDetail() {
       .replace(/\[LPO_NOTE:[^\]]+\]\n?/g, "")
       .trim();
     const lpoTags = [
-      lpoNumber.trim() ? `[LPO:${lpoNumber.trim()}]` : "",
-      lpoDate.trim() ? `[LPO_DATE:${lpoDate.trim()}]` : "",
-      lpoAmount.trim() ? `[LPO_AMOUNT:${lpoAmount.trim()}]` : "",
-      lpoNote.trim() ? `[LPO_NOTE:${lpoNote.trim()}]` : "",
+      lpo.number.trim() ? `[LPO:${lpo.number.trim()}]` : "",
+      lpo.date.trim() ? `[LPO_DATE:${lpo.date.trim()}]` : "",
+      lpo.amount.trim() ? `[LPO_AMOUNT:${lpo.amount.trim()}]` : "",
+      lpo.note.trim() ? `[LPO_NOTE:${lpo.note.trim()}]` : "",
     ].filter(Boolean);
     return [cleaned, ...lpoTags].filter(Boolean).join("\n") || undefined;
   };
@@ -668,9 +680,10 @@ export default function InsuranceClaimDetail() {
           },
         });
         let verifiedClaim: any = verified;
+        const lpo = getLpoValues();
         const expectedNotes = buildNotesWithLpo();
-        const hasLpoInput = !!(lpoNumber.trim() || lpoDate.trim() || lpoAmount.trim() || lpoNote.trim());
-        const expectedLpoMarker = lpoNumber.trim() || (lpoAmount.trim() ? `[LPO_AMOUNT:${lpoAmount.trim()}]` : "");
+        const hasLpoInput = !!(lpo.number.trim() || lpo.date.trim() || lpo.amount.trim() || lpo.note.trim());
+        const expectedLpoMarker = lpo.number.trim() || (lpo.amount.trim() ? `[LPO_AMOUNT:${lpo.amount.trim()}]` : "");
         const notesMissingLpo =
           hasLpoInput &&
           expectedNotes &&
@@ -1333,7 +1346,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
     // مبالغ من المطالبة: المبلغ المعتمد من شركة التأمين يُعتبر الإجمالي النهائي الشامل للضريبة.
     // نعرض صافي ما قبل VAT والـ VAT كتفصيل فقط، بدون تغيير إجمالي الاعتماد.
-    const approvedRaw = parseMoneyInput(lpoAmount) || parseMoneyInput(approvedAmount) || parseMoneyInput(estimatedCost) || 0;
+    const lpo = getLpoValues();
+    const approvedRaw = parseMoneyInput(lpo.amount) || parseMoneyInput(approvedAmount) || parseMoneyInput(estimatedCost) || 0;
     if (approvedRaw <= 0) {
       toast.error("لا يمكن إصدار فاتورة بمبلغ صفر — أدخل المبلغ المعتمد أولاً.");
       return;
@@ -1427,7 +1441,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       insuranceIban: (insuranceCo as any).iban ?? undefined,
       insuranceBankAccountName: (insuranceCo as any).bank_account_name ?? undefined,
       qrDataUrl,
-      lpoNumber: lpoNumber.trim() || undefined,
+      lpoNumber: lpo.number.trim() || undefined,
     });
 
     setTaxInvoiceHtml(html);
@@ -1473,8 +1487,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             status: "issued",
             issued_at: invoiceIssueDate.toISOString(),
             due_date: due.toISOString().slice(0, 10),
-            notes: [notes, lpoNote ? `LPO Note: ${lpoNote}` : ""].filter(Boolean).join("\n") || null,
-            lpo_number: lpoNumber.trim() || null,
+            notes: [notes, lpo.note ? `LPO Note: ${lpo.note}` : ""].filter(Boolean).join("\n") || null,
+            lpo_number: lpo.number.trim() || null,
             items: persistedItems,
           } as any);
           if (insErr) throw insErr;
@@ -1733,15 +1747,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">رقم LPO</Label>
-                  <Input value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
+                  <Input ref={lpoNumberRef} value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">تاريخ LPO</Label>
-                  <Input type="date" value={lpoDate} onChange={(e) => setLpoDate(e.target.value)} />
+                  <Input ref={lpoDateRef} type="date" value={lpoDate} onChange={(e) => setLpoDate(e.target.value)} />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">مبلغ LPO</Label>
-                    <Input type="text" inputMode="decimal" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
+                    <Input ref={lpoAmountRef} type="text" inputMode="decimal" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">تاريخ فاتورة التأمين</Label>
@@ -1762,7 +1776,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 )}
                 <div className="space-y-1.5 md:col-span-2">
                   <Label className="text-xs">ملاحظة LPO</Label>
-                  <Input value={lpoNote} onChange={(e) => setLpoNote(e.target.value)} placeholder="ملاحظة داخلية اختيارية" />
+                  <Input ref={lpoNoteRef} value={lpoNote} onChange={(e) => setLpoNote(e.target.value)} placeholder="ملاحظة داخلية اختيارية" />
                 </div>
               </div>
             </div>
