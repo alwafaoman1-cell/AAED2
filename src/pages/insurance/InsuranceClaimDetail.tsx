@@ -640,7 +640,21 @@ export default function InsuranceClaimDetail() {
       vehicle_vin: vehicleVin.trim() || null,
       estimation_type: estimationType,
       upl_items: uplItems,
-      notes: notes || undefined,
+      notes: (() => {
+        const cleaned = (notes || "")
+          .replace(/\[LPO:[^\]]+\]\n?/g, "")
+          .replace(/\[LPO_DATE:[^\]]+\]\n?/g, "")
+          .replace(/\[LPO_AMOUNT:[^\]]+\]\n?/g, "")
+          .replace(/\[LPO_NOTE:[^\]]+\]\n?/g, "")
+          .trim();
+        const lpoTags = [
+          lpoNumber.trim() ? `[LPO:${lpoNumber.trim()}]` : "",
+          lpoDate.trim() ? `[LPO_DATE:${lpoDate.trim()}]` : "",
+          lpoAmount.trim() ? `[LPO_AMOUNT:${lpoAmount.trim()}]` : "",
+          lpoNote.trim() ? `[LPO_NOTE:${lpoNote.trim()}]` : "",
+        ].filter(Boolean);
+        return [cleaned, ...lpoTags].filter(Boolean).join("\n") || undefined;
+      })(),
       damage_photos: damagePhotos,
       documents,
       needed_parts: neededParts.filter((p) => p.name.trim()),
