@@ -518,21 +518,7 @@ export default function InsuranceClaimDetail() {
       vehicle_vin: vehicleVin.trim() || null,
       estimation_type: estimationType,
       upl_items: uplItems,
-      notes: (() => {
-        const cleaned = (notes || "")
-          .replace(/\[LPO:[^\]]+\]\n?/g, "")
-          .replace(/\[LPO_DATE:[^\]]+\]\n?/g, "")
-          .replace(/\[LPO_AMOUNT:[^\]]+\]\n?/g, "")
-          .replace(/\[LPO_NOTE:[^\]]+\]\n?/g, "")
-          .trim();
-        const lpoTags = [
-          lpoNumber.trim() ? `[LPO:${lpoNumber.trim()}]` : "",
-          lpoDate.trim() ? `[LPO_DATE:${lpoDate.trim()}]` : "",
-          lpoAmount.trim() ? `[LPO_AMOUNT:${lpoAmount.trim()}]` : "",
-          lpoNote.trim() ? `[LPO_NOTE:${lpoNote.trim()}]` : "",
-        ].filter(Boolean);
-        return [cleaned, ...lpoTags].filter(Boolean).join("\n") || undefined;
-      })(),
+      notes: buildNotesWithLpo(),
       damage_photos: damagePhotos,
       documents,
       needed_parts: neededParts.filter((p) => p.name.trim()),
@@ -572,6 +558,22 @@ export default function InsuranceClaimDetail() {
     arrival: workshopArrivalDateRef.current?.value || workshopArrivalDate || "",
     started: workStartedAtRef.current?.value || workStartedAt || "",
   });
+
+  const buildNotesWithLpo = () => {
+    const cleaned = (notes || "")
+      .replace(/\[LPO:[^\]]+\]\n?/g, "")
+      .replace(/\[LPO_DATE:[^\]]+\]\n?/g, "")
+      .replace(/\[LPO_AMOUNT:[^\]]+\]\n?/g, "")
+      .replace(/\[LPO_NOTE:[^\]]+\]\n?/g, "")
+      .trim();
+    const lpoTags = [
+      lpoNumber.trim() ? `[LPO:${lpoNumber.trim()}]` : "",
+      lpoDate.trim() ? `[LPO_DATE:${lpoDate.trim()}]` : "",
+      lpoAmount.trim() ? `[LPO_AMOUNT:${lpoAmount.trim()}]` : "",
+      lpoNote.trim() ? `[LPO_NOTE:${lpoNote.trim()}]` : "",
+    ].filter(Boolean);
+    return [cleaned, ...lpoTags].filter(Boolean).join("\n") || undefined;
+  };
 
   const handleSave = async () => {
     if (!company || !claimNumber) {
@@ -640,21 +642,7 @@ export default function InsuranceClaimDetail() {
       vehicle_vin: vehicleVin.trim() || null,
       estimation_type: estimationType,
       upl_items: uplItems,
-      notes: (() => {
-        const cleaned = (notes || "")
-          .replace(/\[LPO:[^\]]+\]\n?/g, "")
-          .replace(/\[LPO_DATE:[^\]]+\]\n?/g, "")
-          .replace(/\[LPO_AMOUNT:[^\]]+\]\n?/g, "")
-          .replace(/\[LPO_NOTE:[^\]]+\]\n?/g, "")
-          .trim();
-        const lpoTags = [
-          lpoNumber.trim() ? `[LPO:${lpoNumber.trim()}]` : "",
-          lpoDate.trim() ? `[LPO_DATE:${lpoDate.trim()}]` : "",
-          lpoAmount.trim() ? `[LPO_AMOUNT:${lpoAmount.trim()}]` : "",
-          lpoNote.trim() ? `[LPO_NOTE:${lpoNote.trim()}]` : "",
-        ].filter(Boolean);
-        return [cleaned, ...lpoTags].filter(Boolean).join("\n") || undefined;
-      })(),
+      notes: buildNotesWithLpo(),
       damage_photos: damagePhotos,
       documents,
       needed_parts: neededParts.filter((p) => p.name.trim()),
@@ -679,7 +667,26 @@ export default function InsuranceClaimDetail() {
             work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
           },
         });
-        hydrateFromVerifiedClaim(verified);
+        let verifiedClaim: any = verified;
+        const expectedNotes = buildNotesWithLpo();
+        const hasLpoInput = !!(lpoNumber.trim() || lpoDate.trim() || lpoAmount.trim() || lpoNote.trim());
+        const expectedLpoMarker = lpoNumber.trim() || (lpoAmount.trim() ? `[LPO_AMOUNT:${lpoAmount.trim()}]` : "");
+        const notesMissingLpo =
+          hasLpoInput &&
+          expectedNotes &&
+          expectedLpoMarker &&
+          !String(verifiedClaim?.notes || "").includes(expectedLpoMarker);
+        if (notesMissingLpo) {
+          const { data: lpoVerified, error: lpoError } = await supabase
+            .from("insurance_claims" as any)
+            .update({ notes: expectedNotes })
+            .eq("id", id!)
+            .select("*")
+            .single();
+          if (lpoError) throw lpoError;
+          verifiedClaim = lpoVerified;
+        }
+        hydrateFromVerifiedClaim(verifiedClaim);
         await writeClaimAudit("claim_details_saved", {
           workshop_arrival_date: workflowDates.arrival || null,
           estimate_date: workflowDates.estimate || null,
