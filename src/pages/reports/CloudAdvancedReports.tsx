@@ -1,6 +1,6 @@
-// طھظ‚ط§ط±ظٹط± ظ…ط­ط§ط³ط¨ظٹط© ظ…طھظ‚ط¯ظ…ط© ظ…ظ† ط§ظ„ط³ط­ط§ط¨ط© ظ…ط¨ط§ط´ط±ط© (Supabase).
-// 4 طھط¨ظˆظٹط¨ط§طھ: ط¶ط±ظٹط¨ط© ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظ…ط¶ط§ظپط©طŒ ظ‚ط§ط¦ظ…ط© ط§ظ„ط¯ط®ظ„طŒ ط£ط¹ظ…ط§ط± ط§ظ„ط°ظ…ظ… (Aging)طŒ ط§ظ„ط§طھط¬ط§ظ‡ ط§ظ„ط´ظ‡ط±ظٹ.
-// ظƒظ„ ط§ظ„ط¨ظٹط§ظ†ط§طھ طھظڈط¬ظ„ط¨ live ظ…ظ† ط¬ط¯ط§ظˆظ„: sales_documents, insurance_invoices, expenses, claim_payments.
+// تقارير محاسبية متقدمة من السحابة مباشرة (Supabase).
+// 4 تبويبات: ضريبة القيمة المضافة، قائمة الدخل، أعمار الذمم (Aging)، الاتجاه الشهري.
+// كل البيانات تُجلب live من جداول: sales_documents, insurance_invoices, expenses, claim_payments.
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -17,6 +17,9 @@ import { exportVatPdf, exportVatExcel } from "@/lib/vatOfficialExport";
 import { formatMoney } from "@/lib/pdfGenerator";
 import { calculateVatExclusive, roundMoney } from "@/lib/money";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
+import { generatePdfFromHtml } from "@/lib/htmlToPdf";
+import { buildHtmlWithPageMarginStyle } from "@/lib/pdfLayoutSettings";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthsAgoISO = (n: number) => {
@@ -59,7 +62,7 @@ export default function CloudAdvancedReports() {
     const salesInvoices = data.sales.filter((s) => s.doc_type === "invoice");
     const outputSales = salesInvoices.reduce((s, r) => s + Number(r.tax_total || 0), 0);
     const outputInsurance = data.insInv.reduce((s, r) => s + Number(r.vat || 0), 0);
-    // VAT input ظپط¹ظ„ظٹ ظ…ظ† ظپظˆط§طھظٹط± ط§ظ„ط´ط±ط§ط، + طھظ‚ط¯ظٹط± ظ…ظ† ط§ظ„ظ…طµط±ظˆظپط§طھ ط¥ط°ط§ ظ„ظ… طھظˆط¬ط¯ ظ…ط´طھط±ظٹط§طھ
+    // VAT input فعلي من فواتير الشراء + تقدير من المصروفات إذا لم توجد مشتريات
     const inputActual = data.purchases.reduce((s, r) => s + Number(r.vat || 0), 0);
     const inputEst = roundMoney(data.expenses.reduce((s, r) => s + calculateVatExclusive(Number(r.amount || 0)).vatAmount, 0));
     const inputUsed = inputActual > 0 ? inputActual : inputEst;
@@ -104,9 +107,9 @@ export default function CloudAdvancedReports() {
       rows.push({ kind, who, num, due: dueRaw, days, balance, bucket });
     };
     data.sales.filter((s) => s.doc_type === "invoice" && Number(s.balance_due || 0) > 0).forEach((s) =>
-      push("ظ…ط¨ظٹط¹ط§طھ", s.customer_name || "â€”", s.doc_number, s.due_date, Number(s.balance_due)));
+      push("مبيعات", s.customer_name || "—", s.doc_number, s.due_date, Number(s.balance_due)));
     data.insInv.filter((i) => Number(i.total || 0) - Number(i.paid_amount || 0) > 0).forEach((i) =>
-      push("طھط£ظ…ظٹظ†", i.insurance_company_name || "â€”", i.invoice_number, i.due_date, Number(i.total) - Number(i.paid_amount)));
+      push("تأمين", i.insurance_company_name || "—", i.invoice_number, i.due_date, Number(i.total) - Number(i.paid_amount)));
     rows.sort((a, b) => b.days - a.days);
     const total = Object.values(buckets).reduce((s, v) => s + v, 0);
     return { buckets, rows, total };
@@ -134,7 +137,7 @@ export default function CloudAdvancedReports() {
   }, [data]);
 
   const exportCsv = (filename: string, rows: any[], headers: { key: string; label: string }[]) => {
-    if (!rows.length) { toast.info("ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظ„ظ„طھطµط¯ظٹط±"); return; }
+    if (!rows.length) { toast.info("لا توجد بيانات للتصدير"); return; }
     const head = headers.map((h) => h.label).join(",");
     const body = rows.map((r) => headers.map((h) => `"${String(r[h.key] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + head + "\n" + body], { type: "text/csv;charset=utf-8" });
@@ -143,23 +146,127 @@ export default function CloudAdvancedReports() {
     URL.revokeObjectURL(url);
   };
 
+  const profitLossRows = useMemo(() => ([
+    { label: "Sales revenue before VAT", amount: roundMoney(income.salesRev) },
+    { label: "Insurance revenue before VAT", amount: roundMoney(income.insRev) },
+    { label: "Total revenue from invoices only", amount: roundMoney(income.revenue) },
+    { label: "Operating expenses", amount: roundMoney(income.expenses) },
+    { label: "Net profit", amount: roundMoney(income.profit) },
+    { label: "Profit margin %", amount: roundMoney(income.margin) },
+    { label: "Collected insurance payments - note only", amount: roundMoney(income.claimsReceived) },
+  ]), [income]);
+
+  const exportProfitLossXlsx = () => {
+    const rows = profitLossRows.map((r) => ({
+      Metric: r.label,
+      Amount: r.amount,
+      Currency: r.label.includes("%") ? "%" : "OMR",
+    }));
+    const ws = XLSX.utils.json_to_sheet([
+      { Metric: "Profit/Loss Report", Amount: "", Currency: "" },
+      { Metric: "Date From", Amount: f.from, Currency: "" },
+      { Metric: "Date To", Amount: f.to, Currency: "" },
+      {},
+      ...rows,
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Profit Loss");
+    XLSX.writeFile(wb, `Profit_Loss_${f.from}_to_${f.to}.xlsx`);
+  };
+
+  const profitLossHtml = () => {
+    const esc = (value: unknown) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    const money = (value: number) => formatMoney(value);
+    const rows = profitLossRows.map((r) => `
+      <tr>
+        <td>${esc(r.label)}</td>
+        <td class="num">${r.label.includes("%") ? `${roundMoney(r.amount).toFixed(3)}%` : money(r.amount)}</td>
+      </tr>
+    `).join("");
+    return `<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <title>Profit/Loss Report</title>
+  <style>
+    @page { size: A4; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; color: #0f172a; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { width: 186mm; min-height: 273mm; margin: 0 auto; }
+    .header { border-bottom: 2px solid #0f2a4a; padding-bottom: 8mm; margin-bottom: 8mm; }
+    h1 { margin: 0; font-size: 22px; color: #0f2a4a; }
+    .meta { margin-top: 3mm; color: #475569; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
+    th { background: #0f2a4a; color: #fff; }
+    .num { text-align: right; font-family: Consolas, monospace; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    .note { margin-top: 8mm; padding: 4mm; border: 1px solid #fde68a; background: #fffbeb; font-size: 11px; color: #92400e; }
+    .footer { margin-top: 12mm; border-top: 1px solid #cbd5e1; padding-top: 4mm; font-size: 10px; color: #64748b; text-align: center; }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <h1>Profit/Loss Report</h1>
+      <div class="meta">Period: ${esc(f.from)} to ${esc(f.to)} | Generated: ${new Date().toISOString().slice(0, 10)}</div>
+    </div>
+    <table>
+      <thead><tr><th>Metric</th><th>Amount</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="note">Revenue is calculated from issued invoices only. Work order estimated totals are not counted as revenue. VAT is excluded from revenue.</div>
+    <div class="footer">TEMO Auto ERP - Profit/Loss export</div>
+  </div>
+</body>
+</html>`;
+  };
+
+  const exportProfitLossPdf = async () => {
+    await generatePdfFromHtml({
+      htmlContent: buildHtmlWithPageMarginStyle(profitLossHtml()),
+      fileName: `Profit_Loss_${f.from}_to_${f.to}`,
+      download: true,
+    });
+  };
+
+  const printProfitLoss = () => {
+    const win = window.open("", "_blank", "width=1100,height=800");
+    if (!win) {
+      toast.error("Unable to open print window");
+      return;
+    }
+    win.document.open();
+    win.document.write(profitLossHtml());
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
+  };
+
   return (
     <div className="space-y-5" dir="rtl">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Cloud className="text-primary" size={26} /> ط§ظ„طھظ‚ط§ط±ظٹط± ط§ظ„ظ…ط­ط§ط³ط¨ظٹط© ط§ظ„ظ…طھظ‚ط¯ظ…ط© (ط³ط­ط§ط¨ط©)
+            <Cloud className="text-primary" size={26} /> التقارير المحاسبية المتقدمة (سحابة)
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            VAT + ظ‚ط§ط¦ظ…ط© ط§ظ„ط¯ط®ظ„ + ط£ط¹ظ…ط§ط± ط§ظ„ط°ظ…ظ… + ط§ظ„ط§طھط¬ط§ظ‡ ط§ظ„ط´ظ‡ط±ظٹ â€” ظ…ط¨ط§ط´ط±ط© ظ…ظ† ط§ظ„ط³ط­ط§ط¨ط©طŒ ظ…ط­ط¯ظ‘ط«ط© ظ„ط­ط¸ظٹط§ظ‹
+            VAT + قائمة الدخل + أعمار الذمم + الاتجاه الشهري — مباشرة من السحابة، محدّثة لحظياً
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => refetch()} disabled={isFetching} className="gap-1">
-            <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /> طھط­ط¯ظٹط«
+            <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /> تحديث
           </Button>
           <Button variant="outline" onClick={() => navigate(-1)} className="gap-1">
-            <ArrowRight size={14} /> ط±ط¬ظˆط¹
+            <ArrowRight size={14} /> رجوع
           </Button>
         </div>
       </div>
@@ -167,54 +274,54 @@ export default function CloudAdvancedReports() {
       {/* Filters */}
       <Card className="p-4 flex flex-wrap items-end gap-3">
         <div>
-          <Label className="text-xs">ظ…ظ† طھط§ط±ظٹط®</Label>
+          <Label className="text-xs">من تاريخ</Label>
           <Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} className="w-40" />
         </div>
         <div>
-          <Label className="text-xs">ط¥ظ„ظ‰ طھط§ط±ظٹط®</Label>
+          <Label className="text-xs">إلى تاريخ</Label>
           <Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} className="w-40" />
         </div>
         <div className="flex gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setF({ from: monthsAgoISO(1), to: todayISO() })}>ط¢ط®ط± ط´ظ‡ط±</Button>
-          <Button size="sm" variant="ghost" onClick={() => setF({ from: monthsAgoISO(3), to: todayISO() })}>ط¢ط®ط± 3 ط£ط´ظ‡ط±</Button>
-          <Button size="sm" variant="ghost" onClick={() => setF({ from: monthsAgoISO(6), to: todayISO() })}>ط¢ط®ط± 6 ط£ط´ظ‡ط±</Button>
-          <Button size="sm" variant="ghost" onClick={() => setF({ from: monthsAgoISO(12), to: todayISO() })}>ط¢ط®ط± ط³ظ†ط©</Button>
+          <Button size="sm" variant="ghost" onClick={() => setF({ from: monthsAgoISO(1), to: todayISO() })}>آخر شهر</Button>
+          <Button size="sm" variant="ghost" onClick={() => setF({ from: monthsAgoISO(3), to: todayISO() })}>آخر 3 أشهر</Button>
+          <Button size="sm" variant="ghost" onClick={() => setF({ from: monthsAgoISO(6), to: todayISO() })}>آخر 6 أشهر</Button>
+          <Button size="sm" variant="ghost" onClick={() => setF({ from: monthsAgoISO(12), to: todayISO() })}>آخر سنة</Button>
         </div>
       </Card>
 
       {isLoading ? (
-        <Card className="p-12 text-center text-muted-foreground">ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ ط§ظ„ط¨ظٹط§ظ†ط§طھ ظ…ظ† ط§ظ„ط³ط­ط§ط¨ط©...</Card>
+        <Card className="p-12 text-center text-muted-foreground">جاري تحميل البيانات من السحابة...</Card>
       ) : (
       <Tabs defaultValue="vat" dir="rtl" className="space-y-5">
         <TabsList>
-          <TabsTrigger value="vat"><Receipt size={14} className="ml-1" /> ط¶ط±ظٹط¨ط© ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظ…ط¶ط§ظپط©</TabsTrigger>
-          <TabsTrigger value="income"><TrendingUp size={14} className="ml-1" /> ظ‚ط§ط¦ظ…ط© ط§ظ„ط¯ط®ظ„</TabsTrigger>
-          <TabsTrigger value="aging"><Clock size={14} className="ml-1" /> ط£ط¹ظ…ط§ط± ط§ظ„ط°ظ…ظ…</TabsTrigger>
-          <TabsTrigger value="trend"><BarChart3 size={14} className="ml-1" /> ط§ظ„ط§طھط¬ط§ظ‡ ط§ظ„ط´ظ‡ط±ظٹ</TabsTrigger>
+          <TabsTrigger value="vat"><Receipt size={14} className="ml-1" /> ضريبة القيمة المضافة</TabsTrigger>
+          <TabsTrigger value="income"><TrendingUp size={14} className="ml-1" /> قائمة الدخل</TabsTrigger>
+          <TabsTrigger value="aging"><Clock size={14} className="ml-1" /> أعمار الذمم</TabsTrigger>
+          <TabsTrigger value="trend"><BarChart3 size={14} className="ml-1" /> الاتجاه الشهري</TabsTrigger>
         </TabsList>
 
         {/* ===== VAT ===== */}
         <TabsContent value="vat" className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard title="VAT ط§ظ„ظ…ط®ط±ط¬ط© - ظ…ط¨ظٹط¹ط§طھ" value={formatMoney(vat.outputSales)} icon={Receipt} variant="info" />
-            <StatCard title="VAT ط§ظ„ظ…ط®ط±ط¬ط© - طھط£ظ…ظٹظ†" value={formatMoney(vat.outputInsurance)} icon={Receipt} variant="info" />
+            <StatCard title="VAT المخرجة - مبيعات" value={formatMoney(vat.outputSales)} icon={Receipt} variant="info" />
+            <StatCard title="VAT المخرجة - تأمين" value={formatMoney(vat.outputInsurance)} icon={Receipt} variant="info" />
             <StatCard
-              title={vat.inputActual > 0 ? "VAT ط§ظ„ظ…ط¯ط®ظ„ط© (ظپط¹ظ„ظٹ)" : "VAT ط§ظ„ظ…ط¯ط®ظ„ط© (طھظ‚ط¯ظٹط±)"}
+              title={vat.inputActual > 0 ? "VAT المدخلة (فعلي)" : "VAT المدخلة (تقدير)"}
               value={formatMoney(vat.inputActual > 0 ? vat.inputActual : vat.inputEst)}
               icon={TrendingDown}
               variant={vat.inputActual > 0 ? "success" : "warning"}
             />
-            <StatCard title="VAT طµط§ظپظٹ ظ„ظ„ط³ط¯ط§ط¯" value={formatMoney(vat.net)} icon={TrendingUp} variant={vat.net >= 0 ? "success" : "gold"} />
+            <StatCard title="VAT صافي للسداد" value={formatMoney(vat.net)} icon={TrendingUp} variant={vat.net >= 0 ? "success" : "gold"} />
           </div>
           <Card className="p-4 bg-primary/5 border-primary/30">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold">ط¥ظ‚ط±ط§ط± ط¶ط±ظٹط¨ظٹ ط±ط³ظ…ظٹ ظ„ظ„ظپطھط±ط©</h3>
-                <p className="text-xs text-muted-foreground mt-1">ط¬ط§ظ‡ط² ظ„ظ„طھظ‚ط¯ظٹظ… ظ„ط¬ظ‡ط§ط² ط§ظ„ط¶ط±ط§ط¦ط¨ ط§ظ„ط¹ظڈظ…ط§ظ†ظٹ â€” ظٹط¬ظ…ط¹ ط§ظ„ظ…ط®ط±ط¬ط§طھ ظˆط§ظ„ظ…ط¯ط®ظ„ط§طھ ظˆط§ظ„طµط§ظپظٹ</p>
+                <h3 className="text-sm font-semibold">إقرار ضريبي رسمي للفترة</h3>
+                <p className="text-xs text-muted-foreground mt-1">جاهز للتقديم لجهاز الضرائب العُماني — يجمع المخرجات والمدخلات والصافي</p>
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="default" className="gap-1" onClick={() => exportVatPdf(f)}>
-                  <FileText size={14} /> PDF ط±ط³ظ…ظٹ
+                  <FileText size={14} /> PDF رسمي
                 </Button>
                 <Button size="sm" variant="outline" className="gap-1" onClick={() => exportVatExcel(f)}>
                   <FileSpreadsheet size={14} /> Excel/CSV
@@ -224,20 +331,20 @@ export default function CloudAdvancedReports() {
           </Card>
           <Card className="p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold">طھظپطµظٹظ„ ط§ظ„ظپظˆط§طھظٹط± ط§ظ„ط®ط§ط¶ط¹ط© ظ„ظ„ط¶ط±ظٹط¨ط©</h3>
+              <h3 className="text-sm font-semibold">تفصيل الفواتير الخاضعة للضريبة</h3>
               <Button size="sm" variant="outline" className="gap-1" onClick={() => exportCsv("vat-report.csv", [
-                ...(data?.sales.filter((s) => s.doc_type === "invoice" && Number(s.tax_total) > 0).map((s) => ({ source: "ظ…ط¨ظٹط¹ط§طھ", num: s.doc_number, date: s.date, who: s.customer_name, subtotal: s.subtotal, vat: s.tax_total, total: s.total })) || []),
-                ...(data?.insInv.map((i) => ({ source: "طھط£ظ…ظٹظ†", num: i.invoice_number, date: (i.issued_at || "").slice(0, 10), who: i.insurance_company_name, subtotal: i.subtotal, vat: i.vat, total: i.total })) || []),
+                ...(data?.sales.filter((s) => s.doc_type === "invoice" && Number(s.tax_total) > 0).map((s) => ({ source: "مبيعات", num: s.doc_number, date: s.date, who: s.customer_name, subtotal: s.subtotal, vat: s.tax_total, total: s.total })) || []),
+                ...(data?.insInv.map((i) => ({ source: "تأمين", num: i.invoice_number, date: (i.issued_at || "").slice(0, 10), who: i.insurance_company_name, subtotal: i.subtotal, vat: i.vat, total: i.total })) || []),
               ], [
-                { key: "source", label: "ط§ظ„ظ…طµط¯ط±" }, { key: "num", label: "ط§ظ„ط±ظ‚ظ…" }, { key: "date", label: "ط§ظ„طھط§ط±ظٹط®" },
-                { key: "who", label: "ط§ظ„ط¬ظ‡ط©" }, { key: "subtotal", label: "ط§ظ„طµط§ظپظٹ" }, { key: "vat", label: "VAT" }, { key: "total", label: "ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ" },
+                { key: "source", label: "المصدر" }, { key: "num", label: "الرقم" }, { key: "date", label: "التاريخ" },
+                { key: "who", label: "الجهة" }, { key: "subtotal", label: "الصافي" }, { key: "vat", label: "VAT" }, { key: "total", label: "الإجمالي" },
               ])}>
                 <FileSpreadsheet size={14} /> CSV
               </Button>
             </div>
             <div className="text-xs text-muted-foreground space-y-1">
-              <p>ط¹ط¯ط¯ ظپظˆط§طھظٹط± ط§ظ„ظ…ط¨ظٹط¹ط§طھ: <b>{vat.salesInvoicesCount}</b> آ· ظپظˆط§طھظٹط± ط§ظ„طھط£ظ…ظٹظ†: <b>{vat.insCount}</b> آ· ظپظˆط§طھظٹط± ط§ظ„ط´ط±ط§ط،: <b>{vat.purchasesCount}</b></p>
-              <p>{vat.inputActual > 0 ? `VAT ط§ظ„ظ…ط¯ط®ظ„ط© ظ…ط­ط³ظˆط¨ط© ظپط¹ظ„ظٹط§ظ‹ ظ…ظ† ${vat.purchasesCount} ظپط§طھظˆط±ط© ط´ط±ط§ط،.` : "ظ„ط§ طھظˆط¬ط¯ ظپظˆط§طھظٹط± ط´ط±ط§ط، â€” طھظ… طھظ‚ط¯ظٹط± VAT ط§ظ„ظ…ط¯ط®ظ„ط© ظƒظ€ 5% ظ…ظ† ط§ظ„ظ…طµط±ظˆظپط§طھ (ظٹظ…ظƒظ† ط¥ط¯ط®ط§ظ„ ظپظˆط§طھظٹط± ط´ط±ط§ط، ظ„ظ„ط­طµظˆظ„ ط¹ظ„ظ‰ ط±ظ‚ظ… ظپط¹ظ„ظٹ)."}</p>
+              <p>عدد فواتير المبيعات: <b>{vat.salesInvoicesCount}</b> · فواتير التأمين: <b>{vat.insCount}</b> · فواتير الشراء: <b>{vat.purchasesCount}</b></p>
+              <p>{vat.inputActual > 0 ? `VAT المدخلة محسوبة فعلياً من ${vat.purchasesCount} فاتورة شراء.` : "لا توجد فواتير شراء — تم تقدير VAT المدخلة كـ 5% من المصروفات (يمكن إدخال فواتير شراء للحصول على رقم فعلي)."}</p>
             </div>
           </Card>
         </TabsContent>
@@ -245,21 +352,34 @@ export default function CloudAdvancedReports() {
         {/* ===== Income ===== */}
         <TabsContent value="income" className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard title="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط¥ظٹط±ط§ط¯ط§طھ" value={formatMoney(income.revenue)} icon={TrendingUp} variant="success" />
-            <StatCard title="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…طµط±ظˆظپط§طھ" value={formatMoney(income.expenses)} icon={TrendingDown} variant="warning" />
-            <StatCard title="طµط§ظپظٹ ط§ظ„ط±ط¨ط­" value={formatMoney(income.profit)} icon={TrendingUp} variant={income.profit >= 0 ? "gold" : "warning"} />
-            <StatCard title="ظ‡ط§ظ…ط´ ط§ظ„ط±ط¨ط­" value={`${income.margin.toFixed(1)}%`} icon={BarChart3} variant="info" />
+            <StatCard title="إجمالي الإيرادات" value={formatMoney(income.revenue)} icon={TrendingUp} variant="success" />
+            <StatCard title="إجمالي المصروفات" value={formatMoney(income.expenses)} icon={TrendingDown} variant="warning" />
+            <StatCard title="صافي الربح" value={formatMoney(income.profit)} icon={TrendingUp} variant={income.profit >= 0 ? "gold" : "warning"} />
+            <StatCard title="هامش الربح" value={`${income.margin.toFixed(1)}%`} icon={BarChart3} variant="info" />
           </div>
           <Card className="p-4">
-            <h3 className="text-sm font-semibold mb-3">ظ‚ط§ط¦ظ…ط© ط§ظ„ط¯ط®ظ„ ط§ظ„ظ…ط®طھطµط±ط©</h3>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+              <h3 className="text-sm font-semibold">قائمة الدخل المختصرة</h3>
+              <div className="flex gap-2">
+                <Button size="sm" variant="default" className="gap-1" onClick={exportProfitLossPdf}>
+                  <FileText size={14} /> PDF
+                </Button>
+                <Button size="sm" variant="outline" className="gap-1" onClick={exportProfitLossXlsx}>
+                  <FileSpreadsheet size={14} /> XLSX
+                </Button>
+                <Button size="sm" variant="outline" className="gap-1" onClick={printProfitLoss}>
+                  <FileText size={14} /> Print
+                </Button>
+              </div>
+            </div>
             <table className="w-full text-sm">
               <tbody className="divide-y divide-border">
-                <tr><td className="py-2">ط¥ظٹط±ط§ط¯ط§طھ ط§ظ„ظ…ط¨ظٹط¹ط§طھ (ط¨ط¯ظˆظ† VAT)</td><td className="py-2 text-left font-mono" dir="ltr">{formatMoney(income.salesRev)}</td></tr>
-                <tr><td className="py-2">ط¥ظٹط±ط§ط¯ط§طھ ط§ظ„طھط£ظ…ظٹظ† (ط¨ط¯ظˆظ† VAT)</td><td className="py-2 text-left font-mono" dir="ltr">{formatMoney(income.insRev)}</td></tr>
-                <tr><td className="py-2 font-semibold">ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط¥ظٹط±ط§ط¯ط§طھ</td><td className="py-2 text-left font-mono font-bold text-success" dir="ltr">{formatMoney(income.revenue)}</td></tr>
-                <tr><td className="py-2 text-destructive">(-) ط§ظ„ظ…طµط±ظˆظپط§طھ ط§ظ„طھط´ط؛ظٹظ„ظٹط©</td><td className="py-2 text-left font-mono text-destructive" dir="ltr">({formatMoney(income.expenses)})</td></tr>
-                <tr><td className="py-2 font-bold">طµط§ظپظٹ ط§ظ„ط±ط¨ط­</td><td className="py-2 text-left font-mono font-bold" dir="ltr">{formatMoney(income.profit)}</td></tr>
-                <tr><td className="py-2 text-xs text-muted-foreground">ظ„ظ„ط¹ظ„ظ…: ط¯ظپط¹ط§طھ ط§ظ„طھط£ظ…ظٹظ† ط§ظ„ظ…ط­طµظ‘ظ„ط© ظپط¹ظ„ظٹط§ظ‹</td><td className="py-2 text-left font-mono text-xs text-muted-foreground" dir="ltr">{formatMoney(income.claimsReceived)}</td></tr>
+                <tr><td className="py-2">إيرادات المبيعات (بدون VAT)</td><td className="py-2 text-left font-mono" dir="ltr">{formatMoney(income.salesRev)}</td></tr>
+                <tr><td className="py-2">إيرادات التأمين (بدون VAT)</td><td className="py-2 text-left font-mono" dir="ltr">{formatMoney(income.insRev)}</td></tr>
+                <tr><td className="py-2 font-semibold">إجمالي الإيرادات</td><td className="py-2 text-left font-mono font-bold text-success" dir="ltr">{formatMoney(income.revenue)}</td></tr>
+                <tr><td className="py-2 text-destructive">(-) المصروفات التشغيلية</td><td className="py-2 text-left font-mono text-destructive" dir="ltr">({formatMoney(income.expenses)})</td></tr>
+                <tr><td className="py-2 font-bold">صافي الربح</td><td className="py-2 text-left font-mono font-bold" dir="ltr">{formatMoney(income.profit)}</td></tr>
+                <tr><td className="py-2 text-xs text-muted-foreground">للعلم: دفعات التأمين المحصّلة فعلياً</td><td className="py-2 text-left font-mono text-xs text-muted-foreground" dir="ltr">{formatMoney(income.claimsReceived)}</td></tr>
               </tbody>
             </table>
           </Card>
@@ -268,18 +388,18 @@ export default function CloudAdvancedReports() {
         {/* ===== Aging ===== */}
         <TabsContent value="aging" className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <StatCard title="ط¬ط§ط±ظٹ (ط؛ظٹط± ظ…ط³طھط­ظ‚)" value={formatMoney(aging.buckets.current)} icon={Clock} variant="info" />
-            <StatCard title="1-30 ظٹظˆظ…" value={formatMoney(aging.buckets.b30)} icon={Clock} variant="gold" />
-            <StatCard title="31-60 ظٹظˆظ…" value={formatMoney(aging.buckets.b60)} icon={Clock} variant="warning" />
-            <StatCard title="61-90 ظٹظˆظ…" value={formatMoney(aging.buckets.b90)} icon={Clock} variant="warning" />
-            <StatCard title="+90 ظٹظˆظ…" value={formatMoney(aging.buckets.b90plus)} icon={Clock} variant="gold" />
+            <StatCard title="جاري (غير مستحق)" value={formatMoney(aging.buckets.current)} icon={Clock} variant="info" />
+            <StatCard title="1-30 يوم" value={formatMoney(aging.buckets.b30)} icon={Clock} variant="gold" />
+            <StatCard title="31-60 يوم" value={formatMoney(aging.buckets.b60)} icon={Clock} variant="warning" />
+            <StatCard title="61-90 يوم" value={formatMoney(aging.buckets.b90)} icon={Clock} variant="warning" />
+            <StatCard title="+90 يوم" value={formatMoney(aging.buckets.b90plus)} icon={Clock} variant="gold" />
           </div>
           <Card className="p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold">ط§ظ„ط°ظ…ظ… ط§ظ„ظ…ط¹ظ„ظ‚ط© â€” ط¥ط¬ظ…ط§ظ„ظٹ: <span className="font-mono" dir="ltr">{formatMoney(aging.total)}</span></h3>
+              <h3 className="text-sm font-semibold">الذمم المعلقة — إجمالي: <span className="font-mono" dir="ltr">{formatMoney(aging.total)}</span></h3>
               <Button size="sm" variant="outline" className="gap-1" onClick={() => exportCsv("aging-report.csv", aging.rows, [
-                { key: "kind", label: "ط§ظ„ظ†ظˆط¹" }, { key: "who", label: "ط§ظ„ط¬ظ‡ط©" }, { key: "num", label: "ط§ظ„ط±ظ‚ظ…" },
-                { key: "due", label: "طھط§ط±ظٹط® ط§ظ„ط§ط³طھط­ظ‚ط§ظ‚" }, { key: "days", label: "ط£ظٹط§ظ… ط§ظ„طھط£ط®ظٹط±" }, { key: "balance", label: "ط§ظ„ط±طµظٹط¯" }, { key: "bucket", label: "ط§ظ„ظپط¦ط©" },
+                { key: "kind", label: "النوع" }, { key: "who", label: "الجهة" }, { key: "num", label: "الرقم" },
+                { key: "due", label: "تاريخ الاستحقاق" }, { key: "days", label: "أيام التأخير" }, { key: "balance", label: "الرصيد" }, { key: "bucket", label: "الفئة" },
               ])}>
                 <FileSpreadsheet size={14} /> CSV
               </Button>
@@ -288,23 +408,23 @@ export default function CloudAdvancedReports() {
               <table className="w-full text-xs">
                 <thead className="text-muted-foreground">
                   <tr className="border-b border-border">
-                    <th className="text-right py-2">ط§ظ„ظ†ظˆط¹</th>
-                    <th className="text-right py-2">ط§ظ„ط¬ظ‡ط©</th>
-                    <th className="text-right py-2">ط§ظ„ط±ظ‚ظ…</th>
-                    <th className="text-right py-2">ط§ظ„ط§ط³طھط­ظ‚ط§ظ‚</th>
-                    <th className="text-right py-2">ط£ظٹط§ظ… ط§ظ„طھط£ط®ظٹط±</th>
-                    <th className="text-left py-2">ط§ظ„ط±طµظٹط¯</th>
+                    <th className="text-right py-2">النوع</th>
+                    <th className="text-right py-2">الجهة</th>
+                    <th className="text-right py-2">الرقم</th>
+                    <th className="text-right py-2">الاستحقاق</th>
+                    <th className="text-right py-2">أيام التأخير</th>
+                    <th className="text-left py-2">الرصيد</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
                   {aging.rows.length === 0 ? (
-                    <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">ظ„ط§ طھظˆط¬ط¯ ط°ظ…ظ… ظ…ط¹ظ„ظ‚ط© ظپظٹ ظ‡ط°ظ‡ ط§ظ„ظپطھط±ط©</td></tr>
+                    <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">لا توجد ذمم معلقة في هذه الفترة</td></tr>
                   ) : aging.rows.slice(0, 100).map((r, i) => (
                     <tr key={i} className="hover:bg-secondary/30">
                       <td className="py-2">{r.kind}</td>
                       <td className="py-2">{r.who}</td>
                       <td className="py-2 font-mono">{r.num}</td>
-                      <td className="py-2 font-mono" dir="ltr">{r.due || "â€”"}</td>
+                      <td className="py-2 font-mono" dir="ltr">{r.due || "—"}</td>
                       <td className={`py-2 ${r.days > 60 ? "text-destructive font-bold" : r.days > 0 ? "text-warning" : ""}`}>{r.days}</td>
                       <td className="py-2 text-left font-mono font-semibold" dir="ltr">{formatMoney(r.balance)}</td>
                     </tr>
@@ -318,9 +438,9 @@ export default function CloudAdvancedReports() {
         {/* ===== Trend ===== */}
         <TabsContent value="trend" className="space-y-4">
           <Card className="p-4">
-            <h3 className="text-sm font-semibold mb-3">ط§ظ„ط¥ظٹط±ط§ط¯ط§طھ/ط§ظ„ظ…طµط±ظˆظپط§طھ/ط§ظ„ط±ط¨ط­ ط­ط³ط¨ ط§ظ„ط´ظ‡ط±</h3>
+            <h3 className="text-sm font-semibold mb-3">الإيرادات/المصروفات/الربح حسب الشهر</h3>
             {monthly.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground text-sm">ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظپظٹ ط§ظ„ظپطھط±ط© ط§ظ„ظ…ط®طھط§ط±ط©</div>
+              <div className="py-12 text-center text-muted-foreground text-sm">لا توجد بيانات في الفترة المختارة</div>
             ) : (
               <ResponsiveContainer width="100%" height={320}>
                 <BarChart data={monthly}>
@@ -329,23 +449,23 @@ export default function CloudAdvancedReports() {
                   <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
                   <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, direction: "rtl" }} />
                   <Legend wrapperStyle={{ direction: "rtl" }} />
-                  <Bar dataKey="revenue" name="ط¥ظٹط±ط§ط¯ط§طھ" fill="hsl(142, 70%, 45%)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="expenses" name="ظ…طµط±ظˆظپط§طھ" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="profit" name="ط±ط¨ط­" fill="hsl(42, 90%, 55%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="revenue" name="إيرادات" fill="hsl(142, 70%, 45%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="expenses" name="مصروفات" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="profit" name="ربح" fill="hsl(42, 90%, 55%)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
           </Card>
           {monthly.length > 1 && (
             <Card className="p-4">
-              <h3 className="text-sm font-semibold mb-3">ط§طھط¬ط§ظ‡ طµط§ظپظٹ ط§ظ„ط±ط¨ط­</h3>
+              <h3 className="text-sm font-semibold mb-3">اتجاه صافي الربح</h3>
               <ResponsiveContainer width="100%" height={240}>
                 <LineChart data={monthly}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="name" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
                   <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
                   <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, direction: "rtl" }} />
-                  <Line type="monotone" dataKey="profit" name="ط±ط¨ط­" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="profit" name="ربح" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
             </Card>

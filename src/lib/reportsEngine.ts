@@ -1,5 +1,5 @@
-// ظ…ط­ط±ظƒ ط§ظ„طھظ‚ط§ط±ظٹط± ط§ظ„ظ…ط±ظƒط²ظٹ â€” ظٹط¬ظ…ط¹ ط§ظ„ط¨ظٹط§ظ†ط§طھ ظ…ظ† ظƒظ„ ط§ظ„ظ€ stores ظˆظٹط­ط³ط¨ ط§ظ„ط£ط±ظ‚ط§ظ…
-// ط§ظ„ظ…ط§ظ„ظٹط©طŒ ط§ظ„طھط´ط؛ظٹظ„ظٹط©طŒ ط§ظ„ط¹ظ„ط§ظ‚ط§طھطŒ ظˆط§ظ„ظ…ط­ط§ط³ط¨ظٹط© ظپظٹ ظ…ظƒط§ظ† ظˆط§ط­ط¯.
+// محرك التقارير المركزي — يجمع البيانات من كل الـ stores ويحسب الأرقام
+// المالية، التشغيلية، العلاقات، والمحاسبية في مكان واحد.
 
 import { getWorkOrders, type WorkOrder } from "./workOrdersStore";
 import { inventoryStore } from "./inventoryStore";
@@ -15,7 +15,7 @@ import { vehiclesStore } from "./vehiclesStore";
 import { salesStore, type SalesDoc } from "./salesStore";
 import { roundMoney } from "@/lib/money";
 
-// ===== ط£ظ†ظˆط§ط¹ ظ…ظˆط­ط¯ط© =====
+// ===== أنواع موحدة =====
 export interface DateRange {
   from: string; // ISO yyyy-mm-dd
   to: string;   // ISO yyyy-mm-dd
@@ -35,7 +35,7 @@ const inRange = (d: string, r: DateRange) => {
   return (!r.from || x >= r.from) && (!r.to || x <= r.to);
 };
 
-// ===== ط§ط®طھطµط§ط±ط§طھ ط§ظ„ظ†ط·ط§ظ‚ =====
+// ===== اختصارات النطاق =====
 export function rangeShortcut(kind: "today" | "week" | "month" | "quarter" | "year"): DateRange {
   const today = new Date();
   const to = today.toISOString().slice(0, 10);
@@ -54,7 +54,7 @@ export function rangeShortcut(kind: "today" | "week" | "month" | "quarter" | "ye
   return { from: start.toISOString().slice(0, 10), to };
 }
 
-// =================== 1) ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ظ…ط§ظ„ظٹ ط§ظ„ط´ط§ظ…ظ„ ===================
+// =================== 1) التقرير المالي الشامل ===================
 
 export interface SalesRow {
   orderId: string;
@@ -204,10 +204,10 @@ export function buildPurchasesReport(f: ReportFilters): PurchasesReport {
 
 export interface ProfitLossReport {
   revenue: number;
-  cogs: number;            // طھظƒظ„ظپط© ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± ط§ظ„ظ…ط¨ط§ط¹ط©
+  cogs: number;            // تكلفة قطع الغيار المباعة
   laborCost: number;
-  expenses: number;        // ظ…طµط±ظˆظپط§طھ طھط´ط؛ظٹظ„ظٹط©
-  grossProfit: number;     // ط¥ظٹط±ط§ط¯ - طھظƒظ„ظپط© ط¨ط¶ط§ط¹ط©
+  expenses: number;        // مصروفات تشغيلية
+  grossProfit: number;     // إيراد - تكلفة بضاعة
   netProfit: number;
   vatCollected: number;
   vatPaid: number;
@@ -215,8 +215,8 @@ export interface ProfitLossReport {
   margin: number;          // %
 }
 
-// ط£ط³ظ…ط§ط، طھطµظ†ظٹظپط§طھ ط§ظ„ظ…طµط§ط±ظٹظپ ط§ظ„طھظٹ طھظ…ط«ظ„ ظ‚ط·ط¹ ط؛ظٹط§ط± (COGS) â€” طھظڈط³طھط¨ط¹ط¯ ظ…ظ† ط§ظ„ظ…طµط±ظˆظپط§طھ ط§ظ„طھط´ط؛ظٹظ„ظٹط© ظ„ظ…ظ†ط¹ ط§ظ„ط§ط²ط¯ظˆط§ط¬
-const PARTS_EXPENSE_KEYWORDS = ["ظ‚ط·ط¹ ط؛ظٹط§ط±", "ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط±", "parts", "spare"];
+// أسماء تصنيفات المصاريف التي تمثل قطع غيار (COGS) — تُستبعد من المصروفات التشغيلية لمنع الازدواج
+const PARTS_EXPENSE_KEYWORDS = ["قطع غيار", "قطع الغيار", "parts", "spare"];
 const isPartsExpense = (cat?: string) => {
   if (!cat) return false;
   const c = cat.toLowerCase();
@@ -231,18 +231,18 @@ export function buildProfitLossReport(f: ReportFilters): ProfitLossReport {
   const cogs = orders.reduce((s, o) => s + (Number(o.partsCost) || 0), 0);
   const laborCost = orders.reduce((s, o) => s + (Number(o.laborCost) || 0), 0);
 
-  // ط§ظ„ظ…طµط±ظˆظپط§طھ ط§ظ„طھط´ط؛ظٹظ„ظٹط© = ظƒظ„ ط³ظ†ط¯ط§طھ ط§ظ„طµط±ظپ ظ…ط§ ط¹ط¯ط§ ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± (ط§ظ„ظ…ط­ط³ظˆط¨ط© ط¶ظ…ظ† COGS)
+  // المصروفات التشغيلية = كل سندات الصرف ما عدا قطع الغيار (المحسوبة ضمن COGS)
   const expenses = expensesStore
     .getAll()
     .filter((e) => inRange(e.date, f.range))
     .filter((e) => !isPartsExpense(e.categoryName))
     .reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
-  // ط¥ظٹط±ط§ط¯ط§طھ ط§ظ„طھط£ظ…ظٹظ† â€” ظ…ظ† ظ‚ظٹظˆط¯ ط§ظ„ظٹظˆظ…ظٹط© (طھظڈط³ط¬ظژظ‘ظ„ طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ†ط¯ ط§ط¹طھظ…ط§ط¯ ط§ظ„ظ…ط·ط§ظ„ط¨ط©).
-  // ظٹظ…ظ†ط¹ ط§ظ„طھظƒط±ط§ط± ظ…ط¹ ط£ظˆط§ظ…ط± ط§ظ„ط¹ظ…ظ„ ظˆظٹط¹ظƒط³ ظپظ‚ط· ط§ظ„ظ…ط·ط§ظ„ط¨ط§طھ ط§ظ„ظ…ط¹طھظ…ط¯ط©.
+  // إيرادات التأمين — من قيود اليومية (تُسجَّل تلقائياً عند اعتماد المطالبة).
+  // يمنع التكرار مع أوامر العمل ويعكس فقط المطالبات المعتمدة.
   const insuranceRevenue = journalStore
     .getAll()
-    .filter((e) => e.creditAccount === "ط¥ظٹط±ط§ط¯ط§طھ ط§ظ„طھط£ظ…ظٹظ†" && inRange(e.date, f.range))
+    .filter((e) => e.creditAccount === "إيرادات التأمين" && inRange(e.date, f.range))
     .reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
   const salesRevenueExVat = roundMoney(sales.totalRevenue - sales.vatCollected);
@@ -267,7 +267,7 @@ export function buildProfitLossReport(f: ReportFilters): ProfitLossReport {
 }
 
 
-// =================== 2) ط±ط¨ط­/ط®ط³ط§ط±ط© ظ„ظƒظ„ ط³ظٹط§ط±ط© ===================
+// =================== 2) ربح/خسارة لكل سيارة ===================
 
 export interface PerVehicleProfitRow {
   orderId: string;
@@ -279,7 +279,7 @@ export interface PerVehicleProfitRow {
   partsCost: number;
   laborCost: number;
   extraExpenses: number;
-  externalVouchers: number; // ط³ظ†ط¯ط§طھ طµط±ظپ ظ…ط±طھط¨ط·ط©
+  externalVouchers: number; // سندات صرف مرتبطة
   totalCost: number;
   profit: number;
   margin: number;
@@ -337,7 +337,7 @@ export function buildPerVehicleProfitReport(f: ReportFilters): {
   return { rows, totals: { revenue, cost, profit, margin } };
 }
 
-// طھظپط§طµظٹظ„ ط±ط¨ط­ظٹط© ظ„ط³ظٹط§ط±ط© ظˆط§ط­ط¯ط© (ظ„ظ„طھظˆط³ط¹ط© ط¯ط§ط®ظ„ ط§ظ„طھظ‚ط±ظٹط±)
+// تفاصيل ربحية لسيارة واحدة (للتوسعة داخل التقرير)
 export interface VehicleProfitDetail {
   services: { label: string; amount: number }[];
   parts: { label: string; qty: number; unitPrice: number; total: number }[];
@@ -359,14 +359,14 @@ export function getVehicleProfitDetail(orderId: string): VehicleProfitDetail {
 
   const services: { label: string; amount: number }[] = [];
   if (Number(order.laborCost) > 0) {
-    services.push({ label: `ط£ط¬ظˆط± ط§ظ„ط¹ظ…ط§ظ„ط© - ${order.serviceType || "ط®ط¯ظ…ط©"}`, amount: Number(order.laborCost) });
+    services.push({ label: `أجور العمالة - ${order.serviceType || "خدمة"}`, amount: Number(order.laborCost) });
   }
 
-  // ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± - ظ„ظ„ط¹ط±ط¶ ط§ظ„ظ…ط¨ط³ط· ظ†ط¹ط±ط¶ ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ظƒط³ط·ط± ظˆط§ط­ط¯ ط¥ظ† ظ„ظ… طھطھظˆظپط± طھظپط§طµظٹظ„
+  // قطع الغيار - للعرض المبسط نعرض الإجمالي كسطر واحد إن لم تتوفر تفاصيل
   const parts: { label: string; qty: number; unitPrice: number; total: number }[] = [];
   if (Number(order.partsCost) > 0) {
     parts.push({
-      label: "ط¥ط¬ظ…ط§ظ„ظٹ ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± ط§ظ„ظ…ط³طھط®ط¯ظ…ط©",
+      label: "إجمالي قطع الغيار المستخدمة",
       qty: 1,
       unitPrice: Number(order.partsCost),
       total: Number(order.partsCost),
@@ -393,7 +393,7 @@ export function getVehicleProfitDetail(orderId: string): VehicleProfitDetail {
   return { services, parts, internalExpenses, externalVouchers };
 }
 
-// =================== 3) ط¶ط±ظٹط¨ط© ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظ…ط¶ط§ظپط© ===================
+// =================== 3) ضريبة القيمة المضافة ===================
 
 export interface VatReport {
   outputVat: number;
@@ -417,7 +417,7 @@ export function buildVatReport(f: ReportFilters): VatReport {
   };
 }
 
-// =================== 4) طھظ‚ط§ط±ظٹط± طھط´ط؛ظٹظ„ظٹط© ===================
+// =================== 4) تقارير تشغيلية ===================
 
 export interface InventoryValueRow {
   partId: string;
@@ -443,7 +443,7 @@ export function buildInventoryReport(): {
       partId: p.id,
       name: p.name,
       partNumber: p.partNumber,
-      category: p.category || "â€”",
+      category: p.category || "—",
       stock: p.stock,
       minStock: p.minStock,
       buyPrice: p.buyPrice,
@@ -482,7 +482,7 @@ export function buildMovementsReport(f: ReportFilters): MovementRow[] {
       id: m.id,
       date: m.date,
       type: m.type,
-      reference: m.reference || "â€”",
+      reference: m.reference || "—",
       reason: m.reason,
       itemsCount: m.items.length,
       totalQty: m.items.reduce((s, i) => s + i.qty, 0),
@@ -518,7 +518,7 @@ export function buildWorkOrdersReport(f: ReportFilters): WorkOrderRow[] {
     }));
 }
 
-// =================== 5) ط§ظ„ط¹ظ„ط§ظ‚ط§طھ (ط¹ظ…ظ„ط§ط،/ظ…ظˆط±ط¯ظٹظ†) ===================
+// =================== 5) العلاقات (عملاء/موردين) ===================
 
 export interface CustomerLedgerRow {
   customerId: string;
@@ -539,7 +539,7 @@ export function buildCustomersReport(f: ReportFilters): CustomerLedgerRow[] {
   return customersStore.getAll().map((c) => {
     const myOrders = orders.filter((o) => o.customer === c.name);
     const totalSpent = myOrders.reduce((s, o) => s + (Number(o.totalCost) || 0), 0);
-    // ط§ظ„ظ…ط¹ظ„ظژظ‘ظ‚ = ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ âˆ’ (ط³ظ†ط¯ط§طھ ظ‚ط¨ط¶ + ط¹ط±ط§ط¨ظٹظ† ظپط¹ظ„ظٹط© ظپظٹ ط§ظ„ظپطھط±ط©)طŒ ظˆظ„ظٹط³ ط¨ظ†ط§ط،ظ‹ ط¹ظ„ظ‰ ط§ظ„ط­ط§ظ„ط© ظپظ‚ط·
+    // المعلَّق = الإجمالي − (سندات قبض + عرابين فعلية في الفترة)، وليس بناءً على الحالة فقط
     const paidFromReceipts = receiptsInRange
       .filter((r) => normName(r.payerName || "") === normName(c.name))
       .reduce((s, r) => s + (Number(r.amount) || 0), 0);
@@ -550,7 +550,7 @@ export function buildCustomersReport(f: ReportFilters): CustomerLedgerRow[] {
     const depositBalance = deposits
       .filter((d) => d.customer === c.name)
       .reduce((s, d) => s + Math.max(0, d.amount - (d.consumed || 0)), 0);
-    const lastVisit = myOrders.map((o) => o.entryDate).sort().reverse()[0] || "â€”";
+    const lastVisit = myOrders.map((o) => o.entryDate).sort().reverse()[0] || "—";
 
 
     return {
@@ -589,13 +589,13 @@ export function buildSuppliersReport(f: ReportFilters): SupplierLedgerRow[] {
       phone: s.phone,
       totalPurchases,
       totalPaid,
-      // ظ‚ط¯ ظٹظƒظˆظ† ط§ظ„ط±طµظٹط¯ ط³ط§ظ„ط¨ط§ظ‹ (ط¯ظپط¹ظ†ط§ ط£ظƒط«ط± ظ…ظ…ط§ ط§ط´طھط±ظٹظ†ط§) â€” ظ†ظڈط¸ظ‡ط± ط§ظ„ط­ظ‚ظٹظ‚ط© ط¨ط¯ظ„ ط¥ط®ظپط§ط¦ظ‡ط§
+      // قد يكون الرصيد سالباً (دفعنا أكثر مما اشترينا) — نُظهر الحقيقة بدل إخفائها
       balance: totalPurchases - totalPaid,
     };
   });
 }
 
-// =================== 6) ط§ظ„ظ…ط­ط§ط³ط¨ظٹط© ===================
+// =================== 6) المحاسبية ===================
 
 export interface JournalRow {
   id: string;
@@ -664,7 +664,7 @@ export function buildTrialBalance(f: ReportFilters): {
   };
 }
 
-// =================== ط£ط¯ظˆط§طھ ظ„ظ„ظ‚ظˆط§ط¦ظ… ط§ظ„ظ…ظ†ط³ط¯ظ„ط© ===================
+// =================== أدوات للقوائم المنسدلة ===================
 
 export function getReportFacets() {
   return {
@@ -676,7 +676,7 @@ export function getReportFacets() {
 }
 
 
-// =================== ط±ط¨ط­ ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± ===================
+// =================== ربح قطع الغيار ===================
 
 export interface PartsProfitRow {
   voucherNumber: string;
@@ -691,7 +691,7 @@ export interface PartsProfitRow {
   totalCost: number;
   totalRevenue: number;
   profit: number;
-  marginPct: number; // ظ‡ط§ظ…ط´ ط§ظ„ط±ط¨ط­ %
+  marginPct: number; // هامش الربح %
   supplier?: string;
   supplierTaxNumber?: string;
   supplierInvoiceNumber?: string;
@@ -725,8 +725,8 @@ export function buildPartsProfitReport(f: ReportFilters): {
         date: e.date,
         workOrderId: e.linkedWorkOrderId,
         partId: e.partId || e.id,
-        partName: e.partName || "â€”",
-        partNumber: e.partNumber || "â€”",
+        partName: e.partName || "—",
+        partNumber: e.partNumber || "—",
         qty,
         buyPrice: buy,
         sellPrice: sell,
@@ -744,7 +744,7 @@ export function buildPartsProfitReport(f: ReportFilters): {
   const totalRevenue = rows.reduce((s, r) => s + r.totalRevenue, 0);
   const totalProfit = rows.reduce((s, r) => s + r.profit, 0);
 
-  // طھط¬ظ…ظٹط¹ ط­ط³ط¨ ط§ظ„ظ‚ط·ط¹ط©
+  // تجميع حسب القطعة
   const partMap = new Map<string, { partId: string; partName: string; qty: number; profit: number; revenue: number }>();
   rows.forEach((r) => {
     const cur = partMap.get(r.partId) || { partId: r.partId, partName: r.partName, qty: 0, profit: 0, revenue: 0 };

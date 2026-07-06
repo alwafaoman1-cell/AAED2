@@ -1,8 +1,8 @@
-// ظ…ط­ط§ط³ط¨ط© ط¯ظپط¹ط§طھ ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ† â€” ظ‚ظٹظˆط¯ طھظ„ظ‚ط§ط¦ظٹط© ظپظٹ ط¯ظپطھط± ط§ظ„ظٹظˆظ…ظٹط© ط§ظ„ظ…ط­ظ„ظٹ
-// ط¹ظ†ط¯ ط§ظ„ظ…ظˆط§ظپظ‚ط©: ظ…ط¯ظٹظ† ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ† / ط¯ط§ط¦ظ† ط¥ظٹط±ط§ط¯ط§طھ ط§ظ„طھط£ظ…ظٹظ†
-// ط¹ظ†ط¯ ط§ظ„طھط­طµظٹظ„: ظ…ط¯ظٹظ† ط§ظ„ط¨ظ†ظƒ ط£ظˆ ط§ظ„ظ†ظ‚ط¯ظٹط© / ط¯ط§ط¦ظ† ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†
-// ط´ظٹظƒ ظ…ط¹ظ„ظ‚: ظ…ط¯ظٹظ† ط´ظٹظƒط§طھ طھط­طھ ط§ظ„طھط­طµظٹظ„ / ط¯ط§ط¦ظ† ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†طŒ ط«ظ… ط¹ظ†ط¯ ط§ظ„طھط­طµظٹظ„: ظ…ط¯ظٹظ† ط§ظ„ط¨ظ†ظƒ / ط¯ط§ط¦ظ† ط´ظٹظƒط§طھ طھط­طھ ط§ظ„طھط­طµظٹظ„
-// ظ…ظ‚ط§طµط©: ظ…ط¯ظٹظ† ط°ظ…ظ… ط§ظ„ظ…ظˆط±ط¯ظٹظ† / ط¯ط§ط¦ظ† ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†
+// محاسبة دفعات شركات التأمين — قيود تلقائية في دفتر اليومية المحلي
+// عند الموافقة: مدين ذمم شركات التأمين / دائن إيرادات التأمين
+// عند التحصيل: مدين البنك أو النقدية / دائن ذمم شركات التأمين
+// شيك معلق: مدين شيكات تحت التحصيل / دائن ذمم شركات التأمين، ثم عند التحصيل: مدين البنك / دائن شيكات تحت التحصيل
+// مقاصة: مدين ذمم الموردين / دائن ذمم شركات التأمين
 
 import { addJournalEntry, removeJournalBySource, type JournalAccount } from "./journalStore";
 import { calculateVatExclusive } from "@/lib/money";
@@ -14,16 +14,16 @@ export interface PostInsuranceClaimApprovalArgs {
   claimId: string;          // UUID
   claimNumber: string;
   date: string;             // ISO (yyyy-mm-dd)
-  amount: number;           // ط¥ط¬ظ…ط§ظ„ظٹ ط´ط§ظ…ظ„ ط§ظ„ط¶ط±ظٹط¨ط© (VAT-exclusive input + VAT on top)
+  amount: number;           // إجمالي شامل الضريبة (VAT-exclusive input + VAT on top)
   companyName: string;
-  /** ظ†ط³ط¨ط© ط¶ط±ظٹط¨ط© ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظ…ط¶ط§ظپط© (ط§ظپطھط±ط§ط¶ظٹط§ظ‹ 5% â€” ط¹ظڈظ…ط§ظ†). ظ…ط±ظ‘ط± 0 ظ„ط¥ظ„ط؛ط§ط، ظپطµظ„ ط§ظ„ط¶ط±ظٹط¨ط©. */
+  /** نسبة ضريبة القيمة المضافة (افتراضياً 5% — عُمان). مرّر 0 لإلغاء فصل الضريبة. */
   vatRate?: number;
 }
 
 /**
- * ظٹظپطµظ„ ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ط¹طھظ…ط¯ ط¥ظ„ظ‰ طµط§ظپظٹ ط§ظ„ط¥ظٹط±ط§ط¯ + ط¶ط±ظٹط¨ط© ط§ظ„ظ…ط¨ظٹط¹ط§طھ ط­طھظ‰ ظٹط¸ظ‡ط± ظپظٹ ط¥ظ‚ط±ط§ط± VAT ط§ظ„ط±ط³ظ…ظٹ.
- *   ظ…ط¯ظٹظ†: ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ† (ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ)
- *   ط¯ط§ط¦ظ†: ط¥ظٹط±ط§ط¯ط§طھ ط§ظ„طھط£ظ…ظٹظ† (ط§ظ„طµط§ظپظٹ) + ط¶ط±ظٹط¨ط© ط§ظ„ظ…ط¨ظٹط¹ط§طھ (VAT)
+ * يفصل المبلغ المعتمد إلى صافي الإيراد + ضريبة المبيعات حتى يظهر في إقرار VAT الرسمي.
+ *   مدين: ذمم شركات التأمين (الإجمالي)
+ *   دائن: إيرادات التأمين (الصافي) + ضريبة المبيعات (VAT)
  */
 export function postInsuranceClaimApproval(args: PostInsuranceClaimApprovalArgs) {
   if (args.amount <= 0) return;
@@ -34,14 +34,14 @@ export function postInsuranceClaimApproval(args: PostInsuranceClaimApprovalArgs)
   const subtotal = breakdown.subtotalBeforeVat;
   const vat = breakdown.vatAmount;
   const date = args.date.slice(0, 10);
-  const baseDesc = `ط§ط¹طھظ…ط§ط¯ ظ…ط·ط§ظ„ط¨ط© ${args.claimNumber} â€” ${args.companyName}`;
+  const baseDesc = `اعتماد مطالبة ${args.claimNumber} — ${args.companyName}`;
 
   addJournalEntry({
     date,
     source: "insurance_claim",
     sourceId: args.claimId,
-    debitAccount: "ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†",
-    creditAccount: "ط¥ظٹط±ط§ط¯ط§طھ ط§ظ„طھط£ظ…ظٹظ†",
+    debitAccount: "ذمم شركات التأمين",
+    creditAccount: "إيرادات التأمين",
     amount: subtotal,
     description: baseDesc,
   });
@@ -50,10 +50,10 @@ export function postInsuranceClaimApproval(args: PostInsuranceClaimApprovalArgs)
       date,
       source: "insurance_claim",
       sourceId: args.claimId,
-      debitAccount: "ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†",
-      creditAccount: "ط¶ط±ظٹط¨ط© ط§ظ„ظ…ط¨ظٹط¹ط§طھ",
+      debitAccount: "ذمم شركات التأمين",
+      creditAccount: "ضريبة المبيعات",
       amount: vat,
-      description: `${baseDesc} â€” VAT`,
+      description: `${baseDesc} — VAT`,
     });
   }
 }
@@ -71,41 +71,41 @@ export interface PostInsurancePaymentArgs {
 }
 
 /**
- * ظٹظ‚ظˆظ… ط¨ط¥ظ†ط´ط§ط،/طھط­ط¯ظٹط« ط§ظ„ظ‚ظٹظˆط¯ ط§ظ„ظ…ط­ط§ط³ط¨ظٹط© ظ„ظ„ط¯ظپط¹ط© ط¨ط­ط³ط¨ ط§ظ„ط­ط§ظ„ط©.
- * ظٹط­ط°ظپ ط£ظٹ ظ‚ظٹظˆط¯ ط³ط§ط¨ظ‚ط© ظ„ظ‡ط°ظ‡ ط§ظ„ط¯ظپط¹ط© ط«ظ… ظٹط¹ظٹط¯ ط¨ظ†ط§ط،ظ‡ط§ ظˆظپظ‚ط§ظ‹ ظ„ظ„ط­ط§ظ„ط© ط§ظ„ط±ط§ظ‡ظ†ط©.
+ * يقوم بإنشاء/تحديث القيود المحاسبية للدفعة بحسب الحالة.
+ * يحذف أي قيود سابقة لهذه الدفعة ثم يعيد بناءها وفقاً للحالة الراهنة.
  */
 export function postInsurancePayment(args: PostInsurancePaymentArgs) {
-  // ط¥ط²ط§ظ„ط© ظ‚ظٹظˆط¯ ظ‚ط¯ظٹظ…ط© ظ…ط±طھط¨ط·ط© ط¨ظ‡ط°ظ‡ ط§ظ„ط¯ظپط¹ط© (ظ„ط¥ط¹ط§ط¯ط© ط§ظ„طھط±ط­ظٹظ„ ط¹ظ†ط¯ ط§ظ„طھط­ط¯ظٹط«/ط§ظ„ط­ط°ظپ)
+  // إزالة قيود قديمة مرتبطة بهذه الدفعة (لإعادة الترحيل عند التحديث/الحذف)
   removeJournalBySource("insurance_payment", args.paymentId);
 
   if (args.amount <= 0) return;
   if (args.status === "bounced") {
-    // ط´ظٹظƒ ظ…ط±طھط¬ط¹ â€” ظ„ط§ ظ‚ظٹط¯ ظپط¹ظ‘ط§ظ„
+    // شيك مرتجع — لا قيد فعّال
     return;
   }
 
   let debit: JournalAccount;
-  const credit: JournalAccount = "ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†";
+  const credit: JournalAccount = "ذمم شركات التأمين";
   let desc = "";
 
   if (args.method === "cheque") {
     if (args.status === "pending") {
-      debit = "ط´ظٹظƒط§طھ طھط­طھ ط§ظ„طھط­طµظٹظ„";
-      desc = `ط§ط³طھظ„ط§ظ… ط´ظٹظƒ ${args.paymentNumber} ${args.reference ? `(${args.reference})` : ""} â€” ${args.companyName}`;
+      debit = "شيكات تحت التحصيل";
+      desc = `استلام شيك ${args.paymentNumber} ${args.reference ? `(${args.reference})` : ""} — ${args.companyName}`;
     } else {
-      debit = "ط§ظ„ط¨ظ†ظƒ";
-      desc = `طھط­طµظٹظ„ ط´ظٹظƒ ${args.paymentNumber} ${args.reference ? `(${args.reference})` : ""} â€” ${args.companyName}`;
+      debit = "البنك";
+      desc = `تحصيل شيك ${args.paymentNumber} ${args.reference ? `(${args.reference})` : ""} — ${args.companyName}`;
     }
   } else if (args.method === "bank_transfer") {
-    debit = "ط§ظ„ط¨ظ†ظƒ";
-    desc = `طھط­ظˆظٹظ„ ط¨ظ†ظƒظٹ ${args.paymentNumber} â€” ${args.companyName}`;
+    debit = "البنك";
+    desc = `تحويل بنكي ${args.paymentNumber} — ${args.companyName}`;
   } else if (args.method === "cash") {
-    debit = "ط§ظ„ظ†ظ‚ط¯ظٹط©";
-    desc = `ظ‚ط¨ط¶ ظ†ظ‚ط¯ظٹ ${args.paymentNumber} â€” ${args.companyName}`;
+    debit = "النقدية";
+    desc = `قبض نقدي ${args.paymentNumber} — ${args.companyName}`;
   } else {
-    // offset / ظ…ظ‚ط§طµط© â†’ ط°ظ…ظ… ظ…ظˆط±ط¯ظٹظ†
-    debit = "ط°ظ…ظ… ط§ظ„ظ…ظˆط±ط¯ظٹظ†";
-    desc = `طھط³ظˆظٹط© ظ…ظ‚ط§طµط© ${args.paymentNumber} ${args.reference ? `(${args.reference})` : ""} â€” ${args.companyName}`;
+    // offset / مقاصة → ذمم موردين
+    debit = "ذمم الموردين";
+    desc = `تسوية مقاصة ${args.paymentNumber} ${args.reference ? `(${args.reference})` : ""} — ${args.companyName}`;
   }
 
   addJournalEntry({
@@ -115,7 +115,7 @@ export function postInsurancePayment(args: PostInsurancePaymentArgs) {
     debitAccount: debit,
     creditAccount: credit,
     amount: args.amount,
-    description: `${desc} â€” ظ…ط·ط§ظ„ط¨ط© ${args.claimNumber}`,
+    description: `${desc} — مطالبة ${args.claimNumber}`,
   });
 }
 
@@ -126,10 +126,10 @@ export function removeInsuranceClaimJournal(claimId: string) {
   removeJournalBySource("insurance_claim", claimId);
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// ظ…ط¹ط§ظٹظ†ط© ظ‚ظٹظˆط¯ ظ‚ط¨ظ„ ط§ظ„ط­ظپط¸ â€” طھظڈط­ط³ط¨ ظ†ظپط³ ظ…ظ†ط·ظ‚ postInsurancePayment
-// ظ„ظƒظ† ط¯ظˆظ† ط§ظ„ظƒطھط§ط¨ط© ظپظٹ ط¯ظپطھط± ط§ظ„ظٹظˆظ…ظٹط©. طھط³طھط¹ظ…ظ„ ظپظٹ ط­ظˆط§ط± "طھط³ط¬ظٹظ„ ط¯ظپط¹ط©".
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────
+// معاينة قيود قبل الحفظ — تُحسب نفس منطق postInsurancePayment
+// لكن دون الكتابة في دفتر اليومية. تستعمل في حوار "تسجيل دفعة".
+// ─────────────────────────────────────────────────────────────────
 export interface PreviewLine {
   date: string;
   debitAccount: JournalAccount;
@@ -142,26 +142,26 @@ export function previewInsurancePayment(args: PostInsurancePaymentArgs): Preview
   if (args.amount <= 0 || args.status === "bounced") return [];
 
   let debit: JournalAccount;
-  const credit: JournalAccount = "ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†";
+  const credit: JournalAccount = "ذمم شركات التأمين";
   let desc = "";
 
   if (args.method === "cheque") {
     if (args.status === "pending") {
-      debit = "ط´ظٹظƒط§طھ طھط­طھ ط§ظ„طھط­طµظٹظ„";
-      desc = `ط§ط³طھظ„ط§ظ… ط´ظٹظƒ ${args.paymentNumber || "(ط¬ط¯ظٹط¯)"} ${args.reference ? `(${args.reference})` : ""} â€” ${args.companyName}`;
+      debit = "شيكات تحت التحصيل";
+      desc = `استلام شيك ${args.paymentNumber || "(جديد)"} ${args.reference ? `(${args.reference})` : ""} — ${args.companyName}`;
     } else {
-      debit = "ط§ظ„ط¨ظ†ظƒ";
-      desc = `طھط­طµظٹظ„ ط´ظٹظƒ ${args.paymentNumber || "(ط¬ط¯ظٹط¯)"} ${args.reference ? `(${args.reference})` : ""} â€” ${args.companyName}`;
+      debit = "البنك";
+      desc = `تحصيل شيك ${args.paymentNumber || "(جديد)"} ${args.reference ? `(${args.reference})` : ""} — ${args.companyName}`;
     }
   } else if (args.method === "bank_transfer") {
-    debit = "ط§ظ„ط¨ظ†ظƒ";
-    desc = `طھط­ظˆظٹظ„ ط¨ظ†ظƒظٹ ${args.paymentNumber || "(ط¬ط¯ظٹط¯)"} â€” ${args.companyName}`;
+    debit = "البنك";
+    desc = `تحويل بنكي ${args.paymentNumber || "(جديد)"} — ${args.companyName}`;
   } else if (args.method === "cash") {
-    debit = "ط§ظ„ظ†ظ‚ط¯ظٹط©";
-    desc = `ظ‚ط¨ط¶ ظ†ظ‚ط¯ظٹ ${args.paymentNumber || "(ط¬ط¯ظٹط¯)"} â€” ${args.companyName}`;
+    debit = "النقدية";
+    desc = `قبض نقدي ${args.paymentNumber || "(جديد)"} — ${args.companyName}`;
   } else {
-    debit = "ط°ظ…ظ… ط§ظ„ظ…ظˆط±ط¯ظٹظ†";
-    desc = `طھط³ظˆظٹط© ظ…ظ‚ط§طµط© ${args.paymentNumber || "(ط¬ط¯ظٹط¯)"} ${args.reference ? `(${args.reference})` : ""} â€” ${args.companyName}`;
+    debit = "ذمم الموردين";
+    desc = `تسوية مقاصة ${args.paymentNumber || "(جديد)"} ${args.reference ? `(${args.reference})` : ""} — ${args.companyName}`;
   }
 
   return [
@@ -170,7 +170,7 @@ export function previewInsurancePayment(args: PostInsurancePaymentArgs): Preview
       debitAccount: debit,
       creditAccount: credit,
       amount: args.amount,
-      description: `${desc} â€” ظ…ط·ط§ظ„ط¨ط© ${args.claimNumber}`,
+      description: `${desc} — مطالبة ${args.claimNumber}`,
     },
   ];
 }
@@ -182,12 +182,12 @@ export function previewInsuranceClaimApproval(args: PostInsuranceClaimApprovalAr
   const subtotal = breakdown.subtotalBeforeVat;
   const vat = breakdown.vatAmount;
   const date = args.date.slice(0, 10);
-  const baseDesc = `ط§ط¹طھظ…ط§ط¯ ظ…ط·ط§ظ„ط¨ط© ${args.claimNumber} â€” ${args.companyName}`;
+  const baseDesc = `اعتماد مطالبة ${args.claimNumber} — ${args.companyName}`;
   const lines: PreviewLine[] = [
     {
       date,
-      debitAccount: "ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†",
-      creditAccount: "ط¥ظٹط±ط§ط¯ط§طھ ط§ظ„طھط£ظ…ظٹظ†",
+      debitAccount: "ذمم شركات التأمين",
+      creditAccount: "إيرادات التأمين",
       amount: subtotal,
       description: baseDesc,
     },
@@ -195,10 +195,10 @@ export function previewInsuranceClaimApproval(args: PostInsuranceClaimApprovalAr
   if (vat > 0) {
     lines.push({
       date,
-      debitAccount: "ط°ظ…ظ… ط´ط±ظƒط§طھ ط§ظ„طھط£ظ…ظٹظ†",
-      creditAccount: "ط¶ط±ظٹط¨ط© ط§ظ„ظ…ط¨ظٹط¹ط§طھ",
+      debitAccount: "ذمم شركات التأمين",
+      creditAccount: "ضريبة المبيعات",
       amount: vat,
-      description: `${baseDesc} â€” VAT`,
+      description: `${baseDesc} — VAT`,
     });
   }
   return lines;

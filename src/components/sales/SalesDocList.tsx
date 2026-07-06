@@ -32,7 +32,7 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
   const { i18n } = useTranslation();
   const isAr = i18n.language === "ar";
   const isRtl = i18n.dir() === "rtl";
-  const [, force] = useState(0);
+  const [tick, force] = useState(0);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -147,7 +147,7 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
           (d.customerTaxNo || "").toLowerCase().includes(s)
         );
       });
-  }, [q, status, type]);
+  }, [q, status, type, tick]);
 
   return (
     <div className="space-y-4" dir={isRtl ? "rtl" : "ltr"}>

@@ -607,7 +607,6 @@ function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: (
   const [method, setMethod] = useState<string>("نقداً");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [ref, setRef] = useState("");
-  const [showOver, setShowOver] = useState(false);
   const [markFullPaid, setMarkFullPaid] = useState(false);
 
   // Reset balance amount whenever opened
@@ -626,16 +625,23 @@ function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: (
     if (markFullPaid) setAmount(doc.balanceDue || 0);
   }, [markFullPaid, doc.balanceDue]);
 
-  function commit() {
-    salesStore.addPayment(doc.id, { amount, method, date, reference: ref });
-    toast.success(isAr ? "تمت إضافة الدفعة" : "Payment added");
-    onClose();
+  async function commit() {
+    try {
+      await salesStore.addPayment(doc.id, { amount, method, date, reference: ref });
+      toast.success(isAr ? "تمت إضافة الدفعة" : "Payment added");
+      onClose();
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر حفظ الدفعة" : "Unable to save payment"));
+    }
   }
 
   function save() {
     if (amount <= 0) { toast.error(isAr ? "أدخل قيمة" : "Enter amount"); return; }
-    if (amount > doc.balanceDue + 0.001) { setShowOver(true); return; }
-    commit();
+    if (amount > doc.balanceDue + 0.001) {
+      toast.error(isAr ? "لا يمكن تسجيل دفعة أكبر من المبلغ المتبقي." : "Payment cannot exceed the remaining balance.");
+      return;
+    }
+    void commit();
   }
   return (
     <>
@@ -683,22 +689,6 @@ function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: (
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <AlertDialog open={showOver} onOpenChange={setShowOver}>
-      <AlertDialogContent dir={isAr ? "rtl" : "ltr"} className="max-w-md">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{isAr ? "المبلغ أكبر من الرصيد" : "Amount exceeds balance"}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {isAr ? "المبلغ المُدخل أكبر من الرصيد المستحق — هل تريد المتابعة؟" : "Amount exceeds balance due — continue?"}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>{isAr ? "إلغاء" : "Cancel"}</AlertDialogCancel>
-          <AlertDialogAction onClick={() => { setShowOver(false); commit(); }}>
-            {isAr ? "متابعة" : "Continue"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
     </>
   );
 }
