@@ -5,7 +5,7 @@ import {
   ArrowRight, Car, Calendar, Gauge, Palette, History, DollarSign, FileText,
   Edit, Plus, Printer, Share2, Image as ImageIcon, Wrench, Shield, Trash2,
   ChevronDown, ChevronUp, ExternalLink, Receipt, Search, Filter, Camera, Banknote,
-  Activity, RefreshCw, CheckCircle2, Loader2, Download,
+  Activity, RefreshCw, CheckCircle2, Loader2, Download, Archive, RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -285,6 +285,30 @@ export default function VehicleDetail() {
   });
 
   const allowEdit = canEdit();
+  const isArchived = !!vehicle.archived;
+
+  async function restoreArchivedVehicle(openEditAfterRestore = false) {
+    if (!allowEdit) {
+      toast.error("ليست لديك صلاحية استعادة المركبات المؤرشفة");
+      return;
+    }
+    const restored: Vehicle = {
+      ...vehicle,
+      archived: false,
+      archivedAt: undefined,
+      archivedReason: undefined,
+    };
+    try {
+      await saveVehicleToCloud(restored, { previousPlate: vehicle.plate });
+      vehiclesStore.update(vehicle.id, restored);
+      toast.success("تمت استعادة المركبة إلى القائمة النشطة");
+      if (openEditAfterRestore) {
+        setTimeout(() => setEditOpen(true), 0);
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر استعادة المركبة في Supabase");
+    }
+  }
 
   function openWoPdf(o: WorkOrder) {
     const html = getWorkOrderHtml({
@@ -515,22 +539,46 @@ export default function VehicleDetail() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={openNewVisitForVehicle} className="gradient-gold text-primary-foreground gap-1.5" size="sm">
-                <Plus size={14} /> أمر عمل جديد
-              </Button>
-              <Button onClick={() => setStatusDlgOpen(true)} variant="outline" size="sm" className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10">
-                <Activity size={14} /> مخطط الحالة
-              </Button>
+              {isArchived ? (
+                <>
+                  {allowEdit && (
+                    <>
+                      <Button onClick={() => restoreArchivedVehicle(false)} variant="outline" size="sm" className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10">
+                        <RotateCcw size={14} /> استعادة المركبة
+                      </Button>
+                      <Button onClick={() => restoreArchivedVehicle(true)} variant="secondary" size="sm" className="gap-1.5">
+                        <Edit size={14} /> تعديل بعد الاستعادة
+                      </Button>
+                    </>
+                  )}
+                  <Button onClick={() => navigate("/vehicles")} variant="outline" size="sm" className="gap-1.5">
+                    <Archive size={14} /> العودة للأرشيف
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button onClick={openNewVisitForVehicle} className="gradient-gold text-primary-foreground gap-1.5" size="sm">
+                    <Plus size={14} /> أمر عمل جديد
+                  </Button>
+                  <Button onClick={() => setStatusDlgOpen(true)} variant="outline" size="sm" className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10">
+                    <Activity size={14} /> مخطط الحالة
+                  </Button>
+                </>
+              )}
               <Button onClick={openPdf} variant="outline" size="sm" className="gap-1.5">
                 <Printer size={14} /> طباعة بطاقة
               </Button>
-              <Button onClick={() => setShareOpen(true)} variant="outline" size="sm" className="gap-1.5">
-                <Share2 size={14} /> مشاركة عامة / QR
-              </Button>
-              <Button onClick={shareWhatsApp} variant="outline" size="sm" className="gap-1.5">
-                <Share2 size={14} /> WhatsApp
-              </Button>
-              {allowEdit && (
+              {!isArchived && (
+                <>
+                  <Button onClick={() => setShareOpen(true)} variant="outline" size="sm" className="gap-1.5">
+                    <Share2 size={14} /> مشاركة عامة / QR
+                  </Button>
+                  <Button onClick={shareWhatsApp} variant="outline" size="sm" className="gap-1.5">
+                    <Share2 size={14} /> WhatsApp
+                  </Button>
+                </>
+              )}
+              {allowEdit && !isArchived && (
                 <Button onClick={() => setEditOpen(true)} variant="outline" size="sm" className="gap-1.5">
                   <Edit size={14} /> تعديل
                 </Button>
@@ -539,6 +587,19 @@ export default function VehicleDetail() {
           </div>
         </div>
       </div>
+
+      {isArchived && (
+        <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 text-sm text-foreground flex items-start gap-3">
+          <Archive size={18} className="text-warning shrink-0 mt-0.5" />
+          <div>
+            <div className="font-semibold">هذه المركبة مؤرشفة</div>
+            <div className="text-xs text-muted-foreground mt-1">
+              لا يمكن تعديل بيانات المركبة الأساسية وهي في الأرشيف. استعد المركبة أولًا، ثم استخدم “تعديل بعد الاستعادة”.
+              {vehicle.archivedAt ? ` تاريخ الأرشفة: ${formatDateLatin(String(vehicle.archivedAt).slice(0, 10))}.` : ""}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats — lifetime aggregated from ALL linked work orders.
           ⚠️ فصل محاسبي:
@@ -886,7 +947,7 @@ export default function VehicleDetail() {
           <div className="bg-card border border-border rounded-xl p-5 shadow-card">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-foreground">معرض الصور قبل / بعد</h3>
-              {allowEdit && (
+              {allowEdit && !isArchived && (
                 <Button size="sm" onClick={() => setPhotoOpen(true)} className="gap-1.5">
                   <Plus size={14} /> إضافة زوج صور
                 </Button>

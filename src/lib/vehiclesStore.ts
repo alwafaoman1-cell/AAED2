@@ -405,7 +405,6 @@ async function fetchVehiclesFromCloud(): Promise<void> {
       .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,mileage,vin,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,customer_id")
       .eq("tenant_id", tenantId)
       .is("deleted_at", null)
-      .or("archived.is.null,archived.eq.false")
       .limit(5000);
     if (error || !rows) return;
 

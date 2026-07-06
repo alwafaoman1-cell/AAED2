@@ -37,6 +37,17 @@ function bounded(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Number(value) || 0));
 }
 
+function formatStampUploadError(error: any) {
+  const message = String(error?.message || error || "");
+  if (/owner_or_admin_required|owner_or_super_admin_required/i.test(message)) {
+    return "رفع ختم الشركة متاح فقط للـ Owner / Admin / Super Admin.";
+  }
+  if (/row-level security|violates row-level security|RLS/i.test(message)) {
+    return "فشل رفع الختم بسبب سياسة أمان Supabase. تأكد من تسجيل الدخول بصلاحية Owner/Admin.";
+  }
+  return message || "تعذر رفع ختم الشركة";
+}
+
 export default function PdfLayoutPage() {
   const navigate = useNavigate();
   const [s, setS] = useState<PdfLayoutSettings>({ ...DEFAULT_PDF_LAYOUT, ...pdfLayoutStore.get() });
@@ -119,7 +130,7 @@ export default function PdfLayoutPage() {
       await saveTemplateSettings(next);
       toast.success("تم رفع ختم الشركة وحفظه في Supabase");
     } catch (error: any) {
-      toast.error(error?.message || "تعذر رفع ختم الشركة");
+      toast.error(formatStampUploadError(error));
     } finally {
       if (stampInputRef.current) stampInputRef.current.value = "";
     }

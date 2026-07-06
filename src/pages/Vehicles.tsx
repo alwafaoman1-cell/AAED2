@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import VehicleTracking from "@/components/tracking/VehicleTracking";
-import { deleteVehicleFromCloud, saveVehicleToCloud, vehiclesStore, unarchiveVehicle, type Vehicle } from "@/lib/vehiclesStore";
+import { deleteVehicleFromCloud, saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import ArchivedVehicleDetails from "@/components/vehicles/ArchivedVehicleDetails";
 import PlateInput from "@/components/vehicles/PlateInput";
 import { moveToTrash } from "@/lib/trashStore";
@@ -101,10 +101,25 @@ export default function Vehicles() {
     }
     setDeleting(null);
   }
-  function handleRestore(v: Vehicle) {
-    unarchiveVehicle(v.id);
-    toast.success(`تمت إعادة "${v.plate}" إلى السيارات النشطة — يمكن إنشاء أمر عمل جديد لها الآن`);
-    navigate(`/work-orders?plate=${encodeURIComponent(v.plate)}`);
+  async function handleRestore(v: Vehicle, editAfterRestore = false) {
+    const restored: Vehicle = {
+      ...v,
+      archived: false,
+      archivedAt: undefined,
+      archivedReason: undefined,
+    };
+    try {
+      await saveVehicleToCloud(restored, { previousPlate: v.plate });
+      vehiclesStore.update(v.id, restored);
+      toast.success(`تمت استعادة "${v.plate}" إلى قائمة المركبات النشطة`);
+      if (editAfterRestore) {
+        setEditing(restored);
+        setForm(restored);
+        setShowForm(true);
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر استعادة المركبة في Supabase");
+    }
   }
 
   const renderCard = (v: Vehicle, isArchived = false) => {
@@ -171,11 +186,15 @@ export default function Vehicles() {
             </div>
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
               {allowEdit && (
-                <Button size="sm" variant="outline" onClick={() => handleRestore(v)} className="gap-1 h-8" title="إرجاع لأوامر العمل">
-                  <RotateCcw size={12} /> إرجاع
+                <Button size="sm" variant="outline" onClick={() => handleRestore(v)} className="gap-1 h-8" title="استعادة المركبة">
+                  <RotateCcw size={12} /> استعادة المركبة
                 </Button>
               )}
-              {allowEdit && <button onClick={() => openEdit(v)} className="p-1.5 rounded hover:bg-secondary text-muted-foreground hover:text-info" title="تعديل"><Edit size={14} /></button>}
+              {allowEdit && (
+                <Button size="sm" variant="secondary" onClick={() => handleRestore(v, true)} className="gap-1 h-8" title="استعادة ثم تعديل">
+                  <Edit size={12} /> تعديل بعد الاستعادة
+                </Button>
+              )}
               {allowDelete && <button onClick={() => setDeleting(v)} className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="حذف"><Trash2 size={14} /></button>}
             </div>
           </div>
