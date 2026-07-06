@@ -23,7 +23,7 @@ export function roundMoney(value: unknown, decimals = OMR_DECIMALS): number {
 export const roundOMR = roundMoney;
 
 export function addMoney(...values: unknown[]): number {
-  return roundMoney(values.reduce((sum, value) => sum + roundMoney(value), 0));
+  return roundMoney(values.reduce<number>((sum, value) => sum + roundMoney(value), 0));
 }
 
 export function subtractMoney(left: unknown, right: unknown): number {

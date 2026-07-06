@@ -10,13 +10,13 @@ async function getCurrentTenantAndUser() {
   const userId = userRow.user?.id;
   if (!userId) throw new Error("not_authenticated");
 
-  let { data: profile, error: profileError } = await supabase
+  let { data: profile, error: profileError } = await (supabase as any)
     .from("profiles")
     .select("tenant_id, role, is_platform_admin")
     .eq("user_id", userId)
     .maybeSingle();
   if (profileError && /is_platform_admin|column/i.test(String(profileError.message || ""))) {
-    const fallback = await supabase
+    const fallback = await (supabase as any)
       .from("profiles")
       .select("tenant_id, role")
       .eq("user_id", userId)

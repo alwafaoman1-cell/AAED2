@@ -188,13 +188,22 @@ export function useCreateClaim() {
         throw new Error("لا يمكن حفظ المطالبة: المركبة مرتبطة بعميل آخر");
       }
       const claimNumber = claim.claim_number.trim();
-      const { data: existing, error: existingError } = await supabase
+      let { data: existing, error: existingError } = await supabase
         .from("insurance_claims" as any)
         .select("id,claim_number,deleted_at,archived_at")
         .eq("tenant_id", claim.tenant_id)
         .ilike("claim_number", claimNumber)
         .limit(1)
         .maybeSingle();
+      if (existingError && /deleted_at|archived_at|column/i.test(String((existingError as any).message || ""))) {
+        ({ data: existing, error: existingError } = await supabase
+          .from("insurance_claims" as any)
+          .select("id,claim_number")
+          .eq("tenant_id", claim.tenant_id)
+          .ilike("claim_number", claimNumber)
+          .limit(1)
+          .maybeSingle());
+      }
       if (existingError) throw existingError;
       if ((existing as any)?.id) {
         const err = new Error("claim_number_exists");
