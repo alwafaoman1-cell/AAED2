@@ -78,7 +78,7 @@ const InsuranceHub = lazy(() => import("./pages/insurance/InsuranceHub"));
 const InsuranceClaimsList = lazy(() => import("./pages/insurance/InsuranceClaimsList"));
 const InsurancePipeline = lazy(() => import("./pages/insurance/InsurancePipeline"));
 const InsuranceAlertsCenter = lazy(() => import("./pages/insurance/InsuranceAlertsCenter"));
-const InsuranceClaimDetail = lazy(() => import("./pages/insurance/InsuranceClaimDetail"));
+const InsuranceClaimDetail = lazy(() => import("./pages/insurance/InsuranceClaimDetailRedesigned"));
 const InsuranceClaimAuditPage = lazy(() => import("./pages/insurance/InsuranceClaimAuditPage"));
 const NewInsuranceClaim = lazy(() => import("./pages/insurance/NewInsuranceClaim"));
 const InsuranceCompanies = lazy(() => import("./pages/insurance/InsuranceCompanies"));
@@ -283,6 +283,8 @@ const App = () => (
               />
               <Route element={<InsuranceLayout />}>
                 <Route path="/insurance" element={<InsuranceHub />} />
+                <Route path="/insurance/claims" element={<InsuranceClaimsList />} />
+                <Route path="/insurance/claims/:claimId" element={<InsuranceClaimDetail />} />
                 <Route path="/insurance/list" element={<InsuranceClaimsList />} />
                 <Route path="/insurance/pipeline" element={<InsurancePipeline />} />
                 <Route path="/insurance/alerts" element={<InsuranceAlertsCenter />} />
