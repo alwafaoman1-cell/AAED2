@@ -11,6 +11,29 @@ ensureCacheVersion();
 installEnglishDigitGuards();
 registerTechPwa();
 
+const CHUNK_RELOAD_KEY = "__chunk_reload_at";
+const isChunkLoadError = (msg: string) =>
+  /Importing a module script failed|Failed to fetch dynamically imported module|Loading chunk \d+ failed|ChunkLoadError/i.test(msg);
+
+async function recoverFromStaleChunk() {
+  const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0);
+  if (Date.now() - last < 10_000) return;
+  sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if (typeof caches !== "undefined") {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch {
+    /* noop: reload still gives the browser a chance to fetch the fresh shell */
+  }
+  window.location.reload();
+}
+
 class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
 
@@ -20,6 +43,9 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
 
   componentDidCatch(error: Error) {
     console.error("Application render error", error);
+    if (isChunkLoadError(error.message || "")) {
+      void recoverFromStaleChunk();
+    }
   }
 
   render() {
@@ -49,33 +75,12 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
 // When a dynamic import fails ("Importing a module script failed" /
 // "Failed to fetch dynamically imported module"), clear caches + SW and reload once.
 (function installChunkErrorRecovery() {
-  const KEY = "__chunk_reload_at";
-  const isChunkError = (msg: string) =>
-    /Importing a module script failed|Failed to fetch dynamically imported module|Loading chunk \d+ failed|ChunkLoadError/i.test(msg);
-
-  async function recover() {
-    const last = Number(sessionStorage.getItem(KEY) || 0);
-    if (Date.now() - last < 10_000) return; // avoid reload loops
-    sessionStorage.setItem(KEY, String(Date.now()));
-    try {
-      if ("serviceWorker" in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map((r) => r.unregister()));
-      }
-      if (typeof caches !== "undefined") {
-        const keys = await caches.keys();
-        await Promise.all(keys.map((k) => caches.delete(k)));
-      }
-    } catch { /* noop */ }
-    window.location.reload();
-  }
-
   window.addEventListener("error", (e) => {
-    if (e?.message && isChunkError(e.message)) recover();
+    if (e?.message && isChunkLoadError(e.message)) void recoverFromStaleChunk();
   });
   window.addEventListener("unhandledrejection", (e) => {
     const msg = String((e as PromiseRejectionEvent).reason?.message || (e as PromiseRejectionEvent).reason || "");
-    if (isChunkError(msg)) recover();
+    if (isChunkLoadError(msg)) void recoverFromStaleChunk();
   });
 })();
 
