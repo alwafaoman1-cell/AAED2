@@ -1,10 +1,9 @@
 // AI extraction helper: reads an image or PDF file and returns structured data
-// extracted by Lovable AI via the `ai-extract-data` edge function.
-// PDFs are rendered to PNGs client-side using pdfjs-dist — ALL pages (capped)
-// are sent so the model can find the receiver name / ID anywhere in the doc.
+// extracted by the `ai-extract-data` Edge Function.
+// PDFs are rendered to JPEG pages client-side using pdfjs-dist.
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
-// @ts-ignore — worker is loaded as URL
+// @ts-expect-error - worker is loaded as URL by Vite
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min?url";
 
 (pdfjsLib as any).GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -18,6 +17,70 @@ export type ExtractSchema =
   | "diagnostic_report";
 
 const MAX_PDF_PAGES = 8;
+
+async function getFunctionErrorMessage(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : String(error || "فشل الاستخراج");
+  const context = (error as any)?.context;
+
+  if (context && typeof context.json === "function") {
+    try {
+      const body = await context.json();
+      const msg = body?.message || body?.error || body?.details || body?.code;
+      if (msg) return String(msg);
+    } catch {
+      // Response may have already been consumed or may not be JSON.
+    }
+  }
+
+  if (context && typeof context.text === "function") {
+    try {
+      const body = await context.text();
+      if (body) return body;
+    } catch {
+      // noop
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeAiExtractError(message: string) {
+  const raw = String(message || "").trim();
+  const lower = raw.toLowerCase();
+
+  if (!raw) return "فشل الاستخراج بالذكاء الاصطناعي.";
+  if (lower.includes("edge function returned a non-2xx")) {
+    return "فشل طلب الذكاء الاصطناعي. افتح إعدادات مفاتيح الذكاء الاصطناعي وتأكد من تفعيل مزود صحيح.";
+  }
+  if (lower.includes("ai provider is not configured") || lower.includes("ai_api_key_required")) {
+    return "مزود الذكاء الاصطناعي غير مهيأ. أضف مفتاح OpenAI/Gemini من الإعدادات ثم أعد المحاولة.";
+  }
+  if (lower.includes("credits exhausted") || lower.includes("insufficient_quota") || lower.includes("quota")) {
+    return "رصيد أو حصة مزود الذكاء الاصطناعي غير كافية.";
+  }
+  if (lower.includes("rate limit")) {
+    return "تم تجاوز حد استخدام الذكاء الاصطناعي. حاول بعد قليل.";
+  }
+  if (lower.includes("unauthorized")) {
+    return "انتهت جلسة الدخول أو لا توجد صلاحية. سجل الدخول ثم أعد المحاولة.";
+  }
+
+  return raw;
+}
+
+async function invokeAiExtract(body: Record<string, unknown>): Promise<Record<string, string>> {
+  const { data, error } = await supabase.functions.invoke("ai-extract-data", { body });
+
+  if (error) {
+    throw new Error(normalizeAiExtractError(await getFunctionErrorMessage(error)));
+  }
+
+  if ((data as any)?.ok === false || (data as any)?.error) {
+    throw new Error(normalizeAiExtractError((data as any)?.message || (data as any)?.error || "فشل الاستخراج"));
+  }
+
+  return ((data as any)?.data || {}) as Record<string, string>;
+}
 
 async function fileToBase64(file: Blob): Promise<{ b64: string; mime: string }> {
   const buf = await file.arrayBuffer();
@@ -67,6 +130,7 @@ export async function extractFromFile(
   schema: ExtractSchema,
 ): Promise<Record<string, string>> {
   let images: { b64: string; mime: string }[];
+
   if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
     images = await pdfAllPagesToJpegs(file);
   } else if (file.type.startsWith("image/")) {
@@ -77,19 +141,12 @@ export async function extractFromFile(
 
   if (images.length === 0) throw new Error("لم يتم العثور على أي صفحة في الملف");
 
-  const { data, error } = await supabase.functions.invoke("ai-extract-data", {
-    body: {
-      // Backwards-compatible single image fields:
-      imageBase64: images[0].b64,
-      mimeType: images[0].mime,
-      // Multi-page payload (edge function reads this when present):
-      images: images.map((p) => ({ b64: p.b64, mime: p.mime })),
-      schema,
-    },
+  return invokeAiExtract({
+    imageBase64: images[0].b64,
+    mimeType: images[0].mime,
+    images: images.map((p) => ({ b64: p.b64, mime: p.mime })),
+    schema,
   });
-  if (error) throw new Error(error.message || "فشل الاستخراج");
-  if ((data as any)?.error) throw new Error((data as any).error);
-  return ((data as any)?.data || {}) as Record<string, string>;
 }
 
 // Allow extracting from multiple files (e.g. front+back of ID card) in one call.
@@ -98,6 +155,7 @@ export async function extractFromFiles(
   schema: ExtractSchema,
 ): Promise<Record<string, string>> {
   const all: { b64: string; mime: string }[] = [];
+
   for (const file of files) {
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
       const pages = await pdfAllPagesToJpegs(file);
@@ -107,17 +165,13 @@ export async function extractFromFiles(
     }
     if (all.length >= MAX_PDF_PAGES) break;
   }
+
   if (all.length === 0) throw new Error("لا توجد صور صالحة");
 
-  const { data, error } = await supabase.functions.invoke("ai-extract-data", {
-    body: {
-      imageBase64: all[0].b64,
-      mimeType: all[0].mime,
-      images: all.slice(0, MAX_PDF_PAGES),
-      schema,
-    },
+  return invokeAiExtract({
+    imageBase64: all[0].b64,
+    mimeType: all[0].mime,
+    images: all.slice(0, MAX_PDF_PAGES),
+    schema,
   });
-  if (error) throw new Error(error.message || "فشل الاستخراج");
-  if ((data as any)?.error) throw new Error((data as any).error);
-  return ((data as any)?.data || {}) as Record<string, string>;
 }

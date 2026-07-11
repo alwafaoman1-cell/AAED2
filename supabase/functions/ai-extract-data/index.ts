@@ -9,6 +9,13 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+function json(payload: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 // ───────── Provider resolver ─────────
 function fallbackProvider() {
   const lovable = Deno.env.get("LOVABLE_API_KEY");
@@ -180,9 +187,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method !== "POST") {
-      return new Response(JSON.stringify({ error: "Method not allowed" }), {
-        status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ ok: false, error: "Method not allowed" });
     }
 
     const auth = req.headers.get("Authorization");
@@ -238,15 +243,11 @@ Deno.serve(async (req) => {
           : []);
 
     if (pages.length === 0) {
-      return new Response(JSON.stringify({ error: "imageBase64 or images required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ ok: false, error: "imageBase64 or images required" });
     }
     const preset = SCHEMAS[schema];
     if (!preset) {
-      return new Response(JSON.stringify({ error: `Unknown schema. Use one of: ${Object.keys(SCHEMAS).join(", ")}` }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ ok: false, error: `Unknown schema. Use one of: ${Object.keys(SCHEMAS).join(", ")}` });
     }
 
     // Cap total payload (~ 24 MB raw base64 across all pages) to protect the model.
@@ -254,16 +255,12 @@ Deno.serve(async (req) => {
     const safePages = pages.slice(0, MAX_PAGES);
     const totalSize = safePages.reduce((s, p) => s + p.b64.length, 0);
     if (totalSize > 33_000_000) {
-      return new Response(JSON.stringify({ error: "Pages too large in total (max ~24MB)" }), {
-        status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ ok: false, error: "Pages too large in total (max ~24MB)" });
     }
 
     const provider = await resolveProvider(admin, tenantId);
     if (!provider) {
-      return new Response(JSON.stringify({ error: "AI provider is not configured" }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ ok: false, error: "AI provider is not configured" });
     }
 
     const toDataUrl = (p: Page) =>
@@ -341,18 +338,12 @@ Deno.serve(async (req) => {
       const txt = await resp.text();
       console.error("ai-extract-data error:", resp.status, txt);
       if (resp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded, try again shortly" }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ ok: false, error: "Rate limit exceeded, try again shortly" });
       }
       if (resp.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ ok: false, error: "AI credits exhausted" });
       }
-      return new Response(JSON.stringify({ error: "AI request failed", details: txt }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ ok: false, error: "AI request failed", details: txt });
     }
 
     const data = await resp.json();
@@ -377,13 +368,9 @@ Deno.serve(async (req) => {
       } catch { /* ignore */ }
     }
 
-    return new Response(JSON.stringify({ data: extracted }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ ok: true, data: extracted });
   } catch (e) {
     console.error("ai-extract-data exception:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ ok: false, error: e instanceof Error ? e.message : "Unknown error" });
   }
 });
