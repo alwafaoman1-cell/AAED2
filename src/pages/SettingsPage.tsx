@@ -396,6 +396,18 @@ export default function SettingsPage() {
           </div>
         </a>
         <a
+          href="/settings/e-invoicing"
+          className="bg-card border border-border rounded-xl p-4 shadow-card hover:shadow-lg hover:border-primary/40 transition-all flex items-center gap-3"
+        >
+          <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+            <Shield size={20} />
+          </div>
+          <div className="flex-1">
+            <div className="font-semibold text-sm">E-Invoicing / Fawtara Readiness</div>
+            <div className="text-xs text-muted-foreground">Company tax profile, invoice readiness, QR status, service provider placeholder</div>
+          </div>
+        </a>
+        <a
           href="/settings/integrations"
           className="bg-card border border-border rounded-xl p-4 shadow-card hover:shadow-lg hover:border-primary/40 transition-all flex items-center gap-3"
         >

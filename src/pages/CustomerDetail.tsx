@@ -313,7 +313,7 @@ export default function CustomerDetail() {
 
   function whatsappStatement() {
     const html = getAccountStatementHtml(customer, ledger);
-    whatsappPdfBlob(html, `statement-${customer.id}.pdf`,
+    whatsappPdfBlob(html, `statement-${customersStore.displayCode(customer)}.pdf`,
       `كشف حساب العميل ${customer.name}`);
   }
 
@@ -358,7 +358,7 @@ export default function CustomerDetail() {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-border">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-foreground">{customer.name}</h1>
-            <span className="text-xs font-mono text-muted-foreground">#{customer.id.slice(-4)}</span>
+            <span className="text-xs font-mono text-primary" dir="ltr">{customersStore.displayCode(customer)}</span>
             <Badge className={`text-[10px] border ${TAG_STYLE[customer.tag]}`}>
               {customer.tag === "vip" && <Sparkles size={9} className="ml-0.5" />}
               {TAG_LABEL[customer.tag]}
@@ -491,7 +491,7 @@ export default function CustomerDetail() {
           <SectionHeader title="بيانات العميل" />
           <div className="bg-card border border-border rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
             <Field label="رمز الدولة" value="OM" />
-            <Field label="باركود" value={customer.id.replace(/[^0-9]/g, "").padStart(13, "0").slice(-13)} mono />
+            <Field label="Customer Code" value={customersStore.displayCode(customer)} mono />
             <Field label="رقم الهوية" value={customer.idNumber || "-"} />
             <Field label="تاريخ التسجيل" value={new Date(customer.createdAt).toLocaleDateString("ar")} />
           </div>
@@ -1120,7 +1120,7 @@ export default function CustomerDetail() {
         customer={{ name: customer.name, phone: customer.phone }} />
       <PdfPreviewDialog open={statementOpen} onOpenChange={setStatementOpen}
         title={`كشف حساب - ${customer.name}`}
-        fileName={`account-statement-${customer.id}`}
+        fileName={`account-statement-${customersStore.displayCode(customer)}`}
         recipientName={customer.name}
         recipientPhone={customer.phone}
         htmlContent={getAccountStatementHtml(customer, ledger)} />

@@ -403,9 +403,7 @@ export default function WorkOrderDetail() {
   const displayedLaborCharges =
     Number(order.laborCost) > 0
       ? Number(order.laborCost)
-      : hasInsuranceApprovedAmount && Number(order.partsCost || 0) <= 0
-        ? insuranceApprovedBreakdown.subtotalBeforeVat
-        : 0;
+      : 0;
 
   async function handlePrintWorkOrder() {
     // Pre-build tracking QR into the cache before sync HTML render

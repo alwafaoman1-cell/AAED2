@@ -66,6 +66,7 @@ export default function Customers() {
       const q = search.toLowerCase();
       return (
         customer.name.toLowerCase().includes(q) ||
+        (customer.customerCode || "").toLowerCase().includes(q) ||
         (customer.phone || "").includes(q) ||
         (customer.email || "").toLowerCase().includes(q) ||
         (customer.commercialRegistration || "").toLowerCase().includes(q)
@@ -205,6 +206,9 @@ export default function Customers() {
                         )}
                         <span className="text-foreground font-medium hover:text-primary">
                           {customer.name}
+                        </span>
+                        <span className="text-[10px] font-mono text-primary" dir="ltr">
+                          {customersStore.displayCode(customer)}
                         </span>
                         {customer.type === "company" && customer.contactPerson && (
                           <span className="text-[10px] text-muted-foreground hidden sm:inline">

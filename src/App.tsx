@@ -107,6 +107,7 @@ const WorkOrdersStatement = lazy(() => import("./pages/reports/WorkOrdersStateme
 const PartsProfitReport = lazy(() => import("./pages/reports/PartsProfitReport"));
 const MonthlyReport = lazy(() => import("./pages/reports/MonthlyReport"));
 const CloudAdvancedReports = lazy(() => import("./pages/reports/CloudAdvancedReports"));
+const EInvoicingSettingsPage = lazy(() => import("./pages/settings/EInvoicingSettingsPage"));
 const CompletedWithoutInvoice = lazy(() => import("./pages/reports/CompletedWithoutInvoice"));
 const OverdueInvoices = lazy(() => import("./pages/reports/OverdueInvoices"));
 const ExecutiveDashboard = lazy(() => import("./pages/dashboard/ExecutiveDashboard"));
@@ -332,6 +333,7 @@ const App = () => (
               <Route path="/settings/public-access" element={<PublicAccessSettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/settings/tax" element={<TaxSettingsPage />} />
+              <Route path="/settings/e-invoicing" element={<ProtectedRoute roles={["admin","manager","accountant"]}><EInvoicingSettingsPage /></ProtectedRoute>} />
               <Route path="/settings/integrations" element={<IntegrationsSettingsPage />} />
               <Route path="/settings/danger-zone" element={<ProtectedRoute roles={["admin"]}><SecurityDangerZone /></ProtectedRoute>} />
               <Route path="/settings/payment-gateways" element={<PaymentGatewaysPage />} />

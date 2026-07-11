@@ -177,6 +177,11 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   }
 
   const currency = doc.currency === "OMR" ? "ر.ع" : doc.currency;
+  const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
+  const isLockedIssuedDocument = isFinancialDocument && doc.status !== "draft";
+  const blockIssuedEdit = () => toast.error(isAr
+    ? "لا يمكن تعديل فاتورة صادرة. استخدم إلغاء أو إشعار دائن."
+    : "Issued invoices cannot be edited. Use cancellation or a credit note.");
 
   return (
     <div className="space-y-3" dir={isRtl ? "rtl" : "ltr"}>
@@ -241,7 +246,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
       {/* Toolbar (دفترة style) */}
       <div className="rounded-lg border bg-card p-2 flex flex-wrap items-center gap-1 text-sm">
-        <ToolbarBtn icon={<Edit className="h-4 w-4" />} label={isAr ? "تعديل" : "Edit"} onClick={() => navigate(editRoute(doc.id))} />
+        <ToolbarBtn icon={<Edit className="h-4 w-4" />} label={isAr ? "تعديل" : "Edit"} onClick={() => isLockedIssuedDocument ? blockIssuedEdit() : navigate(editRoute(doc.id))} />
         <ToolbarBtn icon={<Printer className="h-4 w-4" />} label={isAr ? "طباعة" : "Print"} onClick={buildAndShowPdf} />
         <ToolbarBtn icon={<FileText className="h-4 w-4" />} label="PDF" onClick={buildAndShowPdf} />
 

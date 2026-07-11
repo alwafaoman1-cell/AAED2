@@ -9,12 +9,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { normalizePhone } from "@/lib/phoneUtils";
 import { isUuid } from "@/lib/uuid";
+import { displayCustomerCode } from "@/lib/customerCode";
 
 export type CustomerTag = "vip" | "regular" | "new";
 export type CustomerType = "individual" | "company";
 
 export interface Customer {
   id: string;
+  customerCode?: string;
   name: string;
   phone: string;
   email?: string;
@@ -30,6 +32,8 @@ export interface Customer {
   commercialRegistration?: string;
   /** للشركات: الرقم الضريبي */
   taxNumber?: string;
+  legalName?: string;
+  buyerType?: "individual" | "company" | "government" | "insurance_company";
   createdAt: string;
   lastContactAt?: string;
 }
@@ -68,6 +72,7 @@ function load(): Customer[] {
 function rowToCustomer(r: any): Customer {
   return {
     id: r.id,
+    customerCode: r.customer_code || undefined,
     name: r.name,
     phone: normalizePhone(r.phone || ""),
     email: r.email || undefined,
@@ -79,6 +84,8 @@ function rowToCustomer(r: any): Customer {
     contactPerson: r.contact_person || undefined,
     commercialRegistration: r.commercial_registration || undefined,
     taxNumber: r.tax_number || undefined,
+    legalName: r.legal_name || undefined,
+    buyerType: r.buyer_type || r.type || "individual",
     createdAt: r.created_at,
   };
 }
@@ -154,7 +161,7 @@ async function readCustomerById(tenantId: string, id: string): Promise<Customer>
 async function upsertCustomerCloud(c: Customer): Promise<Customer | null> {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
-  const payload = {
+  const basePayload = {
     tenant_id: tenantId,
     name: c.name,
     phone: normalizePhone(c.phone) || null,
@@ -166,6 +173,11 @@ async function upsertCustomerCloud(c: Customer): Promise<Customer | null> {
     contact_person: c.contactPerson || null,
     commercial_registration: c.commercialRegistration || null,
     tax_number: c.taxNumber || null,
+  };
+  const payload = {
+    ...basePayload,
+    legal_name: c.legalName || c.name || null,
+    buyer_type: c.buyerType || c.type || "individual",
   };
 
   let targetId = isUuid(c.id) ? c.id : null;
@@ -184,10 +196,15 @@ async function upsertCustomerCloud(c: Customer): Promise<Customer | null> {
     if (existing?.id) targetId = existing.id;
   }
 
-  const query = targetId
-    ? supabase.from("customers").update(payload).eq("tenant_id", tenantId).eq("id", targetId).select("id").single()
-    : supabase.from("customers").insert(payload).select("id").single();
-  const { data, error } = await query;
+  async function writeCustomer(nextPayload: Record<string, unknown>) {
+    return targetId
+      ? supabase.from("customers").update(nextPayload as any).eq("tenant_id", tenantId).eq("id", targetId).select("id").single()
+      : supabase.from("customers").insert(nextPayload as any).select("id").single();
+  }
+  let { data, error } = await writeCustomer(payload);
+  if (error && /legal_name|buyer_type|schema cache|Could not find/i.test(String(error.message || ""))) {
+    ({ data, error } = await writeCustomer(basePayload));
+  }
   if (error) {
     console.warn("[customersStore] cloud upsert failed", error);
     throw error;
@@ -206,6 +223,7 @@ async function replaceTempCustomerId(tempId: string, saved: Customer) {
 export const customersStore = {
   getAll(): Customer[] { return load(); },
   getById(id: string): Customer | undefined { return load().find((c) => c.id === id); },
+  displayCode(customer: Customer | undefined | null): string { return displayCustomerCode(customer); },
 
   findByName(name: string): Customer | undefined {
     const k = normalize(name);

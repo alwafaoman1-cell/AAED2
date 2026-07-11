@@ -68,6 +68,7 @@ import { expensesStore } from "@/lib/expensesStore";
 import { isUuid } from "@/lib/uuid";
 import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
+import { displayCustomerCode } from "@/lib/customerCode";
 
 
 const insuranceCompanies = [
@@ -1668,12 +1669,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 flex-1">
               <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Customer ID</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{customerId || "—"}</div>
+                <div className="text-[11px] text-muted-foreground">Customer Code</div>
+                <div className="font-mono text-xs truncate" dir="ltr">{displayCustomerCode(customer || { id: customerId })}</div>
               </div>
               <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Vehicle ID</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{vehicleId || "—"}</div>
+                <div className="text-[11px] text-muted-foreground">Vehicle</div>
+                <div className="font-mono text-xs truncate" dir="ltr">{vehicle?.plate_number || vehiclePlate || "—"}</div>
               </div>
               <div className="rounded-lg border border-border bg-muted/30 p-3">
                 <div className="text-[11px] text-muted-foreground">Expenses</div>
@@ -1681,7 +1682,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </div>
               <div className="rounded-lg border border-border bg-muted/30 p-3">
                 <div className="text-[11px] text-muted-foreground">Work Order</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{linkedWorkOrderId || "—"}</div>
+                <div className="font-mono text-xs truncate" dir="ltr">{(existing as any)?.job_order?.order_number || (linkedWorkOrderId && !isUuid(linkedWorkOrderId) ? linkedWorkOrderId : "Linked")}</div>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">

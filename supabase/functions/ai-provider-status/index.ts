@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
 
     const { data: rows } = await admin
       .from("tenant_integrations")
-      .select("provider,enabled,config,secrets,status,last_test_at,last_error")
+      .select("provider,enabled,config,secrets,last_test_status,last_test_at,last_test_error")
       .eq("tenant_id", profile.tenant_id)
       .in("provider", PROVIDER_KEYS);
 
@@ -79,8 +79,8 @@ Deno.serve(async (req) => {
         model: config.model || "",
         baseUrl: config.base_url || "",
         lastTestAt: row.last_test_at || null,
-        lastTestStatus: row.status || null,
-        lastTestError: row.last_error || null,
+        lastTestStatus: row.last_test_status || null,
+        lastTestError: row.last_test_error || null,
       };
       if (row.enabled && secrets.api_key) activeProvider = provider;
     }

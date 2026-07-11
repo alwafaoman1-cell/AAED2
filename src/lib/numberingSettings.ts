@@ -10,6 +10,7 @@
 const KEY = "alwafa_numbering_settings_v1";
 
 export type NumberSeries =
+  | "CUST"      // Customer codes
   | "WO"        // Work orders
   | "INV"       // Sales invoices
   | "QT"        // Sales quotes
@@ -36,6 +37,7 @@ export interface NumberSeriesConfig {
 }
 
 export const DEFAULT_NUMBERING: Record<NumberSeries, NumberSeriesConfig> = {
+  CUST:      { label: "Customer Codes",                 prefix: "CUST",    startFrom: 1, padding: 4 },
   WO:        { label: "أوامر العمل",            prefix: "WO",      startFrom: 1, padding: 5 },
   INV:       { label: "فواتير البيع",            prefix: "INV",     startFrom: 1, padding: 5 },
   QT:        { label: "عروض الأسعار",            prefix: "QT",      startFrom: 1, padding: 5 },

@@ -97,6 +97,16 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   const [pickerOpen, setPickerOpen] = useState(false);
   const [vehiclePickerOpen, setVehiclePickerOpen] = useState(false);
 
+  useEffect(() => {
+    const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
+    if (id && isFinancialDocument && doc.status !== "draft") {
+      toast.error(isAr
+        ? "لا يمكن تعديل فاتورة صادرة. استخدم إلغاء أو إشعار دائن."
+        : "Issued invoices cannot be edited. Use cancellation or a credit note.");
+      navigate(detailRoute(doc.id), { replace: true });
+    }
+  }, [id, type, doc.id, doc.status, isAr, navigate, detailRoute]);
+
   // ===== Tax toggle (per invoice) =====
   const taxSettings = getTemplateSettings();
   const defaultTaxRate = taxSettings.vatRate ?? 5;

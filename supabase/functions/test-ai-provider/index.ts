@@ -106,9 +106,9 @@ Deno.serve(async (req) => {
     try {
       await testProvider(provider, apiKey, row.config || {});
       await admin.from("tenant_integrations").update({
-        status: "connected",
+        last_test_status: "connected",
         last_test_at: new Date().toISOString(),
-        last_error: null,
+        last_test_error: null,
       }).eq("id", row.id);
       await audit(admin, {
         tenant_id: profile.tenant_id,
@@ -122,16 +122,16 @@ Deno.serve(async (req) => {
     } catch (error) {
       const message = String(error?.message || error || "ai_test_failed");
       await admin.from("tenant_integrations").update({
-        status: "failed",
+        last_test_status: "failed",
         last_test_at: new Date().toISOString(),
-        last_error: message,
+        last_test_error: message,
       }).eq("id", row.id);
       await audit(admin, {
         tenant_id: profile.tenant_id,
         user_id: userData.user.id,
         action: "ai_provider_test",
         event: "ai provider tested",
-        status: "failed",
+        last_test_status: "failed",
         details: { provider, error: message },
       });
       return json({ ok: false, status: "Failed", error: message, message });

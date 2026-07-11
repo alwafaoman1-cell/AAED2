@@ -1953,7 +1953,7 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
     <div class="info-grid">
       <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${data.customerName}</span></div>
       <div class="info-row">${lbl('هاتف العميل:', 'Phone')}<span class="value">${data.customerPhone || '-'}</span></div>
-      <div class="info-row">${lbl('رقم هوية العميل:', 'Customer ID')}<span class="value">${data.customerIdNumber || '-'}</span></div>
+      <div class="info-row">${lbl('رقم هوية العميل:', 'Customer ID Number')}<span class="value">${data.customerIdNumber || '-'}</span></div>
       <div class="info-row">${lbl('اسم المستلم:', 'Receiver')}<span class="value">${data.receiverName || data.customerName}</span></div>
       <div class="info-row">${lbl('رقم هوية المستلم:', 'Receiver ID')}<span class="value">${data.receiverIdNumber || '-'}</span></div>
       <div class="info-row">${lbl('تاريخ التسليم:', 'Delivery Date')}<span class="value">${data.date}</span></div>

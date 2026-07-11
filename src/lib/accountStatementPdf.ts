@@ -5,6 +5,7 @@ import { renderWithCustomTemplate } from "@/lib/printTemplates/resolver";
 import { formatDateLatin } from "@/lib/numberUtils";
 import { getWorkOrders } from "@/lib/workOrdersStore";
 import { vehiclesStore } from "@/lib/vehiclesStore";
+import { displayCustomerCode } from "@/lib/customerCode";
 
 function norm(s: string) { return (s || "").trim().toLowerCase().replace(/\s+/g, " "); }
 
@@ -130,7 +131,7 @@ export function getAccountStatementHtml(customer: Customer, ledger: CustomerLedg
     </div>
     <div class="meta-card">
       <h4>رقم العميل</h4>
-      <div class="val">${customer.id}</div>
+      <div class="val">${displayCustomerCode(customer)}</div>
     </div>
     <div class="meta-card">
       <h4>الجوال</h4>
