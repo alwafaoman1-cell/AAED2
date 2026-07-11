@@ -5,6 +5,8 @@ import {
   Building2,
   CalendarClock,
   Car,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   ClipboardCheck,
   FileText,
@@ -13,6 +15,7 @@ import {
   Mail,
   MapPin,
   Paperclip,
+  Pencil,
   Phone,
   Printer,
   Receipt,
@@ -200,6 +203,42 @@ async function updateClaimColumns(
   return null;
 }
 
+async function findLinkedWorkOrder(claim: any) {
+  if (!claim) return null;
+  const baseSelect = "id, order_number, status, customer_id, vehicle_id";
+  if (claim.job_order?.id || claim.job_order?.order_number) return claim.job_order;
+  if (claim.job_order_id) {
+    const { data } = await supabase.from("job_orders" as any).select(baseSelect).eq("id", claim.job_order_id).maybeSingle();
+    if (data) return data;
+  }
+  const attempts: Array<() => Promise<any>> = [
+    async () => await supabase.from("job_orders" as any).select(baseSelect).eq("claim_id", claim.id).maybeSingle(),
+    async () => await supabase.from("job_orders" as any).select(baseSelect).eq("insurance_claim_id", claim.id).maybeSingle(),
+    async () => await supabase.from("job_orders" as any).select(baseSelect).eq("claim_number", claim.claim_number).maybeSingle(),
+    async () => await supabase.from("job_orders" as any).select(baseSelect).ilike("description", `%${claim.claim_number}%`).limit(1).maybeSingle(),
+  ];
+  for (const attempt of attempts) {
+    try {
+      const { data, error } = await attempt();
+      if (!error && data) return data;
+    } catch {
+      // Production schemas may not have every historical linking column.
+    }
+  }
+  if (claim.vehicle_id && claim.customer_id) {
+    const { data } = await supabase
+      .from("job_orders" as any)
+      .select(baseSelect)
+      .eq("vehicle_id", claim.vehicle_id)
+      .eq("customer_id", claim.customer_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data) return data;
+  }
+  return null;
+}
+
 function SectionTitle({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
     <div className="mb-4 flex items-center gap-2 border-b pb-3" style={{ color: PRIMARY }}>
@@ -229,10 +268,14 @@ export default function InsuranceClaimDetailRedesigned() {
   const { data: invoices = [] } = useInsuranceInvoices();
   const createInsuranceInvoice = useCreateInsuranceInvoice();
   const lpoFileRef = useRef<HTMLInputElement>(null);
+  const photoFileRef = useRef<HTMLInputElement>(null);
+  const docFileRef = useRef<HTMLInputElement>(null);
 
   const [locationOpen, setLocationOpen] = useState(false);
   const [inspectionOpen, setInspectionOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [documentOpen, setDocumentOpen] = useState(false);
   const [stageSaving, setStageSaving] = useState<StageKey | null>(null);
   const [locationSection, setLocationSection] = useState("");
   const [locationBay, setLocationBay] = useState("");
@@ -245,6 +288,14 @@ export default function InsuranceClaimDetailRedesigned() {
   const [lpoNumber, setLpoNumber] = useState("");
   const [lpoDate, setLpoDate] = useState("");
   const [lpoAmount, setLpoAmount] = useState("");
+  const [costOpen, setCostOpen] = useState(true);
+  const [docType, setDocType] = useState("other");
+  const [docName, setDocName] = useState("");
+  const [editClaimNumber, setEditClaimNumber] = useState("");
+  const [editInsuranceCompany, setEditInsuranceCompany] = useState("");
+  const [editApprovedAmount, setEditApprovedAmount] = useState("");
+  const [editOwnerName, setEditOwnerName] = useState("");
+  const [editOwnerPhone, setEditOwnerPhone] = useState("");
 
   const { data: timeline = [] } = useQuery({
     queryKey: ["claim_audit_logs", currentId],
@@ -268,7 +319,13 @@ export default function InsuranceClaimDetailRedesigned() {
 
   const customer = (claim as any)?.customer || null;
   const vehicle = (claim as any)?.vehicle || null;
-  const workOrder = (claim as any)?.job_order || null;
+  const embeddedWorkOrder = (claim as any)?.job_order || null;
+  const { data: resolvedWorkOrder } = useQuery({
+    queryKey: ["claim-linked-work-order", currentId, claim?.claim_number, (claim as any)?.job_order_id],
+    enabled: !!claim,
+    queryFn: () => findLinkedWorkOrder(claim),
+  });
+  const workOrder = resolvedWorkOrder || embeddedWorkOrder || null;
   const inlineVehicle = {
     make: (claim as any)?.vehicle_make,
     model: (claim as any)?.vehicle_model,
@@ -323,6 +380,7 @@ export default function InsuranceClaimDetailRedesigned() {
     await queryClient.invalidateQueries({ queryKey: ["insurance_claims", currentId] });
     await queryClient.invalidateQueries({ queryKey: ["insurance_claims"] });
     await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", currentId] });
+    await queryClient.invalidateQueries({ queryKey: ["claim-linked-work-order", currentId] });
   };
 
   const saveStageDate = async (key: StageKey, value: string) => {
@@ -500,6 +558,96 @@ export default function InsuranceClaimDetailRedesigned() {
     toast.success("تم حفظ مسودة البريد في سجل المطالبة");
   };
 
+  const openEditClaim = () => {
+    if (!claim) return;
+    setEditClaimNumber(claim.claim_number || "");
+    setEditInsuranceCompany(claim.insurance_company || "");
+    setEditApprovedAmount(String(claim.approved_amount ?? ""));
+    setEditOwnerName((customer as any)?.name || (claim as any).vehicle_owner_name || "");
+    setEditOwnerPhone((customer as any)?.phone || (claim as any).vehicle_owner_phone || "");
+    setEditOpen(true);
+  };
+
+  const saveClaimEdit = async () => {
+    if (!claim || !currentId) return;
+    try {
+      await updateClaimColumns(currentId, {
+        claim_number: editClaimNumber.trim() || claim.claim_number,
+        insurance_company: editInsuranceCompany.trim() || null,
+        approved_amount: parseMoneyInput(editApprovedAmount) || null,
+        vehicle_owner_name: editOwnerName.trim() || null,
+        vehicle_owner_phone: editOwnerPhone.trim() || null,
+      });
+      await insertTimeline(claim, "claim_core_details_updated", {
+        claim_number: editClaimNumber.trim() || claim.claim_number,
+        insurance_company: editInsuranceCompany.trim() || null,
+        approved_amount: parseMoneyInput(editApprovedAmount) || null,
+      });
+      await refreshClaim();
+      setEditOpen(false);
+      toast.success("تم تحديث بيانات المطالبة");
+    } catch (e: any) {
+      toast.error(e?.message || "فشل تحديث بيانات المطالبة");
+    }
+  };
+
+  const uploadClaimPhoto = async (file: File | null) => {
+    if (!file || !currentId || !claim) return;
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `claims/${currentId}/photos/photo-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("insurance-docs").upload(path, file, {
+        contentType: file.type || "application/octet-stream",
+      });
+      if (uploadError) throw uploadError;
+      const { data } = await supabase.storage.from("insurance-docs").createSignedUrl(path, 60 * 60 * 24 * 7);
+      const photo = { url: data?.signedUrl || path, path, name: file.name, stage: statusText, taken_at: new Date().toISOString() };
+      await updateClaimColumns(currentId, {
+        damage_photos: [...(claim.damage_photos || []), photo],
+      });
+      await insertTimeline(claim, "claim_photo_uploaded", { file: file.name, path, stage: statusText });
+      await refreshClaim();
+      toast.success("تم رفع صورة المطالبة");
+    } catch (e: any) {
+      toast.error(e?.message || "فشل رفع صورة المطالبة");
+    } finally {
+      if (photoFileRef.current) photoFileRef.current.value = "";
+    }
+  };
+
+  const uploadClaimDocument = async (file: File | null) => {
+    if (!file || !currentId || !claim) return;
+    try {
+      const ext = file.name.split(".").pop() || "bin";
+      const path = `claims/${currentId}/docs/${docType}-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("insurance-docs").upload(path, file, {
+        contentType: file.type || "application/octet-stream",
+      });
+      if (uploadError) throw uploadError;
+      const { data } = await supabase.storage.from("insurance-docs").createSignedUrl(path, 60 * 60 * 24 * 7);
+      const doc = {
+        name: docName.trim() || file.name,
+        file_name: file.name,
+        type: docType,
+        url: data?.signedUrl || path,
+        path,
+        uploaded_at: new Date().toISOString(),
+      };
+      await updateClaimColumns(currentId, {
+        documents: [...(claim.documents || []), doc],
+      });
+      await insertTimeline(claim, "claim_document_uploaded", { name: doc.name, type: docType, path });
+      await refreshClaim();
+      setDocumentOpen(false);
+      setDocName("");
+      toast.success("تم رفع مستند المطالبة");
+    } catch (e: any) {
+      toast.error(e?.message || "فشل رفع مستند المطالبة");
+    } finally {
+      if (docFileRef.current) docFileRef.current.value = "";
+    }
+  };
+
   if (isLoading) {
     return <div className="p-8 text-center text-muted-foreground">جاري تحميل تفاصيل المطالبة...</div>;
   }
@@ -536,13 +684,16 @@ export default function InsuranceClaimDetailRedesigned() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => workOrder?.order_number ? navigate(`/work-orders/${workOrder.order_number}`) : toast.info("لا يوجد أمر عمل مرتبط")}>
+              <Button variant="outline" onClick={openEditClaim}>
+                <Pencil className="ml-2 h-4 w-4" /> تعديل
+              </Button>
+              <Button variant="outline" onClick={() => workOrder?.order_number || workOrder?.id ? navigate(`/work-orders/${workOrder.order_number || workOrder.id}`) : toast.info("لا يوجد أمر عمل مرتبط")}>
                 <Wrench className="ml-2 h-4 w-4" /> فتح أمر العمل
               </Button>
               <Button variant="outline" onClick={() => setLocationOpen(true)}>
                 <MapPin className="ml-2 h-4 w-4" /> موقع المركبة
               </Button>
-              <Button variant="outline" onClick={() => window.print()}>
+              <Button variant="outline" onClick={() => navigate(`/insurance/${currentId}/archive`)}>
                 <Printer className="ml-2 h-4 w-4" /> طباعة / PDF
               </Button>
               <Button variant="outline" onClick={() => setInspectionOpen(true)}>
@@ -607,7 +758,17 @@ export default function InsuranceClaimDetailRedesigned() {
         <div className="grid gap-4 xl:grid-cols-[minmax(0,2.1fr)_minmax(320px,.9fr)]">
           <main className="space-y-4">
             <Card className="rounded-2xl bg-white p-5">
-              <SectionTitle icon={<ShieldCheck className="h-5 w-5" />} title="التأمين والتكلفة" />
+              <div className="mb-4 flex items-center justify-between border-b pb-3" style={{ color: PRIMARY }}>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5" />
+                  <h2 className="text-base font-extrabold">التأمين والتكلفة</h2>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setCostOpen((value) => !value)}>
+                  {costOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </Button>
+              </div>
+              {costOpen && (
+                <>
               {!hasLpo && dateOnly((claim as any).delivered_at) && (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
                   تم التسليم، لكن لا يمكن إصدار فاتورة التأمين أو إغلاق المطالبة ماليًا قبل تسجيل/إرفاق LPO.
@@ -665,6 +826,8 @@ export default function InsuranceClaimDetailRedesigned() {
                   <Receipt className="ml-2 h-4 w-4" /> إصدار فاتورة تأمينية
                 </Button>
               </div>
+                </>
+              )}
             </Card>
 
             <Card className="rounded-2xl bg-white p-5">
@@ -697,6 +860,11 @@ export default function InsuranceClaimDetailRedesigned() {
 
             <Card className="rounded-2xl bg-white p-5">
               <SectionTitle icon={<Paperclip className="h-5 w-5" />} title="المستندات" />
+              <div className="mb-3 flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => setDocumentOpen(true)}>
+                  <Upload className="ml-2 h-4 w-4" /> رفع مستند
+                </Button>
+              </div>
               <div className="grid gap-2">
                 {[...(claim.documents || []), ...documentsRows.map((d: any) => ({ name: d.name || d.file_name, type: d.type || d.document_type, url: d.url || d.file_url }))].length ? (
                   [...(claim.documents || []), ...documentsRows.map((d: any) => ({ name: d.name || d.file_name, type: d.type || d.document_type, url: d.url || d.file_url }))].map((doc: any, index) => (
@@ -757,6 +925,12 @@ export default function InsuranceClaimDetailRedesigned() {
             </Card>
             <Card className="rounded-2xl bg-white p-5">
               <SectionTitle icon={<Image className="h-5 w-5" />} title="صور المطالبة" />
+              <div className="mb-3 flex justify-end">
+                <input ref={photoFileRef} type="file" hidden accept="image/*" onChange={(event) => void uploadClaimPhoto(event.target.files?.[0] || null)} />
+                <Button variant="outline" size="sm" onClick={() => photoFileRef.current?.click()}>
+                  <Upload className="ml-2 h-4 w-4" /> رفع صورة
+                </Button>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 {(claim.damage_photos || []).slice(0, 6).map((url, index) => (
                   <button key={url} className="overflow-hidden rounded-xl border" onClick={() => window.open(url, "_blank")}>
@@ -775,7 +949,7 @@ export default function InsuranceClaimDetailRedesigned() {
           <div className="text-xs font-bold text-muted-foreground">Claim {safe(claim.claim_number)} — {statusText}</div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => setEmailOpen(true)}><Mail className="ml-2 h-4 w-4" /> بريد التأمين</Button>
-            <Button variant="outline" onClick={() => window.print()}><Printer className="ml-2 h-4 w-4" /> طباعة</Button>
+            <Button variant="outline" onClick={() => navigate(`/insurance/${currentId}/archive`)}><Printer className="ml-2 h-4 w-4" /> طباعة</Button>
             <Button style={{ background: PRIMARY, color: "white" }} onClick={() => navigate("/insurance/claims")}>رجوع للقائمة</Button>
           </div>
         </div>
@@ -810,6 +984,38 @@ export default function InsuranceClaimDetailRedesigned() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent dir="rtl" className="max-w-2xl">
+          <DialogHeader><DialogTitle>تعديل بيانات المطالبة</DialogTitle></DialogHeader>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <Label>رقم المطالبة</Label>
+              <Input value={editClaimNumber} onChange={(event) => setEditClaimNumber(event.target.value)} />
+            </div>
+            <div>
+              <Label>شركة التأمين</Label>
+              <Input value={editInsuranceCompany} onChange={(event) => setEditInsuranceCompany(event.target.value)} />
+            </div>
+            <div>
+              <Label>المبلغ المعتمد قبل الضريبة</Label>
+              <Input value={editApprovedAmount} onChange={(event) => setEditApprovedAmount(event.target.value)} placeholder="0.000" />
+            </div>
+            <div>
+              <Label>اسم العميل</Label>
+              <Input value={editOwnerName} onChange={(event) => setEditOwnerName(event.target.value)} />
+            </div>
+            <div className="md:col-span-2">
+              <Label>هاتف العميل</Label>
+              <Input value={editOwnerPhone} onChange={(event) => setEditOwnerPhone(event.target.value)} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditOpen(false)}>إلغاء</Button>
+            <Button onClick={saveClaimEdit} style={{ background: PRIMARY, color: "white" }}>حفظ التعديل</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={inspectionOpen} onOpenChange={setInspectionOpen}>
         <DialogContent dir="rtl" className="max-w-4xl">
           <DialogHeader><DialogTitle>نموذج الفحص من خلال البحث</DialogTitle></DialogHeader>
@@ -836,6 +1042,41 @@ export default function InsuranceClaimDetailRedesigned() {
               setInspectionOpen(false);
               toast.success("تم تسجيل طلب ربط/إنشاء نموذج الفحص في السجل");
             }} style={{ background: PRIMARY, color: "white" }}>حفظ وربط بالمطالبة</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={documentOpen} onOpenChange={setDocumentOpen}>
+        <DialogContent dir="rtl" className="max-w-xl">
+          <DialogHeader><DialogTitle>رفع مستند للمطالبة</DialogTitle></DialogHeader>
+          <div className="grid gap-3">
+            <div>
+              <Label>نوع المستند</Label>
+              <Select value={docType} onValueChange={setDocType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="rop">ROP</SelectItem>
+                  <SelectItem value="lpo">LPO</SelectItem>
+                  <SelectItem value="invoice">Invoice</SelectItem>
+                  <SelectItem value="handover">Handover</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>اسم المستند</Label>
+              <Input value={docName} onChange={(event) => setDocName(event.target.value)} placeholder="اسم واضح للمستند" />
+            </div>
+            <div>
+              <Label>الملف</Label>
+              <Input ref={docFileRef} type="file" accept=".pdf,image/*,.doc,.docx,.xls,.xlsx" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDocumentOpen(false)}>إلغاء</Button>
+            <Button style={{ background: PRIMARY, color: "white" }} onClick={() => void uploadClaimDocument(docFileRef.current?.files?.[0] || null)}>
+              <Upload className="ml-2 h-4 w-4" /> رفع وحفظ
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
