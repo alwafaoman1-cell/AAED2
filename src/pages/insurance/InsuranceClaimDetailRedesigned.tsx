@@ -111,7 +111,23 @@ function extractLpoFromNotes(notes?: string | null) {
     date: text.match(/\[LPO_DATE:([^\]]+)\]/)?.[1]?.trim() || "",
     amount: text.match(/\[LPO_AMOUNT:([^\]]+)\]/)?.[1]?.trim() || "",
     note: text.match(/\[LPO_NOTE:([^\]]+)\]/)?.[1]?.trim() || "",
+    file: text.match(/\[LPO_FILE:([^\]]+)\]/)?.[1]?.trim() || "",
+    fileName: text.match(/\[LPO_FILE_NAME:([^\]]+)\]/)?.[1]?.trim() || "",
+    receivedAt: text.match(/\[LPO_RECEIVED_AT:([^\]]+)\]/)?.[1]?.trim() || "",
   };
+}
+
+function appendClaimNote(existing: string | null | undefined, markers: Record<string, unknown>) {
+  const lines = Object.entries(markers)
+    .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
+    .map(([key, value]) => `[${key}:${String(value).replace(/\]/g, ")")}]`);
+  if (!lines.length) return existing || "";
+  return [existing || "", ...lines].filter(Boolean).join("\n");
+}
+
+function getMissingColumn(error: any) {
+  const text = [error?.message, error?.details, error?.hint, error?.code].filter(Boolean).join(" ");
+  return text.match(/'([^']+)' column/)?.[1] || text.match(/column "([^"]+)"/)?.[1] || null;
 }
 
 async function insertTimeline(claim: any, action: string, details: Record<string, unknown>) {
@@ -131,15 +147,57 @@ async function insertTimeline(claim: any, action: string, details: Record<string
   }
 }
 
-async function updateClaimColumns(id: string, updates: Record<string, unknown>) {
-  const { data, error } = await supabase
-    .from("insurance_claims" as any)
-    .update(updates)
-    .eq("id", id)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data as any;
+async function updateClaimColumns(
+  id: string,
+  updates: Record<string, unknown>,
+  fallback?: { existingNotes?: string | null; markers?: Record<string, unknown> },
+) {
+  let payload = { ...updates };
+  const ignoredColumns: string[] = [];
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if (!Object.keys(payload).length) break;
+    const { data, error } = await supabase
+      .from("insurance_claims" as any)
+      .update(payload)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (!error) {
+      if (ignoredColumns.length && fallback?.markers) {
+        await supabase
+          .from("insurance_claims" as any)
+          .update({ notes: appendClaimNote((data as any)?.notes ?? fallback.existingNotes, fallback.markers) })
+          .eq("id", id);
+      }
+      return data as any;
+    }
+
+    const missingColumn = getMissingColumn(error);
+    if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
+      ignoredColumns.push(missingColumn);
+      const { [missingColumn]: _removed, ...rest } = payload;
+      payload = rest;
+      continue;
+    }
+    throw error;
+  }
+
+  if (fallback?.markers) {
+    const { data, error } = await supabase
+      .from("insurance_claims" as any)
+      .update({ notes: appendClaimNote(fallback.existingNotes, fallback.markers) })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return data as any;
+  }
+
+  if (ignoredColumns.length) {
+    throw new Error(`Missing insurance_claims columns in schema cache: ${ignoredColumns.join(", ")}`);
+  }
+  return null;
 }
 
 function SectionTitle({ icon, title }: { icon: React.ReactNode; title: string }) {
@@ -228,9 +286,10 @@ export default function InsuranceClaimDetailRedesigned() {
   const lpoFromNotes = extractLpoFromNotes(claim?.notes);
   const effectiveLpo = {
     number: (claim as any)?.lpo_number || lpoNumber || lpoFromNotes.number,
-    date: dateOnly((claim as any)?.lpo_date) || lpoDate || lpoFromNotes.date,
+    date: dateOnly((claim as any)?.lpo_received_at) || dateOnly((claim as any)?.lpo_date) || lpoDate || lpoFromNotes.receivedAt || lpoFromNotes.date,
     amount: (claim as any)?.lpo_amount ? String((claim as any).lpo_amount) : lpoAmount || lpoFromNotes.amount,
-    file: (claim as any)?.lpo_file_url || "",
+    file: (claim as any)?.lpo_file_url || lpoFromNotes.file || "",
+    fileName: (claim as any)?.lpo_file_name || lpoFromNotes.fileName || "",
   };
   const hasLpo = !!(effectiveLpo.number || effectiveLpo.file);
 
@@ -292,10 +351,22 @@ export default function InsuranceClaimDetailRedesigned() {
       return;
     }
     try {
+      const { data: auth } = await supabase.auth.getUser();
+      const updatedAt = new Date().toISOString();
       await updateClaimColumns(currentId, {
         vehicle_location_section: locationSection,
         vehicle_location_bay: locationBay.trim() || null,
         vehicle_location_note: locationNote.trim() || null,
+        vehicle_location_updated_at: updatedAt,
+        vehicle_location_updated_by: auth.user?.id || null,
+      }, {
+        existingNotes: claim.notes,
+        markers: {
+          VEHICLE_LOCATION_SECTION: locationSection,
+          VEHICLE_LOCATION_BAY: locationBay.trim() || null,
+          VEHICLE_LOCATION_NOTE: locationNote.trim() || null,
+          VEHICLE_LOCATION_UPDATED_AT: updatedAt,
+        },
       });
       await insertTimeline(claim, "vehicle_location_updated", {
         section: locationSection,
@@ -313,8 +384,22 @@ export default function InsuranceClaimDetailRedesigned() {
   const requestLpo = async () => {
     if (!currentId || !claim) return;
     try {
-      await updateClaimColumns(currentId, { lpo_requested_at: new Date().toISOString() });
-      await insertTimeline(claim, "lpo_requested", { claim_number: claim.claim_number });
+      const { data: auth } = await supabase.auth.getUser();
+      const requestedAt = new Date().toISOString();
+      await updateClaimColumns(currentId, {
+        lpo_requested_at: requestedAt,
+        lpo_requested_by: auth.user?.id || null,
+        lpo_followup_method: "manual",
+        lpo_followup_note: "LPO requested from claim detail page",
+      }, {
+        existingNotes: claim.notes,
+        markers: {
+          LPO_REQUESTED_AT: requestedAt,
+          LPO_FOLLOWUP_METHOD: "manual",
+          LPO_NOTE: "LPO requested from claim detail page",
+        },
+      });
+      await insertTimeline(claim, "lpo_requested", { claim_number: claim.claim_number, requested_at: requestedAt });
       await refreshClaim();
       toast.success("تم تسجيل طلب إصدار LPO");
     } catch (e: any) {
@@ -337,12 +422,25 @@ export default function InsuranceClaimDetailRedesigned() {
       if (uploadError) throw uploadError;
       const { data } = await supabase.storage.from("insurance-docs").createSignedUrl(path, 60 * 60 * 24 * 7);
       const docs = [...(claim.documents || []), { name: file.name, type: "lpo", url: data?.signedUrl || path }];
+      const receivedAt = lpoDate ? new Date(lpoDate).toISOString() : new Date().toISOString();
       await updateClaimColumns(currentId, {
         lpo_number: lpoNumber.trim() || effectiveLpo.number,
         lpo_date: lpoDate || effectiveLpo.date || null,
+        lpo_received_at: receivedAt,
         lpo_amount: parseMoneyInput(lpoAmount || effectiveLpo.amount) || null,
         lpo_file_url: data?.signedUrl || path,
+        lpo_file_name: file.name,
         documents: docs,
+      }, {
+        existingNotes: claim.notes,
+        markers: {
+          LPO: lpoNumber.trim() || effectiveLpo.number,
+          LPO_RECEIVED_AT: receivedAt,
+          LPO_DATE: lpoDate || effectiveLpo.date || "",
+          LPO_AMOUNT: parseMoneyInput(lpoAmount || effectiveLpo.amount) || "",
+          LPO_FILE: data?.signedUrl || path,
+          LPO_FILE_NAME: file.name,
+        },
       });
       await insertTimeline(claim, "lpo_uploaded", { file: file.name, lpo_number: lpoNumber || effectiveLpo.number });
       await refreshClaim();
