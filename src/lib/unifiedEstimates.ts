@@ -539,10 +539,6 @@ export async function convertUnifiedEstimate(id: string, target: EstimateConvers
         final_total: estimate.total,
         work_order_type: "general_customer",
         source_estimate_id: estimate.id,
-        vehicle_received_at: estimate.vehicle_received_at || null,
-        work_started_at: estimate.work_started_at || null,
-        vehicle_delivered_at: estimate.vehicle_delivered_at || null,
-        vehicle_presence_status: estimate.vehicle_presence_status || "with_customer",
         work_items: (estimate.items || []).map((item) => ({ title: item.description_ar || item.description_en || item.category, note: item.notes || null })),
         metadata: { source: "estimate_conversion", estimate_id: estimate.id, estimate_number: estimate.estimate_number },
       };
@@ -607,10 +603,6 @@ export async function convertUnifiedEstimate(id: string, target: EstimateConvers
       status: "pending",
       estimation_type: "lump_sum",
       source_estimate_id: estimate.id,
-      vehicle_received_at: estimate.vehicle_received_at || null,
-      work_started_at: estimate.work_started_at || null,
-      vehicle_delivered_at: estimate.vehicle_delivered_at || null,
-      vehicle_presence_status: estimate.vehicle_presence_status || "with_customer",
       notes: estimate.notes || `Created from estimate ${estimate.estimate_number}`,
     };
     let { data: claim, error } = await supabase.from("insurance_claims" as any).insert(claimPayload as any).select("id,claim_number,insurance_company").single();
@@ -681,10 +673,6 @@ export async function convertUnifiedEstimate(id: string, target: EstimateConvers
       insurance_company: claim.insurance_company || estimate.claim?.insurance_company || null,
       insurance_claim_number: claim.claim_number || null,
       source_estimate_id: estimate.id,
-      vehicle_received_at: estimate.vehicle_received_at || null,
-      work_started_at: estimate.work_started_at || null,
-      vehicle_delivered_at: estimate.vehicle_delivered_at || null,
-      vehicle_presence_status: estimate.vehicle_presence_status || "with_customer",
       work_items: (estimate.items || []).map((item) => ({ title: item.description_ar || item.description_en || item.category, note: item.notes || null })),
       metadata: { source: "estimate_conversion", estimate_id: estimate.id, estimate_number: estimate.estimate_number },
     };

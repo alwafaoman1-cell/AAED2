@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Loader2, Plus, Save, Search, Trash2 } from "lucide-react";
+import { ArrowRight, FileUp, Loader2, Plus, Save, Search, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatOMR } from "@/lib/money";
+import { extractFromFile } from "@/lib/aiExtract";
 import {
   ESTIMATE_CATEGORY_LABEL,
   calculateEstimateTotals,
@@ -46,6 +48,84 @@ type EstimateSearchResult = {
   vehicle?: { id?: string; brand?: string | null; make?: string | null; model?: string | null; year?: number | null; plate_number?: string | null; vin_number?: string | null } | null;
 };
 
+type ExtractedField = {
+  key: string;
+  label: string;
+  current: string;
+  extracted: string;
+  confidence: "high" | "medium" | "low";
+  apply: boolean;
+};
+
+const AI_FIELD_LABELS: Record<string, string> = {
+  estimate_number: "Estimate Number",
+  estimate_date: "Estimate Date",
+  valid_until: "Valid Until",
+  customer_name: "Customer Name",
+  customer_phone: "Customer Phone",
+  customer_email: "Customer Email",
+  customer_code: "Customer Code",
+  vehicle_make: "Vehicle Make",
+  vehicle_model: "Vehicle Model",
+  vehicle_year: "Vehicle Year",
+  plate_number: "Plate Number",
+  plate_letters: "Plate Letters",
+  vin: "VIN",
+  color: "Color",
+  insurance_company: "Insurance Company",
+  claim_number: "Claim Number",
+  policy_number: "Policy Number",
+  surveyor: "Surveyor",
+  insurance_employee: "Insurance Employee",
+  subtotal: "Subtotal",
+  vat_rate: "VAT Rate",
+  vat_amount: "VAT Amount",
+  total: "Total",
+  accident_description: "Accident Description",
+  visible_damage: "Visible Damage",
+  hidden_damage: "Hidden Damage",
+  parts_notes: "Parts Notes",
+  general_notes: "General Notes",
+  terms: "Terms",
+};
+
+function confidenceForKey(key: string, value: string): ExtractedField["confidence"] {
+  if (!value.trim()) return "low";
+  if (/number|date|vin|plate|total|subtotal|amount|rate/i.test(key)) return "high";
+  if (/notes|description|damage|terms/i.test(key)) return "medium";
+  return "high";
+}
+
+function parseExtractedItems(raw: unknown): EstimateItemInput[] {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((row: any): EstimateItemInput => ({
+      category: ([
+        "labor",
+        "parts",
+        "paint_materials",
+        "mechanical",
+        "electrical",
+        "programming",
+        "diagnosis",
+        "sublet",
+        "transport",
+        "other",
+      ].includes(String(row.category)) ? row.category : "other") as EstimateItemCategory,
+      description_ar: String(row.description || row.description_ar || row.description_en || "").trim(),
+      description_en: String(row.description_en || "").trim(),
+      quantity: Number(row.quantity || 1),
+      unit_price: Number(row.unit_price || row.rate || 0),
+      vat_rate: 5,
+      notes: null,
+    })).filter((item) => item.description_ar || item.description_en || item.unit_price > 0);
+  } catch {
+    return [];
+  }
+}
+
 export default function EstimateForm() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -63,10 +143,10 @@ export default function EstimateForm() {
     queryKey: ["estimate-lookups"],
     queryFn: async () => {
       const [customers, vehicles, claims, workOrders, estimates] = await Promise.all([
-        supabase.from("customers").select("id,name,phone,customer_code").order("created_at", { ascending: false }).limit(200),
-        supabase.from("vehicles").select("id,brand,model,plate_number,vin,vin_number,year,customer_id").order("created_at", { ascending: false }).limit(200),
-        supabase.from("insurance_claims").select("id,claim_number,insurance_company,customer_id,vehicle_id").order("created_at", { ascending: false }).limit(200),
-        supabase.from("job_orders").select("id,order_number,status,customer_id,vehicle_id,claim_id").order("created_at", { ascending: false }).limit(200),
+        supabase.from("customers" as any).select("id,name,phone,email,customer_code").order("created_at", { ascending: false }).limit(200),
+        supabase.from("vehicles" as any).select("id,brand,make,model,plate_number,plate_letters,vin,vin_number,year,color,customer_id").order("created_at", { ascending: false }).limit(200),
+        supabase.from("insurance_claims" as any).select("id,claim_number,insurance_company,insurance_employee_name,policy_number,surveyor,customer_id,vehicle_id").order("created_at", { ascending: false }).limit(200),
+        supabase.from("job_orders" as any).select("id,order_number,status,customer_id,vehicle_id,claim_id").order("created_at", { ascending: false }).limit(200),
         supabase.from("estimates" as any).select("id,estimate_number,estimate_type,total").order("created_at", { ascending: false }).limit(200),
       ]);
       for (const result of [customers, vehicles, claims, workOrders, estimates]) {
@@ -93,7 +173,6 @@ export default function EstimateForm() {
     vat_rate: 5,
     vat_enabled: false,
     currency: "OMR",
-    vehicle_presence_status: "with_customer",
   });
   const [items, setItems] = useState<EstimateItemInput[]>([{ ...emptyItem }]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -101,6 +180,15 @@ export default function EstimateForm() {
   const [selectedRecord, setSelectedRecord] = useState<EstimateSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiFile, setAiFile] = useState<File | null>(null);
+  const [aiDocType, setAiDocType] = useState("auto");
+  const [aiLanguage, setAiLanguage] = useState("auto");
+  const [aiStatus, setAiStatus] = useState<"idle" | "uploading" | "processing" | "ready" | "failed">("idle");
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiFields, setAiFields] = useState<ExtractedField[]>([]);
+  const [aiItems, setAiItems] = useState<EstimateItemInput[]>([]);
+  const [aiVatSuggested, setAiVatSuggested] = useState(false);
 
   useEffect(() => {
     if (!existing) return;
@@ -130,7 +218,7 @@ export default function EstimateForm() {
     const timer = window.setTimeout(async () => {
       try {
         const pattern = `%${term.replace(/[%_]/g, "")}%`;
-        const [vehiclesRes, claimsRes, ordersRes] = await Promise.all([
+        const [vehiclesRes, claimsRes, ordersRes, customersRes] = await Promise.all([
           supabase
             .from("vehicles" as any)
             .select("id,brand,model,year,plate_number,plate_letters,vin_number,customer_id,customer:customers(id,name,phone,customer_code)")
@@ -144,10 +232,15 @@ export default function EstimateForm() {
           supabase
             .from("job_orders" as any)
             .select("id,order_number,status,customer_id,vehicle_id,claim_id,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,vin_number)")
-            .or(`order_number.ilike.${pattern},insurance_claim_number.ilike.${pattern},description.ilike.${pattern}`)
+            .or(`order_number.ilike.${pattern},description.ilike.${pattern}`)
             .limit(8),
+          supabase
+            .from("customers" as any)
+            .select("id,name,phone,customer_code,vehicles(id,brand,model,year,plate_number,plate_letters,vin_number,customer_id)")
+            .or(`name.ilike.${pattern},phone.ilike.${pattern},customer_code.ilike.${pattern}`)
+            .limit(6),
         ]);
-        for (const result of [vehiclesRes, claimsRes, ordersRes]) {
+        for (const result of [vehiclesRes, claimsRes, ordersRes, customersRes]) {
           if (result.error) throw result.error;
         }
         if (cancelled) return;
@@ -187,7 +280,14 @@ export default function EstimateForm() {
           customer: o.customer || null,
           vehicle: o.vehicle || null,
         }));
-        setSearchResults([...claimRows, ...orderRows, ...vehicleRows].slice(0, 12));
+        const customerVehicleRows = ((customersRes.data || []) as any[]).flatMap((c): EstimateSearchResult[] => {
+          const customerVehicles = Array.isArray(c.vehicles) ? c.vehicles : [];
+          if (customerVehicles.length === 0) return [{ type: "vehicle", id: `customer-${c.id}`, title: `${c.customer_code || ""} ${c.name || "Customer"}`.trim(), subtitle: c.phone || "", customer_id: c.id, vehicle_id: null, claim_id: null, work_order_id: null, customer: c, vehicle: null }];
+          return customerVehicles.map((v: any) => ({ type: "vehicle", id: v.id, title: `${[v.plate_letters, v.plate_number].filter(Boolean).join(" ").trim() || "Vehicle"} • ${[v.brand, v.model, v.year].filter(Boolean).join(" ")}`, subtitle: `${c.customer_code || ""} ${c.name || ""} ${c.phone || ""}`.trim(), customer_id: c.id, vehicle_id: v.id, claim_id: null, work_order_id: null, customer: c, vehicle: v }));
+        });
+        const uniqueResults = new Map<string, EstimateSearchResult>();
+        [...claimRows, ...orderRows, ...vehicleRows, ...customerVehicleRows].forEach((row) => uniqueResults.set(`${row.type}-${row.id}`, row));
+        setSearchResults([...uniqueResults.values()].slice(0, 12));
       } catch (error: any) {
         if (!cancelled) setSearchError(error?.message || "فشل البحث");
       } finally {
@@ -205,14 +305,14 @@ export default function EstimateForm() {
     setForm((current) => {
       const next = { ...current };
       if (current.claim_id) {
-        const claim = lookups.claims.find((claim: any) => claim.id === current.claim_id);
+        const claim = lookups.claims.find((claim: any) => claim.id === current.claim_id) as any;
         if (claim) {
           next.customer_id = next.customer_id || claim.customer_id || null;
           next.vehicle_id = next.vehicle_id || claim.vehicle_id || null;
         }
       }
       if (current.work_order_id) {
-        const workOrder = lookups.workOrders.find((order: any) => order.id === current.work_order_id);
+        const workOrder = lookups.workOrders.find((order: any) => order.id === current.work_order_id) as any;
         if (workOrder) {
           next.customer_id = next.customer_id || workOrder.customer_id || null;
           next.vehicle_id = next.vehicle_id || workOrder.vehicle_id || null;
@@ -224,20 +324,41 @@ export default function EstimateForm() {
   }, [isEdit, lookups]);
 
   const totals = useMemo(() => calculateEstimateTotals(items, Number(form.vat_rate ?? 5), Boolean(form.vat_enabled)), [form.vat_enabled, form.vat_rate, items]);
+  const selectedCustomer = useMemo<any>(
+    () => lookups?.customers.find((customer: any) => customer.id === form.customer_id) || (selectedRecord?.customer as any) || null,
+    [form.customer_id, lookups?.customers, selectedRecord],
+  );
+  const selectedVehicle = useMemo<any>(
+    () => lookups?.vehicles.find((vehicle: any) => vehicle.id === form.vehicle_id) || (selectedRecord?.vehicle as any) || null,
+    [form.vehicle_id, lookups?.vehicles, selectedRecord],
+  );
+  const selectedClaim = useMemo<any>(
+    () => lookups?.claims.find((claim: any) => claim.id === form.claim_id) || null,
+    [form.claim_id, lookups?.claims],
+  );
+  const selectedWorkOrder = useMemo<any>(
+    () => lookups?.workOrders.find((order: any) => order.id === form.work_order_id) || null,
+    [form.work_order_id, lookups?.workOrders],
+  );
 
   const saveMut = useMutation({
     mutationFn: async () => {
       if (form.estimate_type === "supplementary" && !form.parent_estimate_id) {
         throw new Error("التقدير الإضافي يجب أن يرتبط بتقدير أصلي.");
       }
-      if (form.vehicle_presence_status === "in_workshop" && !String(form.vehicle_location_section || "").trim()) {
-        throw new Error("موقع المركبة داخل الورشة مطلوب عند اختيار داخل الكراج.");
-      }
+      const estimatePayload = { ...form };
+      delete (estimatePayload as any).vehicle_received_at;
+      delete (estimatePayload as any).work_started_at;
+      delete (estimatePayload as any).vehicle_delivered_at;
+      delete (estimatePayload as any).vehicle_presence_status;
+      delete (estimatePayload as any).vehicle_location_section;
+      delete (estimatePayload as any).vehicle_location_bay;
+      delete (estimatePayload as any).vehicle_location_note;
       if (isEdit && id) {
-        await updateUnifiedEstimate(id, { estimate: form, items });
+        await updateUnifiedEstimate(id, { estimate: estimatePayload, items });
         return { id };
       }
-      return createUnifiedEstimate({ estimate: form, items });
+      return createUnifiedEstimate({ estimate: estimatePayload, items });
     },
     onSuccess: (estimate: any) => {
       qc.invalidateQueries({ queryKey: ["unified-estimates"] });
@@ -260,7 +381,7 @@ export default function EstimateForm() {
   }
 
   function onClaimChange(claimId: string) {
-    const claim = lookups?.claims.find((c: any) => c.id === claimId);
+    const claim = lookups?.claims.find((c: any) => c.id === claimId) as any;
     setForm({
       ...form,
       claim_id: claimId === "none" ? null : claimId,
@@ -283,6 +404,115 @@ export default function EstimateForm() {
     }));
   }
 
+  function currentValueForField(key: string) {
+    if (key === "estimate_date") return String(form.estimate_date || "");
+    if (key === "valid_until") return String(form.valid_until || "");
+    if (key === "terms") return String(form.terms || "");
+    if (key === "general_notes") return String(form.notes || "");
+    return "";
+  }
+
+  async function analyzeAiFile() {
+    if (!aiFile) {
+      toast.error("اختر ملفًا أولًا");
+      return;
+    }
+    const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+    if (!allowed.includes(aiFile.type) && !/\.(jpg|jpeg|png|webp|pdf)$/i.test(aiFile.name)) {
+      setAiStatus("failed");
+      setAiError("صيغة غير مدعومة. ارفع JPG/PNG/WEBP/PDF.");
+      return;
+    }
+    setAiStatus("processing");
+    setAiError(null);
+    setAiFields([]);
+    setAiItems([]);
+    setAiVatSuggested(false);
+    try {
+      let data: Record<string, string>;
+      try {
+        data = await extractFromFile(aiFile, "estimate_document");
+      } catch (primaryError: any) {
+        const primaryMessage = String(primaryError?.message || "");
+        if (!primaryMessage.toLowerCase().includes("unknown schema")) throw primaryError;
+        data = await extractFromFile(aiFile, "insurance_claim");
+      }
+      const ignored = new Set(["items_json", "vat_detected"]);
+      const fields = Object.entries(data)
+        .filter(([key, value]) => !ignored.has(key) && String(value || "").trim())
+        .map(([key, value]): ExtractedField => {
+          const extracted = String(value || "").trim();
+          return {
+            key,
+            label: AI_FIELD_LABELS[key] || key,
+            current: currentValueForField(key),
+            extracted,
+            confidence: confidenceForKey(key, extracted),
+            apply: confidenceForKey(key, extracted) !== "low",
+          };
+        });
+      setAiFields(fields);
+      setAiItems(parseExtractedItems((data as any).items_json));
+      setAiVatSuggested(String((data as any).vat_detected || "").toLowerCase() === "true" || Boolean((data as any).vat_amount));
+      setAiStatus("ready");
+      void logAiExtraction("ready", { extracted_fields_count: fields.length });
+    } catch (error: any) {
+      setAiStatus("failed");
+      setAiError(error?.message || "فشل تحليل الملف بالذكاء الاصطناعي");
+      void logAiExtraction("failed", { failed_reason: error?.message || "AI extraction failed" });
+    }
+  }
+
+  function patchAiField(index: number, patch: Partial<ExtractedField>) {
+    setAiFields((current) => current.map((field, i) => (i === index ? { ...field, ...patch } : field)));
+  }
+
+  async function logAiExtraction(status: string, extras: Record<string, unknown> = {}) {
+    try {
+      const { data: tenantId } = await supabase.rpc("get_user_tenant_id");
+      const { data: auth } = await supabase.auth.getUser();
+      if (!tenantId) return;
+      await supabase.from("ai_extraction_logs" as any).insert({
+        tenant_id: tenantId,
+        user_id: auth.user?.id || null,
+        file_name: aiFile?.name || null,
+        file_type: aiFile?.type || null,
+        document_type: aiDocType,
+        provider: "active_ai_provider",
+        processing_status: status,
+        ...extras,
+      });
+    } catch {
+      // AI audit must not block estimate editing.
+    }
+  }
+
+  function applyExtractedFields(applyAll = false) {
+    const selected = aiFields.filter((field) => applyAll || field.apply);
+    const nextForm = { ...form };
+    const noteLines: string[] = [];
+    for (const field of selected) {
+      if (field.key === "estimate_date") nextForm.estimate_date = field.extracted;
+      else if (field.key === "valid_until") nextForm.valid_until = field.extracted;
+      else if (field.key === "terms") nextForm.terms = field.extracted;
+      else if (field.key === "general_notes" || field.key.endsWith("_notes") || field.key.includes("description") || field.key.includes("damage")) {
+        noteLines.push(`${field.label}: ${field.extracted}`);
+      } else {
+        noteLines.push(`${field.label}: ${field.extracted}`);
+      }
+    }
+    if (noteLines.length) {
+      nextForm.notes = [nextForm.notes, "AI extracted data (reviewed, not auto-saved):", ...noteLines].filter(Boolean).join("\n");
+    }
+    setForm(nextForm);
+    if (aiItems.length > 0) {
+      setItems(aiItems);
+    }
+    void logAiExtraction("applied", { applied_fields_count: selected.length, extracted_fields_count: aiFields.length });
+    toast.success(`تمت تعبئة ${selected.length} حقلًا و${aiItems.length} بنود من الملف. يرجى المراجعة قبل الحفظ.`);
+    setAiOpen(false);
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
@@ -290,9 +520,14 @@ export default function EstimateForm() {
           <h1 className="text-2xl font-bold">{isEdit ? "تعديل تقدير" : "إنشاء تقدير موحد"}</h1>
           <p className="text-sm text-muted-foreground">كل الأسعار هنا قبل الضريبة. VAT يضاف فوق السعر فقط.</p>
         </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setAiOpen(true)} className="gap-2">
+            <FileUp size={16} /> Extract from Image / Document
+          </Button>
         <Button variant="outline" onClick={() => navigate("/estimates")} className="gap-2">
           <ArrowRight size={16} /> رجوع
         </Button>
+        </div>
       </div>
 
       <Card className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -349,6 +584,28 @@ export default function EstimateForm() {
             </div>
           </div>
         )}
+        {(selectedCustomer || selectedVehicle || selectedClaim || selectedWorkOrder) && (
+          <div className="md:col-span-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="rounded-lg border bg-slate-50/70 p-3 text-sm">
+              <div className="mb-2 font-semibold">Customer</div>
+              <div>{selectedCustomer?.customer_code || "—"} • {selectedCustomer?.name || "—"}</div>
+              <div className="text-muted-foreground">{selectedCustomer?.phone || "—"}</div>
+              <div className="text-muted-foreground">{selectedCustomer?.email || "—"}</div>
+            </div>
+            <div className="rounded-lg border bg-slate-50/70 p-3 text-sm">
+              <div className="mb-2 font-semibold">Vehicle</div>
+              <div>{[selectedVehicle?.brand || selectedVehicle?.make, selectedVehicle?.model, selectedVehicle?.year].filter(Boolean).join(" ") || "—"}</div>
+              <div className="text-muted-foreground">{[selectedVehicle?.plate_letters, selectedVehicle?.plate_number].filter(Boolean).join(" ") || "—"}</div>
+              <div className="text-muted-foreground">VIN: {selectedVehicle?.vin_number || selectedVehicle?.vin || "—"} • Color: {selectedVehicle?.color || "—"}</div>
+            </div>
+            <div className="rounded-lg border bg-slate-50/70 p-3 text-sm">
+              <div className="mb-2 font-semibold">Insurance / Source</div>
+              <div>{selectedClaim?.claim_number || "—"} • {selectedClaim?.insurance_company || "—"}</div>
+              <div className="text-muted-foreground">Work Order: {selectedWorkOrder?.order_number || "—"}</div>
+              <div className="text-muted-foreground">Policy: {selectedClaim?.policy_number || "—"} • Surveyor: {selectedClaim?.surveyor || "—"}</div>
+            </div>
+          </div>
+        )}
         <div>
           <Label>Estimate Date</Label>
           <Input type="date" value={form.estimate_date || ""} onChange={(e) => setForm({ ...form, estimate_date: e.target.value })} />
@@ -357,44 +614,6 @@ export default function EstimateForm() {
           <Label>Valid Until</Label>
           <Input type="date" value={form.valid_until || ""} onChange={(e) => setForm({ ...form, valid_until: e.target.value })} />
         </div>
-        <div>
-          <Label>Vehicle Received</Label>
-          <Input type="datetime-local" value={String(form.vehicle_received_at || "").slice(0, 16)} onChange={(e) => setForm({ ...form, vehicle_received_at: e.target.value ? new Date(e.target.value).toISOString() : null })} />
-        </div>
-        <div>
-          <Label>Work Started</Label>
-          <Input type="datetime-local" value={String(form.work_started_at || "").slice(0, 16)} onChange={(e) => setForm({ ...form, work_started_at: e.target.value ? new Date(e.target.value).toISOString() : null })} />
-        </div>
-        <div>
-          <Label>Vehicle Delivered</Label>
-          <Input type="datetime-local" value={String(form.vehicle_delivered_at || "").slice(0, 16)} onChange={(e) => setForm({ ...form, vehicle_delivered_at: e.target.value ? new Date(e.target.value).toISOString() : null })} />
-        </div>
-        <div>
-          <Label>Vehicle Status</Label>
-          <Select value={form.vehicle_presence_status || "with_customer"} onValueChange={(v) => setForm({ ...form, vehicle_presence_status: v as any })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="with_customer">مع العميل</SelectItem>
-              <SelectItem value="in_workshop">داخل الكراج</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {form.vehicle_presence_status === "in_workshop" && (
-          <>
-            <div>
-              <Label>Location Section</Label>
-              <Input value={form.vehicle_location_section || ""} onChange={(e) => setForm({ ...form, vehicle_location_section: e.target.value })} />
-            </div>
-            <div>
-              <Label>Bay</Label>
-              <Input value={form.vehicle_location_bay || ""} onChange={(e) => setForm({ ...form, vehicle_location_bay: e.target.value })} />
-            </div>
-            <div>
-              <Label>Location Note</Label>
-              <Input value={form.vehicle_location_note || ""} onChange={(e) => setForm({ ...form, vehicle_location_note: e.target.value })} />
-            </div>
-          </>
-        )}
         <div>
           <Label>Customer</Label>
           <Select value={form.customer_id || "none"} onValueChange={(v) => setForm({ ...form, customer_id: v === "none" ? null : v })}>
@@ -415,6 +634,7 @@ export default function EstimateForm() {
             </SelectContent>
           </Select>
         </div>
+        {form.estimate_type === "insurance" && (
         <div>
           <Label>Claim</Label>
           <Select value={form.claim_id || "none"} onValueChange={onClaimChange}>
@@ -425,6 +645,7 @@ export default function EstimateForm() {
             </SelectContent>
           </Select>
         </div>
+        )}
         <div>
           <Label>Work Order</Label>
           <Select value={form.work_order_id || "none"} onValueChange={(v) => setForm({ ...form, work_order_id: v === "none" ? null : v })}>
@@ -522,6 +743,116 @@ export default function EstimateForm() {
           </Button>
         </Card>
       </div>
+
+      <Dialog open={aiOpen} onOpenChange={setAiOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Extract from Image / Document</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-3">
+              <div>
+                <Label>File</Label>
+                <Input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
+                  onChange={(event) => setAiFile(event.target.files?.[0] || null)}
+                />
+                {aiFile && <div className="mt-1 text-xs text-muted-foreground">{aiFile.name} • {(aiFile.size / 1024).toFixed(1)} KB • {aiFile.type || "unknown"}</div>}
+              </div>
+              <div>
+                <Label>Document Type</Label>
+                <Select value={aiDocType} onValueChange={setAiDocType}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto Detect</SelectItem>
+                    <SelectItem value="estimate">Estimate</SelectItem>
+                    <SelectItem value="insurance_estimate">Insurance Estimate</SelectItem>
+                    <SelectItem value="parts_quotation">Parts Quotation</SelectItem>
+                    <SelectItem value="inspection_report">Inspection Report</SelectItem>
+                    <SelectItem value="claim_document">Claim Document</SelectItem>
+                    <SelectItem value="invoice">Invoice</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Language</Label>
+                <Select value={aiLanguage} onValueChange={setAiLanguage}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto</SelectItem>
+                    <SelectItem value="ar">Arabic</SelectItem>
+                    <SelectItem value="en">English</SelectItem>
+                    <SelectItem value="ar_en">Arabic + English</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="button" onClick={analyzeAiFile} disabled={aiStatus === "processing"} className="w-full gap-2">
+                {aiStatus === "processing" ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                Analyze File
+              </Button>
+              <div className="rounded-md border p-2 text-xs">
+                Status: <strong>{aiStatus}</strong>
+                {aiError && <div className="mt-1 text-destructive">{aiError}</div>}
+                {aiVatSuggested && (
+                  <label className="mt-2 flex items-center gap-2">
+                    <input type="checkbox" checked={Boolean(form.vat_enabled)} onChange={(e) => setForm({ ...form, vat_enabled: e.target.checked })} />
+                    VAT 5% was detected. Enable VAT in this estimate.
+                  </label>
+                )}
+              </div>
+            </div>
+            <div className="md:col-span-2 overflow-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="p-2 text-right">Field</th>
+                    <th className="p-2 text-right">Current</th>
+                    <th className="p-2 text-right">Extracted</th>
+                    <th className="p-2 text-right">Confidence</th>
+                    <th className="p-2 text-right">Apply</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aiFields.length === 0 && (
+                    <tr><td colSpan={5} className="p-4 text-center text-muted-foreground">No extracted fields yet.</td></tr>
+                  )}
+                  {aiFields.map((field, index) => (
+                    <tr key={`${field.key}-${index}`} className="border-t">
+                      <td className="p-2 font-medium">{field.label}</td>
+                      <td className="p-2 text-muted-foreground">{field.current || "—"}</td>
+                      <td className="p-2">
+                        <Input value={field.extracted} onChange={(event) => patchAiField(index, { extracted: event.target.value })} />
+                      </td>
+                      <td className="p-2">
+                        <span className={field.confidence === "high" ? "text-emerald-700" : field.confidence === "medium" ? "text-amber-700" : "text-red-700"}>
+                          {field.confidence}
+                        </span>
+                      </td>
+                      <td className="p-2 text-center">
+                        <input type="checkbox" checked={field.apply} onChange={(event) => patchAiField(index, { apply: event.target.checked })} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {aiItems.length > 0 && (
+                <div className="border-t p-3 text-sm">
+                  <div className="font-semibold">Draft items extracted: {aiItems.length}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Items are applied only after confirmation. Review quantities and prices before saving.</div>
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" type="button" onClick={() => setAiOpen(false)}>Cancel</Button>
+            <Button variant="secondary" type="button" onClick={analyzeAiFile} disabled={aiStatus === "processing"}>Re-analyze</Button>
+            <Button variant="outline" type="button" onClick={() => applyExtractedFields(false)} disabled={aiFields.length === 0 && aiItems.length === 0}>Apply Selected</Button>
+            <Button type="button" onClick={() => applyExtractedFields(true)} disabled={aiFields.length === 0 && aiItems.length === 0}>Apply All</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

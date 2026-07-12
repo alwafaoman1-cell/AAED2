@@ -278,7 +278,6 @@ export default function InsuranceClaimDetailRedesigned() {
   const [emailOpen, setEmailOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [documentOpen, setDocumentOpen] = useState(false);
-  const [stageSaving, setStageSaving] = useState<StageKey | null>(null);
   const [locationSection, setLocationSection] = useState("");
   const [locationBay, setLocationBay] = useState("");
   const [locationNote, setLocationNote] = useState("");
@@ -299,6 +298,14 @@ export default function InsuranceClaimDetailRedesigned() {
   const [editOwnerName, setEditOwnerName] = useState("");
   const [editOwnerPhone, setEditOwnerPhone] = useState("");
   const [workOrderSaving, setWorkOrderSaving] = useState(false);
+  const [operationalDatesOpen, setOperationalDatesOpen] = useState(false);
+  const [operationalDatesReason, setOperationalDatesReason] = useState("");
+  const [operationalDatesDraft, setOperationalDatesDraft] = useState({
+    estimate_date: "",
+    vehicle_received_at: "",
+    work_started_at: "",
+    vehicle_delivered_at: "",
+  });
 
   const { data: timeline = [] } = useQuery({
     queryKey: ["claim_audit_logs", currentId],
@@ -386,17 +393,80 @@ export default function InsuranceClaimDetailRedesigned() {
     await queryClient.invalidateQueries({ queryKey: ["claim-linked-work-order", currentId] });
   };
 
-  const stageStatusPatch = (key: StageKey, isoValue: string | null) => {
-    if (!isoValue) return {};
-    if (key === "received_at") return { workshop_arrival_date: isoValue };
-    if (key === "inspection_at") return { estimate_date: isoValue };
-    if (key === "insurance_approved_at") return { status: "approved", approved_at: isoValue };
-    if (key === "repair_started_at") return { work_started_at: isoValue };
-    if (key === "quality_checked_at") return { work_completed_at: isoValue };
-    if (key === "delivered_at") return { status: "delivered" };
-    if (key === "invoice_collected_at") return { status: "paid" };
-    return {};
+  const operationalDates = {
+    estimate_date: dateOnly((claim as any)?.estimate_date || (claim as any)?.incident_date || (claim as any)?.created_at),
+    vehicle_received_at: dateOnly((claim as any)?.vehicle_received_at || (claim as any)?.workshop_arrival_date || (claim as any)?.received_at),
+    work_started_at: dateOnly((claim as any)?.work_started_at || (claim as any)?.repair_started_at),
+    vehicle_delivered_at: dateOnly((claim as any)?.vehicle_delivered_at || (claim as any)?.delivered_at),
   };
+
+  function openOperationalDatesDialog() {
+    setOperationalDatesDraft(operationalDates);
+    setOperationalDatesReason("");
+    setOperationalDatesOpen(true);
+  }
+
+  async function syncWorkOrderOperationalDates(patch: Record<string, unknown>) {
+    const workOrderId = workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id;
+    if (!workOrderId) return;
+    const woPatch: Record<string, unknown> = {};
+    if ("vehicle_received_at" in patch) woPatch.vehicle_received_at = patch.vehicle_received_at;
+    if ("work_started_at" in patch) woPatch.work_started_at = patch.work_started_at;
+    if ("vehicle_delivered_at" in patch) woPatch.vehicle_delivered_at = patch.vehicle_delivered_at;
+    if (!Object.keys(woPatch).length) return;
+    try {
+      await supabase.from("job_orders" as any).update(woPatch).eq("id", workOrderId);
+    } catch (error) {
+      console.warn("[claim operational dates] work order sync skipped", error);
+    }
+  }
+
+  async function syncEstimateDateIfLinked(value: string | null) {
+    const estimateId = (claim as any)?.source_estimate_id;
+    if (!estimateId || !value) return;
+    try {
+      await supabase.from("estimates" as any).update({ estimate_date: value }).eq("id", estimateId);
+    } catch (error) {
+      console.warn("[claim operational dates] estimate date sync skipped", error);
+    }
+  }
+
+  async function saveOperationalDates() {
+    if (!currentId || !claim) return;
+    if (!operationalDatesReason.trim()) {
+      toast.error("سبب التعديل مطلوب");
+      return;
+    }
+    const patch = {
+      estimate_date: operationalDatesDraft.estimate_date || null,
+      vehicle_received_at: toIsoOrNull(operationalDatesDraft.vehicle_received_at),
+      vehicle_delivered_at: toIsoOrNull(operationalDatesDraft.vehicle_delivered_at),
+      work_started_at: toIsoOrNull(operationalDatesDraft.work_started_at),
+    };
+    try {
+      await updateClaimColumns(currentId, patch, {
+        existingNotes: claim.notes,
+        markers: {
+          ESTIMATE_DATE: operationalDatesDraft.estimate_date || null,
+          VEHICLE_RECEIVED_AT: operationalDatesDraft.vehicle_received_at || null,
+          WORK_STARTED_AT: operationalDatesDraft.work_started_at || null,
+          VEHICLE_DELIVERED_AT: operationalDatesDraft.vehicle_delivered_at || null,
+        },
+      });
+      await syncWorkOrderOperationalDates(patch);
+      await syncEstimateDateIfLinked(operationalDatesDraft.estimate_date || null);
+      await insertTimeline(claim, "operational_dates_updated", {
+        old: operationalDates,
+        new: operationalDatesDraft,
+        reason: operationalDatesReason.trim(),
+      });
+      await refreshClaim();
+      setOperationalDatesOpen(false);
+      toast.success("تم حفظ التواريخ التشغيلية");
+    } catch (error: any) {
+      toast.error(error?.message || "فشل حفظ التواريخ التشغيلية");
+    }
+  }
 
   const locationSyncPatch = (section: string, updatedAt: string) => {
     const normalized = section.trim();
@@ -407,39 +477,24 @@ export default function InsuranceClaimDetailRedesigned() {
     if (isDelivered) {
       return {
         delivered_at: (claim as any)?.delivered_at || updatedAt,
+        vehicle_delivered_at: (claim as any)?.vehicle_delivered_at || updatedAt,
+        vehicle_presence_status: "with_customer",
         status: "delivered",
       };
     }
 
     if (isWithCustomer || isOutside) {
       return {
-        workshop_arrival_date: null,
-        received_at: null,
-        delivered_at: null,
+        vehicle_presence_status: "with_customer",
       };
     }
 
     return {
       workshop_arrival_date: (claim as any)?.workshop_arrival_date || updatedAt,
       received_at: (claim as any)?.received_at || updatedAt,
-      delivered_at: null,
+      vehicle_received_at: (claim as any)?.vehicle_received_at || updatedAt,
+      vehicle_presence_status: "in_workshop",
     };
-  };
-
-  const saveStageDate = async (key: StageKey, value: string) => {
-    if (!currentId || !claim) return;
-    setStageSaving(key);
-    try {
-      const isoValue = toIsoOrNull(value);
-      await updateClaimColumns(currentId, { [key]: isoValue, ...stageStatusPatch(key, isoValue) });
-      await insertTimeline(claim, "claim_stage_date_updated", { stage: key, date: value });
-      await refreshClaim();
-      toast.success("تم حفظ تاريخ المرحلة");
-    } catch (e: any) {
-      toast.error(e?.message || "فشل حفظ تاريخ المرحلة");
-    } finally {
-      setStageSaving(null);
-    }
   };
 
   const saveVehicleLocation = async () => {
@@ -456,14 +511,15 @@ export default function InsuranceClaimDetailRedesigned() {
     try {
       const { data: auth } = await supabase.auth.getUser();
       const updatedAt = new Date().toISOString();
-      await updateClaimColumns(currentId, {
+      const locationPatch = {
         vehicle_location_section: locationSection,
         vehicle_location_bay: locationBay.trim() || null,
         vehicle_location_note: locationNote.trim() || null,
         vehicle_location_updated_at: updatedAt,
         vehicle_location_updated_by: auth.user?.id || null,
         ...locationSyncPatch(locationSection, updatedAt),
-      }, {
+      };
+      await updateClaimColumns(currentId, locationPatch, {
         existingNotes: claim.notes,
         markers: {
           VEHICLE_LOCATION_SECTION: locationSection,
@@ -472,6 +528,21 @@ export default function InsuranceClaimDetailRedesigned() {
           VEHICLE_LOCATION_UPDATED_AT: updatedAt,
         },
       });
+      try {
+        const workOrderId = workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id;
+        if (workOrderId) {
+          await supabase.from("job_orders" as any).update({
+            vehicle_location_section: locationSection,
+            vehicle_location_bay: locationBay.trim() || null,
+            vehicle_location_note: locationNote.trim() || null,
+            vehicle_presence_status: (locationPatch as any).vehicle_presence_status || null,
+            vehicle_received_at: (locationPatch as any).vehicle_received_at || undefined,
+            vehicle_delivered_at: (locationPatch as any).vehicle_delivered_at || undefined,
+          } as any).eq("id", workOrderId);
+        }
+      } catch (syncError) {
+        console.warn("[claim location] work order sync skipped", syncError);
+      }
       await insertTimeline(claim, "vehicle_location_updated", {
         section: locationSection,
         bay: locationBay.trim() || null,
@@ -882,18 +953,25 @@ export default function InsuranceClaimDetailRedesigned() {
               >
                 <div className="text-xl">{stage.icon}</div>
                 <div className="min-h-[32px]">{stage.label}</div>
-                <Input
-                  type="date"
-                  defaultValue={value}
-                  disabled={stageSaving === stage.key}
-                  className="mt-2 h-8 text-center text-[11px]"
-                  onBlur={(event) => {
-                    if (event.currentTarget.value !== value) void saveStageDate(stage.key, event.currentTarget.value);
-                  }}
-                />
+                <div className="mt-2 text-[11px] font-mono">{value || "—"}</div>
               </div>
             );
           })}
+        </Card>
+
+        <Card className="rounded-2xl border bg-white p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <SectionTitle icon={<CalendarClock className="h-5 w-5" />} title="Operational Dates / التواريخ التشغيلية" />
+            <Button variant="outline" size="sm" onClick={openOperationalDatesDialog}>
+              <Pencil className="ml-2 h-4 w-4" /> تعديل
+            </Button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-4">
+            <InfoField label="Estimate Date" value={operationalDates.estimate_date || "—"} mono />
+            <InfoField label="Vehicle Received" value={operationalDates.vehicle_received_at || "—"} mono />
+            <InfoField label="Work Started" value={operationalDates.work_started_at || "—"} mono />
+            <InfoField label="Vehicle Delivered" value={operationalDates.vehicle_delivered_at || "—"} mono />
+          </div>
         </Card>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,2.1fr)_minmax(320px,.9fr)]">
@@ -1183,6 +1261,38 @@ export default function InsuranceClaimDetailRedesigned() {
               setInspectionOpen(false);
               toast.success("تم تسجيل طلب ربط/إنشاء نموذج الفحص في السجل");
             }} style={{ background: PRIMARY, color: "white" }}>حفظ وربط بالمطالبة</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={operationalDatesOpen} onOpenChange={setOperationalDatesOpen}>
+        <DialogContent dir="rtl" className="max-w-2xl">
+          <DialogHeader><DialogTitle>Operational Dates / التواريخ التشغيلية</DialogTitle></DialogHeader>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <Label>Estimate Date</Label>
+              <Input type="date" value={operationalDatesDraft.estimate_date} onChange={(e) => setOperationalDatesDraft((d) => ({ ...d, estimate_date: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Vehicle Received At</Label>
+              <Input type="date" value={operationalDatesDraft.vehicle_received_at} onChange={(e) => setOperationalDatesDraft((d) => ({ ...d, vehicle_received_at: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Work Started At</Label>
+              <Input type="date" value={operationalDatesDraft.work_started_at} onChange={(e) => setOperationalDatesDraft((d) => ({ ...d, work_started_at: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Vehicle Delivered At</Label>
+              <Input type="date" value={operationalDatesDraft.vehicle_delivered_at} onChange={(e) => setOperationalDatesDraft((d) => ({ ...d, vehicle_delivered_at: e.target.value }))} />
+            </div>
+            <div className="md:col-span-2">
+              <Label>Reason</Label>
+              <Textarea value={operationalDatesReason} onChange={(e) => setOperationalDatesReason(e.target.value)} placeholder="سبب تعديل التواريخ" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setOperationalDatesOpen(false)}>Cancel</Button>
+            <Button style={{ background: PRIMARY, color: "white" }} onClick={saveOperationalDates}>Save</Button>
           </div>
         </DialogContent>
       </Dialog>

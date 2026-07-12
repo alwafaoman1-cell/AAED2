@@ -12,6 +12,7 @@ import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min?url";
 export type ExtractSchema =
   | "vehicle_customer"
   | "insurance_claim"
+  | "estimate_document"
   | "expense_receipt"
   | "spare_part"
   | "delivery_receipt"
