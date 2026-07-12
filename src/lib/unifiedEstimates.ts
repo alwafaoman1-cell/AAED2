@@ -59,7 +59,7 @@ export interface UnifiedEstimate {
   created_at: string;
   updated_at: string;
   customer?: { id: string; name: string | null; phone: string | null; customer_code?: string | null } | null;
-  vehicle?: { id: string; make: string | null; model: string | null; plate_number: string | null; vin?: string | null; year?: number | null } | null;
+  vehicle?: { id: string; brand?: string | null; make?: string | null; model: string | null; plate_number: string | null; vin?: string | null; vin_number?: string | null; year?: number | null } | null;
   claim?: { id: string; claim_number: string | null; insurance_company: string | null } | null;
   work_order?: { id: string; order_number: string | null; status: string | null } | null;
   items?: UnifiedEstimateItem[];
@@ -134,7 +134,7 @@ export function calculateEstimateTotals(items: EstimateItemInput[], vatRate = 5)
 const estimateSelect = `
   *,
   customer:customers(id,name,phone,customer_code),
-  vehicle:vehicles(id,make,model,plate_number,vin,year),
+  vehicle:vehicles(id,brand,model,plate_number,vin,vin_number,year),
   claim:insurance_claims(id,claim_number,insurance_company),
   work_order:job_orders(id,order_number,status)
 `;

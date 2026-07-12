@@ -93,7 +93,7 @@ export default function EstimateDetail() {
           <Card className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <Info label="العميل" value={`${estimate.customer?.customer_code || ""} ${estimate.customer?.name || "—"}`} />
             <Info label="الهاتف" value={estimate.customer?.phone || "—"} />
-            <Info label="المركبة" value={[estimate.vehicle?.make, estimate.vehicle?.model, estimate.vehicle?.year].filter(Boolean).join(" ") || "—"} />
+            <Info label="المركبة" value={[estimate.vehicle?.brand || estimate.vehicle?.make, estimate.vehicle?.model, estimate.vehicle?.year].filter(Boolean).join(" ") || "—"} />
             <Info label="اللوحة" value={estimate.vehicle?.plate_number || "—"} />
             <Info label="المطالبة" value={estimate.claim?.claim_number || "—"} />
             <Info label="أمر العمل" value={estimate.work_order?.order_number || "—"} />
@@ -174,4 +174,3 @@ function Info({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

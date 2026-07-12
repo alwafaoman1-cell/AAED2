@@ -62,7 +62,7 @@ export async function getVehiclesOverStayAlerts(minDays = 25): Promise<VehicleSt
       vehicle_stay_last_contact_at,
       vehicle_stay_alert_excluded,
       customer:customers(id,name,phone),
-      vehicle:vehicles(id,make,model,plate_number),
+      vehicle:vehicles(id,brand,model,plate_number),
       job_order:job_orders(id,order_number,status)
     `)
     .order("workshop_arrival_date", { ascending: true, nullsFirst: false });
@@ -75,7 +75,7 @@ export async function getVehiclesOverStayAlerts(minDays = 25): Promise<VehicleSt
       const deliveredAt = claim.delivered_at;
       const status = String(claim.status || claim.job_order?.status || "").toLowerCase();
       const days = receivedAt ? daysBetween(receivedAt, now) : 0;
-      const vehicleLabel = [claim.vehicle?.make, claim.vehicle?.model].filter(Boolean).join(" ") || "—";
+      const vehicleLabel = [claim.vehicle?.brand, claim.vehicle?.model].filter(Boolean).join(" ") || "—";
       return {
         claim_id: claim.id,
         work_order_id: claim.job_order?.id || null,
@@ -135,4 +135,3 @@ export async function excludeVehicleStayAlert(row: VehicleStayAlertRow) {
     .eq("id", row.claim_id);
   if (error) throw error;
 }
-

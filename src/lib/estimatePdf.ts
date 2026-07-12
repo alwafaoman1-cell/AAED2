@@ -22,7 +22,7 @@ export function buildEstimatePdfHtml(estimate: UnifiedEstimate, lang: "ar" | "en
   const isAr = lang === "ar";
   const typeLabel = ESTIMATE_TYPE_LABEL[estimate.estimate_type]?.[lang] || estimate.estimate_type;
   const customerName = estimate.customer?.name || "—";
-  const vehicle = [estimate.vehicle?.make, estimate.vehicle?.model, estimate.vehicle?.year].filter(Boolean).join(" ") || "—";
+  const vehicle = [estimate.vehicle?.brand || estimate.vehicle?.make, estimate.vehicle?.model, estimate.vehicle?.year].filter(Boolean).join(" ") || "—";
   const plate = estimate.vehicle?.plate_number || "—";
   const vin = estimate.vehicle?.vin || "—";
   const rows = (estimate.items || []).map((item, index) => {
@@ -148,4 +148,3 @@ export function buildEstimatePdfHtml(estimate: UnifiedEstimate, lang: "ar" | "en
 </body>
 </html>`;
 }
-

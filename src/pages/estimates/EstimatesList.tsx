@@ -147,7 +147,7 @@ export default function EstimatesList() {
                 </div>
                 <div className="mt-3 space-y-1 text-sm">
                   <div className="font-semibold">{estimate.customer?.name || "—"}</div>
-                  <div className="text-muted-foreground">{estimate.vehicle?.plate_number || "—"} • {[estimate.vehicle?.make, estimate.vehicle?.model].filter(Boolean).join(" ") || "—"}</div>
+                  <div className="text-muted-foreground">{estimate.vehicle?.plate_number || "—"} • {[estimate.vehicle?.brand || estimate.vehicle?.make, estimate.vehicle?.model].filter(Boolean).join(" ") || "—"}</div>
                   {estimate.claim?.claim_number && <div className="text-muted-foreground">مطالبة: {estimate.claim.claim_number}</div>}
                 </div>
                 <div className="mt-3 pt-3 border-t flex items-center justify-between">

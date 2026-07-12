@@ -50,7 +50,7 @@ export default function EstimateForm() {
     queryFn: async () => {
       const [customers, vehicles, claims, workOrders, estimates] = await Promise.all([
         supabase.from("customers").select("id,name,phone,customer_code").order("created_at", { ascending: false }).limit(200),
-        supabase.from("vehicles").select("id,make,model,plate_number,vin,year,customer_id").order("created_at", { ascending: false }).limit(200),
+        supabase.from("vehicles").select("id,brand,model,plate_number,vin,vin_number,year,customer_id").order("created_at", { ascending: false }).limit(200),
         supabase.from("insurance_claims").select("id,claim_number,insurance_company,customer_id,vehicle_id").order("created_at", { ascending: false }).limit(200),
         supabase.from("job_orders").select("id,order_number,status,customer_id,vehicle_id,claim_id").order("created_at", { ascending: false }).limit(200),
         supabase.from("estimates" as any).select("id,estimate_number,estimate_type,total").order("created_at", { ascending: false }).limit(200),
@@ -209,7 +209,7 @@ export default function EstimateForm() {
             <SelectTrigger><SelectValue placeholder="اختر المركبة" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">— بدون —</SelectItem>
-              {lookups?.vehicles.map((v: any) => <SelectItem key={v.id} value={v.id}>{v.plate_number || "—"} • {[v.make, v.model].filter(Boolean).join(" ")}</SelectItem>)}
+              {lookups?.vehicles.map((v: any) => <SelectItem key={v.id} value={v.id}>{v.plate_number || "—"} • {[v.brand || v.make, v.model].filter(Boolean).join(" ")}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
