@@ -87,8 +87,6 @@ const InsurancePayments = lazy(() => import("./pages/insurance/InsurancePayments
 const InvestorsReport = lazy(() => import("./pages/insurance/InvestorsReport"));
 const InsuranceWorkOrders = lazy(() => import("./pages/insurance/InsuranceWorkOrders"));
 const InsuranceAccounting = lazy(() => import("./pages/insurance/InsuranceAccounting"));
-const InsuranceEstimates = lazy(() => import("./pages/insurance/InsuranceEstimates"));
-const InsuranceIndependentEstimates = lazy(() => import("./pages/insurance/InsuranceIndependentEstimates"));
 const InsuranceDocumentsArchive = lazy(() => import("./pages/insurance/InsuranceDocumentsArchive"));
 const InsuranceImport = lazy(() => import("./pages/insurance/InsuranceImport"));
 const ClaimArchivePage = lazy(() => import("./pages/insurance/ClaimArchivePage"));
@@ -110,6 +108,10 @@ const CloudAdvancedReports = lazy(() => import("./pages/reports/CloudAdvancedRep
 const EInvoicingSettingsPage = lazy(() => import("./pages/settings/EInvoicingSettingsPage"));
 const CompletedWithoutInvoice = lazy(() => import("./pages/reports/CompletedWithoutInvoice"));
 const OverdueInvoices = lazy(() => import("./pages/reports/OverdueInvoices"));
+const VehiclesOver30Days = lazy(() => import("./pages/reports/VehiclesOver30Days"));
+const EstimatesList = lazy(() => import("./pages/estimates/EstimatesList"));
+const EstimateForm = lazy(() => import("./pages/estimates/EstimateForm"));
+const EstimateDetail = lazy(() => import("./pages/estimates/EstimateDetail"));
 const ExecutiveDashboard = lazy(() => import("./pages/dashboard/ExecutiveDashboard"));
 const PrintTemplates = lazy(() => import("./pages/settings/PrintTemplates"));
 const PrintTemplateVariants = lazy(() => import("./pages/settings/PrintTemplateVariants"));
@@ -147,6 +149,7 @@ const SupplementApprovalPage = lazy(() => import("./pages/public/SupplementAppro
 const VehicleBelongingsSettingsPage = lazy(() => import("./pages/settings/VehicleBelongingsSettingsPage"));
 const MessagesCenter = lazy(() => import("./pages/MessagesCenter"));
 const CustomerNotificationsSettingsPage = lazy(() => import("./pages/settings/CustomerNotificationsSettingsPage"));
+const VehicleStayAlertsSettingsPage = lazy(() => import("./pages/settings/VehicleStayAlertsSettingsPage"));
 const AdminNotifications = lazy(() => import("./pages/AdminNotifications"));
 const SaasAdminConsole = lazy(() => import("./pages/admin/SaasAdminConsole"));
 const TenantFiles = lazy(() => import("./pages/admin/TenantFiles"));
@@ -256,6 +259,10 @@ const App = () => (
               <Route path="/sales/recurring/:id/edit" element={<NewRecurring />} />
               <Route path="/sales/payments" element={<CustomerPayments />} />
               <Route path="/sales/settings" element={<SalesSettings />} />
+              <Route path="/estimates" element={<EstimatesList />} />
+              <Route path="/estimates/new" element={<EstimateForm />} />
+              <Route path="/estimates/:id" element={<EstimateDetail />} />
+              <Route path="/estimates/:id/edit" element={<EstimateForm />} />
               <Route path="/accounting" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Accounting /></ProtectedRoute>} />
               <Route path="/accounting/expenses" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />
               <Route path="/accounting/expenses/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />
@@ -293,8 +300,8 @@ const App = () => (
                 <Route path="/insurance/companies" element={<InsuranceCompanies />} />
                 <Route path="/insurance/work-orders" element={<InsuranceWorkOrders />} />
                 <Route path="/insurance/accounting" element={<InsuranceAccounting />} />
-                <Route path="/insurance/estimates" element={<InsuranceEstimates />} />
-                <Route path="/insurance/independent-estimates" element={<InsuranceIndependentEstimates />} />
+                <Route path="/insurance/estimates" element={<Navigate to="/estimates?type=insurance" replace />} />
+                <Route path="/insurance/independent-estimates" element={<Navigate to="/estimates?type=independent" replace />} />
                 <Route path="/insurance/documents" element={<InsuranceDocumentsArchive />} />
                 <Route path="/insurance/import" element={<InsuranceImport />} />
                 <Route path="/insurance/companies/:id" element={<InsuranceCompanyDetail />} />
@@ -317,6 +324,7 @@ const App = () => (
               <Route path="/reports/monthly" element={<MonthlyReport />} />
               <Route path="/reports/completed-without-invoice" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><CompletedWithoutInvoice /></ProtectedRoute>} />
               <Route path="/reports/overdue-invoices" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><OverdueInvoices /></ProtectedRoute>} />
+              <Route path="/reports/vehicles-over-30-days" element={<ProtectedRoute roles={["admin", "manager", "insurance", "supervisor"]}><VehiclesOver30Days /></ProtectedRoute>} />
               <Route path="/reports/cloud-advanced" element={<ProtectedRoute roles={["admin", "manager", "accountant", "insurance"]}><CloudAdvancedReports /></ProtectedRoute>} />
               <Route path="/dashboard/executive" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><ExecutiveDashboard /></ProtectedRoute>} />
               <Route path="/media-studio" element={<MediaStudio />} />
@@ -353,6 +361,7 @@ const App = () => (
               <Route path="/admin/saas" element={<ProtectedRoute roles={["admin","manager"]}><SaasAdminConsole /></ProtectedRoute>} />
               <Route path="/admin/files" element={<ProtectedRoute roles={["admin","manager"]}><TenantFiles /></ProtectedRoute>} />
               <Route path="/settings/customer-notifications" element={<ProtectedRoute roles={["admin","manager"]}><CustomerNotificationsSettingsPage /></ProtectedRoute>} />
+              <Route path="/settings/vehicle-stay-alerts" element={<ProtectedRoute roles={["admin","manager"]}><VehicleStayAlertsSettingsPage /></ProtectedRoute>} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

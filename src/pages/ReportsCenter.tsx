@@ -5,7 +5,7 @@ import {
   ArrowRight, FileBarChart, FileText, FileSpreadsheet, Download, Upload,
   ShoppingCart, Building2, TrendingUp, Receipt, Car, Package,
   ArrowDownUp, ClipboardList, Users, BookOpen, BookCheck, Search,
-  ShieldCheck, Wallet, Wrench, MinusCircle, FilePlus2, Archive,
+  ShieldCheck, Wallet, Wrench, MinusCircle, FilePlus2, Archive, Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +55,7 @@ const ITEMS: ExportItem[] = [
   { key: "wo-delivery", title: "إقرارات استلام السيارات", description: "PDF إقرار استلام موقّع", icon: FilePlus2, group: "workorders", route: "/work-orders", format: "pdf", badge: "جديد" },
   { key: "wo-inspections", title: "تقارير الفحص", description: "تقارير الفحص العامة وفحوصات التأمين", icon: Wrench, group: "workorders", route: "/inspection", format: "pdf" },
   { key: "wo-report", title: "تقرير أوامر الشغل", description: "تقرير شامل بحالات الأوامر والتكاليف", icon: ClipboardList, group: "workorders", route: "/reports?tab=operational&report=workOrders", format: "excel", badge: "Excel" },
+  { key: "vehicles-over-30-days", title: "المركبات المتأخرة داخل الورشة", description: "تنبيهات داخلية ومسودات تواصل للمركبات الموجودة 30 يومًا أو أكثر", icon: Bell, group: "workorders", route: "/reports/vehicles-over-30-days", format: "report", badge: "30+" },
   { key: "wo-statement", title: "كشف حساب أوامر الشغل والصيانة", description: "كشف تفصيلي بكل أمر شغل: تكلفة، عمالة، أجر الزبون، الربح/الخسارة + PDF أفقي", icon: ClipboardList, group: "workorders", route: "/reports/work-orders-statement", format: "pdf", badge: "PDF أفقي" },
   { key: "daily-log", title: "السجل اليومي (نموذج الورشة)", description: "جدول يومي بنفس شكل النموذج — رفع Excel + توليد أمر عمل وفاتورة لكل صف", icon: FileSpreadsheet, group: "workorders", route: "/daily-log", format: "excel", badge: "جديد ⭐" },
 

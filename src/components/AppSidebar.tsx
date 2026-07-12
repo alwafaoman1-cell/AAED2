@@ -55,6 +55,7 @@ const menuItems: MenuItem[] = [
       { path: "/sales/recurring", labelKey: "nav.recurringInvoices", icon: History },
     ],
   },
+  { path: "/estimates", labelKey: "التقديرات الموحدة", icon: FileSpreadsheet },
   {
     path: "/inventory",
     labelKey: "nav.inventory",
@@ -117,6 +118,7 @@ const menuItems: MenuItem[] = [
       { path: "/settings/audit-log", labelKey: "nav.auditLog", icon: History },
       { path: "/settings/backup", labelKey: "النسخ الاحتياطي", icon: Database },
       { path: "/settings/ai-keys", labelKey: "مفاتيح الذكاء الاصطناعي", icon: Key },
+      { path: "/settings/vehicle-stay-alerts", labelKey: "تنبيهات بقاء المركبة", icon: Bell },
       { path: "/settings/trash", labelKey: "nav.trash", icon: Trash2 },
     ],
   },
