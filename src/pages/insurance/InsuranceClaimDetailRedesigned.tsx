@@ -45,6 +45,7 @@ import { useClaimDocuments } from "@/hooks/useClaimDocuments";
 import { displayCustomerCode } from "@/lib/customerCode";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { isUuid } from "@/lib/uuid";
+import { saveWorkOrderToCloud, type WorkOrder } from "@/lib/workOrdersStore";
 
 const PRIMARY = "#0f2f57";
 const GOLD = "#c69b43";
@@ -296,6 +297,7 @@ export default function InsuranceClaimDetailRedesigned() {
   const [editApprovedAmount, setEditApprovedAmount] = useState("");
   const [editOwnerName, setEditOwnerName] = useState("");
   const [editOwnerPhone, setEditOwnerPhone] = useState("");
+  const [workOrderSaving, setWorkOrderSaving] = useState(false);
 
   const { data: timeline = [] } = useQuery({
     queryKey: ["claim_audit_logs", currentId],
@@ -383,11 +385,20 @@ export default function InsuranceClaimDetailRedesigned() {
     await queryClient.invalidateQueries({ queryKey: ["claim-linked-work-order", currentId] });
   };
 
+  const stageStatusPatch = (key: StageKey, isoValue: string | null) => {
+    if (!isoValue) return {};
+    if (key === "insurance_approved_at") return { status: "approved", approved_at: isoValue };
+    if (key === "delivered_at") return { status: "delivered" };
+    if (key === "invoice_collected_at") return { status: "paid" };
+    return {};
+  };
+
   const saveStageDate = async (key: StageKey, value: string) => {
     if (!currentId || !claim) return;
     setStageSaving(key);
     try {
-      await updateClaimColumns(currentId, { [key]: toIsoOrNull(value) });
+      const isoValue = toIsoOrNull(value);
+      await updateClaimColumns(currentId, { [key]: isoValue, ...stageStatusPatch(key, isoValue) });
       await insertTimeline(claim, "claim_stage_date_updated", { stage: key, date: value });
       await refreshClaim();
       toast.success("تم حفظ تاريخ المرحلة");
@@ -436,6 +447,95 @@ export default function InsuranceClaimDetailRedesigned() {
       toast.success("تم تحديث موقع المركبة");
     } catch (e: any) {
       toast.error(e?.message || "فشل تحديث موقع المركبة");
+    }
+  };
+
+  const approveClaim = async () => {
+    if (!currentId || !claim) return;
+    try {
+      const approvedAt = new Date().toISOString();
+      await updateClaimColumns(currentId, {
+        status: "approved",
+        approved_at: approvedAt,
+        insurance_approved_at: (claim as any).insurance_approved_at || approvedAt,
+      });
+      await insertTimeline(claim, "claim_approved", { claim_number: claim.claim_number, approved_at: approvedAt });
+      await refreshClaim();
+      toast.success("تم اعتماد المطالبة");
+    } catch (e: any) {
+      toast.error(e?.message || "فشل اعتماد المطالبة");
+    }
+  };
+
+  const openOrCreateWorkOrder = async () => {
+    if (!claim || !currentId) return;
+    if (workOrder?.order_number || workOrder?.id) {
+      navigate(`/work-orders/${workOrder.order_number || workOrder.id}`);
+      return;
+    }
+    if (!claim.customer_id || !claim.vehicle_id) {
+      toast.error("لا يمكن إنشاء أمر عمل بدون ربط عميل ومركبة بالمطالبة");
+      return;
+    }
+    setWorkOrderSaving(true);
+    try {
+      const now = new Date();
+      const orderNumber = `WO-${now.getFullYear()}-${String(now.getTime() % 100000).padStart(5, "0")}`;
+      const order: WorkOrder = {
+        id: orderNumber,
+        workOrderType: "insurance",
+        claimId: currentId,
+        customerId: claim.customer_id,
+        vehicleId: claim.vehicle_id,
+        customer: customer?.name || (claim as any).vehicle_owner_name || "Insurance Customer",
+        phone: customer?.phone || (claim as any).vehicle_owner_phone || "",
+        plate: plate || inlineVehicle.plate || "-",
+        vehicleType: vehicleName || [inlineVehicle.make, inlineVehicle.model].filter(Boolean).join(" ") || "Vehicle",
+        model: String(vehicle?.model || inlineVehicle.model || ""),
+        year: String(vehicle?.year || inlineVehicle.year || ""),
+        vin: String(vehicle?.vin || inlineVehicle.vin || ""),
+        color: String(vehicle?.color || inlineVehicle.color || ""),
+        insurance: claim.insurance_company || "",
+        claimNumber: claim.claim_number || "",
+        entryDate: dateOnly((claim as any).received_at || claim.workshop_arrival_date || now.toISOString()) || now.toISOString().slice(0, 10),
+        technician: "",
+        serviceType: "Insurance Repair",
+        status: "open",
+        totalCost: subtotal,
+        description: `Insurance claim ${claim.claim_number || ""}`,
+        laborCost: 0,
+        partsCost: 0,
+        insuranceApprovedAmount: total || subtotal,
+        insuranceApprovalMode: "lump_sum",
+        lumpSumNotItemized: true,
+        workItems: [{ id: `claim-${currentId}`, title: `Insurance repair claim ${claim.claim_number || ""}` }],
+        receivedAt: (claim as any).received_at || claim.workshop_arrival_date || now.toISOString(),
+      };
+      const saved = await saveWorkOrderToCloud(order);
+      const approvedAt = new Date().toISOString();
+      await updateClaimColumns(currentId, {
+        status: "approved",
+        approved_at: approvedAt,
+        insurance_approved_at: (claim as any).insurance_approved_at || approvedAt,
+        job_order_id: saved.cloudId || null,
+      }, {
+        existingNotes: claim.notes,
+        markers: {
+          LINKED_WORK_ORDER_ID: saved.cloudId || saved.id,
+          LINKED_WORK_ORDER_NUMBER: saved.id,
+        },
+      });
+      await insertTimeline(claim, "work_order_created_from_claim", {
+        work_order_id: saved.cloudId || saved.id,
+        work_order_number: saved.id,
+      });
+      await refreshClaim();
+      toast.success("تم إنشاء وربط أمر العمل");
+      navigate(`/work-orders/${saved.id}`);
+    } catch (e: any) {
+      toast.error(e?.message || "فشل إنشاء أمر العمل من المطالبة");
+    } finally {
+      setWorkOrderSaving(false);
     }
   };
 
@@ -687,8 +787,13 @@ export default function InsuranceClaimDetailRedesigned() {
               <Button variant="outline" onClick={openEditClaim}>
                 <Pencil className="ml-2 h-4 w-4" /> تعديل
               </Button>
-              <Button variant="outline" onClick={() => workOrder?.order_number || workOrder?.id ? navigate(`/work-orders/${workOrder.order_number || workOrder.id}`) : toast.info("لا يوجد أمر عمل مرتبط")}>
-                <Wrench className="ml-2 h-4 w-4" /> فتح أمر العمل
+              {claim.status !== "approved" && (
+                <Button variant="outline" onClick={approveClaim}>
+                  <ShieldCheck className="ml-2 h-4 w-4" /> اعتماد المطالبة
+                </Button>
+              )}
+              <Button variant="outline" disabled={workOrderSaving} onClick={openOrCreateWorkOrder}>
+                <Wrench className="ml-2 h-4 w-4" /> {workOrder?.order_number || workOrder?.id ? "فتح أمر العمل" : "إنشاء أمر عمل"}
               </Button>
               <Button variant="outline" onClick={() => setLocationOpen(true)}>
                 <MapPin className="ml-2 h-4 w-4" /> موقع المركبة
@@ -703,7 +808,7 @@ export default function InsuranceClaimDetailRedesigned() {
                 <Send className="ml-2 h-4 w-4" /> إرسال تقرير التأمين
               </Button>
               <Button variant="secondary" onClick={requestLpo}>طلب إصدار LPO</Button>
-              <Button style={{ background: PRIMARY, color: "white" }} onClick={() => toast.info("الحقول المعروضة محفوظة من إجراءاتها المباشرة")}>
+              <Button style={{ background: PRIMARY, color: "white" }} onClick={() => refreshClaim().then(() => toast.success("تم تحديث البيانات من Supabase"))}>
                 <Save className="ml-2 h-4 w-4" /> حفظ
               </Button>
             </div>

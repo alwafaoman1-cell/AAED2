@@ -120,6 +120,7 @@ export default function NewInsuranceClaim() {
   useEffect(() => {
     let cancelled = false;
     draftHydratedRef.current = false;
+    const shouldResumeDraft = params.get("resumeDraft") === "1" || params.get("draft") === "1";
 
     const applyDraft = (stored: { savedAt: number; data: Draft } | null) => {
       if (!stored?.savedAt || Date.now() - stored.savedAt >= 1000 * 60 * 60 * 24 * 3) return;
@@ -130,6 +131,17 @@ export default function NewInsuranceClaim() {
     };
 
     void (async () => {
+      if (!shouldResumeDraft) {
+        const c = params.get("company");
+        skipNextDraftSaveRef.current = true;
+        savedDraftAtRef.current = null;
+        setSavedDraftAt(null);
+        setDraft({ ...emptyDraft(), company: c || "" });
+        await writeCloudSetting(cloudDraftKey, null).catch(() => {});
+        if (!cancelled) draftHydratedRef.current = true;
+        return;
+      }
+
       const cloudDraft = await readCloudSetting<{ savedAt: number; data: Draft } | null>(cloudDraftKey, null);
       if (cancelled) return;
       applyDraft(cloudDraft);
@@ -139,12 +151,14 @@ export default function NewInsuranceClaim() {
       draftHydratedRef.current = true;
     })();
 
-    const unsubscribe = subscribeCloudSetting<{ savedAt: number; data: Draft } | null>(
-      cloudDraftKey,
-      (stored) => {
-        if (!cancelled) applyDraft(stored);
-      },
-    );
+    const unsubscribe = shouldResumeDraft
+      ? subscribeCloudSetting<{ savedAt: number; data: Draft } | null>(
+          cloudDraftKey,
+          (stored) => {
+            if (!cancelled) applyDraft(stored);
+          },
+        )
+      : () => {};
 
     return () => {
       cancelled = true;
@@ -172,6 +186,7 @@ export default function NewInsuranceClaim() {
   const clearStoredDraft = () => {
     skipNextDraftSaveRef.current = true;
     savedDraftAtRef.current = null;
+    setSavedDraftAt(null);
     void writeCloudSetting(cloudDraftKey, null).catch(() => {});
   };
 
