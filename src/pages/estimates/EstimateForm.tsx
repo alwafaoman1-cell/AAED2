@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowRight, Loader2, Plus, Save, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { formatOMR } from "@/lib/money";
 import {
   ESTIMATE_CATEGORY_LABEL,
@@ -30,6 +31,19 @@ const emptyItem: EstimateItemInput = {
   quantity: 1,
   unit_price: 0,
   vat_rate: 5,
+};
+
+type EstimateSearchResult = {
+  type: "vehicle" | "claim" | "work_order";
+  id: string;
+  title: string;
+  subtitle: string;
+  customer_id: string | null;
+  vehicle_id: string | null;
+  claim_id: string | null;
+  work_order_id: string | null;
+  customer?: { id?: string; name?: string | null; phone?: string | null; customer_code?: string | null } | null;
+  vehicle?: { id?: string; brand?: string | null; make?: string | null; model?: string | null; year?: number | null; plate_number?: string | null; vin_number?: string | null } | null;
 };
 
 export default function EstimateForm() {
@@ -77,13 +91,20 @@ export default function EstimateForm() {
     estimate_date: new Date().toISOString().slice(0, 10),
     valid_until: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
     vat_rate: 5,
+    vat_enabled: false,
     currency: "OMR",
+    vehicle_presence_status: "with_customer",
   });
   const [items, setItems] = useState<EstimateItemInput[]>([{ ...emptyItem }]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<EstimateSearchResult[]>([]);
+  const [selectedRecord, setSelectedRecord] = useState<EstimateSearchResult | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!existing) return;
-    setForm(existing);
+    setForm({ ...existing, vat_enabled: Boolean(existing.vat_enabled) });
     setItems((existing.items || []).map((item) => ({
       category: item.category,
       description_ar: item.description_ar,
@@ -94,6 +115,90 @@ export default function EstimateForm() {
       notes: item.notes,
     })));
   }, [existing]);
+
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (term.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchError(null);
+      return;
+    }
+    let cancelled = false;
+    setSearchLoading(true);
+    setSearchError(null);
+    const timer = window.setTimeout(async () => {
+      try {
+        const pattern = `%${term.replace(/[%_]/g, "")}%`;
+        const [vehiclesRes, claimsRes, ordersRes] = await Promise.all([
+          supabase
+            .from("vehicles" as any)
+            .select("id,brand,model,year,plate_number,plate_letters,vin_number,customer_id,customer:customers(id,name,phone,customer_code)")
+            .or(`plate_number.ilike.${pattern},plate_letters.ilike.${pattern},vin_number.ilike.${pattern},brand.ilike.${pattern},model.ilike.${pattern}`)
+            .limit(8),
+          supabase
+            .from("insurance_claims" as any)
+            .select("id,claim_number,insurance_company,customer_id,vehicle_id,job_order_id,auto_job_order_id,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,vin_number)")
+            .or(`claim_number.ilike.${pattern},insurance_company.ilike.${pattern}`)
+            .limit(8),
+          supabase
+            .from("job_orders" as any)
+            .select("id,order_number,status,customer_id,vehicle_id,claim_id,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,vin_number)")
+            .or(`order_number.ilike.${pattern},insurance_claim_number.ilike.${pattern},description.ilike.${pattern}`)
+            .limit(8),
+        ]);
+        for (const result of [vehiclesRes, claimsRes, ordersRes]) {
+          if (result.error) throw result.error;
+        }
+        if (cancelled) return;
+        const vehicleRows = ((vehiclesRes.data || []) as any[]).map((v): EstimateSearchResult => ({
+          type: "vehicle",
+          id: v.id,
+          title: `${[v.plate_letters, v.plate_number].filter(Boolean).join(" ").trim() || v.plate_number || "Vehicle"} • ${[v.brand, v.model, v.year].filter(Boolean).join(" ")}`,
+          subtitle: `${v.customer?.customer_code || ""} ${v.customer?.name || ""} ${v.customer?.phone || ""}`.trim(),
+          customer_id: v.customer_id || null,
+          vehicle_id: v.id,
+          claim_id: null,
+          work_order_id: null,
+          customer: v.customer || null,
+          vehicle: v,
+        }));
+        const claimRows = ((claimsRes.data || []) as any[]).map((c): EstimateSearchResult => ({
+          type: "claim",
+          id: c.id,
+          title: `${c.claim_number || "Claim"} • ${c.insurance_company || "—"}`,
+          subtitle: `${c.customer?.customer_code || ""} ${c.customer?.name || ""} • ${c.vehicle?.plate_number || ""}`.trim(),
+          customer_id: c.customer_id || null,
+          vehicle_id: c.vehicle_id || null,
+          claim_id: c.id,
+          work_order_id: c.job_order_id || c.auto_job_order_id || null,
+          customer: c.customer || null,
+          vehicle: c.vehicle || null,
+        }));
+        const orderRows = ((ordersRes.data || []) as any[]).map((o): EstimateSearchResult => ({
+          type: "work_order",
+          id: o.id,
+          title: `${o.order_number || "WO"} • ${o.status || "—"}`,
+          subtitle: `${o.customer?.customer_code || ""} ${o.customer?.name || ""} • ${o.vehicle?.plate_number || ""}`.trim(),
+          customer_id: o.customer_id || null,
+          vehicle_id: o.vehicle_id || null,
+          claim_id: o.claim_id || null,
+          work_order_id: o.id,
+          customer: o.customer || null,
+          vehicle: o.vehicle || null,
+        }));
+        setSearchResults([...claimRows, ...orderRows, ...vehicleRows].slice(0, 12));
+      } catch (error: any) {
+        if (!cancelled) setSearchError(error?.message || "فشل البحث");
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchTerm]);
 
   useEffect(() => {
     if (!lookups || isEdit) return;
@@ -118,12 +223,15 @@ export default function EstimateForm() {
     });
   }, [isEdit, lookups]);
 
-  const totals = useMemo(() => calculateEstimateTotals(items, Number(form.vat_rate ?? 5)), [form.vat_rate, items]);
+  const totals = useMemo(() => calculateEstimateTotals(items, Number(form.vat_rate ?? 5), Boolean(form.vat_enabled)), [form.vat_enabled, form.vat_rate, items]);
 
   const saveMut = useMutation({
     mutationFn: async () => {
       if (form.estimate_type === "supplementary" && !form.parent_estimate_id) {
         throw new Error("التقدير الإضافي يجب أن يرتبط بتقدير أصلي.");
+      }
+      if (form.vehicle_presence_status === "in_workshop" && !String(form.vehicle_location_section || "").trim()) {
+        throw new Error("موقع المركبة داخل الورشة مطلوب عند اختيار داخل الكراج.");
       }
       if (isEdit && id) {
         await updateUnifiedEstimate(id, { estimate: form, items });
@@ -161,6 +269,20 @@ export default function EstimateForm() {
     });
   }
 
+  function selectSearchResult(result: EstimateSearchResult) {
+    setSelectedRecord(result);
+    setSearchTerm(result.title);
+    setSearchResults([]);
+    setForm((current) => ({
+      ...current,
+      customer_id: result.customer_id || current.customer_id || null,
+      vehicle_id: result.vehicle_id || current.vehicle_id || null,
+      claim_id: result.claim_id || current.claim_id || null,
+      work_order_id: result.work_order_id || current.work_order_id || null,
+      estimate_type: result.claim_id ? "insurance" : current.estimate_type,
+    }));
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
@@ -185,6 +307,48 @@ export default function EstimateForm() {
             </SelectContent>
           </Select>
         </div>
+        <div className="md:col-span-2 relative">
+          <Label>Search Vehicle / Claim / Work Order</Label>
+          <div className="relative">
+            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="ابحث عن المركبة أو رقم المطالبة أو أمر العمل"
+              className="pr-9"
+            />
+            {searchLoading && <Loader2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
+          </div>
+          {(searchResults.length > 0 || searchError || (searchTerm.trim().length >= 2 && !searchLoading)) && (
+            <div className="absolute z-30 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-popover p-1 shadow-lg">
+              {searchError && <div className="p-2 text-sm text-destructive">{searchError}</div>}
+              {!searchError && searchResults.length === 0 && <div className="p-2 text-sm text-muted-foreground">No results</div>}
+              {searchResults.map((result) => (
+                <button
+                  key={`${result.type}-${result.id}`}
+                  type="button"
+                  onClick={() => selectSearchResult(result)}
+                  className="w-full rounded-sm px-3 py-2 text-right hover:bg-accent"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold">{result.title}</span>
+                    <span className="text-[11px] uppercase text-muted-foreground">{result.type}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">{result.subtitle || "—"}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {selectedRecord && (
+          <div className="md:col-span-3 rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="font-semibold">Selected: {selectedRecord.title}</div>
+            <div className="text-muted-foreground">{selectedRecord.subtitle || "—"}</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              روابط محفوظة: customer_id {selectedRecord.customer_id ? "✓" : "—"} • vehicle_id {selectedRecord.vehicle_id ? "✓" : "—"} • claim_id {selectedRecord.claim_id ? "✓" : "—"} • work_order_id {selectedRecord.work_order_id ? "✓" : "—"}
+            </div>
+          </div>
+        )}
         <div>
           <Label>Estimate Date</Label>
           <Input type="date" value={form.estimate_date || ""} onChange={(e) => setForm({ ...form, estimate_date: e.target.value })} />
@@ -193,6 +357,44 @@ export default function EstimateForm() {
           <Label>Valid Until</Label>
           <Input type="date" value={form.valid_until || ""} onChange={(e) => setForm({ ...form, valid_until: e.target.value })} />
         </div>
+        <div>
+          <Label>Vehicle Received</Label>
+          <Input type="datetime-local" value={String(form.vehicle_received_at || "").slice(0, 16)} onChange={(e) => setForm({ ...form, vehicle_received_at: e.target.value ? new Date(e.target.value).toISOString() : null })} />
+        </div>
+        <div>
+          <Label>Work Started</Label>
+          <Input type="datetime-local" value={String(form.work_started_at || "").slice(0, 16)} onChange={(e) => setForm({ ...form, work_started_at: e.target.value ? new Date(e.target.value).toISOString() : null })} />
+        </div>
+        <div>
+          <Label>Vehicle Delivered</Label>
+          <Input type="datetime-local" value={String(form.vehicle_delivered_at || "").slice(0, 16)} onChange={(e) => setForm({ ...form, vehicle_delivered_at: e.target.value ? new Date(e.target.value).toISOString() : null })} />
+        </div>
+        <div>
+          <Label>Vehicle Status</Label>
+          <Select value={form.vehicle_presence_status || "with_customer"} onValueChange={(v) => setForm({ ...form, vehicle_presence_status: v as any })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="with_customer">مع العميل</SelectItem>
+              <SelectItem value="in_workshop">داخل الكراج</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {form.vehicle_presence_status === "in_workshop" && (
+          <>
+            <div>
+              <Label>Location Section</Label>
+              <Input value={form.vehicle_location_section || ""} onChange={(e) => setForm({ ...form, vehicle_location_section: e.target.value })} />
+            </div>
+            <div>
+              <Label>Bay</Label>
+              <Input value={form.vehicle_location_bay || ""} onChange={(e) => setForm({ ...form, vehicle_location_bay: e.target.value })} />
+            </div>
+            <div>
+              <Label>Location Note</Label>
+              <Input value={form.vehicle_location_note || ""} onChange={(e) => setForm({ ...form, vehicle_location_note: e.target.value })} />
+            </div>
+          </>
+        )}
         <div>
           <Label>Customer</Label>
           <Select value={form.customer_id || "none"} onValueChange={(v) => setForm({ ...form, customer_id: v === "none" ? null : v })}>
@@ -305,8 +507,15 @@ export default function EstimateForm() {
           </div>
         </Card>
         <Card className="p-4 space-y-2">
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-md border p-3">
+            <div>
+              <div className="font-semibold">تفعيل الضريبة VAT 5%</div>
+              <div className="text-xs text-muted-foreground">OFF افتراضيًا. عند الإغلاق يبقى subtotal = total.</div>
+            </div>
+            <Switch checked={Boolean(form.vat_enabled)} onCheckedChange={(checked) => setForm({ ...form, vat_enabled: checked })} />
+          </div>
           <div className="flex justify-between"><span>Subtotal before VAT</span><strong>{formatOMR(totals.subtotal)}</strong></div>
-          <div className="flex justify-between"><span>VAT 5%</span><strong>{formatOMR(totals.vat_amount)}</strong></div>
+          <div className="flex justify-between"><span>{form.vat_enabled ? "VAT 5%" : "VAT: Not Applied"}</span><strong>{formatOMR(totals.vat_amount)}</strong></div>
           <div className="flex justify-between text-lg border-t pt-2"><span>Total</span><strong>{formatOMR(totals.total)}</strong></div>
           <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending} className="w-full gap-2 mt-3">
             <Save size={16} /> حفظ

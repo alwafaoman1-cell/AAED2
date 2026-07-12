@@ -25,6 +25,7 @@ export function buildEstimatePdfHtml(estimate: UnifiedEstimate, lang: "ar" | "en
   const vehicle = [estimate.vehicle?.brand || estimate.vehicle?.make, estimate.vehicle?.model, estimate.vehicle?.year].filter(Boolean).join(" ") || "—";
   const plate = estimate.vehicle?.plate_number || "—";
   const vin = estimate.vehicle?.vin || "—";
+  const vatEnabled = Boolean(estimate.vat_enabled);
   const rows = (estimate.items || []).map((item, index) => {
     const desc = isAr
       ? item.description_ar || item.description_en || "—"
@@ -37,7 +38,7 @@ export function buildEstimatePdfHtml(estimate: UnifiedEstimate, lang: "ar" | "en
         <td>${Number(item.quantity).toFixed(3)}</td>
         <td>${formatOMR(item.unit_price, "")}</td>
         <td>${formatOMR(item.line_subtotal, "")}</td>
-        <td>${formatOMR(item.vat_amount, "")}</td>
+        <td>${vatEnabled ? formatOMR(item.vat_amount, "") : "0.000"}</td>
         <td>${formatOMR(item.line_total, "")}</td>
       </tr>`;
   }).join("");
@@ -132,7 +133,7 @@ export function buildEstimatePdfHtml(estimate: UnifiedEstimate, lang: "ar" | "en
 
     <section class="totals">
       <div><span>${isAr ? "المجموع قبل الضريبة" : "Subtotal before VAT"}</span><strong>${formatOMR(estimate.subtotal)}</strong></div>
-      <div><span>VAT ${Number(estimate.vat_rate).toFixed(2)}%</span><strong>${formatOMR(estimate.vat_amount)}</strong></div>
+      <div><span>${vatEnabled ? `VAT ${Number(estimate.vat_rate).toFixed(2)}%` : "VAT: Not Applied"}</span><strong>${vatEnabled ? formatOMR(estimate.vat_amount) : formatOMR(0)}</strong></div>
       <div><span>${isAr ? "الإجمالي" : "Total"}</span><strong>${formatOMR(estimate.total)}</strong></div>
     </section>
 

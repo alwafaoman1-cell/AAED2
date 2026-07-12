@@ -46,8 +46,19 @@ export interface UnifiedEstimate {
   currency: string;
   subtotal: number;
   vat_rate: number;
+  vat_enabled?: boolean | null;
   vat_amount: number;
   total: number;
+  vehicle_received_at?: string | null;
+  work_started_at?: string | null;
+  vehicle_delivered_at?: string | null;
+  vehicle_presence_status?: "in_workshop" | "with_customer" | "at_insurer" | "at_copart" | "external_vendor" | null;
+  vehicle_location_section?: string | null;
+  vehicle_location_bay?: string | null;
+  vehicle_location_note?: string | null;
+  legacy_source?: string | null;
+  legacy_id?: string | null;
+  legacy_number?: string | null;
   notes: string | null;
   terms: string | null;
   internal_notes: string | null;
@@ -118,11 +129,21 @@ export const ESTIMATE_CATEGORY_LABEL: Record<EstimateItemCategory, { ar: string;
   other: { ar: "أخرى", en: "Other" },
 };
 
-export function calculateEstimateItem(item: EstimateItemInput, fallbackVatRate = 5) {
+export function calculateEstimateItem(item: EstimateItemInput, fallbackVatRate = 5, vatEnabled = true) {
   const quantity = roundMoney(item.quantity || 0);
   const unitPrice = roundMoney(item.unit_price || 0);
   const vatRatePercent = Number(item.vat_rate ?? fallbackVatRate);
   const lineSubtotal = roundMoney(quantity * unitPrice);
+  if (!vatEnabled) {
+    return {
+      quantity,
+      unit_price: unitPrice,
+      line_subtotal: lineSubtotal,
+      vat_rate: vatRatePercent,
+      vat_amount: 0,
+      line_total: lineSubtotal,
+    };
+  }
   const vat = calculateVatExclusive(lineSubtotal, vatRatePercent / 100);
   return {
     quantity,
@@ -134,8 +155,8 @@ export function calculateEstimateItem(item: EstimateItemInput, fallbackVatRate =
   };
 }
 
-export function calculateEstimateTotals(items: EstimateItemInput[], vatRate = 5) {
-  const calculated = items.map((item) => calculateEstimateItem(item, vatRate));
+export function calculateEstimateTotals(items: EstimateItemInput[], vatRate = 5, vatEnabled = true) {
+  const calculated = items.map((item) => calculateEstimateItem(item, vatRate, vatEnabled));
   const subtotal = roundMoney(calculated.reduce((sum, item) => sum + item.line_subtotal, 0));
   const vatAmount = roundMoney(calculated.reduce((sum, item) => sum + item.vat_amount, 0));
   const total = roundMoney(subtotal + vatAmount);
@@ -341,7 +362,8 @@ export async function createUnifiedEstimate(payload: {
   if (tenantError) throw tenantError;
   if (!tenantId) throw new Error("تعذر تحديد المستأجر الحالي");
   const { data: userData } = await supabase.auth.getUser();
-  const totals = calculateEstimateTotals(payload.items, Number(payload.estimate.vat_rate ?? 5));
+  const vatEnabled = Boolean(payload.estimate.vat_enabled);
+  const totals = calculateEstimateTotals(payload.items, Number(payload.estimate.vat_rate ?? 5), vatEnabled);
   const { data: estimate, error } = await supabase
     .from("estimates" as any)
     .insert({
@@ -350,6 +372,7 @@ export async function createUnifiedEstimate(payload: {
       created_by: userData.user?.id ?? null,
       currency: payload.estimate.currency || "OMR",
       estimate_date: payload.estimate.estimate_date || new Date().toISOString().slice(0, 10),
+      vat_enabled: vatEnabled,
       ...totals,
     } as any)
     .select("*")
@@ -365,7 +388,7 @@ export async function createUnifiedEstimate(payload: {
     description_en: item.description_en || null,
     notes: item.notes || null,
     sort_order: index,
-    ...calculateEstimateItem(item, Number(payload.estimate.vat_rate ?? 5)),
+    ...calculateEstimateItem(item, Number(payload.estimate.vat_rate ?? 5), vatEnabled),
   }));
   if (rows.length) {
     const { error: itemsError } = await supabase.from("estimate_items" as any).insert(rows as any);
@@ -380,7 +403,9 @@ export async function updateUnifiedEstimate(id: string, payload: {
 }) {
   const patch: Record<string, unknown> = { ...payload.estimate };
   if (payload.items) {
-    Object.assign(patch, calculateEstimateTotals(payload.items, Number(payload.estimate.vat_rate ?? 5)));
+    const vatEnabled = Boolean(payload.estimate.vat_enabled);
+    patch.vat_enabled = vatEnabled;
+    Object.assign(patch, calculateEstimateTotals(payload.items, Number(payload.estimate.vat_rate ?? 5), vatEnabled));
   }
   const { error } = await supabase.from("estimates" as any).update(patch as any).eq("id", id);
   if (error) throw error;
@@ -388,11 +413,12 @@ export async function updateUnifiedEstimate(id: string, payload: {
   if (payload.items) {
     const { data: current, error: currentError } = await supabase
       .from("estimates" as any)
-      .select("tenant_id,vat_rate")
+      .select("tenant_id,vat_rate,vat_enabled")
       .eq("id", id)
       .single();
     if (currentError) throw currentError;
     const currentEstimate = current as any;
+    const vatEnabled = Boolean((payload.estimate as any).vat_enabled ?? currentEstimate.vat_enabled);
     await supabase.from("estimate_items" as any).delete().eq("estimate_id", id);
     const rows = payload.items.map((item, index) => ({
       tenant_id: currentEstimate.tenant_id,
@@ -402,7 +428,7 @@ export async function updateUnifiedEstimate(id: string, payload: {
       description_en: item.description_en || null,
       notes: item.notes || null,
       sort_order: index,
-      ...calculateEstimateItem(item, Number(currentEstimate.vat_rate ?? 5)),
+      ...calculateEstimateItem(item, Number(currentEstimate.vat_rate ?? 5), vatEnabled),
     }));
     if (rows.length) {
       const { error: itemsError } = await supabase.from("estimate_items" as any).insert(rows as any);
@@ -513,6 +539,10 @@ export async function convertUnifiedEstimate(id: string, target: EstimateConvers
         final_total: estimate.total,
         work_order_type: "general_customer",
         source_estimate_id: estimate.id,
+        vehicle_received_at: estimate.vehicle_received_at || null,
+        work_started_at: estimate.work_started_at || null,
+        vehicle_delivered_at: estimate.vehicle_delivered_at || null,
+        vehicle_presence_status: estimate.vehicle_presence_status || "with_customer",
         work_items: (estimate.items || []).map((item) => ({ title: item.description_ar || item.description_en || item.category, note: item.notes || null })),
         metadata: { source: "estimate_conversion", estimate_id: estimate.id, estimate_number: estimate.estimate_number },
       };
@@ -577,6 +607,10 @@ export async function convertUnifiedEstimate(id: string, target: EstimateConvers
       status: "pending",
       estimation_type: "lump_sum",
       source_estimate_id: estimate.id,
+      vehicle_received_at: estimate.vehicle_received_at || null,
+      work_started_at: estimate.work_started_at || null,
+      vehicle_delivered_at: estimate.vehicle_delivered_at || null,
+      vehicle_presence_status: estimate.vehicle_presence_status || "with_customer",
       notes: estimate.notes || `Created from estimate ${estimate.estimate_number}`,
     };
     let { data: claim, error } = await supabase.from("insurance_claims" as any).insert(claimPayload as any).select("id,claim_number,insurance_company").single();
@@ -647,6 +681,10 @@ export async function convertUnifiedEstimate(id: string, target: EstimateConvers
       insurance_company: claim.insurance_company || estimate.claim?.insurance_company || null,
       insurance_claim_number: claim.claim_number || null,
       source_estimate_id: estimate.id,
+      vehicle_received_at: estimate.vehicle_received_at || null,
+      work_started_at: estimate.work_started_at || null,
+      vehicle_delivered_at: estimate.vehicle_delivered_at || null,
+      vehicle_presence_status: estimate.vehicle_presence_status || "with_customer",
       work_items: (estimate.items || []).map((item) => ({ title: item.description_ar || item.description_en || item.category, note: item.notes || null })),
       metadata: { source: "estimate_conversion", estimate_id: estimate.id, estimate_number: estimate.estimate_number },
     };
