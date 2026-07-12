@@ -12,6 +12,7 @@ interface InsInvoiceRow {
   vat: number;
   paid_amount: number;
   status: string;
+  invoice_date: string | null;
   issued_at: string;
 }
 
@@ -27,7 +28,7 @@ export function useUnifiedRevenue(filters: ReportFilters) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("insurance_invoices" as any)
-        .select("id,total,subtotal,vat,paid_amount,status,issued_at");
+        .select("id,total,subtotal,vat,paid_amount,status,invoice_date,issued_at");
       if (error) throw error;
       return (data || []) as unknown as InsInvoiceRow[];
     },
@@ -36,7 +37,7 @@ export function useUnifiedRevenue(filters: ReportFilters) {
   return useMemo(() => {
     const sales = buildSalesReport(filters);
 
-    const insInRange = insInvoices.filter((i) => inRange(i.issued_at, filters.range.from, filters.range.to));
+    const insInRange = insInvoices.filter((i) => inRange(i.invoice_date || i.issued_at, filters.range.from, filters.range.to));
     const insTotal = insInRange.reduce((s, i) => s + (Number(i.total) || 0), 0);
     const insVat = insInRange.reduce((s, i) => s + (Number(i.vat) || 0), 0);
     const insPaid = insInRange.reduce((s, i) => s + (Number(i.paid_amount) || 0), 0);

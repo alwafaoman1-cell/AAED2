@@ -667,6 +667,7 @@ export default function InsuranceClaimDetailRedesigned() {
         total,
         paid_amount: 0,
         status: "issued",
+        invoice_date: new Date().toISOString().slice(0, 10),
         lpo_number: effectiveLpo.number || null,
         notes: "Created from insurance claim detail page",
         items: [{ description: `Insurance repair claim ${claim.claim_number}`, quantity: 1, unit_price: subtotal }],

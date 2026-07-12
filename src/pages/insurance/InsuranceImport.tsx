@@ -375,6 +375,7 @@ export default function InsuranceImport() {
           subtotal, vat, total,
           status: "issued",
           items,
+          invoice_date: issuedAt.slice(0, 10),
           issued_at: issuedAt,
           created_at: issuedAt,
         } as any);

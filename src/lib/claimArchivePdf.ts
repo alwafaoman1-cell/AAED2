@@ -43,7 +43,7 @@ export interface ClaimArchivePdfData {
     vehicle_owner_phone?: string | null;
   };
   workOrder?: { order_number?: string; status?: string; description?: string | null; diagnosis?: string | null } | null;
-  invoices: { invoice_number: string; total: number; status: string; issued_at: string; pdf_url?: string | null }[];
+  invoices: { invoice_number: string; total: number; status: string; issued_at: string; invoice_date?: string | null; pdf_url?: string | null }[];
   payments?: { payment_number: string; amount: number; payment_method: string; payment_date: string; status: string; reference_number?: string | null }[];
   sections: { title: string; titleEn: string; files: ArchiveSectionFile[] }[];
 }
@@ -199,7 +199,7 @@ function buildInvoices(data: ClaimArchivePdfData) {
           ${data.invoices.map((inv) => `
             <tr>
               <td style="padding:5px 8px;border:1px solid #e2e8f0;font-family:monospace">${esc(inv.invoice_number)}</td>
-              <td style="padding:5px 8px;border:1px solid #e2e8f0">${fmtDate(inv.issued_at)}</td>
+              <td style="padding:5px 8px;border:1px solid #e2e8f0">${fmtDate(inv.invoice_date || inv.issued_at)}</td>
               <td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:left;font-family:monospace">${fmtMoney(inv.total)}</td>
               <td style="padding:5px 8px;border:1px solid #e2e8f0">${esc(inv.status)}</td>
             </tr>

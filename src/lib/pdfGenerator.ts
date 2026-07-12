@@ -1633,7 +1633,7 @@ function renderInsuranceTaxInvoiceReference(data: InsuranceTaxInvoiceData): stri
     <table class="items"><thead><tr><th class="c">#</th><th>الوصف / DESCRIPTION</th><th class="c">الكمية / QTY</th><th class="l">الوحدة / RATE</th><th class="l">الإجمالي / TOTAL</th></tr></thead><tbody>${itemRows}</tbody></table>
     <div class="summary-box"><div class="totals"><div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(subtotal)}</span><span class="lbl">Subtotal / المجموع الفرعي</span></div><div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(vatAmount)}</span><span class="lbl">VAT ${invoiceRefMoney(vatRate).replace(".000", "")}% / ضريبة القيمة المضافة</span></div><div class="payable"><div class="p-amount">${invoiceRefMoney(total)}<div class="cur-small">OMR / ريال عماني</div></div><div class="p-label">الإجمالي المستحق<span>TOTAL PAYABLE</span></div></div></div><div class="qr-box"><div class="qr-frame">${data.qrDataUrl ? `<img src="${invoiceRefEscape(data.qrDataUrl)}" alt="QR"/>` : "QR"}</div><div class="qr-caption">ZATCA TLV QR</div></div></div>
     <div class="signatures"><div><div class="sig-title">التوقيع / SIGNATURE</div><div class="signature-line">${signature}</div></div><div><div class="stamp-title">ختم الشركة / COMPANY STAMP</div><div class="stamp-placeholder">${stamp}</div></div></div>
-    <div class="legal"><strong>إفادة قانونية:</strong> هذه فاتورة ضريبية صادرة وفقًا لأنظمة الضرائب المعمول بها في سلطنة عمان وغير مصرح رد ضريبة QR.</div><div class="footer">${invoiceRefEscape(s.companyNameEn)} • © ${new Date().getFullYear()} • ${invoiceRefEscape(s.companyName)}</div>
+    <div class="footer">${invoiceRefEscape(s.companyNameEn)} • © ${new Date().getFullYear()} • ${invoiceRefEscape(s.companyName)}</div>
   </div>`;
   return wrapHtml(`Tax Invoice ${data.invoiceNumber}`, styles, body);
 }
@@ -1699,7 +1699,7 @@ function renderInsuranceTaxInvoiceReferenceClean(data: InsuranceTaxInvoiceData):
     <table class="items"><thead><tr><th class="c">#</th><th>الوصف / DESCRIPTION</th><th class="c">الكمية / QTY</th><th class="l">الوحدة / RATE</th><th class="l">الإجمالي / TOTAL</th></tr></thead><tbody>${itemRows}</tbody></table>
     <div class="summary-box"><div class="totals"><div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(subtotal)}</span><span class="lbl">Subtotal / المجموع الفرعي</span></div><div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(vatAmount)}</span><span class="lbl">VAT ${invoiceRefMoney(vatRate).replace(".000", "")}% / ضريبة القيمة المضافة</span></div><div class="payable"><div class="p-amount">${invoiceRefMoney(total)}<div class="cur-small">OMR / ريال عماني</div></div><div class="p-label">الإجمالي المستحق<span>TOTAL PAYABLE</span></div></div></div><div class="qr-box"><div class="qr-frame">${data.qrDataUrl ? `<img src="${invoiceRefEscape(data.qrDataUrl)}" alt="QR"/>` : "QR"}</div><div class="qr-caption">ZATCA TLV QR</div></div></div>
     <div class="signatures"><div><div class="sig-title">التوقيع / SIGNATURE</div><div class="signature-line">${signature}</div></div><div><div class="stamp-title">ختم الشركة / COMPANY STAMP</div><div class="stamp-placeholder">${stamp}</div></div></div>
-    <div class="legal"><strong>إفادة قانونية:</strong> هذه فاتورة ضريبية صادرة وفقًا لأنظمة الضرائب المعمول بها في سلطنة عمان وغير مصرح رد ضريبة QR.</div><div class="footer">${invoiceRefEscape(s.companyNameEn)} • © ${new Date().getFullYear()} • ${invoiceRefEscape(s.companyName)}</div>
+    <div class="footer">${invoiceRefEscape(s.companyNameEn)} • © ${new Date().getFullYear()} • ${invoiceRefEscape(s.companyName)}</div>
   </div>`;
   return wrapHtml(`Tax Invoice ${data.invoiceNumber}`, styles, body);
 }
@@ -1870,12 +1870,10 @@ export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): strin
 
     ${bankBlock}
 
-    <!-- Footer area: QR + legal -->
+    <!-- Footer area: QR -->
     <div class="footer-area">
       <div class="left">
-        <strong>Notice <span class="ar">إشعار</span>:</strong> This is an official tax invoice issued under the VAT regulations of the Sultanate of Oman.
-        <span class="ar">هذه فاتورة ضريبية رسمية صادرة وفق نظام ضريبة القيمة المضافة في سلطنة عمان.</span>
-        ${data.notes ? `<br/><strong>Notes <span class="ar">ملاحظات</span>:</strong> ${data.notes}` : ''}
+        ${data.notes ? `<strong>Notes <span class="ar">ملاحظات</span>:</strong> ${data.notes}` : ''}
       </div>
       ${data.qrDataUrl ? `
         <div class="qr-box">

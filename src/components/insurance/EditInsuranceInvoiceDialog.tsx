@@ -13,6 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import {
   useUpdateInsuranceInvoice,
   type InsuranceInvoice,
@@ -33,9 +35,12 @@ interface Props {
 }
 
 export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange }: Props) {
+  const { hasRole, user } = useAuth();
   const update = useUpdateInsuranceInvoice();
   const [items, setItems] = useState<ItemRow[]>([]);
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState("");
+  const [dateChangeReason, setDateChangeReason] = useState("");
   const [lpo, setLpo] = useState("");
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -60,6 +65,8 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
       }]);
     }
     setInvoiceNumber(invoice.invoice_number || "");
+    setInvoiceDate(invoice.invoice_date || invoice.issued_at?.slice(0, 10) || new Date().toISOString().slice(0, 10));
+    setDateChangeReason("");
     setLpo(invoice.lpo_number || "");
     setNotes(invoice.notes || "");
     setDueDate(invoice.due_date || "");
@@ -70,6 +77,9 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
   const subtotal = items.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
   const vat = subtotal * VAT_RATE;
   const total = subtotal + vat;
+  const originalInvoiceDate = invoice?.invoice_date || invoice?.issued_at?.slice(0, 10) || "";
+  const invoiceDateChanged = !!invoice && invoiceDate !== originalInvoiceDate;
+  const canChangeIssuedDate = hasRole("admin");
 
   const addRow = () => setItems((prev) => [...prev, { description: "", quantity: 1, unit_price: 0 }]);
   const removeRow = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i));
@@ -88,10 +98,34 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
       toast.error("رقم الفاتورة مطلوب");
       return;
     }
+    if (!invoiceDate) {
+      toast.error("تاريخ إصدار الفاتورة الضريبية مطلوب");
+      return;
+    }
+    const parsedDate = new Date(`${invoiceDate}T12:00:00`);
+    if (Number.isNaN(parsedDate.getTime())) {
+      toast.error("تاريخ إصدار الفاتورة غير صالح");
+      return;
+    }
+    const maxFutureDate = new Date();
+    maxFutureDate.setDate(maxFutureDate.getDate() + 30);
+    if (parsedDate > maxFutureDate) {
+      toast.error("تاريخ إصدار الفاتورة بعيد جدًا في المستقبل");
+      return;
+    }
+    if (invoiceDateChanged && !canChangeIssuedDate) {
+      toast.error("لا يمكن تعديل تاريخ فاتورة صادرة إلا للمدير");
+      return;
+    }
+    if (invoiceDateChanged && !dateChangeReason.trim()) {
+      toast.error("أدخل سبب تغيير تاريخ إصدار الفاتورة");
+      return;
+    }
     await update.mutateAsync({
       id: invoice.id,
       updates: {
         invoice_number: trimmedNumber,
+        invoice_date: invoiceDate,
         items: cleaned,
         subtotal,
         vat,
@@ -103,6 +137,23 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
         paid_amount: paid,
       } as any,
     });
+    if (invoiceDateChanged) {
+      await supabase.from("claim_audit_logs" as any).insert({
+        tenant_id: invoice.tenant_id,
+        claim_id: invoice.claim_id,
+        user_id: user?.id || null,
+        action: "insurance_invoice_date_changed",
+        details: {
+          invoice_id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          old_invoice_date: originalInvoiceDate,
+          new_invoice_date: invoiceDate,
+          changed_by: user?.id || null,
+          changed_at: new Date().toISOString(),
+          reason: dateChangeReason.trim(),
+        },
+      } as any);
+    }
     onOpenChange(false);
   };
 
@@ -115,8 +166,8 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
         </ResponsiveDialogHeader>
 
         <div className="space-y-4 p-1">
-          {/* Invoice Number + L.P.O + Due + Status */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          {/* Invoice Number + Issue Date + L.P.O + Due + Status */}
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div>
               <Label className="text-xs">رقم الفاتورة</Label>
               <Input
@@ -126,6 +177,10 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
                 dir="ltr"
                 className="font-mono"
               />
+            </div>
+            <div>
+              <Label className="text-xs">تاريخ إصدار الفاتورة الضريبية</Label>
+              <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">رقم أمر الشراء (L.P.O)</Label>
@@ -149,6 +204,17 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
               </Select>
             </div>
           </div>
+          {invoiceDateChanged && canChangeIssuedDate && (
+            <div>
+              <Label className="text-xs">سبب تغيير تاريخ الفاتورة</Label>
+              <Textarea
+                value={dateChangeReason}
+                onChange={(e) => setDateChangeReason(e.target.value)}
+                placeholder="سبب محاسبي/إداري واضح"
+                rows={2}
+              />
+            </div>
+          )}
 
           {/* Items */}
           <div className="border border-border rounded-lg overflow-hidden">

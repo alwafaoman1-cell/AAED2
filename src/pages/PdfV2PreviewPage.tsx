@@ -202,7 +202,7 @@ async function loadInsuranceInvoice(id: string): Promise<LoadedPdf> {
     qrDataUrl = await buildZatcaQrDataUrl({
       sellerName: tpl.companyName,
       vatNumber: tpl.vatNumber,
-      timestamp: new Date(inv.issued_at || inv.created_at || Date.now()).toISOString(),
+      timestamp: new Date(inv.invoice_date || inv.issued_at || inv.created_at || Date.now()).toISOString(),
       total: Number(inv.total || 0),
       vat: Number(inv.vat || 0),
     });
@@ -215,8 +215,8 @@ async function loadInsuranceInvoice(id: string): Promise<LoadedPdf> {
     template: "default",
     number: inv.invoice_number || inv.id,
     invoiceNumber: inv.invoice_number || inv.id,
-    issueDate: formatDateEnglish(inv.issued_at || inv.created_at),
-    paymentDueDate: formatDateEnglish(inv.due_date || inv.issued_at || inv.created_at),
+    issueDate: formatDateEnglish(inv.invoice_date || inv.issued_at || inv.created_at),
+    paymentDueDate: formatDateEnglish(inv.due_date || inv.invoice_date || inv.issued_at || inv.created_at),
     customerName: inv.insurance_company_name || (company as any)?.name || "Insurance Company",
     customFields: [],
     items: Array.isArray(inv.items) && inv.items.length ? inv.items.map((it: any) => ({

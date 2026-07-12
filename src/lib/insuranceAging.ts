@@ -49,7 +49,7 @@ export interface AgingRow {
   arrivalDate: string | null;   // workshop_arrival_date
   deliveryDate: string | null;  // delivered_at
   approvalDate: string | null;  // approved_at
-  invoiceDate: string | null;   // insurance_invoices.issued_at
+  invoiceDate: string | null;   // insurance_invoices.invoice_date
   invoiceNumber: string | null;
   dueDate: string | null;       // approved_at + payment_terms_days
 }
@@ -60,7 +60,7 @@ export interface AgingComputeOptions {
   /** أيام الاستحقاق المفترضة عند basis === "due_date" بدون شركة محددة */
   defaultTermsDays?: number;
   /** خريطة المطالبة → الفاتورة النشطة (لاستخدام invoice_date كأساس وعرض رقم الفاتورة) */
-  invoiceByClaim?: Map<string, { issued_at: string; invoice_number: string }>;
+  invoiceByClaim?: Map<string, { invoice_date?: string | null; issued_at: string; invoice_number: string }>;
 }
 
 function toBucketLabel(days: number, buckets: AgingBucket[]): string {
@@ -93,7 +93,7 @@ export function computeAging(
     const deliveryIso = (c as any).delivered_at ?? null;
     const approvalIso = c.approved_at ?? null;
     const inv = options.invoiceByClaim?.get(c.id) ?? null;
-    const invoiceIso = inv?.issued_at ?? null;
+    const invoiceIso = inv?.invoice_date ?? inv?.issued_at ?? null;
     const dueIso = approvalIso
       ? new Date(new Date(approvalIso).getTime() + terms * 86400000).toISOString()
       : new Date(new Date(c.created_at).getTime() + terms * 86400000).toISOString();

@@ -24,8 +24,8 @@ export async function fetchOfficialVatData(range: VatExportRange) {
   const [sales, insInv, purchases, expenses] = await Promise.all([
     supabase.from("sales_documents").select("doc_type,doc_number,date,customer_name,subtotal,tax_total,total")
       .eq("doc_type", "invoice").gte("date", range.from).lte("date", range.to),
-    supabase.from("insurance_invoices" as any).select("invoice_number,issued_at,insurance_company_name,subtotal,vat,total")
-      .gte("issued_at", range.from).lte("issued_at", range.to + "T23:59:59"),
+    supabase.from("insurance_invoices" as any).select("invoice_number,invoice_date,issued_at,insurance_company_name,subtotal,vat,total")
+      .gte("invoice_date", range.from).lte("invoice_date", range.to),
     supabase.from("purchase_invoices" as any).select("invoice_number,date,supplier_name,subtotal,vat,total")
       .gte("date", range.from).lte("date", range.to),
     supabase.from("expenses").select("id,voucher_number,date,amount,beneficiary,category_name,meta")
@@ -38,7 +38,7 @@ export async function fetchOfficialVatData(range: VatExportRange) {
     subtotal: Number(s.subtotal || 0), vat: Number(s.tax_total || 0), total: Number(s.total || 0), kind: "output",
   }));
   (insInv.data || []).forEach((i: any) => rows.push({
-    source: "تأمين", doc_number: i.invoice_number, date: (i.issued_at || "").slice(0, 10),
+    source: "تأمين", doc_number: i.invoice_number, date: (i.invoice_date || i.issued_at || "").slice(0, 10),
     who: i.insurance_company_name || "—", subtotal: Number(i.subtotal || 0), vat: Number(i.vat || 0),
     total: Number(i.total || 0), kind: "output",
   }));

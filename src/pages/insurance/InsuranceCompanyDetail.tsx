@@ -60,6 +60,9 @@ const BUCKET_PRESETS: Record<string, AgingBucket[]> = {
   ],
 };
 
+const invoiceDateValue = (invoice: any) =>
+  invoice?.invoice_date || invoice?.issued_at?.slice?.(0, 10) || invoice?.created_at?.slice?.(0, 10) || null;
+
 export default function InsuranceCompanyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -90,7 +93,7 @@ export default function InsuranceCompanyDetail() {
       .forEach((i) => {
         // إن وُجد أكثر من فاتورة لنفس المطالبة، نحتفظ بالأحدث فقط
         const prev = map.get(i.claim_id);
-        if (!prev || new Date(i.issued_at).getTime() > new Date(prev.issued_at).getTime()) {
+        if (!prev || new Date(invoiceDateValue(i) || i.issued_at).getTime() > new Date(invoiceDateValue(prev) || prev.issued_at).getTime()) {
           map.set(i.claim_id, i);
         }
       });
@@ -237,14 +240,14 @@ export default function InsuranceCompanyDetail() {
         status: c.status,
       })),
       invoices: companyInvoices
-        .filter((inv) => inRange(inv.issued_at))
+        .filter((inv) => inRange(invoiceDateValue(inv) || inv.issued_at))
         .filter((inv) => reportClaims.some((c) => c.id === inv.claim_id))
         .map((inv) => {
           const claim = claims.find((c) => c.id === inv.claim_id);
           return {
             invoice_number: inv.invoice_number,
             claim_number: claim?.claim_number ?? null,
-            issued_at: inv.issued_at,
+            issued_at: invoiceDateValue(inv) || inv.issued_at,
             subtotal: Number(inv.subtotal) || 0,
             vat: Number(inv.vat) || 0,
             total: Number(inv.total) || 0,
@@ -294,7 +297,7 @@ export default function InsuranceCompanyDetail() {
         workStartedAt: (c as any).work_started_at ?? null,
         workCompletedAt: (c as any).work_completed_at ?? null,
         approvalDate: c.approved_at,
-        invoiceDate: inv?.issued_at ?? null,
+        invoiceDate: invoiceDateValue(inv),
         invoiceNumber: inv?.invoice_number ?? null,
         claimNumber: c.claim_number,
         vehicleNo: v?.plate_number || "—",
@@ -603,7 +606,7 @@ export default function InsuranceCompanyDetail() {
                     <td className="py-2.5 px-4 text-xs">{vehicleLabel}</td>
                     <td className="py-2.5 px-4 text-xs">{arrival ? formatDateLatin(arrival) : <span className="text-muted-foreground">—</span>}</td>
                     <td className="py-2.5 px-4 text-xs">{delivered ? formatDateLatin(delivered) : <span className="text-muted-foreground">—</span>}</td>
-                    <td className="py-2.5 px-4 text-xs">{inv ? formatDateLatin(inv.issued_at) : <span className="text-muted-foreground">—</span>}</td>
+                    <td className="py-2.5 px-4 text-xs">{inv ? formatDateLatin(invoiceDateValue(inv) || inv.issued_at) : <span className="text-muted-foreground">—</span>}</td>
                     <td className="py-2.5 px-4 text-xs">{CLAIM_STATUS_AR[c.status] ?? c.status}</td>
                     <td className="py-2.5 px-4">{net.toLocaleString()} ر.ع</td>
                     <td className="py-2.5 px-4 text-muted-foreground">{vat.toLocaleString()} ر.ع</td>

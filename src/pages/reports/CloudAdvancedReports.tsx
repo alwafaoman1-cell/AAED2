@@ -50,7 +50,7 @@ function useCloudData(f: Filters) {
     queryFn: async () => {
       const [sales, insInv, exp, payments, purchases] = await Promise.all([
         supabase.from("sales_documents").select("id,doc_type,doc_number,date,due_date,subtotal,tax_total,total,paid_amount,balance_due,status,customer_name").gte("date", f.from).lte("date", f.to),
-        supabase.from("insurance_invoices" as any).select("id,invoice_number,issued_at,due_date,subtotal,vat,total,paid_amount,status,insurance_company_name").gte("issued_at", f.from).lte("issued_at", f.to + "T23:59:59"),
+        supabase.from("insurance_invoices" as any).select("id,invoice_number,invoice_date,issued_at,due_date,subtotal,vat,total,paid_amount,status,insurance_company_name").gte("invoice_date", f.from).lte("invoice_date", f.to),
         supabase.from("expenses").select("id,date,amount,category_name,description,beneficiary").gte("date", f.from).lte("date", f.to),
         supabase.from("claim_payments").select("id,payment_date,amount,status,insurance_company_id").gte("payment_date", f.from).lte("payment_date", f.to),
         supabase.from("purchase_invoices" as any).select("id,invoice_number,date,supplier_name,subtotal,vat,total").gte("date", f.from).lte("date", f.to),
@@ -125,7 +125,7 @@ export default function CloudAdvancedReports() {
       return {
         invoiceType: "Insurance",
         invoiceNumber: String(i.invoice_number || "—"),
-        invoiceDate: String(i.issued_at || "").slice(0, 10) || "—",
+        invoiceDate: String(i.invoice_date || i.issued_at || "").slice(0, 10) || "—",
         party: String(i.insurance_company_name || "—"),
         subtotal: roundMoney(i.subtotal || 0),
         vat: roundMoney(i.vat || 0),
@@ -203,7 +203,7 @@ export default function CloudAdvancedReports() {
       map.set(ym, r);
     };
     data.sales.filter((s) => s.doc_type === "invoice").forEach((s) => add(s.date, Number(s.subtotal || 0), 0));
-    data.insInv.forEach((i) => add((i.issued_at || "").slice(0, 10), Number(i.subtotal || 0), 0));
+    data.insInv.forEach((i) => add((i.invoice_date || i.issued_at || "").slice(0, 10), Number(i.subtotal || 0), 0));
     data.expenses.forEach((e) => add(e.date, 0, Number(e.amount || 0)));
     return Array.from(map.values()).sort((a, b) => a.ym.localeCompare(b.ym)).map((r) => ({
       name: new Date(r.ym + "-01").toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
@@ -524,7 +524,7 @@ export default function CloudAdvancedReports() {
               <h3 className="text-sm font-semibold">تفصيل الفواتير الخاضعة للضريبة</h3>
               <Button size="sm" variant="outline" className="gap-1" onClick={() => exportCsv("vat-report.csv", [
                 ...(data?.sales.filter((s) => s.doc_type === "invoice" && Number(s.tax_total) > 0).map((s) => ({ source: "مبيعات", num: s.doc_number, date: s.date, who: s.customer_name, subtotal: s.subtotal, vat: s.tax_total, total: s.total })) || []),
-                ...(data?.insInv.map((i) => ({ source: "تأمين", num: i.invoice_number, date: (i.issued_at || "").slice(0, 10), who: i.insurance_company_name, subtotal: i.subtotal, vat: i.vat, total: i.total })) || []),
+                ...(data?.insInv.map((i) => ({ source: "تأمين", num: i.invoice_number, date: (i.invoice_date || i.issued_at || "").slice(0, 10), who: i.insurance_company_name, subtotal: i.subtotal, vat: i.vat, total: i.total })) || []),
               ], [
                 { key: "source", label: "المصدر" }, { key: "num", label: "الرقم" }, { key: "date", label: "التاريخ" },
                 { key: "who", label: "الجهة" }, { key: "subtotal", label: "الصافي" }, { key: "vat", label: "VAT" }, { key: "total", label: "الإجمالي" },

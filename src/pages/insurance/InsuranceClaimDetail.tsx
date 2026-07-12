@@ -1486,6 +1486,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             total,
             paid_amount: 0,
             status: "issued",
+            invoice_date: invoiceIssueDate.toISOString().slice(0, 10),
             issued_at: invoiceIssueDate.toISOString(),
             due_date: due.toISOString().slice(0, 10),
             notes: [notes, lpo.note ? `LPO Note: ${lpo.note}` : ""].filter(Boolean).join("\n") || null,

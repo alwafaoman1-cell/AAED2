@@ -457,7 +457,6 @@ function renderReferenceInsuranceInvoice(p: {
         </div>
       </div>
 
-      <div class="legal"><strong>إفادة قانونية:</strong> هذه فاتورة ضريبية صادرة وفقًا لأنظمة الضرائب المعمول بها في سلطنة عمان وغير مصرح رد ضريبة QR.</div>
       <div class="footer">${e(s.companyNameEn)} • © ${new Date().getFullYear()} • ${e(s.companyName)}</div>
     </div>
   `;
@@ -948,11 +947,7 @@ export async function getClaimTaxInvoiceHtml(p: ClaimTaxInvoicePayload): Promise
 
       ${stampHtml}
 
-      <!-- LEGAL -->
-      <div class="legal">
-        <strong>إفادة قانونية:</strong> هذه فاتورة ضريبية صادرة وفقاً للأنظمة المعمول بها في سلطنة عُمان. يُرجى التحقق عبر مسح رمز QR.
-        ${p.notes ? `<br/><strong>ملاحظات:</strong> ${e(p.notes)}` : ""}
-      </div>
+      ${p.notes ? `<div class="legal"><strong>ملاحظات:</strong> ${e(p.notes)}</div>` : ""}
       <div class="footer">${e(s.companyName)} • ${e(s.companyNameEn)} • © ${new Date().getFullYear()}</div>
 
     </div>`;

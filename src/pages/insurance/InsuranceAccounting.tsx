@@ -44,6 +44,9 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "bg-muted text-muted-foreground",
 };
 
+const insuranceInvoiceDate = (invoice: Pick<InsuranceInvoice, "invoice_date" | "issued_at" | "created_at">) =>
+  invoice.invoice_date || invoice.issued_at?.slice(0, 10) || invoice.created_at?.slice(0, 10) || "";
+
 export default function InsuranceAccounting() {
   const { hasRole } = useAuth();
   const { data: invoices, isLoading } = useInsuranceInvoices();
@@ -134,8 +137,9 @@ export default function InsuranceAccounting() {
     return (invoices || []).filter((inv) => {
       if (statusFilter !== "all" && inv.status !== statusFilter) return false;
       if (companyFilter !== "all" && inv.insurance_company_name !== companyFilter) return false;
-      if (dateFrom && inv.issued_at.slice(0, 10) < dateFrom) return false;
-      if (dateTo && inv.issued_at.slice(0, 10) > dateTo) return false;
+      const visibleDate = insuranceInvoiceDate(inv);
+      if (dateFrom && visibleDate < dateFrom) return false;
+      if (dateTo && visibleDate > dateTo) return false;
       if (!search) return true;
       const s = search.toLowerCase();
       return (
@@ -168,7 +172,7 @@ export default function InsuranceAccounting() {
     (acc, i) => {
       const out = Number(i.total || 0) - Number(i.paid_amount || 0);
       if (out <= 0) return acc;
-      const a = ageDays(i.issued_at);
+      const a = ageDays(insuranceInvoiceDate(i));
       if (a > 90) acc.over90 += out;
       else if (a > 60) acc.over60 += out;
       else if (a > 30) acc.over30 += out;
@@ -207,7 +211,7 @@ export default function InsuranceAccounting() {
 
     const html = await getClaimTaxInvoiceHtml({
       invoiceNumber: inv.invoice_number,
-      invoiceDate: inv.issued_at.slice(0, 10),
+      invoiceDate: insuranceInvoiceDate(inv),
       dueDate: inv.due_date,
       claimNumber: claim?.claim_number || "—",
       insuranceCompany: inv.insurance_company_name,
@@ -245,7 +249,7 @@ export default function InsuranceAccounting() {
     const headers = ["رقم الفاتورة", "تاريخ الإصدار", "شركة التأمين", "المركبة", "اللوحة", "الإجمالي", "المدفوع", "المتبقي", "الحالة", "الاستحقاق"];
     const rows = filtered.map((i) => [
       i.invoice_number,
-      i.issued_at.slice(0, 10),
+      insuranceInvoiceDate(i),
       i.insurance_company_name,
       `${i.vehicle_make || ""} ${i.vehicle_model || ""}`.trim(),
       i.vehicle_plate || "",
@@ -366,7 +370,7 @@ export default function InsuranceAccounting() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground" dir="ltr">{formatDateLatin(inv.issued_at)}</span>
+                      <span className="text-muted-foreground" dir="ltr">{formatDateLatin(insuranceInvoiceDate(inv))}</span>
                       <span className="font-bold" dir="ltr">
                         {Number(inv.total).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} OMR
                       </span>
@@ -411,7 +415,7 @@ export default function InsuranceAccounting() {
                           <td className="py-3 px-4 font-mono text-xs text-primary">{inv.invoice_number}</td>
                           <td className="py-3 px-4 text-muted-foreground" dir="ltr">
                             <div className="flex flex-col gap-0.5">
-                              <span title="تاريخ إصدار الفاتورة">📄 {formatDateLatin(inv.issued_at)}</span>
+                              <span title="تاريخ إصدار الفاتورة">📄 {formatDateLatin(insuranceInvoiceDate(inv))}</span>
                               {(inv as any).last_payment_date && (
                                 <span className="text-[10px] text-success" title="تاريخ آخر تحصيل">💵 {formatDateLatin((inv as any).last_payment_date)}</span>
                               )}

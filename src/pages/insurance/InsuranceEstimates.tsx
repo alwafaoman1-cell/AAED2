@@ -175,7 +175,7 @@ export default function InsuranceEstimates() {
     const company = (companiesList || []).find((c) => c.id === (inv as any).insurance_company_id);
     const html = await getClaimTaxInvoiceHtml({
       invoiceNumber: inv.invoice_number,
-      invoiceDate: inv.issued_at.slice(0, 10),
+      invoiceDate: inv.invoice_date || inv.issued_at.slice(0, 10),
       dueDate: inv.due_date,
       claimNumber: claim?.claim_number || "—",
       insuranceCompany: inv.insurance_company_name,

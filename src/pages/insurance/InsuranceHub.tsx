@@ -84,7 +84,7 @@ export default function InsuranceHub() {
       if (inv.status === "paid" || inv.status === "cancelled") continue;
       const remaining = Number(inv.total) - Number(inv.paid_amount || 0);
       if (remaining <= 0) continue;
-      const issued = new Date(inv.issued_at || inv.created_at).getTime();
+      const issued = new Date(inv.invoice_date || inv.issued_at || inv.created_at).getTime();
       const ageDays = Math.floor((now - issued) / 86400000);
       if (ageDays <= 30) buckets["0-30"] += remaining;
       else if (ageDays <= 60) buckets["31-60"] += remaining;

@@ -20,6 +20,7 @@ export interface InsuranceInvoice {
   paid_amount: number;
   status: "issued" | "partial" | "paid" | "overdue" | "cancelled";
   pdf_url: string | null;
+  invoice_date: string | null;
   issued_at: string;
   last_payment_date: string | null;
   due_date: string | null;
@@ -44,6 +45,7 @@ export interface InsuranceInvoiceInsert {
   paid_amount?: number;
   status?: "issued" | "partial" | "paid" | "overdue" | "cancelled";
   pdf_url?: string | null;
+  invoice_date?: string | null;
   due_date?: string | null;
   notes?: string | null;
   lpo_number?: string | null;
@@ -78,6 +80,7 @@ export function useInsuranceInvoices() {
       const { data, error } = await supabase
         .from("insurance_invoices" as any)
         .select("*")
+        .order("invoice_date", { ascending: false, nullsFirst: false })
         .order("issued_at", { ascending: false });
       if (error) throw error;
       return (data || []) as unknown as InsuranceInvoice[];
@@ -120,7 +123,13 @@ export function useCreateInsuranceInvoice() {
         inv.idempotency_key ??
         `claim:${inv.claim_id}:total:${Number(inv.total).toFixed(2)}`;
 
-      const payload = { ...inv, idempotency_key: idem, invoice_number: "" };
+      const issuedAt = (inv as any).issued_at || new Date().toISOString();
+      const payload = {
+        ...inv,
+        invoice_date: inv.invoice_date || String(issuedAt).slice(0, 10),
+        idempotency_key: idem,
+        invoice_number: "",
+      };
       let { data, error } = await supabase
         .from("insurance_invoices" as any)
         .insert(payload as any)

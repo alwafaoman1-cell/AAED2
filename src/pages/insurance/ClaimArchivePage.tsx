@@ -135,9 +135,9 @@ export default function ClaimArchivePage() {
       // 3) الفواتير الضريبية
       const { data: invoices } = await supabase
         .from("insurance_invoices" as any)
-        .select("id, invoice_number, pdf_url, total, issued_at, status")
+        .select("id, invoice_number, pdf_url, total, invoice_date, issued_at, status")
         .eq("claim_id", id!)
-        .order("issued_at", { ascending: false });
+        .order("invoice_date", { ascending: false, nullsFirst: false });
 
       // 4) أمر العمل (إن وُجد) + صوره
       let workOrder: any = null;
@@ -247,7 +247,7 @@ export default function ClaimArchivePage() {
         name: `${inv.invoice_number}.pdf`,
         kind: "pdf",
         section: "invoices",
-        createdAt: inv.issued_at,
+        createdAt: inv.invoice_date || inv.issued_at,
         meta: `فاتورة • ${inv.status}`,
       });
     });
@@ -347,6 +347,7 @@ export default function ClaimArchivePage() {
           total: Number(i.total) || 0,
           status: i.status,
           issued_at: i.issued_at,
+          invoice_date: i.invoice_date,
           pdf_url: i.pdf_url,
         })),
         payments: (data.payments as any[]).map((p) => ({
