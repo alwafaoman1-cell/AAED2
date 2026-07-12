@@ -73,6 +73,7 @@ const STAGES: Array<{ key: StageKey; label: string; icon: string }> = [
 ];
 
 const LOCATION_OPTIONS = [
+  "مع العميل / خارج الورشة",
   "ساحة الانتظار",
   "منطقة الفحص",
   "قسم السمكرة والشاصي",
@@ -387,10 +388,42 @@ export default function InsuranceClaimDetailRedesigned() {
 
   const stageStatusPatch = (key: StageKey, isoValue: string | null) => {
     if (!isoValue) return {};
+    if (key === "received_at") return { workshop_arrival_date: isoValue };
+    if (key === "inspection_at") return { estimate_date: isoValue };
     if (key === "insurance_approved_at") return { status: "approved", approved_at: isoValue };
+    if (key === "repair_started_at") return { work_started_at: isoValue };
+    if (key === "quality_checked_at") return { work_completed_at: isoValue };
     if (key === "delivered_at") return { status: "delivered" };
     if (key === "invoice_collected_at") return { status: "paid" };
     return {};
+  };
+
+  const locationSyncPatch = (section: string, updatedAt: string) => {
+    const normalized = section.trim();
+    const isWithCustomer = normalized.includes("مع العميل");
+    const isDelivered = normalized.includes("تم التسليم");
+    const isOutside = normalized.includes("خارج الورشة");
+
+    if (isDelivered) {
+      return {
+        delivered_at: (claim as any)?.delivered_at || updatedAt,
+        status: "delivered",
+      };
+    }
+
+    if (isWithCustomer || isOutside) {
+      return {
+        workshop_arrival_date: null,
+        received_at: null,
+        delivered_at: null,
+      };
+    }
+
+    return {
+      workshop_arrival_date: (claim as any)?.workshop_arrival_date || updatedAt,
+      received_at: (claim as any)?.received_at || updatedAt,
+      delivered_at: null,
+    };
   };
 
   const saveStageDate = async (key: StageKey, value: string) => {
@@ -415,8 +448,9 @@ export default function InsuranceClaimDetailRedesigned() {
       toast.error("حدد موقع المركبة أولًا");
       return;
     }
-    if (locationSection !== "خارج الورشة — تم التسليم" && !locationBay.trim()) {
-      toast.error("رقم الموقف/العنبر مطلوب لهذا الموقع");
+    const isOutsideLocation = locationSection.includes("خارج الورشة") || locationSection.includes("مع العميل");
+    if (!isOutsideLocation && !locationBay.trim()) {
+      toast.error("رقم الموقف/العنبر مطلوب إذا كانت المركبة داخل الورشة");
       return;
     }
     try {
@@ -428,6 +462,7 @@ export default function InsuranceClaimDetailRedesigned() {
         vehicle_location_note: locationNote.trim() || null,
         vehicle_location_updated_at: updatedAt,
         vehicle_location_updated_by: auth.user?.id || null,
+        ...locationSyncPatch(locationSection, updatedAt),
       }, {
         existingNotes: claim.notes,
         markers: {
