@@ -473,66 +473,30 @@ export default function NewInsuranceClaim() {
           }
         }
       }
-      if (!vehicleId && (draft.vehiclePlate.trim() || draft.vehicleVin.trim())) {
-        let resolved: Awaited<ReturnType<typeof ensureVehicleForCustomer>>;
-        try {
-          resolved = await ensureVehicleForCustomer({
-            customerId: customerId!,
-            plate: draft.vehiclePlate,
-            vin: draft.vehicleVin,
-            make: draft.vehicleMake,
-            model: draft.vehicleModel,
-            year: draft.vehicleYear,
-            color: draft.vehicleColor,
-          });
-        } catch (error: any) {
-          const retryVehicle = await findExistingVehicle({
-            plate: draft.vehiclePlate,
-            vin: draft.vehicleVin,
-            make: draft.vehicleMake,
-            model: draft.vehicleModel,
-            year: draft.vehicleYear,
-            color: draft.vehicleColor,
-          });
-          if (!retryVehicle?.id) throw error;
-          resolved = {
-            vehicleId: retryVehicle.id,
-            existing: retryVehicle,
-            ownershipConflict: !!retryVehicle.customer_id && retryVehicle.customer_id !== customerId,
-            created: false,
-          };
-        }
-        vehicleId = resolved.vehicleId;
-        if (resolved.existing?.customer_id && resolved.existing.customer_id !== customerId) {
-          const vehicleCustomer = await loadCustomerRecord(resolved.existing.customer_id);
-          if (vehicleCustomer?.id) {
-            customerRecord = vehicleCustomer;
-            customerId = vehicleCustomer.id;
+      // لا تنشئ المركبة هنا. إنشاء/ربط المركبة يتم مركزياً داخل useCreateClaim بنفس tenant_id
+      // حتى لا يحدث اختلاف بين tenant الصفحة وtenant resolver الخارجي.
+      if (vehicleId) {
+        const { data: sameVehicleClaims, error: sameVehicleError } = await supabase
+          .from("insurance_claims" as any)
+          .select("id,claim_number,status,insurance_company,created_at")
+          .eq("tenant_id", tenantId as string)
+          .eq("vehicle_id", vehicleId)
+          .neq("claim_number", cn)
+          .not("status", "in", "(rejected,cancelled,paid)")
+          .limit(10);
+        if (sameVehicleError) throw sameVehicleError;
+        if ((sameVehicleClaims as any[])?.length) {
+          const lines = [
+            "تنبيه: نفس المركبة لديها مطالبة أخرى برقم مختلف.",
+            "",
+            ...((sameVehicleClaims as any[]) || []).map((d) => `• مطالبة ${d.claim_number} — ${d.insurance_company || ""} (${d.status})`),
+            "",
+            "هل تريد المتابعة وإنشاء مطالبة جديدة لهذه المركبة؟",
+          ].join("\n");
+          if (!window.confirm(lines)) {
+            setSubmitting(false);
+            return;
           }
-        }
-      }
-      if (!vehicleId) throw new Error("لا يمكن حفظ مطالبة بدون vehicle_id");
-
-      const { data: sameVehicleClaims, error: sameVehicleError } = await supabase
-        .from("insurance_claims" as any)
-        .select("id,claim_number,status,insurance_company,created_at")
-        .eq("tenant_id", tenantId as string)
-        .eq("vehicle_id", vehicleId)
-        .neq("claim_number", cn)
-        .not("status", "in", "(rejected,cancelled,paid)")
-        .limit(10);
-      if (sameVehicleError) throw sameVehicleError;
-      if ((sameVehicleClaims as any[])?.length) {
-        const lines = [
-          "تنبيه: نفس المركبة لديها مطالبة أخرى برقم مختلف.",
-          "",
-          ...((sameVehicleClaims as any[]) || []).map((d) => `• مطالبة ${d.claim_number} — ${d.insurance_company || ""} (${d.status})`),
-          "",
-          "هل تريد المتابعة وإنشاء مطالبة جديدة لهذه المركبة؟",
-        ].join("\n");
-        if (!window.confirm(lines)) {
-          setSubmitting(false);
-          return;
         }
       }
 

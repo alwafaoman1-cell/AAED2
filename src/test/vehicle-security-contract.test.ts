@@ -39,7 +39,8 @@ describe("vehicle identity guard", () => {
     expect(newClaim).toContain("customer_id");
     expect(newClaim).not.toContain('.ilike("name", draft.ownerName.trim())');
     expect(newClaim).not.toContain("placeholderName");
-    expect(newClaim).toContain("لا يمكن حفظ مطالبة بدون vehicle_id");
+    expect(newClaim).toContain("useCreateClaim");
+    expect(newClaim).toContain("إنشاء/ربط المركبة يتم مركزياً داخل useCreateClaim");
     expect(store).toContain("vehicleId?: string");
   });
 
