@@ -27,6 +27,8 @@ import { generatePdfFromHtml } from "@/lib/htmlToPdf";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import { toast } from "sonner";
 import AiExtractButton from "@/components/ai/AiExtractButton";
+import { findExistingVehicle } from "@/lib/vehicleIdentity";
+import { supabase } from "@/integrations/supabase/client";
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "مسودة",
@@ -68,8 +70,12 @@ export default function InsuranceIndependentEstimates() {
   const [form, setForm] = useState<Partial<IndependentEstimate>>(emptyForm);
   const [previewEstimate, setPreviewEstimate] = useState<IndependentEstimate | null>(null);
   const [sp, setSp] = useSearchParams();
+  const [vehicleLookupPlate, setVehicleLookupPlate] = useState("");
+  const [vehicleLookupBusy, setVehicleLookupBusy] = useState(false);
 
   useEffect(() => {
+    const searchParam = sp.get("search");
+    if (searchParam) setSearch(searchParam);
     if (sp.get("new") === "1") {
       setEditing(null);
       setForm(emptyForm);
@@ -109,12 +115,79 @@ export default function InsuranceIndependentEstimates() {
   function openCreate() {
     setEditing(null);
     setForm(emptyForm);
+    setVehicleLookupPlate("");
     setDialogOpen(true);
   }
   function openEdit(e: IndependentEstimate) {
     setEditing(e);
     setForm({ ...e });
+    setVehicleLookupPlate(e.vehicle_plate || "");
     setDialogOpen(true);
+  }
+
+  async function fillFromSavedVehicle() {
+    const plate = (vehicleLookupPlate || form.vehicle_plate || "").trim();
+    if (!plate) {
+      toast.error("أدخل رقم اللوحة أولًا");
+      return;
+    }
+    setVehicleLookupBusy(true);
+    try {
+      let match = await findExistingVehicle({ plate });
+      if (!match) {
+        const digits = plate.replace(/[^\d]/g, "");
+        if (digits) {
+          const { data: tenant } = await supabase.rpc("get_user_tenant_id");
+          const { data: row } = await supabase
+            .from("vehicles" as any)
+            .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,customers(name,phone)")
+            .eq("tenant_id", tenant as string)
+            .eq("plate_number", digits)
+            .limit(1)
+            .maybeSingle();
+          const vehicleRow = row as any;
+          if (vehicleRow) {
+            match = {
+              id: vehicleRow.id,
+              customer_id: vehicleRow.customer_id || null,
+              plate_number: vehicleRow.plate_number || null,
+              plate_letters: vehicleRow.plate_letters || null,
+              plate_country: vehicleRow.plate_country || null,
+              brand: vehicleRow.brand || null,
+              model: vehicleRow.model || null,
+              year: vehicleRow.year ?? null,
+              color: vehicleRow.color || null,
+              vin: vehicleRow.vin || null,
+              vin_number: vehicleRow.vin_number || null,
+              customer_name: vehicleRow.customers?.name || null,
+              customer_phone: vehicleRow.customers?.phone || null,
+              source: "plate",
+            };
+          }
+        }
+      }
+      if (!match) {
+        toast.error("لم يتم العثور على مركبة محفوظة بهذا الرقم");
+        return;
+      }
+      const displayPlate = [match.plate_letters, match.plate_number].filter(Boolean).join(" ").trim() || plate;
+      setForm((prev) => ({
+        ...prev,
+        customer_name: match.customer_name || prev.customer_name || "",
+        customer_phone: match.customer_phone || prev.customer_phone || "",
+        vehicle_plate: displayPlate,
+        vehicle_make: match.brand || prev.vehicle_make || "",
+        vehicle_model: match.model || prev.vehicle_model || "",
+        vehicle_year: match.year ?? prev.vehicle_year ?? null,
+        vehicle_color: match.color || prev.vehicle_color || "",
+      }));
+      setVehicleLookupPlate(displayPlate);
+      toast.success("تم تعبئة بيانات المركبة من السجل المحفوظ");
+    } catch (e: any) {
+      toast.error(e?.message || "فشل جلب بيانات المركبة");
+    } finally {
+      setVehicleLookupBusy(false);
+    }
   }
 
   function addUplItem() {
@@ -420,6 +493,31 @@ export default function InsuranceIndependentEstimates() {
             </div>
           </div>
 
+          <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+            <div className="text-sm font-semibold">تعبئة من مركبة محفوظة</div>
+            <div className="flex flex-col md:flex-row gap-2">
+              <Input
+                value={vehicleLookupPlate}
+                onChange={(e) => setVehicleLookupPlate(e.target.value)}
+                placeholder="أدخل رقم اللوحة مثل 5651 أو AA 5651"
+                dir="ltr"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={fillFromSavedVehicle}
+                disabled={vehicleLookupBusy}
+                className="gap-2"
+              >
+                <Search size={14} />
+                {vehicleLookupBusy ? "جاري البحث..." : "تعبئة من اللوحة"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              يمكن ترك الحقول يدويًا كما هي، أو تعبئتها تلقائيًا من السجل المحفوظ للمركبة.
+            </p>
+          </div>
+
           <VehicleMakeModelPicker
             make={form.vehicle_make || ""}
             model={form.vehicle_model || ""}
@@ -568,4 +666,3 @@ export default function InsuranceIndependentEstimates() {
     </div>
   );
 }
-

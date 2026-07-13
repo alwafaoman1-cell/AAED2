@@ -78,7 +78,7 @@ const InsuranceHub = lazy(() => import("./pages/insurance/InsuranceHub"));
 const InsuranceClaimsList = lazy(() => import("./pages/insurance/InsuranceClaimsList"));
 const InsurancePipeline = lazy(() => import("./pages/insurance/InsurancePipeline"));
 const InsuranceAlertsCenter = lazy(() => import("./pages/insurance/InsuranceAlertsCenter"));
-const InsuranceClaimDetail = lazy(() => import("./pages/insurance/InsuranceClaimDetailRedesigned"));
+const InsuranceClaimDetail = lazy(() => import("./pages/insurance/InsuranceClaimDetail"));
 const InsuranceClaimAuditPage = lazy(() => import("./pages/insurance/InsuranceClaimAuditPage"));
 const NewInsuranceClaim = lazy(() => import("./pages/insurance/NewInsuranceClaim"));
 const InsuranceCompanies = lazy(() => import("./pages/insurance/InsuranceCompanies"));
@@ -87,6 +87,8 @@ const InsurancePayments = lazy(() => import("./pages/insurance/InsurancePayments
 const InvestorsReport = lazy(() => import("./pages/insurance/InvestorsReport"));
 const InsuranceWorkOrders = lazy(() => import("./pages/insurance/InsuranceWorkOrders"));
 const InsuranceAccounting = lazy(() => import("./pages/insurance/InsuranceAccounting"));
+const InsuranceEstimates = lazy(() => import("./pages/insurance/InsuranceEstimates"));
+const InsuranceIndependentEstimates = lazy(() => import("./pages/insurance/InsuranceIndependentEstimates"));
 const InsuranceDocumentsArchive = lazy(() => import("./pages/insurance/InsuranceDocumentsArchive"));
 const InsuranceImport = lazy(() => import("./pages/insurance/InsuranceImport"));
 const ClaimArchivePage = lazy(() => import("./pages/insurance/ClaimArchivePage"));
@@ -300,8 +302,8 @@ const App = () => (
                 <Route path="/insurance/companies" element={<InsuranceCompanies />} />
                 <Route path="/insurance/work-orders" element={<InsuranceWorkOrders />} />
                 <Route path="/insurance/accounting" element={<InsuranceAccounting />} />
-                <Route path="/insurance/estimates" element={<Navigate to="/estimates?type=insurance" replace />} />
-                <Route path="/insurance/independent-estimates" element={<Navigate to="/estimates?type=independent" replace />} />
+                <Route path="/insurance/estimates" element={<InsuranceEstimates />} />
+                <Route path="/insurance/independent-estimates" element={<InsuranceIndependentEstimates />} />
                 <Route path="/insurance/documents" element={<InsuranceDocumentsArchive />} />
                 <Route path="/insurance/import" element={<InsuranceImport />} />
                 <Route path="/insurance/companies/:id" element={<InsuranceCompanyDetail />} />

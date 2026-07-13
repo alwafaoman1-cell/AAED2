@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Search, Eye, FileText, Receipt, Filter, CheckCircle2, AlertTriangle, FileSpreadsheet, ArrowLeftRight,
-  Printer, X, CheckSquare,
+  Printer, X, CheckSquare, Plus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -370,9 +370,14 @@ export default function InsuranceEstimates() {
           <h1 className="text-xl md:text-2xl font-bold text-foreground">قائمة تقديرات الإصلاح</h1>
           <p className="text-xs md:text-sm text-muted-foreground">جميع تقديرات إصلاح المركبات — يمكن تحويل أي تقدير إلى فاتورة ضريبية بنقرة واحدة</p>
         </div>
-        <Button variant="outline" onClick={exportCsv} className="gap-2 w-full md:w-auto">
-          <FileSpreadsheet size={16} /> تصدير CSV
-        </Button>
+        <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
+          <Button onClick={() => navigate("/insurance/independent-estimates?new=1")} className="gap-2 w-full md:w-auto">
+            <Plus size={16} /> تقدير يدوي جديد
+          </Button>
+          <Button variant="outline" onClick={exportCsv} className="gap-2 w-full md:w-auto">
+            <FileSpreadsheet size={16} /> تصدير CSV
+          </Button>
+        </div>
       </div>
 
       {/* KPIs */}

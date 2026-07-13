@@ -5,7 +5,7 @@ import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
   Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Sparkles, Phone,
-  DollarSign, PackageCheck,
+  DollarSign, PackageCheck, Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,7 @@ import { getClaimEstimateHtml } from "@/lib/insurancePdfTemplates";
 import { formatDateLatin } from "@/lib/numberUtils";
 import { nextWorkOrderNumber } from "@/lib/numbering";
 import { saveClaimDocument } from "@/lib/uploadHtmlAsPdf";
+import { generatePdfFromHtml } from "@/lib/htmlToPdf";
 import ClaimDocumentsPanel from "@/components/insurance/ClaimDocumentsPanel";
 import { FolderArchive } from "lucide-react";
 import TemplatePicker from "@/components/print/TemplatePicker";
@@ -1102,6 +1103,19 @@ export default function InsuranceClaimDetail() {
     return html;
   }, [existing, vehicle, claimNumber, company, ownerName, ownerPhone, vehicleMake, vehicleModel, vehiclePlate, vehicleYear, vehicleColor, estimatedCost, approvedAmount, estimationType, uplItems, notes, estimateTerms, damagePhotos, estimateDate]);
 
+  async function handleDownloadEstimatePdf() {
+    try {
+      toast.loading("جاري تحميل تقدير الإصلاح...", { id: "claim-estimate-pdf" });
+      await generatePdfFromHtml({
+        htmlContent: buildPdf(),
+        fileName: `Estimate-${claimNumber || id || "claim"}`,
+      });
+      toast.success("تم تحميل تقدير الإصلاح", { id: "claim-estimate-pdf" });
+    } catch (e: any) {
+      toast.error(e?.message || "فشل تحميل تقدير الإصلاح", { id: "claim-estimate-pdf" });
+    }
+  }
+
   // ── ملخص شامل للمطالبة (مختلف عن "تقدير المطالبة") ──
   const { data: claimPayments = [] } = usePaymentsByClaim(id);
   const { data: claimDocs = [] } = useClaimDocuments(isNew ? undefined : id);
@@ -1542,6 +1556,29 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             : "Delivered - Invoice Issued"
     : "";
   const isApprovedClaim = status === "approved";
+  const vehiclePresence =
+    isDeliveredClaim
+      ? "with_customer_delivered"
+      : workshopArrivalDate
+        ? "in_workshop"
+        : "with_customer_not_arrived";
+  const vehiclePresenceMeta: Record<typeof vehiclePresence, { label: string; hint: string; cls: string }> = {
+    with_customer_not_arrived: {
+      label: "مع العميل / لم تصل",
+      hint: "لا يوجد تاريخ وصول للورشة؛ لذلك تعتبر المركبة مع العميل.",
+      cls: "border-amber-300 bg-amber-50 text-amber-700",
+    },
+    in_workshop: {
+      label: "داخل الورشة",
+      hint: "تم تسجيل تاريخ وصول المركبة للورشة ولم يتم تسجيل التسليم.",
+      cls: "border-emerald-300 bg-emerald-50 text-emerald-700",
+    },
+    with_customer_delivered: {
+      label: "مع العميل / تم التسليم",
+      hint: "تم تسجيل تسليم المركبة للعميل.",
+      cls: "border-sky-300 bg-sky-50 text-sky-700",
+    },
+  };
   const currentVehicleStepIndex = isClosedClaim
     ? 8
     : isDeliveredClaim
@@ -1555,9 +1592,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             : isAwaitingApproval
               ? 2
               : workshopArrivalDate
-                ? 0
-                : 1;
+                ? 1
+                : 0;
   const vehicleProgress = [
+    { key: "not_arrived", label: "مع العميل / لم تصل", icon: "👤", date: workshopArrivalDate ? null : (existing as any)?.created_at, editable: false },
     { key: "arrived", label: "وصلت الورشة", icon: "🏁", date: workshopArrivalDate, editable: true },
     { key: "inspection", label: "بانتظار الفحص", icon: "🔍", date: estimateDate, editable: false },
     { key: "approval_wait", label: "بانتظار موافقة التأمين", icon: "⏳", date: estimateDate, editable: false },
@@ -1877,6 +1915,16 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             </div>
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
+            {!isNew && (
+              <>
+                <Button variant="outline" onClick={() => setShowPdf(true)} className="gap-2">
+                  <Printer size={16} /> طباعة تقدير الإصلاح
+                </Button>
+                <Button variant="outline" onClick={handleDownloadEstimatePdf} className="gap-2">
+                  <Download size={16} /> تحميل تقدير الإصلاح
+                </Button>
+              </>
+            )}
             {isNew && (
               <>
                 <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
@@ -2031,7 +2079,43 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <h3 className="font-bold text-foreground">حالة المركبة داخل المطالبة</h3>
             <p className="text-xs text-muted-foreground">كل مرحلة تعتمد على بيانات محفوظة في Supabase وتبقى بعد التحديث.</p>
           </div>
-          <Badge variant="outline">آخر تحديث: {formatDateLatin((existing as any)?.updated_at || new Date().toISOString())}</Badge>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge variant="outline" className={vehiclePresenceMeta[vehiclePresence].cls}>{vehiclePresenceMeta[vehiclePresence].label}</Badge>
+            <Badge variant="outline">آخر تحديث: {formatDateLatin((existing as any)?.updated_at || new Date().toISOString())}</Badge>
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+          <div className="text-sm font-semibold">موقع المركبة التشغيلي</div>
+          <p className="text-xs text-muted-foreground">{vehiclePresenceMeta[vehiclePresence].hint}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={vehiclePresence === "with_customer_not_arrived" ? "default" : "outline"}
+              disabled={isNew || isDeliveredClaim || !!workStartedAt}
+              onClick={() => {
+                setWorkshopArrivalDate("");
+                toast.info("تم ضبط الحالة: مع العميل / لم تصل. اضغط حفظ التعديلات لتثبيتها.");
+              }}
+            >
+              مع العميل / لم تصل
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={vehiclePresence === "in_workshop" ? "default" : "outline"}
+              disabled={isNew || isDeliveredClaim}
+              onClick={() => {
+                if (!workshopArrivalDate) setWorkshopArrivalDate(new Date().toISOString().slice(0, 10));
+                toast.info("تم ضبط الحالة: داخل الورشة. اضغط حفظ التعديلات لتثبيتها.");
+              }}
+            >
+              داخل الورشة / وصلت
+            </Button>
+          </div>
+          {!!workStartedAt && !isDeliveredClaim && (
+            <p className="text-[11px] text-muted-foreground">لا يمكن إرجاع المركبة إلى “لم تصل” بعد تسجيل بدء العمل إلا بتعديل تواريخ سير العملية يدويًا.</p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {vehicleProgress.map((step) => (

@@ -65,6 +65,14 @@ export default function EstimatesList() {
     supplementary: data.filter((e) => e.estimate_type === "supplementary").length,
   }), [data]);
 
+  function openEstimate(estimate: (typeof data)[number]) {
+    if (estimate.legacy_source === "insurance_estimates") {
+      navigate(`/insurance/independent-estimates?search=${encodeURIComponent(estimate.estimate_number)}`);
+      return;
+    }
+    navigate(`/estimates/${estimate.id}`);
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -133,7 +141,7 @@ export default function EstimatesList() {
               <Card
                 key={estimate.id}
                 className="p-4 cursor-pointer hover:border-primary/50 transition"
-                onClick={() => navigate(`/estimates/${estimate.id}`)}
+                onClick={() => openEstimate(estimate)}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -149,6 +157,7 @@ export default function EstimatesList() {
                   <div className="font-semibold">{estimate.customer?.name || "—"}</div>
                   <div className="text-muted-foreground">{estimate.vehicle?.plate_number || "—"} • {[estimate.vehicle?.brand || estimate.vehicle?.make, estimate.vehicle?.model].filter(Boolean).join(" ") || "—"}</div>
                   {estimate.claim?.claim_number && <div className="text-muted-foreground">مطالبة: {estimate.claim.claim_number}</div>}
+                  {estimate.legacy_source === "insurance_estimates" && <Badge variant="outline" className="text-[10px]">Legacy estimate</Badge>}
                 </div>
                 <div className="mt-3 pt-3 border-t flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">{estimate.estimate_date}</span>

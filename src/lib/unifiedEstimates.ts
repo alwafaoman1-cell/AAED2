@@ -334,7 +334,77 @@ export async function listUnifiedEstimates() {
     .is("archived_at", null)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data || []) as unknown as UnifiedEstimate[];
+  const unified = (data || []) as unknown as UnifiedEstimate[];
+
+  const { data: legacyRows, error: legacyError } = await supabase
+    .from("insurance_estimates" as any)
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (legacyError) throw legacyError;
+
+  const legacy = ((legacyRows || []) as any[]).map((row) => {
+    const subtotal = row.estimation_type === "upl" && Array.isArray(row.upl_items)
+      ? row.upl_items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0)
+      : Number(row.lump_sum_amount || 0);
+    const statusMap: Record<string, EstimateStatus> = {
+      draft: "draft",
+      sent: "issued",
+      approved: "approved",
+      converted: "converted",
+      cancelled: "archived",
+    };
+    return {
+      id: row.id,
+      tenant_id: row.tenant_id,
+      estimate_number: row.estimate_number || row.claim_number || row.id,
+      estimate_type: "independent",
+      status: statusMap[String(row.status || "draft")] || "draft",
+      customer_id: null,
+      vehicle_id: null,
+      claim_id: row.converted_claim_id || null,
+      work_order_id: null,
+      insurance_company_id: row.insurance_company_id || null,
+      insurance_employee_id: null,
+      parent_estimate_id: null,
+      title: row.claim_number || null,
+      purpose: row.incident_description || null,
+      estimate_date: String(row.created_at || new Date().toISOString()).slice(0, 10),
+      valid_until: null,
+      currency: "OMR",
+      subtotal,
+      vat_rate: 0,
+      vat_enabled: false,
+      vat_amount: 0,
+      total: subtotal,
+      legacy_source: "insurance_estimates",
+      legacy_id: row.id,
+      legacy_number: row.estimate_number || null,
+      notes: row.notes || null,
+      terms: row.terms_text || null,
+      internal_notes: null,
+      issued_at: null,
+      issued_by: null,
+      converted_at: row.converted_at || null,
+      archived_at: null,
+      created_by: null,
+      created_at: row.created_at,
+      updated_at: row.updated_at || row.created_at,
+      customer: row.customer_name || row.customer_phone
+        ? { id: row.id, name: row.customer_name || null, phone: row.customer_phone || null, customer_code: null }
+        : null,
+      vehicle: row.vehicle_plate || row.vehicle_make || row.vehicle_model
+        ? { id: row.id, brand: row.vehicle_make || null, make: row.vehicle_make || null, model: row.vehicle_model || null, plate_number: row.vehicle_plate || null, vin: null, vin_number: null, year: row.vehicle_year || null }
+        : null,
+      claim: row.claim_number || row.insurance_company
+        ? { id: row.converted_claim_id || row.id, claim_number: row.claim_number || null, insurance_company: row.insurance_company || null }
+        : null,
+      work_order: null,
+    } as UnifiedEstimate;
+  });
+
+  const existingLegacyKeys = new Set(unified.map((estimate) => `${estimate.legacy_source || ""}:${estimate.legacy_id || ""}`));
+  return [...unified, ...legacy.filter((estimate) => !existingLegacyKeys.has(`insurance_estimates:${estimate.id}`))]
+    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
 }
 
 export async function getUnifiedEstimate(id: string) {
