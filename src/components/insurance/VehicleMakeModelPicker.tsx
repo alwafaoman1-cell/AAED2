@@ -11,6 +11,7 @@ import {
 } from "@/hooks/useVehicleMakesModels";
 import VinScannerButton from "@/components/scanner/VinScannerButton";
 import VehicleColorSelect from "@/components/vehicles/VehicleColorSelect";
+import PlateInput from "@/components/vehicles/PlateInput";
 
 interface Props {
   make: string;
@@ -237,7 +238,11 @@ export default function VehicleMakeModelPicker({
         {!hidden("plate") && (
           <div className="space-y-1.5">
             <Label>اللوحة</Label>
-            <Input value={plate} onChange={(e) => onChange({ plate: e.target.value })} placeholder="أ ب ج 1234" />
+            <PlateInput
+              value={plate}
+              onChange={(value) => onChange({ plate: value })}
+              checkDuplicate={false}
+            />
           </div>
         )}
 

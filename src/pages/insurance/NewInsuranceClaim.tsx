@@ -89,6 +89,11 @@ const emptyDraft = (): Draft => ({
   notes: "",
 });
 
+const formatVehiclePlateForClaim = (vehicle: {
+  plate_letters?: string | null;
+  plate_number?: string | null;
+}) => [vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ") || vehicle.plate_number || "";
+
 async function resolveTenantForClaim(): Promise<string> {
   const tenantId = await getCurrentTenantId();
   if (tenantId && isUuid(tenantId)) return tenantId;
@@ -381,22 +386,42 @@ export default function NewInsuranceClaim() {
             toE164(customer.phone || "").replace(/\D/g, "").slice(-8) === phoneDigits
           );
           if (phoneMatch) {
-            throw new Error("رقم الهاتف موجود. اضغط Use Existing Customer قبل حفظ المطالبة.");
+            customerRecord = phoneMatch as any;
+            customerId = customerRecord.id;
           }
         }
-        if (!draft.ownerName.trim()) throw new Error("اختر customer_id أو أدخل اسم المالك لإنشاء عميل جديد");
-        const { data: newCust, error: e1 } = await supabase
-          .from("customers")
-          .insert({
-            tenant_id: tenantId as string,
-            name: draft.ownerName.trim(),
-            phone: normalizedPhone || null,
-          } as any)
-          .select("id,name,phone")
-          .single();
-        if (e1) throw e1;
-        customerRecord = newCust as any;
-        customerId = customerRecord.id;
+        if (!customerId) {
+          const customerName = draft.ownerName.trim() || draft.company.trim();
+          if (!customerName) throw new Error("اختر عميلًا موجودًا أو أدخل اسم المالك أو استخدم شركة التأمين كعميل");
+
+          const { data: sameNameRows } = await supabase
+            .from("customers")
+            .select("id,name,phone")
+            .eq("tenant_id", tenantId as string)
+            .is("deleted_at", null)
+            .ilike("name", customerName)
+            .limit(5);
+          const sameName = ((sameNameRows as any[]) || []).find((customer) =>
+            String(customer.name || "").trim().toLowerCase() === customerName.toLowerCase()
+          );
+          if (sameName) {
+            customerRecord = sameName as any;
+            customerId = customerRecord.id;
+          } else {
+            const { data: newCust, error: e1 } = await supabase
+              .from("customers")
+              .insert({
+                tenant_id: tenantId as string,
+                name: customerName,
+                phone: normalizedPhone || null,
+              } as any)
+              .select("id,name,phone")
+              .single();
+            if (e1) throw e1;
+            customerRecord = newCust as any;
+            customerId = customerRecord.id;
+          }
+        }
       }
 
 
@@ -808,7 +833,7 @@ function Step1({
     (async () => {
       const { data } = await supabase
         .from("vehicles")
-        .select("id, plate_number, brand, model, year, color, customer_id, customers(name, phone)")
+        .select("id, plate_number, plate_letters, plate_country, brand, model, year, color, customer_id, customers(name, phone)")
         .order("created_at", { ascending: false })
         .limit(200);
       setVehicles((data as any[]) || []);
@@ -847,7 +872,7 @@ function Step1({
     if (!t) return vehicles.slice(0, 50);
     return vehicles
       .filter((v) =>
-        [v.plate_number, v.brand, v.model, v.customers?.name, v.customers?.phone]
+        [formatVehiclePlateForClaim(v), v.plate_number, v.plate_letters, v.brand, v.model, v.customers?.name, v.customers?.phone]
           .filter(Boolean)
           .some((x) => String(x).toLowerCase().includes(t)),
       )
@@ -860,7 +885,7 @@ function Step1({
       customerId: v.customer_id || draft.customerId,
       vehicleMake: v.brand || "",
       vehicleModel: v.model || "",
-      vehiclePlate: v.plate_number || "",
+      vehiclePlate: formatVehiclePlateForClaim(v),
       vehicleYear: v.year ? String(v.year) : "",
       vehicleColor: v.color || "",
       ownerName: v.customers?.name || draft.ownerName,
@@ -923,6 +948,7 @@ function Step1({
                   customerId: vehicleMatch.customer_id || draft.customerId,
                   vehicleMake: vehicleMatch.brand || draft.vehicleMake,
                   vehicleModel: vehicleMatch.model || draft.vehicleModel,
+                  vehiclePlate: formatVehiclePlateForClaim(vehicleMatch),
                   vehicleYear: vehicleMatch.year ? String(vehicleMatch.year) : draft.vehicleYear,
                   vehicleColor: vehicleMatch.color || draft.vehicleColor,
                   vehicleVin: vehicleMatch.vin_number || vehicleMatch.vin || draft.vehicleVin,
@@ -1035,7 +1061,7 @@ function Step1({
         {existingCustomerByPhone && draft.customerId !== existingCustomerByPhone.id && (
           <div className="mt-3 rounded-lg border border-info/40 bg-info/5 p-3 text-xs flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <div className="font-semibold">Use Existing Customer</div>
+              <div className="font-semibold">عميل موجود بنفس رقم الهاتف</div>
               <div className="text-muted-foreground">
                 {existingCustomerByPhone.name} — <span dir="ltr">{existingCustomerByPhone.phone}</span>
               </div>
@@ -1050,10 +1076,48 @@ function Step1({
                 ownerPhone: existingCustomerByPhone.phone || draft.ownerPhone,
               })}
             >
-              Use Existing Customer
+              استخدام العميل الموجود
             </Button>
           </div>
         )}
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+          <div className="rounded-lg border border-border bg-card/60 p-3">
+            <div className="font-semibold text-foreground">إنشاء عميل جديد</div>
+            <div className="text-muted-foreground mt-1">
+              إذا لم يوجد عميل بنفس الهاتف أو الاسم، سيتم إنشاء عميل جديد عند حفظ المطالبة.
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={!existingCustomerByPhone}
+            onClick={() => existingCustomerByPhone && update({
+              customerId: existingCustomerByPhone.id,
+              ownerName: existingCustomerByPhone.name,
+              ownerPhone: existingCustomerByPhone.phone || draft.ownerPhone,
+            })}
+            className="rounded-lg border border-info/40 bg-info/5 p-3 text-right transition hover:bg-info/10 disabled:opacity-50 disabled:hover:bg-info/5"
+          >
+            <div className="font-semibold text-foreground">اختيار عميل محفوظ</div>
+            <div className="text-muted-foreground mt-1">
+              {existingCustomerByPhone ? existingCustomerByPhone.name : "يظهر تلقائيًا عند تطابق رقم الهاتف."}
+            </div>
+          </button>
+          <button
+            type="button"
+            disabled={!draft.company.trim()}
+            onClick={() => update({
+              customerId: null,
+              ownerName: draft.company.trim(),
+              ownerPhone: "",
+            })}
+            className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-right transition hover:bg-amber-500/15 disabled:opacity-50 disabled:hover:bg-amber-500/10"
+          >
+            <div className="font-semibold text-foreground">العميل = شركة التأمين</div>
+            <div className="text-muted-foreground mt-1">
+              يستخدم اسم شركة التأمين كعميل عند عدم وجود مالك محدد.
+            </div>
+          </button>
+        </div>
       </div>
 
       {/* Vehicle picker dialog */}
@@ -1075,7 +1139,7 @@ function Step1({
               ) : filtered.map((v) => (
                 <button key={v.id} className="w-full text-right p-3 hover:bg-secondary/50 transition flex items-center justify-between gap-3" onClick={() => pickVehicle(v)}>
                   <div>
-                    <div className="font-mono text-sm" dir="ltr">{v.plate_number}</div>
+                    <div className="font-mono text-sm" dir="ltr">{formatVehiclePlateForClaim(v)}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">{v.brand} {v.model} {v.year ? `• ${v.year}` : ""}</div>
                   </div>
                   <div className="text-xs text-muted-foreground">{v.customers?.name}</div>
