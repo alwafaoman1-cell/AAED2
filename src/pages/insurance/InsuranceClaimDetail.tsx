@@ -5,7 +5,7 @@ import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
   Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Sparkles, Phone,
-  DollarSign, PackageCheck, Download,
+  DollarSign, PackageCheck, Download, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -198,6 +199,9 @@ export default function InsuranceClaimDetail() {
   const [stageDate, setStageDate] = useState<string>(dateOnly(new Date().toISOString()));
   const [stageNote, setStageNote] = useState("");
   const [savingStage, setSavingStage] = useState(false);
+  const [insuranceSectionOpen, setInsuranceSectionOpen] = useState(false);
+  const [ownerSectionOpen, setOwnerSectionOpen] = useState(false);
+  const [vehicleSectionOpen, setVehicleSectionOpen] = useState(false);
 
   // ── شروط/ملاحظات تقدير الإصلاح (محرّرة، تُحفظ محلياً لكل tenant) ──
   const DEFAULT_ESTIMATE_TERMS = [
@@ -1486,7 +1490,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             unit_price: Number(it.unitPrice) || 0,
           }));
 
-          const { error: insErr } = await supabase.from("insurance_invoices" as any).insert({
+          const { data: insertedInvoice, error: insErr } = await supabase.from("insurance_invoices" as any).insert({
             tenant_id: tenant as string,
             claim_id: existing.id,
             invoice_number: "", // الـ trigger يولّد الرقم INS-INV-XXXXX
@@ -1506,10 +1510,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             notes: [notes, lpo.note ? `LPO Note: ${lpo.note}` : ""].filter(Boolean).join("\n") || null,
             lpo_number: lpo.number.trim() || null,
             items: persistedItems,
-          } as any);
+          } as any).select("id,invoice_number").single();
           if (insErr) throw insErr;
           queryClient.invalidateQueries({ queryKey: ["insurance_invoices"] });
           toast.success("تم حفظ الفاتورة في محاسبة المطالبات");
+          if ((insertedInvoice as any)?.id) {
+            navigate(`/insurance/accounting?invoice=${(insertedInvoice as any).id}`);
+          } else {
+            navigate("/insurance/accounting");
+          }
         }
       }
     } catch (e: any) {
@@ -1543,6 +1552,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const isDeliveredClaim = !!(existing as any)?.delivered_at || status === "paid";
   const isReadyForDelivery = !!workCompletedAt && !isDeliveredClaim && !isClosedClaim;
   const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
+  const showHeaderWorkflowActions = Boolean((existing as any)?.show_header_workflow_actions);
   const isAwaitingApproval = !isNew && status === "pending";
   const insuranceFinancialStatus = isDeliveredClaim
     ? paymentRemaining <= 0 && paidTotal > 0
@@ -1751,10 +1761,16 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
       <Card className="p-5 grid md:grid-cols-2 gap-5 bg-gradient-to-l from-primary/5 to-transparent">
         {/* Insurance company (primary) */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm font-bold text-primary">
-            <Building2 size={16} /> شركة التأمين (الجهة الدافعة)
-          </div>
+        <Collapsible open={insuranceSectionOpen} onOpenChange={setInsuranceSectionOpen} className="space-y-3">
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="ghost" className="w-full justify-between px-0 text-primary hover:bg-transparent">
+              <span className="flex items-center gap-2 text-sm font-bold">
+                <Building2 size={16} /> شركة التأمين (الجهة الدافعة)
+              </span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${insuranceSectionOpen ? "rotate-180" : ""}`} />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">شركة التأمين *</Label>
@@ -1777,57 +1793,21 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <Label className="text-xs">رقم المطالبة *</Label>
               <Input value={claimNumber} onChange={(e) => setClaimNumber(e.target.value)} placeholder="CLM-001" />
             </div>
-            <div className="col-span-2 rounded-lg border border-dashed border-primary/30 bg-primary/5 p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <Label className="text-xs font-bold">LPO / أمر الشراء من شركة التأمين</Label>
-                <Badge variant={hasRegisteredLpo ? "default" : "outline"}>
-                  {hasRegisteredLpo ? "LPO مسجل" : "بانتظار LPO"}
-                </Badge>
-              </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">رقم LPO</Label>
-                  <Input ref={lpoNumberRef} value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">تاريخ LPO</Label>
-                  <Input ref={lpoDateRef} type="date" value={lpoDate} onChange={(e) => setLpoDate(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">مبلغ LPO</Label>
-                    <Input ref={lpoAmountRef} type="text" inputMode="decimal" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">تاريخ فاتورة التأمين</Label>
-                  <Select value={invoiceDateMode} onValueChange={(value) => setInvoiceDateMode(value as "lpo" | "lpo_plus_one" | "custom")}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="lpo">نفس تاريخ LPO</SelectItem>
-                      <SelectItem value="lpo_plus_one">اليوم التالي لـ LPO</SelectItem>
-                      <SelectItem value="custom">تاريخ مخصص</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {invoiceDateMode === "custom" && (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">التاريخ المخصص</Label>
-                    <Input type="date" value={customInvoiceDate} onChange={(e) => setCustomInvoiceDate(e.target.value)} />
-                  </div>
-                )}
-                <div className="space-y-1.5 md:col-span-2">
-                  <Label className="text-xs">ملاحظة LPO</Label>
-                  <Input ref={lpoNoteRef} value={lpoNote} onChange={(e) => setLpoNote(e.target.value)} placeholder="ملاحظة داخلية اختيارية" />
-                </div>
-              </div>
-            </div>
           </div>
-        </div>
+          </CollapsibleContent>
+        </Collapsible>
 
         {/* Vehicle owner (secondary) — smart autocomplete */}
-        <div className="space-y-3 border-r-0 md:border-r md:pr-5 border-border">
-          <div className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
-            <User size={16} /> مالك السيارة (اختياري — يُجلب تلقائياً من بيانات السيارة)
-          </div>
+        <Collapsible open={ownerSectionOpen} onOpenChange={setOwnerSectionOpen} className="space-y-3 border-r-0 md:border-r md:pr-5 border-border">
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="ghost" className="w-full justify-between px-0 text-muted-foreground hover:bg-transparent">
+              <span className="flex items-center gap-2 text-sm font-bold">
+                <User size={16} /> مالك السيارة (اختياري — يُجلب تلقائياً من بيانات السيارة)
+              </span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${ownerSectionOpen ? "rotate-180" : ""}`} />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5 col-span-2">
               <Label className="text-xs">اسم المالك</Label>
@@ -1868,27 +1848,40 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <Input value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} placeholder="+968 ..." dir="ltr" />
             </div>
           </div>
-        </div>
+          </CollapsibleContent>
+        </Collapsible>
       </Card>
 
       {/* ── Vehicle data (inline, optional, saved with claim) ── */}
       <Card className="p-5">
-        <VehicleMakeModelPicker
-          make={vehicleMake}
-          model={vehicleModel}
-          plate={vehiclePlate}
-          year={vehicleYear}
-          color={vehicleColor}
-          vin={vehicleVin}
-          onChange={(patch) => {
-            if (patch.make !== undefined) setVehicleMake(patch.make);
-            if (patch.model !== undefined) setVehicleModel(patch.model);
-            if (patch.plate !== undefined) setVehiclePlate(patch.plate);
-            if (patch.year !== undefined) setVehicleYear(patch.year);
-            if (patch.color !== undefined) setVehicleColor(patch.color);
-            if (patch.vin !== undefined) setVehicleVin(patch.vin);
-          }}
-        />
+        <Collapsible open={vehicleSectionOpen} onOpenChange={setVehicleSectionOpen} className="space-y-3">
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="ghost" className="w-full justify-between px-0 hover:bg-transparent">
+              <span className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
+                <Car size={16} /> بيانات السيارة (اختياري — تُحفظ مع المطالبة حتى دون ربط مركبة)
+              </span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${vehicleSectionOpen ? "rotate-180" : ""}`} />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <VehicleMakeModelPicker
+              make={vehicleMake}
+              model={vehicleModel}
+              plate={vehiclePlate}
+              year={vehicleYear}
+              color={vehicleColor}
+              vin={vehicleVin}
+              onChange={(patch) => {
+                if (patch.make !== undefined) setVehicleMake(patch.make);
+                if (patch.model !== undefined) setVehicleModel(patch.model);
+                if (patch.plate !== undefined) setVehiclePlate(patch.plate);
+                if (patch.year !== undefined) setVehicleYear(patch.year);
+                if (patch.color !== undefined) setVehicleColor(patch.color);
+                if (patch.vin !== undefined) setVehicleVin(patch.vin);
+              }}
+            />
+          </CollapsibleContent>
+        </Collapsible>
       </Card>
 
       <Card className="p-5 border-primary/20 bg-gradient-to-l from-primary/5 via-card to-card">
@@ -1942,7 +1935,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </>
             )}
 
-            {isAwaitingApproval && (
+            {showHeaderWorkflowActions && isAwaitingApproval && (
               <>
                 <Button onClick={handleApprove} disabled={updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
                   <CheckCircle2 size={16} /> اعتماد / موافقة
@@ -1962,7 +1955,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </>
             )}
 
-            {isApprovedClaim && !isRepairingClaim && !isReadyForDelivery && !isDeliveredClaim && (
+            {showHeaderWorkflowActions && isApprovedClaim && !isRepairingClaim && !isReadyForDelivery && !isDeliveredClaim && (
               <>
                 {hasLinkedWorkOrder ? (
                   <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
@@ -1982,7 +1975,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </>
             )}
 
-            {hasLinkedWorkOrder && !isClosedClaim && (
+            {showHeaderWorkflowActions && hasLinkedWorkOrder && !isClosedClaim && (
               <>
                 <Badge variant="outline" className="h-10 px-3 flex items-center gap-2">
                   <Wrench size={14} /> حالة أمر العمل: {linkedWorkOrderStatus}
@@ -1995,7 +1988,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </>
             )}
 
-            {isRepairingClaim && (
+            {showHeaderWorkflowActions && isRepairingClaim && (
               <>
                 <Button variant="outline" onClick={() => openStageDialog({ key: "ready", label: "جاهزة للتسليم" })} className="gap-2">
                   <ClipboardCheck size={16} /> تحديث المرحلة
@@ -2012,7 +2005,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </>
             )}
 
-            {isReadyForDelivery && (
+            {showHeaderWorkflowActions && isReadyForDelivery && (
               <>
                 <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
                   <Send size={16} /> إشعار جاهزية
@@ -2026,7 +2019,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </>
             )}
 
-            {isDeliveredClaim && (
+            {showHeaderWorkflowActions && isDeliveredClaim && (
               <>
                 {!hasRegisteredLpo && (
                   <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
@@ -2054,7 +2047,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </>
             )}
 
-            {isClosedClaim && (
+            {showHeaderWorkflowActions && isClosedClaim && (
               <>
                 <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
                   <Printer size={16} /> PDF
@@ -2070,6 +2063,68 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </>
             )}
           </div>
+        </div>
+      </Card>
+
+      <Card className="p-5 space-y-4 border-primary/20">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-bold text-primary">
+              <FileUp size={16} /> LPO / أمر الشراء من شركة التأمين
+            </div>
+            <p className="text-xs text-muted-foreground">سجل بيانات LPO هنا ثم أنشئ فاتورة التأمين الضريبية من نفس المكان.</p>
+          </div>
+          <Badge variant={hasRegisteredLpo ? "default" : "outline"}>
+            {hasRegisteredLpo ? "LPO مسجل" : "بانتظار LPO"}
+          </Badge>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">رقم LPO</Label>
+            <Input ref={lpoNumberRef} value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">تاريخ LPO</Label>
+            <Input ref={lpoDateRef} type="date" value={lpoDate} onChange={(e) => setLpoDate(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">مبلغ LPO</Label>
+            <Input ref={lpoAmountRef} type="text" inputMode="decimal" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">تاريخ فاتورة التأمين</Label>
+            <Select value={invoiceDateMode} onValueChange={(value) => setInvoiceDateMode(value as "lpo" | "lpo_plus_one" | "custom")}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lpo">نفس تاريخ LPO</SelectItem>
+                <SelectItem value="lpo_plus_one">اليوم التالي لـ LPO</SelectItem>
+                <SelectItem value="custom">تاريخ مخصص</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {invoiceDateMode === "custom" && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">التاريخ المخصص</Label>
+              <Input type="date" value={customInvoiceDate} onChange={(e) => setCustomInvoiceDate(e.target.value)} />
+            </div>
+          )}
+          <div className="space-y-1.5 md:col-span-3">
+            <Label className="text-xs">ملاحظة LPO</Label>
+            <Input ref={lpoNoteRef} value={lpoNote} onChange={(e) => setLpoNote(e.target.value)} placeholder="ملاحظة داخلية اختيارية" />
+          </div>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
+          <Button variant="outline" onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
+            <Save size={16} /> حفظ
+          </Button>
+          <Button onClick={async () => { await handleSave(); await generateTaxInvoice(); }} disabled={isNew || updateClaim.isPending || !canIssueTaxInvoice || hasActiveInvoice} className="gap-2">
+            <FileText size={16} /> إنشاء الفاتورة الضريبية
+          </Button>
+          {activeInvoice && (
+            <Button variant="outline" onClick={() => navigate(`/insurance/accounting?invoice=${(activeInvoice as any).id || ""}`)} className="gap-2">
+              <FileText size={16} /> فتح الفاتورة
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -2249,7 +2304,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
       {/* ── Workflow Tabs ── */}
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-7">
+        <div className="rounded-lg border border-border bg-muted/20 p-3">
+          <div className="text-sm font-bold text-foreground">إعدادات مراحل المطالبة</div>
+          <p className="text-xs text-muted-foreground">الإجراءات التفصيلية موحدة داخل هذه المراحل فقط لتجنب تكرار الأزرار في الصفحة.</p>
+        </div>
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="inspect" className="gap-1.5">
             <ClipboardCheck size={14} /> 1. فحص
           </TabsTrigger>
@@ -2267,9 +2326,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </TabsTrigger>
           <TabsTrigger value="payments" className="gap-1.5" disabled={isNew}>
             <DollarSign size={14} /> 6. مدفوعات
-          </TabsTrigger>
-          <TabsTrigger value="documents" className="gap-1.5" disabled={isNew}>
-            <FolderArchive size={14} /> 7. الأرشيف
           </TabsTrigger>
         </TabsList>
 
