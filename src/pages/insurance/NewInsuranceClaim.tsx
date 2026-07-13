@@ -426,7 +426,33 @@ export default function NewInsuranceClaim() {
 
 
 
+      const loadCustomerRecord = async (id: string | null) => {
+        if (!id || !isUuid(id)) return null;
+        const { data, error } = await supabase
+          .from("customers")
+          .select("id,name,phone")
+          .eq("tenant_id", tenantId as string)
+          .eq("id", id)
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (error) throw error;
+        return (data as any) || null;
+      };
+
       let vehicleId = draft.vehicleId && isUuid(draft.vehicleId) ? draft.vehicleId : null;
+      if (vehicleId) {
+        const linkedVehicle = await findExistingVehicle({ vehicleId });
+        if (!linkedVehicle?.id) {
+          vehicleId = null;
+        } else if (linkedVehicle.customer_id && linkedVehicle.customer_id !== customerId) {
+          const vehicleCustomer = await loadCustomerRecord(linkedVehicle.customer_id);
+          if (vehicleCustomer?.id) {
+            customerRecord = vehicleCustomer;
+            customerId = vehicleCustomer.id;
+          }
+        }
+      }
+
       if (!vehicleId) {
         const vehicleCandidate = await findExistingVehicle({
           plate: draft.vehiclePlate,
@@ -437,20 +463,53 @@ export default function NewInsuranceClaim() {
           color: draft.vehicleColor,
         });
         if (vehicleCandidate?.id) {
-          throw new Error("هذه المركبة موجودة مسبقًا. اختر Use This Vehicle أو غيّر بيانات اللوحة.");
+          vehicleId = vehicleCandidate.id;
+          if (vehicleCandidate.customer_id && vehicleCandidate.customer_id !== customerId) {
+            const vehicleCustomer = await loadCustomerRecord(vehicleCandidate.customer_id);
+            if (vehicleCustomer?.id) {
+              customerRecord = vehicleCustomer;
+              customerId = vehicleCustomer.id;
+            }
+          }
         }
       }
       if (!vehicleId && (draft.vehiclePlate.trim() || draft.vehicleVin.trim())) {
-        const resolved = await ensureVehicleForCustomer({
-          customerId: customerId!,
-          plate: draft.vehiclePlate,
-          vin: draft.vehicleVin,
-          make: draft.vehicleMake,
-          model: draft.vehicleModel,
-          year: draft.vehicleYear,
-          color: draft.vehicleColor,
-        });
+        let resolved: Awaited<ReturnType<typeof ensureVehicleForCustomer>>;
+        try {
+          resolved = await ensureVehicleForCustomer({
+            customerId: customerId!,
+            plate: draft.vehiclePlate,
+            vin: draft.vehicleVin,
+            make: draft.vehicleMake,
+            model: draft.vehicleModel,
+            year: draft.vehicleYear,
+            color: draft.vehicleColor,
+          });
+        } catch (error: any) {
+          const retryVehicle = await findExistingVehicle({
+            plate: draft.vehiclePlate,
+            vin: draft.vehicleVin,
+            make: draft.vehicleMake,
+            model: draft.vehicleModel,
+            year: draft.vehicleYear,
+            color: draft.vehicleColor,
+          });
+          if (!retryVehicle?.id) throw error;
+          resolved = {
+            vehicleId: retryVehicle.id,
+            existing: retryVehicle,
+            ownershipConflict: !!retryVehicle.customer_id && retryVehicle.customer_id !== customerId,
+            created: false,
+          };
+        }
         vehicleId = resolved.vehicleId;
+        if (resolved.existing?.customer_id && resolved.existing.customer_id !== customerId) {
+          const vehicleCustomer = await loadCustomerRecord(resolved.existing.customer_id);
+          if (vehicleCustomer?.id) {
+            customerRecord = vehicleCustomer;
+            customerId = vehicleCustomer.id;
+          }
+        }
       }
       if (!vehicleId) throw new Error("لا يمكن حفظ مطالبة بدون vehicle_id");
 
