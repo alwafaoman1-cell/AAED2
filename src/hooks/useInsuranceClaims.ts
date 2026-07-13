@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { postInsuranceClaimApproval, removeInsuranceClaimJournal } from "@/lib/insuranceAccounting";
 import { isUuid } from "@/lib/uuid";
 import { sanitizeClaimWritePayload } from "@/lib/supabasePayload";
-import { ensureVehicleForCustomer, findExistingVehicle } from "@/lib/vehicleIdentity";
+import { isVehicleAlreadyExistsError, normalizeVehiclePlate } from "@/lib/vehicleIdentity";
 
 export interface ClaimNeededPart {
   name: string;
@@ -198,7 +198,7 @@ export function useCreateClaim() {
       };
 
       const resolveVehicleForClaim = async () => {
-        let currentVehicle = await loadVehicle(claim.vehicle_id);
+        const currentVehicle = await loadVehicle(claim.vehicle_id);
         if (currentVehicle?.id) return currentVehicle;
 
         const canResolveFromInlineVehicle = !!(
@@ -210,38 +210,73 @@ export function useCreateClaim() {
           throw new Error("لا يمكن حفظ المطالبة بدون vehicle_id صالح");
         }
 
-        const vehicleInput = {
-          customerId: claim.customer_id,
-          vehicleId: null,
+        const plate = normalizeVehiclePlate({
           plate: claim.vehicle_plate || "",
           make: claim.vehicle_make || "",
           model: claim.vehicle_model || "",
           year: claim.vehicle_year || null,
           color: claim.vehicle_color || "",
+        });
+        const make = String(claim.vehicle_make || "").trim();
+        const model = String(claim.vehicle_model || "").trim();
+        if (!plate.digits) throw new Error("رقم اللوحة مطلوب قبل حفظ المطالبة");
+        if (!make || !model) throw new Error("أدخل ماركة وموديل المركبة قبل حفظ المطالبة");
+
+        const findVehicleByClaimTenantPlate = async () => {
+          let query = supabase
+            .from("vehicles")
+            .select("id,customer_id")
+            .eq("tenant_id", claim.tenant_id)
+            .eq("plate_number", plate.digits)
+            .eq("plate_country", plate.country)
+            .limit(1);
+          if (plate.letters) query = query.eq("plate_letters", plate.letters);
+          const { data, error } = await query.maybeSingle();
+          if (error) throw error;
+          return data as any;
         };
 
-        let resolvedVehicleId: string | null = null;
-        try {
-          const resolved = await ensureVehicleForCustomer(vehicleInput);
-          resolvedVehicleId = resolved.vehicleId;
-        } catch (error) {
-          const existing = await findExistingVehicle(vehicleInput);
-          if (!existing?.id) throw error;
-          resolvedVehicleId = existing.id;
-          if (existing.customer_id && existing.customer_id !== claim.customer_id) {
-            claim = { ...claim, customer_id: existing.customer_id };
+        const attachVehicleToClaim = (vehicle: any) => {
+          claim = { ...claim, vehicle_id: vehicle.id };
+          if (vehicle.customer_id && vehicle.customer_id !== claim.customer_id) {
+            claim = { ...claim, customer_id: vehicle.customer_id };
           }
+          return vehicle;
+        };
+
+        const existingByPlate = await findVehicleByClaimTenantPlate();
+        if (existingByPlate?.id) return attachVehicleToClaim(existingByPlate);
+
+        const insertPayload = {
+          tenant_id: claim.tenant_id,
+          customer_id: claim.customer_id,
+          plate_number: plate.digits,
+          plate_letters: plate.letters || null,
+          plate_country: plate.country,
+          brand: make,
+          model,
+          year: claim.vehicle_year ? Number(claim.vehicle_year) || null : null,
+          color: claim.vehicle_color || null,
+        };
+
+        const { data: insertedVehicle, error: insertVehicleError } = await supabase
+          .from("vehicles")
+          .insert(insertPayload as any)
+          .select("id,customer_id")
+          .single();
+
+        if (insertVehicleError) {
+          if (isVehicleAlreadyExistsError(insertVehicleError)) {
+            const duplicateVehicle = await findVehicleByClaimTenantPlate();
+            if (duplicateVehicle?.id) return attachVehicleToClaim(duplicateVehicle);
+          }
+          throw insertVehicleError;
         }
 
-        currentVehicle = await loadVehicle(resolvedVehicleId);
-        if (!currentVehicle?.id) {
-          throw new Error("تعذر إنشاء أو ربط المركبة في Supabase قبل حفظ المطالبة");
+        if (!(insertedVehicle as any)?.id) {
+          throw new Error("تعذر إنشاء المركبة في Supabase قبل حفظ المطالبة");
         }
-        claim = { ...claim, vehicle_id: currentVehicle.id };
-        if (currentVehicle.customer_id && currentVehicle.customer_id !== claim.customer_id) {
-          claim = { ...claim, customer_id: currentVehicle.customer_id };
-        }
-        return currentVehicle;
+        return attachVehicleToClaim(insertedVehicle);
       };
 
       let existingCustomer = await loadCustomer(claim.customer_id);
