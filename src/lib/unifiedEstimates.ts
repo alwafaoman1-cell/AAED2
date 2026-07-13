@@ -167,8 +167,8 @@ const estimateSelect = `
   *,
   customer:customers(id,name,phone,customer_code),
   vehicle:vehicles(id,brand,model,plate_number,vin,vin_number,year),
-  claim:insurance_claims(id,claim_number,insurance_company,job_order_id,auto_job_order_id),
-  work_order:job_orders(id,order_number,status)
+  claim:insurance_claims!estimates_claim_id_fkey(id,claim_number,insurance_company,job_order_id,auto_job_order_id),
+  work_order:job_orders!estimates_work_order_id_fkey(id,order_number,status)
 `;
 
 function isMissingSchemaColumnError(error: unknown): boolean {
