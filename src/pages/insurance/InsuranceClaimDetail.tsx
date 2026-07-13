@@ -1695,7 +1695,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     requested_workshop_arrival_date: "تاريخ الوصول المطلوب",
     work_started_at: "تاريخ بدء العمل",
     work_completed_at: "تاريخ اكتمال العمل",
+    vehicle_received_at: "تاريخ وصول المركبة",
     vehicle_delivered_at: "تاريخ التسليم",
+    claim_number: "رقم المطالبة",
     insurance_employee_id: "موظف التأمين",
     to_stage: "المرحلة الجديدة",
     to_label: "اسم المرحلة",
@@ -1705,6 +1707,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     new: "بعد التعديل",
     url: "رابط المستند",
     file_name: "اسم الملف",
+    mime_type: "نوع الملف",
     document_type: "نوع المستند",
   };
   const renderAuditValue = (value: unknown): string => {
