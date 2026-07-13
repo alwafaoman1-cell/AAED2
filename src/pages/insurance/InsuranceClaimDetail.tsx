@@ -56,7 +56,7 @@ import { findOrCreateInsuranceCompany, useInsuranceCompany } from "@/hooks/useIn
 import { useCreateInsuranceInvoice } from "@/hooks/useInsuranceInvoices";
 import CancelClaimDialog from "@/components/insurance/CancelClaimDialog";
 import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicker";
-import UplItemsEditor, { type UplItem } from "@/components/insurance/UplItemsEditor";
+import UplItemsEditor, { DEFAULT_UPL_ITEMS, type UplItem } from "@/components/insurance/UplItemsEditor";
 import ClaimDeliverySection from "@/components/insurance/ClaimDeliverySection";
 import InlineWorkOrderSummary from "@/components/insurance/InlineWorkOrderSummary";
 import { XCircle } from "lucide-react";
@@ -77,6 +77,16 @@ const insuranceCompanies = [
   "التعاونية", "بوبا", "الراجحي", "ميدغلف", "ملاذ", "وفاء", "سلامة",
   "الاتحاد التجاري", "أليانز", "تكافل الراجحي", "أخرى",
 ];
+
+type ClaimEstimationType = "auto" | "lump_sum" | "upl";
+
+function normalizeClaimEstimationType(value: unknown): ClaimEstimationType {
+  return value === "upl" || value === "lump_sum" || value === "auto" ? value : "auto";
+}
+
+function formatClaimEstimateNumber(year: number, sequence: number): string {
+  return `ALW-${String(year).slice(-2)}-${String(sequence).padStart(5, "0")}`;
+}
 
 const docTypeLabels: Record<string, string> = {
   police_report: "تقرير الشرطة",
@@ -152,7 +162,7 @@ export default function InsuranceClaimDetail() {
   // Inspection / estimate / status
   const [estimatedCost, setEstimatedCost] = useState("");
   const [approvedAmount, setApprovedAmount] = useState("");
-  const [estimationType, setEstimationType] = useState<"lump_sum" | "upl">("lump_sum");
+  const [estimationType, setEstimationType] = useState<ClaimEstimationType>("auto");
   const [uplItems, setUplItems] = useState<UplItem[]>([]);
   const [status, setStatus] = useState<"pending" | "approved" | "rejected" | "paid" | "cancelled">("pending");
   const [rejectionReason, setRejectionReason] = useState("");
@@ -255,7 +265,7 @@ export default function InsuranceClaimDetail() {
     setOwnerPhone(existing.vehicle_owner_phone ?? "");
     setEstimatedCost(String(existing.estimated_cost ?? existing.estimated_amount ?? ""));
     setApprovedAmount(String(existing.approved_amount ?? ""));
-    setEstimationType(((existing as any).estimation_type as "lump_sum" | "upl") ?? "lump_sum");
+    setEstimationType(normalizeClaimEstimationType((existing as any).estimation_type));
     setUplItems(((existing as any).upl_items as UplItem[]) ?? []);
     setVehicleMake((existing as any).vehicle_make ?? "");
     setVehicleModel((existing as any).vehicle_model ?? "");
@@ -497,6 +507,42 @@ export default function InsuranceClaimDetail() {
   );
   const effectiveEstimate = estimationType === "upl" ? uplTotal : (parseMoneyInput(estimatedCost) || 0);
 
+  useEffect(() => {
+    if (estimationType === "upl" && uplItems.length === 0) {
+      setUplItems(DEFAULT_UPL_ITEMS.map((item) => ({ ...item })));
+    }
+  }, [estimationType, uplItems.length]);
+
+  const { data: claimEstimateNumber } = useQuery({
+    queryKey: ["claim-estimate-number", (existing as any)?.tenant_id, id],
+    enabled: !!id && !isNew && !!(existing as any)?.tenant_id,
+    queryFn: async () => {
+      const tenantId = String((existing as any).tenant_id);
+      const targetDateRaw = (existing as any).estimate_date || (existing as any).created_at || new Date().toISOString();
+      const targetYear = new Date(targetDateRaw).getFullYear();
+      const { data, error } = await supabase
+        .from("insurance_claims")
+        .select("id,created_at,estimate_date,estimated_amount,estimated_cost")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      const rows = ((data || []) as any[])
+        .filter((row) => {
+          const rowDate = row.estimate_date || row.created_at;
+          const rowYear = rowDate ? new Date(rowDate).getFullYear() : targetYear;
+          const amount = Number(row.estimated_cost ?? row.estimated_amount ?? 0);
+          return rowYear === targetYear && (amount > 0 || row.id === id);
+        })
+        .sort((a, b) => {
+          const da = String(a.estimate_date || a.created_at || "");
+          const db = String(b.estimate_date || b.created_at || "");
+          return da.localeCompare(db) || String(a.id).localeCompare(String(b.id));
+        });
+      const index = Math.max(0, rows.findIndex((row) => row.id === id));
+      return formatClaimEstimateNumber(targetYear, index + 1);
+    },
+  });
+
   // ── Save ──
   const buildPayload = async () => {
     const { data: tenant } = await supabase.rpc("get_user_tenant_id");
@@ -527,7 +573,7 @@ export default function InsuranceClaimDetail() {
       vehicle_color: vehicleColor || null,
       vehicle_vin: vehicleVin.trim() || null,
       estimation_type: estimationType,
-      upl_items: uplItems,
+      upl_items: estimationType === "upl" ? uplItems : [],
       notes: buildNotesWithLpo(),
       damage_photos: damagePhotos,
       documents,
@@ -659,7 +705,7 @@ export default function InsuranceClaimDetail() {
       vehicle_color: vehicleColor || null,
       vehicle_vin: vehicleVin.trim() || null,
       estimation_type: estimationType,
-      upl_items: uplItems,
+      upl_items: estimationType === "upl" ? uplItems : [],
       notes: buildNotesWithLpo(),
       damage_photos: damagePhotos,
       documents,
@@ -1072,6 +1118,7 @@ export default function InsuranceClaimDetail() {
       ? formatDateLatin(estimateDate)
       : (ex.estimate_date ? formatDateLatin(ex.estimate_date) : (ex.incident_date ? formatDateLatin(ex.incident_date) : formatDateLatin(new Date())));
     const html = getClaimEstimateHtml({
+      estimateNumber: claimEstimateNumber || null,
       claimNumber: claimNumber || "—",
       date: estimateDateStr,
       insuranceCompany: company || "—",
@@ -1105,14 +1152,14 @@ export default function InsuranceClaimDetail() {
       damagePhotos: damagePhotos || [],
     });
     return html;
-  }, [existing, vehicle, claimNumber, company, ownerName, ownerPhone, vehicleMake, vehicleModel, vehiclePlate, vehicleYear, vehicleColor, estimatedCost, approvedAmount, estimationType, uplItems, notes, estimateTerms, damagePhotos, estimateDate]);
+  }, [existing, vehicle, claimEstimateNumber, claimNumber, company, ownerName, ownerPhone, vehicleMake, vehicleModel, vehiclePlate, vehicleYear, vehicleColor, estimatedCost, approvedAmount, estimationType, uplItems, notes, estimateTerms, damagePhotos, estimateDate]);
 
   async function handleDownloadEstimatePdf() {
     try {
       toast.loading("جاري تحميل تقدير الإصلاح...", { id: "claim-estimate-pdf" });
       await generatePdfFromHtml({
         htmlContent: buildPdf(),
-        fileName: `Estimate-${claimNumber || id || "claim"}`,
+        fileName: `Estimate-${claimEstimateNumber || claimNumber || id || "claim"}`,
       });
       toast.success("تم تحميل تقدير الإصلاح", { id: "claim-estimate-pdf" });
     } catch (e: any) {
@@ -1279,7 +1326,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
   <div class="section"><h3>التقدير المالي والموافقة</h3>
     <div class="grid2">
-      <div class="field"><b>نوع التقدير:</b> ${estimationType === "upl" ? "UPL (قائمة بنود)" : "Lump Sum (مبلغ مقطوع)"}</div>
+      <div class="field"><b>نوع التقدير:</b> ${estimationType === "upl" ? "UPL (قائمة بنود)" : estimationType === "auto" ? "تقدير أولي تلقائي" : "Lump Sum (مبلغ مقطوع)"}</div>
       <div class="field"><b>التحمل (Deductible):</b> ${fmt(Number((existing as any)?.deductible_amount) || 0)} ر.ع</div>
     </div>
     <div class="totals">
@@ -2550,9 +2597,16 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </div>
               <div className="flex items-center gap-2">
                 <Label className="text-xs">نوع التقدير:</Label>
-                <Select value={estimationType} onValueChange={(v) => setEstimationType(v as "lump_sum" | "upl")}>
+                <Select value={estimationType} onValueChange={(v) => {
+                  const next = normalizeClaimEstimationType(v);
+                  setEstimationType(next);
+                  if (next === "upl" && uplItems.length === 0) {
+                    setUplItems(DEFAULT_UPL_ITEMS.map((item) => ({ ...item })));
+                  }
+                }}>
                   <SelectTrigger className="w-[160px] h-9"><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="auto">تقدير أولي تلقائي</SelectItem>
                     <SelectItem value="lump_sum">Lump Sum (مبلغ مقطوع)</SelectItem>
                     <SelectItem value="upl">UPL (قائمة بنود)</SelectItem>
                   </SelectContent>
@@ -2560,7 +2614,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </div>
             </div>
 
-            {estimationType === "lump_sum" ? (
+            {estimationType !== "upl" ? (
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label>المبلغ المقدر للإصلاح (ر.ع)</Label>
@@ -2574,7 +2628,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </div>
             ) : (
               <div className="space-y-3">
-                <UplItemsEditor items={uplItems} onChange={setUplItems} />
+                <UplItemsEditor items={uplItems} onChange={setUplItems} suggestedAmount={parseMoneyInput(estimatedCost) || 0} />
                 <div className="space-y-1.5">
                   <Label>ملاحظات</Label>
                   <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="ملاحظات على التقدير..." />
@@ -2830,13 +2884,13 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             onOpenChange={setShowPdf}
             htmlContent={html}
             title={`تقدير المطالبة ${claimNumber}`}
-            fileName={`Estimate-${claimNumber}`}
+            fileName={`Estimate-${claimEstimateNumber || claimNumber}`}
             autoSave={async () => saveClaimDocument({
               claimId: id,
               category: "claim_estimate",
-              fileBaseName: `Estimate-${claimNumber}`,
+              fileBaseName: `Estimate-${claimEstimateNumber || claimNumber}`,
               htmlContent: html,
-              meta: { claim_number: claimNumber },
+              meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber },
             })}
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["claim_documents", id] })}
           />
@@ -2982,8 +3036,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             const html = buildPdf();
             const res = await saveClaimDocument({
               claimId: id, category: "claim_estimate",
-              fileBaseName: `Estimate-${claimNumber}`,
-              htmlContent: html, meta: { claim_number: claimNumber, sent_via: "email" },
+              fileBaseName: `Estimate-${claimEstimateNumber || claimNumber}`,
+              htmlContent: html, meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber, sent_via: "email" },
             });
             queryClient.invalidateQueries({ queryKey: ["claim_documents", id] });
             return res?.url ?? null;
@@ -2993,7 +3047,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             const res = await saveClaimDocument({
               claimId: id, category: "claim_summary",
               fileBaseName: `Claim-Summary-${claimNumber}`,
-              htmlContent: html, meta: { claim_number: claimNumber, sent_via: "email" },
+              htmlContent: html, meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber, sent_via: "email" },
             });
             queryClient.invalidateQueries({ queryKey: ["claim_documents", id] });
             return res?.url ?? null;

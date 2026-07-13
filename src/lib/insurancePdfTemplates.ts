@@ -28,6 +28,7 @@ export interface UplItem {
 }
 
 export interface ClaimEstimatePayload {
+  estimateNumber?: string | null;
   claimNumber: string;
   date: string;
   insuranceCompany: string;
@@ -41,7 +42,7 @@ export interface ClaimEstimatePayload {
   customerName?: string | null;
   customerPhone?: string | null;
   vehicle: ClaimVehicleInfo;
-  estimationType: "lump_sum" | "upl";
+  estimationType: "auto" | "lump_sum" | "upl";
   lumpSumAmount?: number;
   uplItems?: UplItem[];
   approvedAmount?: number | null;
@@ -67,7 +68,7 @@ export interface ClaimTaxInvoicePayload {
   vatRate?: number;
   notes?: string | null;
   lpoNumber?: string | null;
-  estimationType?: "lump_sum" | "upl" | null;
+  estimationType?: "auto" | "lump_sum" | "upl" | null;
   verifyUrl?: string | null;
 }
 
@@ -540,6 +541,16 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
   // لكلا النوعين LUMP SUM و UPL مع الحفاظ على الختم لكل واحد.
   const s = getTemplateSettings();
   const styles = baseStyles(s);
+  const documentNumber = p.estimateNumber || p.claimNumber;
+  const estimateTypeLabel =
+    p.estimationType === "upl"
+      ? "بنود التقدير (UPL)"
+      : p.estimationType === "lump_sum"
+        ? "التقدير الإجمالي (Lump Sum)"
+        : "تقدير أولي تلقائي / Initial Estimate";
+  const estimateBadge =
+    p.estimationType === "upl" ? "UPL" : p.estimationType === "lump_sum" ? "LUMP SUM" : "INITIAL";
+  const showStampAndSignature = p.estimationType !== "auto";
 
   let itemsHtml = "";
   let subtotal = 0;
@@ -604,6 +615,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
     <div class="page">
       ${s.showWatermark ? `<div class="watermark">ESTIMATE</div>` : ""}
       ${headerHtml(s, "تقدير مطالبة", "CLAIM ESTIMATE", p.claimNumber, p.date)}
+      <div class="info-row" style="justify-content:flex-end;margin:-6px 0 8px;font-family:'Inter',sans-serif;direction:ltr"><span class="label">Estimate No</span><span class="value">${e(documentNumber)}</span><span style="display:none">${e(estimateTypeLabel)} ${e(estimateBadge)}</span></div>
       ${insuranceBanner(p.insuranceCompany, p.claimNumber, p.policyNumber)}
       ${vehicleCard(p.vehicle)}
 
@@ -618,6 +630,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
       ${p.incidentDescription ? `<div class="notes-box"><b>وصف الحادث:</b> ${p.incidentDescription}</div>` : ""}
 
       <div class="section-title">${p.estimationType === "upl" ? "بنود التقدير (UPL)" : "التقدير الإجمالي (Lump Sum)"}</div>
+      ${p.estimationType === "auto" ? `<div class="notes-box"><b>Initial Estimate:</b> تقدير أولي تلقائي حسب المبلغ المدخل، ولا يحمل ختم الورشة حتى يتم تحويله إلى UPL أو Lump Sum.</div>` : ""}
       ${itemsHtml}
 
       <div class="totals-box">
@@ -631,7 +644,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
       ${damagePhotosHtml}
       ${p.notes ? `<div class="notes-box"><b>ملاحظات:</b> ${p.notes}</div>` : ""}
 
-      <div class="signature-area">
+      ${showStampAndSignature ? `<div class="signature-area">
         <div class="sig">
           <div class="name">المُقدِّر / Estimator</div>
           <div class="area">${s.signatureUrl ? `<img src="${s.signatureUrl}" alt="signature"/>` : ""}</div>
@@ -647,7 +660,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
           <div class="area"></div>
           <div class="lbl">التوقيع والختم</div>
         </div>
-      </div>
+      </div>` : ""}
       ${footerHtml(s)}
     </div>`;
   return wrapHtml(`تقدير ${p.claimNumber}`, styles, body);

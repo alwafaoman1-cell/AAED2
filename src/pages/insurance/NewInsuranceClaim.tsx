@@ -20,7 +20,7 @@ import { useInsuranceCompanies, findOrCreateInsuranceCompany } from "@/hooks/use
 import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompanyAutocomplete";
 import InsuranceEmployeeSelect from "@/components/insurance/InsuranceEmployeeSelect";
 import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicker";
-import UplItemsEditor, { type UplItem } from "@/components/insurance/UplItemsEditor";
+import UplItemsEditor, { DEFAULT_UPL_ITEMS, type UplItem } from "@/components/insurance/UplItemsEditor";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import { toEnglishDigits } from "@/lib/numberUtils";
@@ -60,7 +60,7 @@ interface Draft {
   incidentDate: string;
   damageDescription: string;
   // estimation (تسعيرنا نحن الكراج — قابل للتبديل بين إجمالي وبنود)
-  estimationType: "lump_sum" | "upl";
+  estimationType: "auto" | "lump_sum" | "upl";
   estimatedCost: string;     // المبلغ الإجمالي المطالب به (lump sum)
   uplItems: UplItem[];       // البنود التفصيلية (UPL)
   // misc
@@ -84,7 +84,7 @@ const emptyDraft = (): Draft => ({
   vehicleId: null, vehicleMake: "", vehicleModel: "", vehiclePlate: "", vehicleYear: "", vehicleColor: "", vehicleVin: "",
   incidentDate: new Date().toISOString().slice(0, 10),
   damageDescription: "",
-  estimationType: "lump_sum", estimatedCost: "",
+  estimationType: "auto", estimatedCost: "",
   uplItems: [],
   notes: "",
 });
@@ -1153,7 +1153,19 @@ function Step3({
       {/* نوع التقدير — أزرار مقطّعة (Segmented) واضحة وقابلة للتبديل */}
       <div>
         <Label className="text-xs text-muted-foreground mb-2 block">طريقة التسعير</Label>
-        <div className="grid grid-cols-2 gap-2 p-1 rounded-lg bg-muted border">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 p-1 rounded-lg bg-muted border">
+          <button
+            type="button"
+            onClick={() => update({ estimationType: "auto" })}
+            className={`px-4 py-3 rounded-md text-sm font-semibold transition flex flex-col items-center gap-0.5 ${
+              draft.estimationType === "auto"
+                ? "bg-background shadow text-primary border border-primary/20"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span>تقدير أولي تلقائي</span>
+            <span className="text-[10px] font-normal opacity-70">مبلغ فقط بدون ختم في الورقة</span>
+          </button>
           <button
             type="button"
             onClick={() => update({ estimationType: "lump_sum" })}
@@ -1168,7 +1180,10 @@ function Step3({
           </button>
           <button
             type="button"
-            onClick={() => update({ estimationType: "upl" })}
+            onClick={() => update({
+              estimationType: "upl",
+              uplItems: draft.uplItems.length ? draft.uplItems : DEFAULT_UPL_ITEMS.map((item) => ({ ...item })),
+            })}
             className={`px-4 py-3 rounded-md text-sm font-semibold transition flex flex-col items-center gap-0.5 ${
               draft.estimationType === "upl"
                 ? "bg-background shadow text-primary border border-primary/20"
@@ -1185,7 +1200,7 @@ function Step3({
       </div>
 
       {draft.estimationType === "upl" ? (
-        <UplItemsEditor items={draft.uplItems} onChange={(items) => update({ uplItems: items })} />
+        <UplItemsEditor items={draft.uplItems} onChange={(items) => update({ uplItems: items })} suggestedAmount={parseMoneyInput(draft.estimatedCost) || 0} />
       ) : (
         <div className="space-y-1.5">
           <Label>المبلغ المطالب به (ر.ع) *</Label>
@@ -1261,7 +1276,7 @@ function Step4({
       </ReviewBlock>
 
       <ReviewBlock title="المطالبة لشركة التأمين" icon={Calculator} onEdit={() => goTo(3)}>
-        <KV k="نوع التسعير" v={draft.estimationType === "upl" ? "بنود UPL" : "مبلغ إجمالي"} />
+        <KV k="نوع التسعير" v={draft.estimationType === "upl" ? "بنود UPL" : draft.estimationType === "auto" ? "تقدير أولي تلقائي" : "مبلغ إجمالي"} />
         {draft.estimationType === "upl" && (
           <KV k="عدد البنود" v={String(draft.uplItems.length)} ltr />
         )}

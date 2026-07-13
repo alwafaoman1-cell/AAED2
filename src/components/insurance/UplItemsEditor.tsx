@@ -11,36 +11,69 @@ export interface UplItem {
   unit_price: number;
 }
 
+export const DEFAULT_UPL_ITEMS: UplItem[] = [
+  { description: "قطع الغيار / Spare Parts", quantity: 1, unit_price: 0 },
+  { description: "أجرة العمالة / Labour Charges", quantity: 1, unit_price: 0 },
+];
+
 interface Props {
   items: UplItem[];
   onChange: (items: UplItem[]) => void;
   readOnly?: boolean;
+  suggestedAmount?: number;
 }
 
-export default function UplItemsEditor({ items, onChange, readOnly }: Props) {
+export default function UplItemsEditor({ items, onChange, readOnly, suggestedAmount = 0 }: Props) {
   const total = items.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
 
   const update = (i: number, patch: Partial<UplItem>) =>
     onChange(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   const add = () => onChange([...items, { description: "", quantity: 1, unit_price: 0 }]);
+  const addDefaults = () => onChange(DEFAULT_UPL_ITEMS.map((it) => ({ ...it })));
+  const fillSuggested = (target: "parts" | "labor") =>
+    onChange(DEFAULT_UPL_ITEMS.map((it, idx) => ({
+      ...it,
+      unit_price: target === "parts" ? (idx === 0 ? suggestedAmount : 0) : (idx === 1 ? suggestedAmount : 0),
+    })));
   const remove = (i: number) => onChange(items.filter((_, idx) => idx !== i));
 
   return (
     <Card className="p-4 space-y-3 bg-muted/30">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <Label className="text-base">بنود التقدير (UPL)</Label>
-          <p className="text-xs text-muted-foreground mt-0.5">قائمة الأسعار الموحدة — كل بند بكمية وسعر وحدة</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            قائمة الأسعار الموحدة — كل بند بكمية وسعر وحدة. البنود الأساسية: قطع الغيار وأجرة العمالة.
+          </p>
         </div>
         {!readOnly && (
-          <Button size="sm" variant="outline" onClick={add}>
-            <Plus className="h-4 w-4 ml-1" /> إضافة بند
-          </Button>
+          <div className="flex flex-wrap gap-2 justify-end">
+            {items.length === 0 && (
+              <Button size="sm" variant="secondary" onClick={addDefaults}>
+                قطع الغيار + أجرة العمالة
+              </Button>
+            )}
+            {suggestedAmount > 0 && (
+              <>
+                <Button size="sm" variant="outline" onClick={() => fillSuggested("parts")}>
+                  تعبئة السعر في قطع الغيار
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => fillSuggested("labor")}>
+                  تعبئة السعر في أجرة العمالة
+                </Button>
+              </>
+            )}
+            <Button size="sm" variant="outline" onClick={add}>
+              <Plus className="h-4 w-4 ml-1" /> إضافة بند
+            </Button>
+          </div>
         )}
       </div>
 
       {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-4">لم تتم إضافة بنود — اضغط "إضافة بند" للبدء</p>
+        <p className="text-sm text-muted-foreground text-center py-4">
+          اضغط “قطع الغيار + أجرة العمالة” لإضافة البنود الافتراضية، أو اختر تعبئة السعر في البند المناسب.
+        </p>
       ) : (
         <div className="space-y-2">
           <div className="grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-2">
@@ -58,29 +91,36 @@ export default function UplItemsEditor({ items, onChange, readOnly }: Props) {
                   className="col-span-6"
                   value={it.description}
                   onChange={(e) => update(i, { description: e.target.value })}
-                  placeholder="مثل: استبدال صدام أمامي"
+                  placeholder="مثال: قطع الغيار / Spare Parts"
                   disabled={readOnly}
                 />
                 <Input
                   className="col-span-2 text-center"
-                  type="text" inputMode="decimal" min="0" step="1"
+                  type="text"
+                  inputMode="decimal"
+                  min="0"
+                  step="1"
                   value={it.quantity}
                   onChange={(e) => update(i, { quantity: parseMoneyInput(e.target.value) })}
                   disabled={readOnly}
                 />
                 <Input
                   className="col-span-2 text-center"
-                  type="text" inputMode="decimal" min="0" step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.001"
                   value={it.unit_price}
                   onChange={(e) => update(i, { unit_price: parseMoneyInput(e.target.value) })}
                   disabled={readOnly}
                 />
-                <div className="col-span-1 text-center font-semibold text-sm">
-                  {lineTotal.toFixed(2)}
+                <div className="col-span-1 text-center font-semibold text-sm" dir="ltr">
+                  {lineTotal.toFixed(3)}
                 </div>
                 {!readOnly && (
                   <Button
-                    size="icon" variant="ghost"
+                    size="icon"
+                    variant="ghost"
                     className="col-span-1 h-8 w-8 text-destructive"
                     onClick={() => remove(i)}
                   >
@@ -92,7 +132,7 @@ export default function UplItemsEditor({ items, onChange, readOnly }: Props) {
           })}
           <div className="flex justify-end pt-2 border-t">
             <div className="text-sm">
-              إجمالي البنود: <span className="font-bold text-base">{total.toFixed(2)} ر.ع</span>
+              إجمالي البنود: <span className="font-bold text-base" dir="ltr">{total.toFixed(3)} ر.ع</span>
             </div>
           </div>
         </div>

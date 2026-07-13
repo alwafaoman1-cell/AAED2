@@ -110,7 +110,7 @@ export type ClaimInsert = {
   vehicle_year?: number | null;
   vehicle_color?: string | null;
   // estimation type
-  estimation_type?: "lump_sum" | "upl";
+  estimation_type?: "auto" | "lump_sum" | "upl";
   upl_items?: { description: string; quantity: number; unit_price: number }[];
   // workflow date tracking
   estimate_date?: string | null;
