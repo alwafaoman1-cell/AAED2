@@ -293,6 +293,7 @@ const App = () => (
               <Route element={<InsuranceLayout />}>
                 <Route path="/insurance" element={<InsuranceHub />} />
                 <Route path="/insurance/claims" element={<InsuranceClaimsList />} />
+                <Route path="/insurance/claims/new" element={<Navigate to="/insurance/new" replace />} />
                 <Route path="/insurance/claims/:claimId" element={<InsuranceClaimDetail />} />
                 <Route path="/insurance/list" element={<InsuranceClaimsList />} />
                 <Route path="/insurance/pipeline" element={<InsurancePipeline />} />
