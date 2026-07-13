@@ -550,7 +550,14 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
         : "تقدير أولي تلقائي / Initial Estimate";
   const estimateBadge =
     p.estimationType === "upl" ? "UPL" : p.estimationType === "lump_sum" ? "LUMP SUM" : "INITIAL";
-  const showStampAndSignature = p.estimationType !== "auto";
+  const showEstimateBadge = p.estimationType === "upl" || p.estimationType === "lump_sum";
+  const showStampAndSignature = showEstimateBadge;
+  const estimateSectionTitle =
+    p.estimationType === "upl"
+      ? "بنود التقدير (UPL)"
+      : p.estimationType === "lump_sum"
+        ? "التقدير الإجمالي (Lump Sum)"
+        : "تقدير أولي تلقائي / Initial Estimate";
 
   let itemsHtml = "";
   let subtotal = 0;
@@ -585,12 +592,15 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
       </table>`;
   } else {
     subtotal = p.lumpSumAmount || 0;
+    const lineDescription = p.estimationType === "auto"
+      ? `تقدير أولي تلقائي حسب المبلغ المدخل<br/><span style="color:#888;font-size:10px">Initial automatic estimate based on the entered amount. Not stamped until converted to UPL or Lump Sum.</span>`
+      : `تقدير شامل لإصلاح أضرار المركبة بناءً على المعاينة الفنية<br/><span style="color:#888;font-size:10px">Lump-sum estimation based on technical inspection</span>`;
     itemsHtml = `
       <table>
         <thead><tr><th>الوصف / Description</th><th style="width:25%">الإجمالي / Total</th></tr></thead>
         <tbody>
           <tr>
-            <td>تقدير شامل لإصلاح أضرار المركبة بناءً على المعاينة الفنية<br/><span style="color:#888;font-size:10px">Lump-sum estimation based on technical inspection</span></td>
+            <td>${lineDescription}</td>
             <td style="font-family:'Inter';direction:ltr;font-weight:700">${subtotal.toFixed(3)} OMR</td>
           </tr>
         </tbody>
@@ -629,7 +639,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
       </div>
       ${p.incidentDescription ? `<div class="notes-box"><b>وصف الحادث:</b> ${p.incidentDescription}</div>` : ""}
 
-      <div class="section-title">${p.estimationType === "upl" ? "بنود التقدير (UPL)" : "التقدير الإجمالي (Lump Sum)"}</div>
+      <div class="section-title">${estimateSectionTitle}</div>
       ${p.estimationType === "auto" ? `<div class="notes-box"><b>Initial Estimate:</b> تقدير أولي تلقائي حسب المبلغ المدخل، ولا يحمل ختم الورشة حتى يتم تحويله إلى UPL أو Lump Sum.</div>` : ""}
       ${itemsHtml}
 
@@ -639,7 +649,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
         ${p.approvedAmount != null ? `<div class="totals-row"><span>المعتمد من التأمين / Approved</span><span class="amount" style="color:#2e7d32">${Number(p.approvedAmount).toFixed(3)}</span></div>` : ""}
         <div class="totals-row total"><span>الصافي المستحق / Net Due</span><span class="amount">${netAmount.toFixed(3)} OMR</span></div>
       </div>
-      ${p.estimationType ? `<div class="estimation-badge"><span>${p.estimationType === "upl" ? "UPL" : "LUMP SUM"}</span></div>` : ""}
+      ${showEstimateBadge ? `<div class="estimation-badge"><span>${p.estimationType === "upl" ? "UPL" : "LUMP SUM"}</span></div>` : ""}
 
       ${damagePhotosHtml}
       ${p.notes ? `<div class="notes-box"><b>ملاحظات:</b> ${p.notes}</div>` : ""}
