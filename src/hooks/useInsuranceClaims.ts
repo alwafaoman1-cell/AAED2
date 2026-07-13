@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { postInsuranceClaimApproval, removeInsuranceClaimJournal } from "@/lib/insuranceAccounting";
 import { isUuid } from "@/lib/uuid";
 import { sanitizeClaimWritePayload } from "@/lib/supabasePayload";
+import { ensureVehicleForCustomer, findExistingVehicle } from "@/lib/vehicleIdentity";
 
 export interface ClaimNeededPart {
   name: string;
@@ -154,34 +155,103 @@ export function useInsuranceClaims() {
 export function useCreateClaim() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (claim: ClaimInsert) => {
+    mutationFn: async (claimInput: ClaimInsert) => {
+      let claim: ClaimInsert = { ...claimInput };
       if (!claim.tenant_id || !isUuid(claim.tenant_id)) {
         throw new Error("Tenant was not loaded. Please refresh and try again.");
       }
       if (!claim.customer_id || !isUuid(claim.customer_id) || /^(CUST|TEMP)-/i.test(String(claim.customer_id))) {
         throw new Error("لا يمكن حفظ المطالبة بدون customer_id صالح");
       }
-      if (!claim.vehicle_id || !isUuid(claim.vehicle_id) || /^(VEH|TEMP)-/i.test(String(claim.vehicle_id))) {
-        throw new Error("لا يمكن حفظ المطالبة بدون vehicle_id صالح");
-      }
-      const [{ data: existingCustomer, error: customerError }, { data: existingVehicle, error: vehicleError }] = await Promise.all([
-        supabase
+
+      const loadCustomer = async (customerId: string) => {
+        const { data, error } = await supabase
           .from("customers")
           .select("id")
           .eq("tenant_id", claim.tenant_id)
-          .eq("id", claim.customer_id)
+          .eq("id", customerId)
           .is("deleted_at", null)
-          .maybeSingle(),
-        supabase
+          .maybeSingle();
+        if (error) throw error;
+        return data as any;
+      };
+
+      const loadVehicle = async (vehicleId: string | null | undefined) => {
+        if (!vehicleId || !isUuid(vehicleId) || /^(VEH|TEMP)-/i.test(String(vehicleId))) return null;
+        let query = await supabase
           .from("vehicles")
           .select("id,customer_id")
           .eq("tenant_id", claim.tenant_id)
-          .eq("id", claim.vehicle_id)
+          .eq("id", vehicleId)
           .is("deleted_at", null)
-          .maybeSingle(),
-      ]);
-      if (customerError) throw customerError;
-      if (vehicleError) throw vehicleError;
+          .maybeSingle();
+        if (query.error && /deleted_at|column/i.test(String((query.error as any).message || ""))) {
+          query = await supabase
+            .from("vehicles")
+            .select("id,customer_id")
+            .eq("tenant_id", claim.tenant_id)
+            .eq("id", vehicleId)
+            .maybeSingle();
+        }
+        if (query.error) throw query.error;
+        return query.data as any;
+      };
+
+      const resolveVehicleForClaim = async () => {
+        let currentVehicle = await loadVehicle(claim.vehicle_id);
+        if (currentVehicle?.id) return currentVehicle;
+
+        const canResolveFromInlineVehicle = !!(
+          claim.vehicle_plate?.trim() ||
+          claim.vehicle_make?.trim() ||
+          claim.vehicle_model?.trim()
+        );
+        if (!canResolveFromInlineVehicle) {
+          throw new Error("لا يمكن حفظ المطالبة بدون vehicle_id صالح");
+        }
+
+        const vehicleInput = {
+          customerId: claim.customer_id,
+          vehicleId: null,
+          plate: claim.vehicle_plate || "",
+          make: claim.vehicle_make || "",
+          model: claim.vehicle_model || "",
+          year: claim.vehicle_year || null,
+          color: claim.vehicle_color || "",
+        };
+
+        let resolvedVehicleId: string | null = null;
+        try {
+          const resolved = await ensureVehicleForCustomer(vehicleInput);
+          resolvedVehicleId = resolved.vehicleId;
+        } catch (error) {
+          const existing = await findExistingVehicle(vehicleInput);
+          if (!existing?.id) throw error;
+          resolvedVehicleId = existing.id;
+          if (existing.customer_id && existing.customer_id !== claim.customer_id) {
+            claim = { ...claim, customer_id: existing.customer_id };
+          }
+        }
+
+        currentVehicle = await loadVehicle(resolvedVehicleId);
+        if (!currentVehicle?.id) {
+          throw new Error("تعذر إنشاء أو ربط المركبة في Supabase قبل حفظ المطالبة");
+        }
+        claim = { ...claim, vehicle_id: currentVehicle.id };
+        if (currentVehicle.customer_id && currentVehicle.customer_id !== claim.customer_id) {
+          claim = { ...claim, customer_id: currentVehicle.customer_id };
+        }
+        return currentVehicle;
+      };
+
+      let existingCustomer = await loadCustomer(claim.customer_id);
+      if (!(existingCustomer as any)?.id) throw new Error("لا يمكن حفظ المطالبة: العميل غير موجود في Supabase");
+
+      const existingVehicle = await resolveVehicleForClaim();
+      if ((existingVehicle as any).customer_id && (existingVehicle as any).customer_id !== claim.customer_id) {
+        claim = { ...claim, customer_id: (existingVehicle as any).customer_id };
+        existingCustomer = await loadCustomer(claim.customer_id);
+      }
       if (!(existingCustomer as any)?.id) throw new Error("لا يمكن حفظ المطالبة: العميل غير موجود في Supabase");
       if (!(existingVehicle as any)?.id) throw new Error("لا يمكن حفظ المطالبة: المركبة غير موجودة في Supabase");
       if ((existingVehicle as any).customer_id && (existingVehicle as any).customer_id !== claim.customer_id) {
