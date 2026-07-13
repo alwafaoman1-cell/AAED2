@@ -1680,6 +1680,14 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     claim_approved: "تم اعتماد المطالبة",
     claim_lpo_saved: "تم حفظ بيانات LPO",
     insurance_invoice_created: "تم إنشاء فاتورة التأمين",
+    document_generated: "تم إنشاء مستند للمطالبة",
+  };
+  const auditCategoryLabels: Record<string, string> = {
+    workflow: "سير العمل",
+    claim_estimate: "تقدير الإصلاح",
+    claim_summary: "ملخص المطالبة",
+    inspection: "الفحص",
+    audit: "تدقيق",
   };
   const auditFieldLabels: Record<string, string> = {
     estimate_date: "تاريخ التقدير",
@@ -1695,6 +1703,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     note: "ملاحظة",
     old: "قبل التعديل",
     new: "بعد التعديل",
+    url: "رابط المستند",
+    file_name: "اسم الملف",
+    document_type: "نوع المستند",
   };
   const renderAuditValue = (value: unknown): string => {
     if (value === null || value === undefined || value === "") return "—";
@@ -2784,7 +2795,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-sm text-foreground">{auditActionLabels[item.action] || item.action || "إجراء على المطالبة"}</span>
-                      <Badge variant="secondary" className="text-[10px]">{item.category || "audit"}</Badge>
+                      <Badge variant="secondary" className="text-[10px]">{auditCategoryLabels[item.category] || item.category || "تدقيق"}</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
                       {formatDateLatin(item.created_at)} — المستخدم: {item.user_id || "—"}
