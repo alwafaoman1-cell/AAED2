@@ -360,11 +360,13 @@ export default function NewInsuranceClaim() {
           .select("id,name,phone")
           .eq("tenant_id", tenantId as string)
           .eq("id", customerId)
+          .is("deleted_at", null)
           .maybeSingle();
         if (error) throw error;
         customerRecord = (data as any) || null;
-        if (!customerRecord) throw new Error("customer_id غير صحيح");
-      } else {
+        if (!customerRecord) customerId = null;
+      }
+      if (!customerId) {
         const normalizedPhone = toE164(draft.ownerPhone);
         const phoneDigits = normalizedPhone.replace(/\D/g, "").slice(-8);
         if (phoneDigits) {
@@ -372,6 +374,7 @@ export default function NewInsuranceClaim() {
             .from("customers")
             .select("id,name,phone")
             .eq("tenant_id", tenantId as string)
+            .is("deleted_at", null)
             .ilike("phone", `%${phoneDigits}%`)
             .limit(5);
           const phoneMatch = ((data as any[]) || []).find((customer) =>

@@ -481,10 +481,35 @@ export default function InsuranceClaimDetail() {
       (c) => c.name.trim().toLowerCase() === trimmed.toLowerCase(),
     );
     if (matchLocal) {
-      if (phone && !matchLocal.phone) {
-        await supabase.from("customers").update({ phone }).eq("id", matchLocal.id);
+      const { data: verifiedLocal, error: verifyLocalError } = await supabase
+        .from("customers")
+        .select("id,phone")
+        .eq("tenant_id", tenantId)
+        .eq("id", matchLocal.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (verifyLocalError) throw verifyLocalError;
+      if ((verifiedLocal as any)?.id) {
+        if (phone && !(verifiedLocal as any).phone) {
+          await supabase.from("customers").update({ phone }).eq("id", matchLocal.id);
+        }
+        return matchLocal.id;
       }
-      return matchLocal.id;
+    }
+    const { data: existingByName, error: existingByNameError } = await supabase
+      .from("customers")
+      .select("id,phone")
+      .eq("tenant_id", tenantId)
+      .ilike("name", trimmed)
+      .is("deleted_at", null)
+      .limit(1)
+      .maybeSingle();
+    if (existingByNameError) throw existingByNameError;
+    if ((existingByName as any)?.id) {
+      if (phone && !(existingByName as any).phone) {
+        await supabase.from("customers").update({ phone }).eq("id", (existingByName as any).id);
+      }
+      return (existingByName as any).id;
     }
     const { data, error } = await supabase
       .from("customers")
@@ -498,6 +523,59 @@ export default function InsuranceClaimDetail() {
     queryClient.invalidateQueries({ queryKey: ["customers"] });
     toast.success(`تم إضافة "${trimmed}" إلى قائمة العملاء`);
     return data.id;
+  };
+
+  const ensureClaimCustomerId = async (currentId: string, tenantId: string): Promise<string | null> => {
+    if (currentId && isUuid(currentId)) {
+      const { data, error } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("id", currentId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw error;
+      if ((data as any)?.id) return currentId;
+    }
+    if (!ownerName.trim()) return null;
+    const resolvedId = await findOrCreateCustomer(ownerName, ownerPhone, tenantId);
+    if (!resolvedId) return null;
+    setCustomerId(resolvedId);
+    return resolvedId;
+  };
+
+  const repairVehicleCustomerIfPreviousCustomerMissing = async (
+    targetVehicleId: string,
+    targetCustomerId: string,
+    tenantId: string,
+  ) => {
+    if (!targetVehicleId || !isUuid(targetVehicleId)) return;
+    const { data: vehicleRow, error: vehicleError } = await supabase
+      .from("vehicles")
+      .select("id,customer_id")
+      .eq("tenant_id", tenantId)
+      .eq("id", targetVehicleId)
+      .maybeSingle();
+    if (vehicleError) throw vehicleError;
+    const currentVehicleCustomerId = (vehicleRow as any)?.customer_id;
+    if (!currentVehicleCustomerId || currentVehicleCustomerId === targetCustomerId) return;
+
+    const { data: existingOwner, error: ownerError } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("id", currentVehicleCustomerId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (ownerError) throw ownerError;
+    if ((existingOwner as any)?.id) return;
+
+    await supabase
+      .from("vehicles")
+      .update({ customer_id: targetCustomerId } as any)
+      .eq("tenant_id", tenantId)
+      .eq("id", targetVehicleId);
+    queryClient.invalidateQueries({ queryKey: ["vehicles"] });
   };
 
   // Computed UPL total
@@ -651,18 +729,17 @@ export default function InsuranceClaimDetail() {
       return;
     }
 
-    // Smart customer: if no customerId yet, derive from owner name/phone
-    let cId = customerId;
+    // Smart customer: verify Supabase customer even when a UUID is already present.
+    let cId: string | null = null;
+    try {
+      cId = await ensureClaimCustomerId(customerId, tenant as string);
+    } catch (e: any) {
+      toast.error(e?.message || "تعذر التحقق من العميل في Supabase");
+      return;
+    }
     if (!cId) {
-      if (ownerName.trim()) {
-        const created = await findOrCreateCustomer(ownerName, ownerPhone, tenant as string);
-        if (!created) return;
-        cId = created;
-        setCustomerId(created);
-      } else {
-        toast.error("يرجى إدخال اسم مالك السيارة");
-        return;
-      }
+      toast.error("يرجى اختيار عميل موجود أو إدخال اسم مالك السيارة لإنشاء عميل في Supabase");
+      return;
     }
     if (!isUuid(cId)) {
       toast.error("Customer must be saved before creating the claim.");
@@ -670,6 +747,14 @@ export default function InsuranceClaimDetail() {
     }
     if (vehicleId && !isUuid(vehicleId)) {
       toast.error("Vehicle must be saved before creating the claim.");
+      return;
+    }
+    try {
+      if (vehicleId && isUuid(vehicleId)) {
+        await repairVehicleCustomerIfPreviousCustomerMissing(vehicleId, cId, tenant as string);
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "تعذر التحقق من ربط المركبة بالعميل");
       return;
     }
 
