@@ -1526,6 +1526,60 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     }
   };
 
+  const hasUnsavedChanges = useMemo(() => {
+    if (!existing || isNew) return false;
+    const rawNotes = buildNotesWithLpo() || "";
+    const createdAtStr = existing.created_at ? String(existing.created_at).slice(0, 10) : "";
+    return [
+      company !== (existing.insurance_company || ""),
+      companyId !== ((existing as any).insurance_company_id ?? null),
+      insuranceEmployeeId !== ((existing as any).insurance_employee_id ?? null),
+      claimNumber !== (existing.claim_number || ""),
+      customerId !== (existing.customer_id || ""),
+      vehicleId !== (existing.vehicle_id || ""),
+      ownerName !== (existing.vehicle_owner_name ?? ""),
+      ownerPhone !== (existing.vehicle_owner_phone ?? ""),
+      String(parseMoneyInput(estimatedCost) || 0) !== String(Number(existing.estimated_cost ?? existing.estimated_amount ?? 0) || 0),
+      String(parseMoneyInput(approvedAmount) || 0) !== String(Number(existing.approved_amount ?? 0) || 0),
+      vehicleMake !== ((existing as any).vehicle_make ?? ""),
+      vehicleModel !== ((existing as any).vehicle_model ?? ""),
+      vehiclePlate !== ((existing as any).vehicle_plate ?? ""),
+      vehicleYear !== ((existing as any).vehicle_year ? String((existing as any).vehicle_year) : ""),
+      vehicleColor !== ((existing as any).vehicle_color ?? ""),
+      vehicleVin.trim() !== ((existing as any).vehicle_vin ?? ""),
+      estimateDate !== ((existing as any).estimate_date ?? createdAtStr),
+      workshopArrivalDate !== dateOnly((existing as any).workshop_arrival_date),
+      workStartedAt !== dateOnly((existing as any).work_started_at),
+      rawNotes !== (existing.notes ?? ""),
+    ].some(Boolean);
+  }, [
+    existing, isNew, company, companyId, insuranceEmployeeId, claimNumber, customerId, vehicleId,
+    ownerName, ownerPhone, estimatedCost, approvedAmount, vehicleMake, vehicleModel, vehiclePlate,
+    vehicleYear, vehicleColor, vehicleVin, estimateDate, workshopArrivalDate, workStartedAt,
+    notes, lpoNumber, lpoDate, lpoAmount, lpoNote,
+  ]);
+
+  useEffect(() => {
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnsavedChanges]);
+
+  const confirmLeaveIfDirty = () => {
+    if (!hasUnsavedChanges) return true;
+    return window.confirm("هناك تعديلات غير محفوظة. هل تريد الخروج بدون حفظ؟");
+  };
+
+  const resetUnsavedChanges = () => {
+    if (!existing) return;
+    window.location.reload();
+  };
+
+
   if (!isNew && isLoading) {
     return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
   }
@@ -1544,7 +1598,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     : claimPayments.filter((p) => p.status === "cleared").reduce((sum, p) => sum + Number(p.amount || 0), 0);
   const paymentRemaining = Math.max(0, invoiceTotal > 0 ? invoiceTotal - paidTotal : Number(approvedAmount || estimatedCost || 0) - paidTotal);
   const paymentStatusLabel = paymentRemaining <= 0 && paidTotal > 0 ? "مدفوع" : paidTotal > 0 ? "مدفوع جزئيًا" : "غير مدفوع";
-  const vehicleTitle = `${vehicleMake || vehicle?.brand || "—"} ${vehicleModel || vehicle?.model || ""}`.trim();
   const hasLinkedWorkOrder = !!(linkedWorkOrderId || (existing as any)?.auto_job_order_id || (existing as any)?.job_order_id);
   const effectiveWorkOrderId = linkedWorkOrderId || (existing as any)?.auto_job_order_id || (existing as any)?.job_order_id || "";
   const linkedWorkOrderStatus = (existing as any)?.job_order?.status || "—";
@@ -1552,7 +1605,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const isDeliveredClaim = !!(existing as any)?.delivered_at || status === "paid";
   const isReadyForDelivery = !!workCompletedAt && !isDeliveredClaim && !isClosedClaim;
   const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
-  const showHeaderWorkflowActions = Boolean((existing as any)?.show_header_workflow_actions);
   const isAwaitingApproval = !isNew && status === "pending";
   const insuranceFinancialStatus = isDeliveredClaim
     ? paymentRemaining <= 0 && paidTotal > 0
@@ -1620,13 +1672,62 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     index,
     state: index < currentVehicleStepIndex ? "completed" : index === currentVehicleStepIndex ? "current" : "upcoming",
   }));
+  const auditActionLabels: Record<string, string> = {
+    claim_details_saved: "تم حفظ بيانات المطالبة",
+    claim_workflow_dates_updated: "تم تحديث تواريخ سير العملية",
+    claim_vehicle_stage_changed: "تم تغيير مرحلة المركبة",
+    operational_dates_updated: "تم تحديث التواريخ التشغيلية",
+    claim_approved: "تم اعتماد المطالبة",
+    claim_lpo_saved: "تم حفظ بيانات LPO",
+    insurance_invoice_created: "تم إنشاء فاتورة التأمين",
+  };
+  const auditFieldLabels: Record<string, string> = {
+    estimate_date: "تاريخ التقدير",
+    workshop_arrival_date: "تاريخ وصول المركبة",
+    requested_workshop_arrival_date: "تاريخ الوصول المطلوب",
+    work_started_at: "تاريخ بدء العمل",
+    work_completed_at: "تاريخ اكتمال العمل",
+    vehicle_delivered_at: "تاريخ التسليم",
+    insurance_employee_id: "موظف التأمين",
+    to_stage: "المرحلة الجديدة",
+    to_label: "اسم المرحلة",
+    changed_at: "تاريخ التغيير",
+    note: "ملاحظة",
+    old: "قبل التعديل",
+    new: "بعد التعديل",
+  };
+  const renderAuditValue = (value: unknown): string => {
+    if (value === null || value === undefined || value === "") return "—";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (Array.isArray(value)) return value.length ? value.map(renderAuditValue).join("، ") : "—";
+    if (typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>)
+        .map(([key, val]) => `${auditFieldLabels[key] || key}: ${renderAuditValue(val)}`)
+        .join(" | ");
+    }
+    return String(value);
+  };
+  const renderAuditDetails = (details: unknown) => {
+    if (!details || typeof details !== "object") return [];
+    return Object.entries(details as Record<string, unknown>).map(([key, value]) => ({
+      label: auditFieldLabels[key] || key,
+      value: renderAuditValue(value),
+    }));
+  };
 
   return (
     <div className="space-y-5 pb-12" dir="rtl">
       {/* ── Header ── */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => smartBack(navigate, "/insurance")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              if (confirmLeaveIfDirty()) smartBack(navigate, "/insurance");
+            }}
+          >
             <ArrowRight size={18} />
           </Button>
           <div>
@@ -1697,11 +1798,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       </div>
 
-      {/* ── Header Identity Card (Insurance + Owner) ── */}
+      {/* ── Unified Claim Management Center ── */}
       {!isNew && (
-        <Card className="p-4 bg-card/95 border-primary/15">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-3 min-w-0">
+        <Card className="p-4 bg-gradient-to-l from-primary/5 via-card to-card border-primary/20">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="flex items-start gap-3 min-w-0">
               <VehicleAvatar
                 size="lg"
                 imageUrl={(vehicle as any)?.vehicle_thumbnail_url || (vehicle as any)?.vehicle_cover_image_url}
@@ -1709,40 +1811,117 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 label={`${vehicle?.brand || vehicleMake} ${vehicle?.model || vehicleModel}`.trim() || claimNumber}
               />
               <div className="min-w-0">
-                <div className="text-xs font-semibold text-primary">Claim Management Center</div>
-                <div className="text-lg font-bold truncate">{vehicle?.brand || vehicleMake || "—"} {vehicle?.model || vehicleModel || ""}</div>
-                <div className="text-xs text-muted-foreground font-mono" dir="ltr">
-                  {(vehicle?.plate_number || vehiclePlate || "—")} · {(vehicle as any)?.vin_number || vehicleVin || "VIN —"}
+                  <div className="text-xs font-semibold text-primary">Claim Management Center</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-xl font-bold text-foreground">{claimNumber || "مطالبة جديدة"}</h2>
+                    <Badge className={statusMeta[status]?.cls}>{statusMeta[status]?.label || status}</Badge>
+                    <Badge variant="outline">{activeInvoice ? `فاتورة #${(activeInvoice as any).invoice_number}` : "لا توجد فاتورة"}</Badge>
+                    <Badge variant={paymentRemaining <= 0 && paidTotal > 0 ? "default" : "secondary"}>{paymentStatusLabel}</Badge>
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-foreground truncate">
+                    {vehicle?.brand || vehicleMake || "—"} {vehicle?.model || vehicleModel || ""}
+                  </div>
+                  <div className="text-xs text-muted-foreground font-mono" dir="ltr">
+                    {(vehicle?.plate_number || vehiclePlate || "—")} · {(vehicle as any)?.vin_number || vehicleVin || "VIN —"}
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:min-w-[560px]">
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="text-[11px] text-muted-foreground">شركة التأمين</div>
+                  <div className="text-sm font-semibold truncate">{company || "—"}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="text-[11px] text-muted-foreground">العميل</div>
+                  <div className="text-sm font-semibold truncate">{ownerName || customer?.name || "—"}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="text-[11px] text-muted-foreground">Customer Code</div>
+                  <div className="font-mono text-xs truncate" dir="ltr">{displayCustomerCode(customer || { id: customerId })}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="text-[11px] text-muted-foreground">موقع المركبة</div>
+                  <div className="text-xs font-semibold truncate">{vehiclePresenceMeta[vehiclePresence].label}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="text-[11px] text-muted-foreground">اللوحة</div>
+                  <div className="font-mono text-xs truncate" dir="ltr">{vehicle?.plate_number || vehiclePlate || "—"}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="text-[11px] text-muted-foreground">أمر العمل</div>
+                  <div className="font-mono text-xs truncate" dir="ltr">{(existing as any)?.job_order?.order_number || (linkedWorkOrderId && !isUuid(linkedWorkOrderId) ? linkedWorkOrderId : hasLinkedWorkOrder ? "Linked" : "—")}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="text-[11px] text-muted-foreground">المصاريف</div>
+                  <div className="font-semibold" dir="ltr">{claimExpensesTotal.toFixed(3)} OMR</div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="text-[11px] text-muted-foreground">آخر تحديث</div>
+                  <div className="text-xs font-semibold">{formatDateLatin((existing as any)?.updated_at || new Date().toISOString())}</div>
                 </div>
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 flex-1">
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Customer Code</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{displayCustomerCode(customer || { id: customerId })}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Vehicle</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{vehicle?.plate_number || vehiclePlate || "—"}</div>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Expenses</div>
-                <div className="font-semibold" dir="ltr">{claimExpensesTotal.toFixed(3)} OMR</div>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <div className="text-[11px] text-muted-foreground">Work Order</div>
-                <div className="font-mono text-xs truncate" dir="ltr">{(existing as any)?.job_order?.order_number || (linkedWorkOrderId && !isUuid(linkedWorkOrderId) ? linkedWorkOrderId : "Linked")}</div>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {linkedWorkOrderId && (
-                <Button variant="outline" size="sm" onClick={() => navigate(`/work-orders/${linkedWorkOrderId}`)}>
-                  <Wrench size={14} className="ml-1" /> Work Order
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
+              {hasUnsavedChanges && (
+                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
+                  تعديلات غير محفوظة
+                </Badge>
+              )}
+              <Button size="sm" onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-1.5">
+                <Save size={14} /> حفظ
+              </Button>
+              {hasUnsavedChanges && (
+                <Button variant="ghost" size="sm" onClick={resetUnsavedChanges}>
+                  إلغاء التعديلات
+                </Button>
+              )}
+              {isAwaitingApproval && (
+                <Button size="sm" onClick={handleApprove} disabled={updateStatus.isPending} className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground">
+                  <CheckCircle2 size={14} /> اعتماد المطالبة
+                </Button>
+              )}
+              {isApprovedClaim && (
+                <Button variant="outline" size="sm" onClick={() => openStageDialog({ key: "repairing", label: "تحت الإصلاح" })} className="gap-1.5">
+                  <Wrench size={14} /> بدء العمل
+                </Button>
+              )}
+              {isRepairingClaim && (
+                <Button variant="outline" size="sm" onClick={() => openStageDialog({ key: "ready", label: "جاهزة للتسليم" })} className="gap-1.5">
+                  <ClipboardCheck size={14} /> جاهزة للتسليم
+                </Button>
+              )}
+              {isReadyForDelivery && (
+                <Button variant="outline" size="sm" onClick={() => setTab("delivery")} className="gap-1.5">
+                  <PackageCheck size={14} /> تسليم المركبة
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setShowPdf(true)} className="gap-1.5">
+                <Printer size={14} /> طباعة تقدير الإصلاح
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleDownloadEstimatePdf} className="gap-1.5">
+                <Download size={14} /> تحميل تقدير الإصلاح
+              </Button>
+              {hasLinkedWorkOrder ? (
+                <Button variant="outline" size="sm" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-1.5">
+                  <Wrench size={14} /> فتح أمر العمل
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={handleConvertToWorkOrder} disabled={!isApprovedClaim} className="gap-1.5">
+                  <Wrench size={14} /> إنشاء أمر عمل
                 </Button>
               )}
               <Button
                 variant="outline"
                 size="sm"
+                className="gap-1.5"
+                onClick={() => setShowSendEmail(true)}
+              >
+                <Send size={14} /> إرسال رسالة
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
                 onClick={() => {
                   const params = new URLSearchParams();
                   if (existing?.id) params.set("claim_id", existing.id);
@@ -1752,7 +1931,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   navigate(`/accounting/expenses?${params.toString()}`);
                 }}
               >
-                <DollarSign size={14} className="ml-1" /> Expenses
+                <DollarSign size={14} /> Expenses
               </Button>
             </div>
           </div>
@@ -1884,201 +2063,19 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </Collapsible>
       </Card>
 
-      <Card className="p-5 border-primary/20 bg-gradient-to-l from-primary/5 via-card to-card">
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <VehicleAvatar
-              imageUrl={(vehicle as any)?.vehicle_cover_image_url || (vehicle as any)?.vehicle_thumbnail_url}
-              label={`${vehicleTitle} ${vehiclePlate || vehicle?.plate_number || ""}`.trim()}
-              size="lg"
-            />
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-bold text-foreground">{claimNumber || "مطالبة جديدة"}</h2>
-                <Badge className={statusMeta[status]?.cls}>{statusMeta[status]?.label || status}</Badge>
-                <Badge variant="outline">{activeInvoice ? `فاتورة #${(activeInvoice as any).invoice_number}` : "لا توجد فاتورة"}</Badge>
-                <Badge variant={paymentRemaining <= 0 && paidTotal > 0 ? "default" : "secondary"}>{paymentStatusLabel}</Badge>
-              </div>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-sm text-muted-foreground">
-                <div><span className="block text-[11px]">شركة التأمين</span><strong className="text-foreground">{company || "—"}</strong></div>
-                <div><span className="block text-[11px]">العميل</span><strong className="text-foreground">{ownerName || customer?.name || "—"}</strong></div>
-                <div><span className="block text-[11px]">المركبة</span><strong className="text-foreground">{vehicleTitle}</strong></div>
-                <div><span className="block text-[11px]">اللوحة</span><strong className="text-foreground">{vehiclePlate || vehicle?.plate_number || "—"}</strong></div>
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end">
-            {!isNew && (
-              <>
-                <Button variant="outline" onClick={() => setShowPdf(true)} className="gap-2">
-                  <Printer size={16} /> طباعة تقدير الإصلاح
-                </Button>
-                <Button variant="outline" onClick={handleDownloadEstimatePdf} className="gap-2">
-                  <Download size={16} /> تحميل تقدير الإصلاح
-                </Button>
-              </>
-            )}
-            {isNew && (
-              <>
-                <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
-                  <Save size={16} /> حفظ
-                </Button>
-                <Button variant="outline" onClick={() => setTab("inspect")} className="gap-2">
-                  <Shield size={16} /> تعديل بيانات التأمين
-                </Button>
-                <Button variant="outline" onClick={() => setTab("inspect")} className="gap-2">
-                  <Car size={16} /> تعديل بيانات المركبة
-                </Button>
-                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
-                  <Upload size={16} /> رفع مستندات
-                </Button>
-              </>
-            )}
-
-            {showHeaderWorkflowActions && isAwaitingApproval && (
-              <>
-                <Button onClick={handleApprove} disabled={updateStatus.isPending} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
-                  <CheckCircle2 size={16} /> اعتماد / موافقة
-                </Button>
-                <Button variant="outline" onClick={() => setTab("approval")} className="gap-2">
-                  <DollarSign size={16} /> تعديل مبلغ الموافقة
-                </Button>
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> إرسال رسالة للتأمين
-                </Button>
-                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
-                  <FileUp size={16} /> رفع مستندات التأمين
-                </Button>
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> PDF
-                </Button>
-              </>
-            )}
-
-            {showHeaderWorkflowActions && isApprovedClaim && !isRepairingClaim && !isReadyForDelivery && !isDeliveredClaim && (
-              <>
-                {hasLinkedWorkOrder ? (
-                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
-                    <LinkIcon size={16} /> فتح أمر العمل
-                  </Button>
-                ) : (
-                  <Button variant="outline" onClick={handleConvertToWorkOrder} className="gap-2">
-                    <Wrench size={16} /> إنشاء أمر عمل
-                  </Button>
-                )}
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> إرسال تحديث للعميل
-                </Button>
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> PDF
-                </Button>
-              </>
-            )}
-
-            {showHeaderWorkflowActions && hasLinkedWorkOrder && !isClosedClaim && (
-              <>
-                <Badge variant="outline" className="h-10 px-3 flex items-center gap-2">
-                  <Wrench size={14} /> حالة أمر العمل: {linkedWorkOrderStatus}
-                </Badge>
-                {(isRepairingClaim || isReadyForDelivery || isDeliveredClaim) && (
-                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
-                    <LinkIcon size={16} /> فتح أمر العمل
-                  </Button>
-                )}
-              </>
-            )}
-
-            {showHeaderWorkflowActions && isRepairingClaim && (
-              <>
-                <Button variant="outline" onClick={() => openStageDialog({ key: "ready", label: "جاهزة للتسليم" })} className="gap-2">
-                  <ClipboardCheck size={16} /> تحديث المرحلة
-                </Button>
-                <Button variant="outline" onClick={() => navigate("/accounting/expenses")} className="gap-2">
-                  <DollarSign size={16} /> إضافة مصروف
-                </Button>
-                <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
-                  <Camera size={16} /> رفع صور إصلاح
-                </Button>
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> إرسال تحديث للعميل
-                </Button>
-              </>
-            )}
-
-            {showHeaderWorkflowActions && isReadyForDelivery && (
-              <>
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> إشعار جاهزية
-                </Button>
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> طباعة
-                </Button>
-                <Button variant="outline" onClick={() => setTab("delivery")} className="gap-2">
-                  <PackageCheck size={16} /> تسليم المركبة
-                </Button>
-              </>
-            )}
-
-            {showHeaderWorkflowActions && isDeliveredClaim && (
-              <>
-                {!hasRegisteredLpo && (
-                  <Button variant="outline" onClick={() => setTab("documents")} className="gap-2">
-                    <FileUp size={16} /> تسجيل / رفع LPO
-                  </Button>
-                )}
-                {hasRegisteredLpo && !hasActiveInvoice && (
-                  <Button variant="outline" onClick={generateTaxInvoice} className="gap-2">
-                    <FileText size={16} /> إنشاء فاتورة التأمين
-                  </Button>
-                )}
-                {activeInvoice && (
-                  <Button variant="outline" onClick={() => setShowTaxInvoice(true)} className="gap-2">
-                    <FileText size={16} /> عرض الفاتورة
-                  </Button>
-                )}
-                {paymentRemaining > 0 && (
-                  <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                    <Send size={16} /> تذكير دفع
-                  </Button>
-                )}
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> PDF
-                </Button>
-              </>
-            )}
-
-            {showHeaderWorkflowActions && isClosedClaim && (
-              <>
-                <Button variant="outline" onClick={() => setShowSummary(true)} className="gap-2">
-                  <Printer size={16} /> PDF
-                </Button>
-                <Button variant="outline" onClick={() => setShowSendEmail(true)} className="gap-2">
-                  <Send size={16} /> الرسائل
-                </Button>
-                {hasLinkedWorkOrder && (
-                  <Button variant="outline" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-2">
-                    <LinkIcon size={16} /> السجلات المرتبطة
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </Card>
-
-      <Card className="p-5 space-y-4 border-primary/20">
+      <Card className="mx-auto max-w-5xl p-4 space-y-3 border-primary/20">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-bold text-primary">
               <FileUp size={16} /> LPO / أمر الشراء من شركة التأمين
             </div>
-            <p className="text-xs text-muted-foreground">سجل بيانات LPO هنا ثم أنشئ فاتورة التأمين الضريبية من نفس المكان.</p>
+            <p className="text-xs text-muted-foreground">سجل بيانات LPO ثم أنشئ فاتورة التأمين الضريبية من نفس القسم.</p>
           </div>
           <Badge variant={hasRegisteredLpo ? "default" : "outline"}>
             {hasRegisteredLpo ? "LPO مسجل" : "بانتظار LPO"}
           </Badge>
         </div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
           <div className="space-y-1.5">
             <Label className="text-xs">رقم LPO</Label>
             <Input ref={lpoNumberRef} value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
@@ -2108,12 +2105,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <Input type="date" value={customInvoiceDate} onChange={(e) => setCustomInvoiceDate(e.target.value)} />
             </div>
           )}
-          <div className="space-y-1.5 md:col-span-3">
+          <div className="space-y-1.5 md:col-span-2">
             <Label className="text-xs">ملاحظة LPO</Label>
             <Input ref={lpoNoteRef} value={lpoNote} onChange={(e) => setLpoNote(e.target.value)} placeholder="ملاحظة داخلية اختيارية" />
           </div>
         </div>
-        <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
+        <div className="flex flex-wrap justify-end gap-2 border-t pt-2">
           <Button variant="outline" onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
             <Save size={16} /> حفظ
           </Button>
@@ -2779,25 +2776,33 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           <div className="space-y-2 max-h-80 overflow-y-auto">
             {claimAudit.length === 0 ? (
               <div className="text-sm text-muted-foreground border rounded-lg p-4 text-center">لا توجد أحداث مسجلة بعد</div>
-            ) : claimAudit.map((item: any) => (
-              <div key={item.id} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/20 p-3">
-                <div className="mt-1 h-2.5 w-2.5 rounded-full bg-primary shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-sm text-foreground">{item.action}</span>
-                    <Badge variant="secondary" className="text-[10px]">{item.category || "audit"}</Badge>
+            ) : claimAudit.map((item: any) => {
+              const details = renderAuditDetails(item.details);
+              return (
+                <div key={item.id} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/20 p-3">
+                  <div className="mt-1 h-2.5 w-2.5 rounded-full bg-primary shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-sm text-foreground">{auditActionLabels[item.action] || item.action || "إجراء على المطالبة"}</span>
+                      <Badge variant="secondary" className="text-[10px]">{item.category || "audit"}</Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {formatDateLatin(item.created_at)} — المستخدم: {item.user_id || "—"}
+                    </div>
+                    {details.length > 0 && (
+                      <div className="mt-2 grid gap-1 rounded bg-background/70 p-2 text-[11px] text-muted-foreground">
+                        {details.map((detail, index) => (
+                          <div key={`${item.id}-${detail.label}-${index}`} className="flex flex-wrap gap-1">
+                            <span className="font-semibold text-foreground">{detail.label}:</span>
+                            <span>{detail.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {formatDateLatin(item.created_at)} — المستخدم: {item.user_id || "—"}
-                  </div>
-                  {item.details && (
-                    <pre className="mt-2 whitespace-pre-wrap break-words rounded bg-background/70 p-2 text-[11px] text-muted-foreground">
-                      {JSON.stringify(item.details, null, 2)}
-                    </pre>
-                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       )}
