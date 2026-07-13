@@ -16,6 +16,24 @@ function json(payload: Record<string, unknown>, status = 200) {
   });
 }
 
+function extractJsonObject(raw: string): Record<string, unknown> {
+  const cleaned = String(raw || "").replace(/```json|```/g, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+}
+
 // ───────── Provider resolver ─────────
 function fallbackProvider() {
   const lovable = Deno.env.get("LOVABLE_API_KEY");
@@ -35,20 +53,42 @@ async function resolveProvider(admin: any, tenantId: string | null) {
       .from("tenant_integrations")
       .select("provider,config,secrets,enabled")
       .eq("tenant_id", tenantId)
-      .in("provider", ["ai_openai", "ai_gemini", "ai_anthropic", "ai_custom"])
+      .in("provider", ["ai_openai", "ai_gemini", "ai_anthropic", "ai_custom", "ai_ollama"])
       .eq("enabled", true)
-      .maybeSingle();
-    const provider = String(row?.provider || "").replace(/^ai_/, "");
-    const config = row?.config || {};
-    const apiKey = row?.secrets?.api_key;
-    if (row?.enabled && apiKey) {
+      .order("updated_at", { ascending: false });
+    const rows = Array.isArray(row) ? row : (row ? [row] : []);
+    const preferred = rows.find((r: any) => r?.config?.use_for_image_extraction) || rows.find((r: any) => String(r?.provider || "") !== "ai_ollama") || rows[0];
+    const rowData = preferred;
+    const provider = String(rowData?.provider || "").replace(/^ai_/, "");
+    const config = rowData?.config || {};
+    const apiKey = rowData?.secrets?.api_key;
+    if (rowData?.enabled && apiKey) {
       if (provider === "openai") return { type: provider, url: "https://api.openai.com/v1/chat/completions", key: apiKey, model: config.model || "gpt-4o-mini" };
       if (provider === "gemini") return { type: provider, url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: apiKey, model: config.model || "gemini-2.0-flash" };
       if (provider === "anthropic") return { type: provider, url: "https://api.anthropic.com/v1/messages", key: apiKey, model: config.model || "claude-3-5-haiku-latest" };
       if (provider === "custom" && config.base_url) return { type: provider, url: config.base_url, key: apiKey, model: config.model };
+      if (provider === "ollama") {
+        const base = String(config.base_url || (config.connection_type === "local" ? "http://localhost:11434" : "https://ollama.com")).replace(/\/+$/, "");
+        const apiBase = base.endsWith("/api") ? base : `${base}/api`;
+        return {
+          type: provider,
+          url: `${apiBase}/chat`,
+          key: apiKey,
+          model: config.model || "llama3.2-vision",
+          timeoutMs: Number(config.request_timeout_ms || 45000),
+        };
+      }
     }
   }
   return fallbackProvider();
+}
+
+async function logUsage(admin: any, payload: Record<string, unknown>) {
+  try {
+    await admin.from("ai_usage_logs").insert(payload);
+  } catch {
+    // Logging must never break extraction.
+  }
 }
 
 // ───────── Schemas / Tool definitions ─────────
@@ -255,6 +295,7 @@ Deno.serve(async (req) => {
     }
     // Validate the JWT against Supabase Auth (header presence alone is not enough).
     let tenantId: string | null = null;
+    let userId: string | null = null;
     let admin: any = null;
     try {
       const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.45.0");
@@ -269,6 +310,7 @@ Deno.serve(async (req) => {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      userId = userData.user.id;
       const { data: resolvedTenantId } = await sb.rpc("get_user_tenant_id");
       tenantId = resolvedTenantId;
       const { data: aiFeature } = await sb.from("tenant_features")
@@ -319,6 +361,7 @@ Deno.serve(async (req) => {
     if (!provider) {
       return json({ ok: false, error: "AI provider is not configured" });
     }
+    const startedAt = Date.now();
 
     const toDataUrl = (p: Page) =>
       p.b64.startsWith("data:") ? p.b64 : `data:${p.mime};base64,${p.b64}`;
@@ -346,6 +389,72 @@ Deno.serve(async (req) => {
       tool_choice: { type: "function", function: { name: "extract" } },
       temperature: 0,
     };
+
+    if (provider.type === "ollama") {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort("timeout"), Math.max(5000, Math.min(180000, Number(provider.timeoutMs || 45000))));
+      try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (provider.key) headers.Authorization = `Bearer ${provider.key}`;
+        const fieldNames = Object.keys(preset.parameters?.properties || {});
+        const resp = await fetch(provider.url, {
+          method: "POST",
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: provider.model,
+            stream: false,
+            format: "json",
+            messages: [{
+              role: "user",
+              content: [
+                preset.system,
+                "Extract document text and fields only. Do not diagnose damage, do not recommend repairs, do not suggest parts or prices.",
+                "Return a single JSON object with keys from this list only:",
+                fieldNames.join(", "),
+                "Use null for unclear or missing fields. Preserve visible text as-is.",
+              ].join("\n"),
+              images: safePages.map((p) => p.b64.replace(/^data:[^;]+;base64,/, "")),
+            }],
+          }),
+        });
+        const text = await resp.text();
+        if (!resp.ok) {
+          if (resp.status === 401 || resp.status === 403) return json({ ok: false, error: "Invalid API key" });
+          if (resp.status === 404) return json({ ok: false, error: "Model not found" });
+          if (resp.status === 408 || resp.status === 504) return json({ ok: false, error: "Request timeout" });
+          return json({ ok: false, error: "Ollama request failed" });
+        }
+        const parsed = extractJsonObject(text);
+        const content = String((parsed as any)?.message?.content || (parsed as any)?.response || text || "");
+        const extracted = extractJsonObject(content);
+        await logUsage(admin, {
+          tenant_id: tenantId,
+          user_id: userId,
+          provider: "ollama",
+          document_type: schema,
+          model: provider.model,
+          status: "success",
+          duration_ms: Date.now() - startedAt,
+        });
+        return json({ ok: true, data: extracted, provider: "ollama" });
+      } catch (e) {
+        const msg = String(e?.message || e || "ollama_request_failed").toLowerCase().includes("abort") ? "Request timeout" : "Ollama server unavailable";
+        await logUsage(admin, {
+          tenant_id: tenantId,
+          user_id: userId,
+          provider: "ollama",
+          document_type: schema,
+          model: provider.model,
+          status: "failed",
+          duration_ms: Date.now() - startedAt,
+          error_message: msg,
+        });
+        return json({ ok: false, error: msg });
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
 
     const resp = provider.type === "anthropic"
       ? await fetch(provider.url, {
@@ -395,11 +504,14 @@ Deno.serve(async (req) => {
       const txt = await resp.text();
       console.error("ai-extract-data error:", resp.status, txt);
       if (resp.status === 429) {
+        await logUsage(admin, { tenant_id: tenantId, user_id: userId, provider: provider.type, document_type: schema, model: provider.model, status: "failed", duration_ms: Date.now() - startedAt, error_message: "Rate limit exceeded" });
         return json({ ok: false, error: "Rate limit exceeded, try again shortly" });
       }
       if (resp.status === 402) {
+        await logUsage(admin, { tenant_id: tenantId, user_id: userId, provider: provider.type, document_type: schema, model: provider.model, status: "failed", duration_ms: Date.now() - startedAt, error_message: "AI credits exhausted" });
         return json({ ok: false, error: "AI credits exhausted" });
       }
+      await logUsage(admin, { tenant_id: tenantId, user_id: userId, provider: provider.type, document_type: schema, model: provider.model, status: "failed", duration_ms: Date.now() - startedAt, error_message: "AI request failed" });
       return json({ ok: false, error: "AI request failed", details: txt });
     }
 
@@ -425,6 +537,15 @@ Deno.serve(async (req) => {
       } catch { /* ignore */ }
     }
 
+    await logUsage(admin, {
+      tenant_id: tenantId,
+      user_id: userId,
+      provider: provider.type,
+      document_type: schema,
+      model: provider.model,
+      status: "success",
+      duration_ms: Date.now() - startedAt,
+    });
     return json({ ok: true, data: extracted });
   } catch (e) {
     console.error("ai-extract-data exception:", e);

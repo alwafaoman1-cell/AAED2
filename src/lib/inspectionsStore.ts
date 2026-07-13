@@ -20,6 +20,36 @@ export function normalizePlate(value?: string): string {
   return (value || "").replace(/[\s\-_]+/g, "").trim().toLowerCase();
 }
 
+export function formatDamageReportNumber(sequence: number): string {
+  return `DR-${String(Math.max(1, Math.trunc(sequence || 1))).padStart(5, "0")}`;
+}
+
+export function parseDamageReportSequence(value?: string | null): number | null {
+  const match = String(value || "").trim().match(/^DR-(\d{5})$/i);
+  if (!match) return null;
+  const sequence = Number(match[1]);
+  return Number.isFinite(sequence) && sequence > 0 ? sequence : null;
+}
+
+export function getNextDamageReportNumberFromRecords(records: Array<{ id?: string | null; inspection_code?: string | null; kind?: string | null; inspection_kind?: string | null }>): string {
+  const reportRecords = records.filter((record) => {
+    const kind = record.kind || record.inspection_kind;
+    const code = record.inspection_code || record.id || "";
+    return kind === "insurance" || /^DR-/i.test(code);
+  });
+  const usedSequences = new Set<number>();
+  let maxSequence = 0;
+  for (const record of reportRecords) {
+    const sequence = parseDamageReportSequence(record.inspection_code || record.id);
+    if (!sequence) continue;
+    usedSequences.add(sequence);
+    maxSequence = Math.max(maxSequence, sequence);
+  }
+  let nextSequence = Math.max(reportRecords.length + 1, maxSequence + 1, 1);
+  while (usedSequences.has(nextSequence)) nextSequence += 1;
+  return formatDamageReportNumber(nextSequence);
+}
+
 let cache: InspectionRecord[] = [];
 let started = false;
 let tenantId: string | null = null;
@@ -142,6 +172,23 @@ export function findInspectionByPlate(plate: string, kind: "general" | "insuranc
     (inspection.kind || "general") === kind
     && normalizePlate(inspection.plate || inspection.vehicle) === normalized
   );
+}
+
+export async function getNextDamageReportNumber(): Promise<string> {
+  const currentTenant = await getTenantId();
+  if (!currentTenant) {
+    return getNextDamageReportNumberFromRecords(cache);
+  }
+  const { data, error } = await (supabase.from("inspections") as any)
+    .select("inspection_code,inspection_kind")
+    .eq("tenant_id", currentTenant)
+    .order("created_at", { ascending: true })
+    .limit(5000);
+  if (error) {
+    console.warn("[inspectionsStore] damage report number lookup failed", error);
+    return getNextDamageReportNumberFromRecords(cache);
+  }
+  return getNextDamageReportNumberFromRecords(data || []);
 }
 
 export const inspectionsStore = {

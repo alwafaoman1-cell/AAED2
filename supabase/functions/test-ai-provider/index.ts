@@ -7,7 +7,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const PROVIDERS = ["openai", "gemini", "anthropic", "custom"] as const;
+const PROVIDERS = ["openai", "gemini", "anthropic", "custom", "ollama"] as const;
 
 function json(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -24,12 +24,51 @@ function endpoint(provider: string, config: any) {
   if (provider === "openai") return { url: "https://api.openai.com/v1/chat/completions", model: config.model || "gpt-4o-mini" };
   if (provider === "gemini") return { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: config.model || "gemini-2.0-flash" };
   if (provider === "anthropic") return { url: "https://api.anthropic.com/v1/messages", model: config.model || "claude-3-5-haiku-latest" };
+  if (provider === "ollama") {
+    const base = String(config.base_url || (config.connection_type === "local" ? "http://localhost:11434" : "https://ollama.com")).replace(/\/+$/, "");
+    const apiBase = base.endsWith("/api") ? base : `${base}/api`;
+    return { url: `${apiBase}/chat`, model: config.model || "llama3.2-vision" };
+  }
   return { url: config.base_url, model: config.model };
 }
 
 async function testProvider(provider: string, apiKey: string, config: any) {
   const ep = endpoint(provider, config);
   if (!ep.url || !ep.model) throw new Error("ai_provider_not_configured");
+
+  if (provider === "ollama") {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort("timeout"), Math.max(5000, Math.min(180000, Number(config.request_timeout_ms || 45000))));
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      const r = await fetch(ep.url, {
+        method: "POST",
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: ep.model,
+          messages: [{ role: "user", content: "Reply with OK." }],
+          stream: false,
+        }),
+      });
+      const text = await r.text();
+      if (!r.ok) {
+        if (r.status === 401 || r.status === 403) throw new Error("Invalid API key");
+        if (r.status === 404) throw new Error("Model not found");
+        throw new Error(text.slice(0, 500) || `ollama_test_failed_${r.status}`);
+      }
+      const data = JSON.parse(text || "{}");
+      const content = data?.message?.content || data?.response || "";
+      if (!content) throw new Error("Invalid Ollama response");
+      return;
+    } catch (e) {
+      if (String(e?.message || e).toLowerCase().includes("abort")) throw new Error("Request timeout");
+      throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
 
   if (provider === "anthropic") {
     const r = await fetch(ep.url, {

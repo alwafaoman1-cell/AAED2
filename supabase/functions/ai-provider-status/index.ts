@@ -7,7 +7,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const PROVIDERS = ["openai", "gemini", "anthropic", "custom"] as const;
+const PROVIDERS = ["openai", "gemini", "anthropic", "custom", "ollama"] as const;
 const PROVIDER_KEYS = PROVIDERS.map((p) => `ai_${p}`);
 
 function json(payload: Record<string, unknown>, status = 200) {
@@ -61,11 +61,15 @@ Deno.serve(async (req) => {
       maskedKey: null,
       model: "",
       baseUrl: "",
+      connectionType: "cloud",
+      useForImageExtraction: false,
+      requestTimeoutMs: 45000,
       lastTestAt: null,
       lastTestStatus: null,
       lastTestError: null,
     }]));
     let activeProvider = "none";
+    let activeImageExtractionProvider = "none";
 
     for (const row of rows || []) {
       const provider = String(row.provider || "").replace(/^ai_/, "");
@@ -78,11 +82,15 @@ Deno.serve(async (req) => {
         maskedKey: maskKey(secrets.api_key),
         model: config.model || "",
         baseUrl: config.base_url || "",
+        connectionType: config.connection_type || "cloud",
+        useForImageExtraction: !!config.use_for_image_extraction,
+        requestTimeoutMs: Number(config.request_timeout_ms || 45000),
         lastTestAt: row.last_test_at || null,
         lastTestStatus: row.last_test_status || null,
         lastTestError: row.last_test_error || null,
       };
-      if (row.enabled && secrets.api_key) activeProvider = provider;
+      if (row.enabled && secrets.api_key && provider !== "ollama") activeProvider = provider;
+      if (row.enabled && secrets.api_key && config.use_for_image_extraction) activeImageExtractionProvider = provider;
     }
 
     const fallback = {
@@ -92,7 +100,7 @@ Deno.serve(async (req) => {
       anthropic: !!Deno.env.get("ANTHROPIC_API_KEY"),
     };
 
-    return json({ ok: true, activeProvider, providers, fallback });
+    return json({ ok: true, activeProvider, activeImageExtractionProvider, providers, fallback });
   } catch (error) {
     const code = String(error?.message || error || "server_function_failed");
     return json({ ok: false, error: code, message: code }, 200);

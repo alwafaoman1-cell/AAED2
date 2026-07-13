@@ -7,7 +7,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const PROVIDERS = ["openai", "gemini", "anthropic", "custom"] as const;
+const PROVIDERS = ["openai", "gemini", "anthropic", "custom", "ollama"] as const;
 const PROVIDER_KEYS = PROVIDERS.map((p) => `ai_${p}`);
 
 function json(payload: Record<string, unknown>, status = 200) {
@@ -38,6 +38,10 @@ function validateProvider(provider: string, config: any, apiKey?: string) {
   if (provider === "custom") {
     if (!config?.base_url) throw new Error("custom_base_url_required");
     if (!config?.model) throw new Error("custom_model_required");
+  }
+  if (provider === "ollama") {
+    if (!config?.model) throw new Error("ollama_model_required");
+    if (config?.connection_type === "local" && !config?.base_url) throw new Error("ollama_base_url_required");
   }
 }
 
@@ -88,6 +92,7 @@ Deno.serve(async (req) => {
         lastTestError: null,
       }]));
       let activeProvider = "none";
+      let activeImageExtractionProvider = "none";
 
       for (const row of rows || []) {
         const provider = String(row.provider || "").replace(/^ai_/, "");
@@ -100,11 +105,15 @@ Deno.serve(async (req) => {
           maskedKey: maskKey(secrets.api_key),
           model: config.model || "",
           baseUrl: config.base_url || "",
+          connectionType: config.connection_type || "cloud",
+          useForImageExtraction: !!config.use_for_image_extraction,
+          requestTimeoutMs: Number(config.request_timeout_ms || 45000),
           lastTestAt: row.last_test_at || null,
           lastTestStatus: row.last_test_status || null,
           lastTestError: row.last_test_error || null,
         };
-        if (row.enabled && secrets.api_key) activeProvider = provider;
+        if (row.enabled && secrets.api_key && provider !== "ollama") activeProvider = provider;
+        if (row.enabled && secrets.api_key && config.use_for_image_extraction) activeImageExtractionProvider = provider;
       }
 
       const fallback = {
@@ -114,7 +123,7 @@ Deno.serve(async (req) => {
         lovable: !!Deno.env.get("LOVABLE_API_KEY"),
       };
 
-      return json({ ok: true, status: { activeProvider, providers, fallback } });
+      return json({ ok: true, status: { activeProvider, activeImageExtractionProvider, providers, fallback } });
     }
 
     if (action !== "save") return json({ ok: false, error: "unsupported_action" }, 400);
@@ -125,7 +134,13 @@ Deno.serve(async (req) => {
     const config = {
       model: String(body.model || "").trim(),
       base_url: String(body.baseUrl || "").trim(),
+      connection_type: String(body.connectionType || "cloud"),
+      use_for_image_extraction: !!body.useForImageExtraction,
+      request_timeout_ms: Math.max(5000, Math.min(180000, Number(body.requestTimeoutMs || 45000))),
     };
+    if (provider === "ollama" && !config.base_url) {
+      config.base_url = config.connection_type === "local" ? "http://localhost:11434" : "https://ollama.com";
+    }
     validateProvider(provider, config, apiKey || undefined);
 
     const providerKey = `ai_${provider}`;
@@ -140,14 +155,13 @@ Deno.serve(async (req) => {
     const nextSecret = apiKey || existingSecret;
     if (enabled && !nextSecret) return json({ ok: false, error: "ai_api_key_required" }, 400);
 
-    if (enabled) {
+    if (enabled && provider !== "ollama") {
       await admin
         .from("tenant_integrations")
         .update({ enabled: false })
         .eq("tenant_id", profile.tenant_id)
-        .in("provider", PROVIDER_KEYS);
+        .in("provider", PROVIDER_KEYS.filter((p) => p !== "ai_ollama"));
     }
-
     const payload = {
       tenant_id: profile.tenant_id,
       provider: providerKey,

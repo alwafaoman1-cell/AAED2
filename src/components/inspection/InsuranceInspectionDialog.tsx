@@ -20,7 +20,7 @@ import {
 import VehicleAnnotationCanvas, { DEFAULT_VEHICLE_SVG_DATA_URL } from "./VehicleAnnotationCanvas";
 import { VEHICLE_TEMPLATES } from "@/lib/vehicleDiagrams";
 import { getWorkOrders, getWorkOrderById } from "@/lib/workOrdersStore";
-import { inspectionsStore, findInspectionByPlate } from "@/lib/inspectionsStore";
+import { inspectionsStore, findInspectionByPlate, getNextDamageReportNumber, parseDamageReportSequence } from "@/lib/inspectionsStore";
 import { insuranceInspectionStore } from "@/lib/insuranceInspectionStore";
 import { logActivity } from "@/lib/auditLogStore";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
@@ -48,7 +48,7 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
   const [step, setStep] = useState(0);
   const [linkedOrderId, setLinkedOrderId] = useState("");
   const [meta, setMeta] = useState({
-    reportNo: `DR-${Date.now().toString().slice(-6)}`,
+    reportNo: "DR-00001",
     date: new Date().toISOString().split("T")[0],
     claimNo: "",
     regNo: "",
@@ -106,6 +106,11 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
         return;
       }
     }
+    if (open && !editId) {
+      void getNextDamageReportNumber().then((reportNo) => {
+        setMeta(m => ({ ...m, reportNo, date: m.date || new Date().toISOString().split("T")[0] }));
+      });
+    }
     if (open && preselectOrderId && !linkedOrderId) selectOrder(preselectOrderId);
     if (!open) {
       setStep(0);
@@ -119,7 +124,7 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
       setActivePhotoIdx(0);
       setImageMode("template");
       setTemplateId(VEHICLE_TEMPLATES[0].id);
-      setMeta(m => ({ ...m, reportNo: `DR-${Date.now().toString().slice(-6)}`, date: new Date().toISOString().split("T")[0] }));
+      setMeta(m => ({ ...m, reportNo: "DR-00001", date: new Date().toISOString().split("T")[0] }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, preselectOrderId, editId]);
@@ -270,11 +275,13 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
   const currentSourceKey = imageMode === "photo" ? `photo:${activePhotoIdx}` : `template:${templateId}`;
   const annotatedImagesAll = Object.values(annotatedMap).filter(Boolean);
 
-  function persistInspection() {
+  async function persistInspection() {
     // منع التكرار: في حالة الإنشاء (وليس التعديل) إذا وُجد فحص تأمين سابق لنفس اللوحة → نُحدّثه ونعيد استخدام نفس الـ id
     const existingForPlate = !editId ? findInspectionByPlate(meta.regNo, "insurance") : undefined;
-    const id = existingForPlate?.id || meta.reportNo;
+    const id = existingForPlate?.id || editId || (parseDamageReportSequence(meta.reportNo) ? meta.reportNo : await getNextDamageReportNumber());
     const isEdit = (!!editId && !!inspectionsStore.getById(id)) || !!existingForPlate;
+    const savedMeta = { ...meta, reportNo: id };
+    setMeta(savedMeta);
     const recordPayload = {
       id,
       workOrder: linkedOrderId || existingForPlate?.workOrder || "—",
@@ -294,7 +301,7 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
     }
     // Save the full insurance payload so the report page can rebuild the exact PDF view
     const result = insuranceInspectionStore.save(id, {
-      ...meta,
+      ...savedMeta,
       reportNo: id,
       remarks,
       sections,
@@ -325,37 +332,31 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
         duration: 6000,
       });
     }
-    return result;
+    return { result, id, data: { ...savedMeta, reportNo: id, remarks, sections, annotatedImages: annotatedImagesAll, photos } };
   }
 
 
-  function handleSaveOnly() {
+  async function handleSaveOnly() {
     if (!meta.claimNo.trim() && !meta.regNo.trim()) {
       toast.error("Claim No. or Reg No. is required");
       return;
     }
-    const r = persistInspection();
-    if (r !== "failed") {
-      toast.success(`Saved report ${meta.reportNo}`);
+    const saved = await persistInspection();
+    if (saved.result !== "failed") {
+      toast.success(`Saved report ${saved.id}`);
       onOpenChange(false);
     }
   }
 
 
-  function handleSavePdf() {
+  async function handleSavePdf() {
     if (!meta.claimNo.trim() && !meta.regNo.trim()) {
       toast.error("Claim No. or Reg No. is required");
       return;
     }
-    generateInsuranceInspectionPdf({
-      ...meta,
-      remarks,
-      sections,
-      annotatedImages: annotatedImagesAll,
-      photos,
-    });
-    persistInspection();
-    toast.success(`Generated report ${meta.reportNo}`);
+    const saved = await persistInspection();
+    generateInsuranceInspectionPdf(saved.data);
+    toast.success(`Generated report ${saved.id}`);
   }
 
   async function handleDownloadPdf() {
@@ -364,14 +365,13 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
       toast.error("Claim No. or Reg No. is required");
       return;
     }
-    const data = { ...meta, remarks, sections, annotatedImages: annotatedImagesAll, photos };
     try {
       setPdfBusy(true);
       toast.loading("جارٍ تحضير ملف PDF...", { id: "ins-pdf" });
-      const blob = await generateInsuranceInspectionPdfBlob(data, `Inspection_${meta.reportNo || Date.now()}`, true);
+      const saved = await persistInspection();
+      const blob = await generateInsuranceInspectionPdfBlob(saved.data, `Inspection_${saved.id}`, true);
       if (blob.size === 0) throw new Error("Empty PDF file");
-      persistInspection();
-      toast.success(`تم تنزيل التقرير ${meta.reportNo}`, { id: "ins-pdf" });
+      toast.success(`تم تنزيل التقرير ${saved.id}`, { id: "ins-pdf" });
     } catch (e) {
       console.error(e);
       toast.error("تعذّر تنزيل الـ PDF: " + ((e as Error)?.message || "خطأ غير معروف"), { id: "ins-pdf" });

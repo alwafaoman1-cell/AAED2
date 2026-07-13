@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Key, CheckCircle2, AlertTriangle, ExternalLink, Loader2, Copy, Save, Send } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { getFunctionErrorMessage } from "@/lib/functionErrors";
 
-type AiProvider = "openai" | "gemini" | "anthropic" | "custom";
+type AiProvider = "openai" | "gemini" | "anthropic" | "custom" | "ollama";
 
 type ProviderUiState = {
   configured: boolean;
@@ -19,6 +20,9 @@ type ProviderUiState = {
   maskedKey: string | null;
   model: string;
   baseUrl: string;
+  connectionType?: "cloud" | "local";
+  useForImageExtraction?: boolean;
+  requestTimeoutMs?: number;
   lastTestAt: string | null;
   lastTestStatus: string | null;
   lastTestError: string | null;
@@ -26,6 +30,7 @@ type ProviderUiState = {
 
 type ProviderStatus = {
   activeProvider: AiProvider | "none";
+  activeImageExtractionProvider?: AiProvider | "none";
   providers: Record<AiProvider, ProviderUiState>;
   fallback?: Record<string, boolean>;
 };
@@ -35,6 +40,7 @@ const DEFAULT_MODELS: Record<AiProvider, string> = {
   gemini: "gemini-2.0-flash",
   anthropic: "claude-3-5-haiku-latest",
   custom: "",
+  ollama: "llama3.2-vision",
 };
 
 const PROVIDER_META: Record<AiProvider, { name: string; url: string; note: string; keyHint: string }> = {
@@ -62,6 +68,12 @@ const PROVIDER_META: Record<AiProvider, { name: string; url: string; note: strin
     note: "مزود مخصص متوافق مع Chat Completions.",
     keyHint: "API Key",
   },
+  ollama: {
+    name: "Ollama Vision",
+    url: "https://ollama.com",
+    note: "Vision provider for document/image field extraction only. Not for vehicle damage diagnosis, pricing, or parts suggestions.",
+    keyHint: "Ollama API Key",
+  },
 };
 
 const emptyProvider: ProviderUiState = {
@@ -70,6 +82,9 @@ const emptyProvider: ProviderUiState = {
   maskedKey: null,
   model: "",
   baseUrl: "",
+  connectionType: "cloud",
+  useForImageExtraction: false,
+  requestTimeoutMs: 45000,
   lastTestAt: null,
   lastTestStatus: null,
   lastTestError: null,
@@ -87,6 +102,9 @@ export default function AiKeysSettingsPage() {
     apiKey: "",
     model: DEFAULT_MODELS.openai,
     baseUrl: "",
+    connectionType: "cloud" as "cloud" | "local",
+    useForImageExtraction: false,
+    requestTimeoutMs: 45000,
   });
 
   const canManage =
@@ -97,6 +115,7 @@ export default function AiKeysSettingsPage() {
 
   const providerState = status?.providers?.[selected] || emptyProvider;
   const active = status?.activeProvider || "none";
+  const activeImage = status?.activeImageExtractionProvider || "none";
 
   async function load() {
     setLoading(true);
@@ -107,11 +126,13 @@ export default function AiKeysSettingsPage() {
       const next = data as ProviderStatus & { ok?: boolean };
       setStatus({
         activeProvider: next.activeProvider || "none",
+        activeImageExtractionProvider: next.activeImageExtractionProvider || "none",
         providers: {
           openai: next.providers?.openai || emptyProvider,
           gemini: next.providers?.gemini || emptyProvider,
           anthropic: next.providers?.anthropic || emptyProvider,
           custom: next.providers?.custom || emptyProvider,
+          ollama: next.providers?.ollama || emptyProvider,
         },
         fallback: next.fallback,
       });
@@ -131,6 +152,9 @@ export default function AiKeysSettingsPage() {
       apiKey: "",
       model: current.model || DEFAULT_MODELS[selected],
       baseUrl: current.baseUrl || "",
+      connectionType: current.connectionType || "cloud",
+      useForImageExtraction: !!current.useForImageExtraction,
+      requestTimeoutMs: current.requestTimeoutMs || 45000,
     });
   }, [selected, status]);
 
@@ -152,6 +176,9 @@ export default function AiKeysSettingsPage() {
           apiKey: form.apiKey.trim(),
           model: form.model.trim() || DEFAULT_MODELS[selected],
           baseUrl: form.baseUrl.trim(),
+          connectionType: form.connectionType,
+          useForImageExtraction: form.useForImageExtraction,
+          requestTimeoutMs: Number(form.requestTimeoutMs || 45000),
         },
       });
       if (error) throw error;
@@ -264,6 +291,7 @@ export default function AiKeysSettingsPage() {
                   </div>
                   <div className="flex gap-1 flex-wrap justify-end">
                     {active === provider && <Badge className="bg-success text-success-foreground">Active</Badge>}
+                    {activeImage === provider && <Badge className="bg-primary text-primary-foreground">Image</Badge>}
                     {p.configured ? <Badge variant="outline">Configured</Badge> : <Badge variant="outline">Not Configured</Badge>}
                   </div>
                 </div>
@@ -309,18 +337,60 @@ export default function AiKeysSettingsPage() {
               onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
             />
           </div>
-          {selected === "custom" && (
+          {selected === "ollama" && (
+            <>
+              <div className="space-y-2">
+                <Label>Connection Type</Label>
+                <Select value={form.connectionType} onValueChange={(connectionType: "cloud" | "local") => setForm((f) => ({
+                  ...f,
+                  connectionType,
+                  baseUrl: f.baseUrl || (connectionType === "cloud" ? "https://ollama.com" : "http://localhost:11434"),
+                }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cloud">Ollama Cloud</SelectItem>
+                    <SelectItem value="local">Local / Custom URL</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Request Timeout (ms)</Label>
+                <Input
+                  value={String(form.requestTimeoutMs)}
+                  inputMode="numeric"
+                  dir="ltr"
+                  onChange={(e) => setForm((f) => ({ ...f, requestTimeoutMs: Number(e.target.value || 45000) }))}
+                />
+              </div>
+            </>
+          )}
+          {(selected === "custom" || selected === "ollama") && (
             <div className="space-y-2 md:col-span-2">
               <Label>Base URL</Label>
               <Input
                 value={form.baseUrl}
-                placeholder="https://provider.example.com/v1/chat/completions"
+                placeholder={selected === "ollama" ? (form.connectionType === "local" ? "http://localhost:11434" : "https://ollama.com") : "https://provider.example.com/v1/chat/completions"}
                 dir="ltr"
                 onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
               />
+              {selected === "ollama" && form.connectionType === "local" && (
+                <p className="text-[11px] text-warning">
+                  Local Ollama must be reachable from the Supabase Edge Function/backend. Browser-only localhost is not used.
+                </p>
+              )}
             </div>
           )}
         </div>
+
+        {selected === "ollama" && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3">
+            <div>
+              <div className="text-sm font-medium">Use for Image Data Extraction</div>
+              <div className="text-xs text-muted-foreground">Ollama will be selected only for image/document extraction; text writing providers remain separate.</div>
+            </div>
+            <Switch checked={form.useForImageExtraction} onCheckedChange={(useForImageExtraction) => setForm((f) => ({ ...f, useForImageExtraction }))} />
+          </div>
+        )}
 
         <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3">
           <div>

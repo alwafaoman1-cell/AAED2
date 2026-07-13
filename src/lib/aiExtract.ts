@@ -67,6 +67,11 @@ function normalizeAiExtractError(message: string) {
     return "انتهت جلسة الدخول أو لا توجد صلاحية. سجل الدخول ثم أعد المحاولة.";
   }
 
+  if (lower.includes("model not found")) return "Ollama model not found. Check the Vision Model name in Settings → AI Keys.";
+  if (lower.includes("invalid api key")) return "Invalid AI provider API key.";
+  if (lower.includes("request timeout")) return "AI provider request timed out. Increase timeout or check server availability.";
+  if (lower.includes("ollama server unavailable")) return "Ollama server is unavailable from the backend/Edge Function.";
+
   return raw;
 }
 
