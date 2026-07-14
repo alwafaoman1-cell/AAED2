@@ -27,6 +27,30 @@ function maskKey(key?: string | null) {
   return `${prefix}****${key.slice(-4)}`;
 }
 
+function isMissingColumnError(error: any) {
+  const text = String(error?.message || error?.details || error?.hint || error || "").toLowerCase();
+  return text.includes("schema cache") || text.includes("could not find") || text.includes("column");
+}
+
+async function selectIntegrationRows(admin: any, tenantId: string) {
+  const rich = await admin
+    .from("tenant_integrations")
+    .select("provider,enabled,config,secrets,last_test_status,last_test_at,last_test_error")
+    .eq("tenant_id", tenantId)
+    .in("provider", PROVIDER_KEYS);
+
+  if (!rich.error) return rich.data || [];
+  if (!isMissingColumnError(rich.error)) throw rich.error;
+
+  const fallback = await admin
+    .from("tenant_integrations")
+    .select("provider,enabled,config,secrets")
+    .eq("tenant_id", tenantId)
+    .in("provider", PROVIDER_KEYS);
+  if (fallback.error) throw fallback.error;
+  return fallback.data || [];
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
@@ -49,11 +73,7 @@ Deno.serve(async (req) => {
     if (!profile?.tenant_id) return json({ ok: false, error: "tenant_not_found" }, 400);
     if (!isAdmin(profile)) return json({ ok: false, error: "owner_or_super_admin_required" }, 403);
 
-    const { data: rows } = await admin
-      .from("tenant_integrations")
-      .select("provider,enabled,config,secrets,last_test_status,last_test_at,last_test_error")
-      .eq("tenant_id", profile.tenant_id)
-      .in("provider", PROVIDER_KEYS);
+    const rows = await selectIntegrationRows(admin, profile.tenant_id);
 
     const providers = Object.fromEntries(PROVIDERS.map((p) => [p, {
       configured: false,

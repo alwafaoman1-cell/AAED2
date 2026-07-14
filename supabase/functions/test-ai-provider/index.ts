@@ -107,6 +107,17 @@ async function audit(admin: any, payload: Record<string, unknown>) {
   await admin.from("security_otp_audit_log").insert(payload).catch?.(() => undefined);
 }
 
+function isMissingColumnError(error: any) {
+  const text = String(error?.message || error?.details || error?.hint || error || "").toLowerCase();
+  return text.includes("schema cache") || text.includes("could not find") || text.includes("column");
+}
+
+async function updateTestStatus(admin: any, id: string, payload: Record<string, unknown>) {
+  const result = await admin.from("tenant_integrations").update(payload).eq("id", id);
+  if (!result.error || isMissingColumnError(result.error)) return;
+  throw result.error;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
@@ -144,11 +155,11 @@ Deno.serve(async (req) => {
 
     try {
       await testProvider(provider, apiKey, row.config || {});
-      await admin.from("tenant_integrations").update({
+      await updateTestStatus(admin, row.id, {
         last_test_status: "connected",
         last_test_at: new Date().toISOString(),
         last_test_error: null,
-      }).eq("id", row.id);
+      });
       await audit(admin, {
         tenant_id: profile.tenant_id,
         user_id: userData.user.id,
@@ -160,11 +171,11 @@ Deno.serve(async (req) => {
       return json({ ok: true, status: "Connected" });
     } catch (error) {
       const message = String(error?.message || error || "ai_test_failed");
-      await admin.from("tenant_integrations").update({
+      await updateTestStatus(admin, row.id, {
         last_test_status: "failed",
         last_test_at: new Date().toISOString(),
         last_test_error: message,
-      }).eq("id", row.id);
+      });
       await audit(admin, {
         tenant_id: profile.tenant_id,
         user_id: userData.user.id,

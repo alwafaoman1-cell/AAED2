@@ -49,6 +49,45 @@ async function audit(admin: any, payload: Record<string, unknown>) {
   await admin.from("security_otp_audit_log").insert(payload).catch?.(() => undefined);
 }
 
+function isMissingColumnError(error: any) {
+  const text = String(error?.message || error?.details || error?.hint || error || "").toLowerCase();
+  return text.includes("schema cache") || text.includes("could not find") || text.includes("column");
+}
+
+async function selectIntegrationRows(admin: any, tenantId: string) {
+  const rich = await admin
+    .from("tenant_integrations")
+    .select("provider,enabled,config,secrets,last_test_status,last_test_at,last_test_error")
+    .eq("tenant_id", tenantId)
+    .in("provider", PROVIDER_KEYS);
+
+  if (!rich.error) return rich.data || [];
+  if (!isMissingColumnError(rich.error)) throw rich.error;
+
+  const fallback = await admin
+    .from("tenant_integrations")
+    .select("provider,enabled,config,secrets")
+    .eq("tenant_id", tenantId)
+    .in("provider", PROVIDER_KEYS);
+  if (fallback.error) throw fallback.error;
+  return fallback.data || [];
+}
+
+async function writeIntegration(admin: any, existing: any, payload: Record<string, unknown>, fallbackPayload: Record<string, unknown>) {
+  const write = existing
+    ? await admin.from("tenant_integrations").update(payload).eq("id", existing.id).select("id").single()
+    : await admin.from("tenant_integrations").insert(payload).select("id").single();
+
+  if (!write.error) return write;
+  if (!isMissingColumnError(write.error)) throw write.error;
+
+  const retry = existing
+    ? await admin.from("tenant_integrations").update(fallbackPayload).eq("id", existing.id).select("id").single()
+    : await admin.from("tenant_integrations").insert(fallbackPayload).select("id").single();
+  if (retry.error) throw retry.error;
+  return retry;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
@@ -75,11 +114,7 @@ Deno.serve(async (req) => {
     const action = body.action || "status";
 
     if (action === "status") {
-      const { data: rows } = await admin
-        .from("tenant_integrations")
-        .select("provider,enabled,config,secrets,last_test_status,last_test_at,last_test_error")
-        .eq("tenant_id", profile.tenant_id)
-        .in("provider", PROVIDER_KEYS);
+      const rows = await selectIntegrationRows(admin, profile.tenant_id);
 
       const providers = Object.fromEntries(PROVIDERS.map((p) => [p, {
         configured: false,
@@ -172,11 +207,16 @@ Deno.serve(async (req) => {
       last_test_error: null,
       updated_at: new Date().toISOString(),
     };
+    const fallbackPayload = {
+      tenant_id: profile.tenant_id,
+      provider: providerKey,
+      enabled,
+      config,
+      secrets: { api_key: nextSecret },
+      updated_at: new Date().toISOString(),
+    };
 
-    const write = existing
-      ? await admin.from("tenant_integrations").update(payload).eq("id", existing.id).select("id").single()
-      : await admin.from("tenant_integrations").insert(payload).select("id").single();
-    if (write.error) throw write.error;
+    await writeIntegration(admin, existing, payload, fallbackPayload);
 
     await audit(admin, {
       tenant_id: profile.tenant_id,
