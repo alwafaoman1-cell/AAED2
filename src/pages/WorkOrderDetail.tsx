@@ -83,6 +83,7 @@ import { archiveWorkOrder } from "@/lib/deletePolicy";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { classifyWorkOrderCosts, splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
+import { listUnifiedVehicleMedia, type UnifiedMediaRecord } from "@/lib/claimWorkOrderUnified";
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
 
@@ -116,6 +117,7 @@ export default function WorkOrderDetail() {
   const [order, setOrder] = useState<WorkOrder | undefined>(() => getWorkOrderById(id));
   const [loadingRemote, setLoadingRemote] = useState(false);
   const [cloudJobOrderId, setCloudJobOrderId] = useState<string | null>(null);
+  const [unifiedMedia, setUnifiedMedia] = useState<UnifiedMediaRecord[]>([]);
 
   // Resolve cloud UUID for job_orders (used by Supplements/Reception/Approval sections)
   useEffect(() => {
@@ -371,6 +373,28 @@ export default function WorkOrderDetail() {
     return () => { cancelled = true; };
   }, [order?.id, order?.claimNumber]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!order) {
+      setUnifiedMedia([]);
+      return () => { cancelled = true; };
+    }
+    (async () => {
+      try {
+        const rows = await listUnifiedVehicleMedia({
+          claimId: order.claimId || null,
+          workOrderId: order.cloudId || cloudJobOrderId || (UUID_RE.test(order.id) ? order.id : null),
+          vehicleId: order.vehicleId || null,
+        });
+        if (!cancelled) setUnifiedMedia(rows);
+      } catch (error) {
+        console.warn("[work order unified media] load skipped", error);
+        if (!cancelled) setUnifiedMedia([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [order?.claimId, order?.cloudId, order?.id, order?.vehicleId, cloudJobOrderId]);
+
 
 
 
@@ -391,7 +415,29 @@ export default function WorkOrderDetail() {
 
   const currentIdx = WORK_ORDER_STATUSES.indexOf(order.status);
   const partsNeeded = order.partsNeeded || [];
-  const photos = order.photos || [];
+  const photos = (() => {
+    const byKey = new Map<string, any>();
+    const normalizePhase = (value?: string | null): StagePhase => (
+      PHASES.includes(value as StagePhase) ? value as StagePhase : "inspection"
+    );
+    for (const media of unifiedMedia) {
+      const dataUrl = media.public_url || media.storage_path;
+      if (!dataUrl) continue;
+      byKey.set(`${media.storage_bucket}:${media.storage_path}`, {
+        id: media.id,
+        phase: normalizePhase(media.stage || media.category),
+        dataUrl,
+        storagePath: media.storage_path,
+        caption: media.caption || undefined,
+        uploadedAt: media.uploaded_at,
+      });
+    }
+    for (const photo of order.photos || []) {
+      const key = photo.storagePath || photo.dataUrl || photo.id;
+      if (!byKey.has(key)) byKey.set(key, photo);
+    }
+    return Array.from(byKey.values());
+  })();
   // رقم العرض الاحترافي للأمر (WO-YYYY-NNNNN). يُستخدم في كل الواجهات والـPDF بدل الـUUID.
   const displayNo = order.displayNumber || (UUID_RE.test(order.id) ? `WO-${order.id.slice(0, 8).toUpperCase()}` : order.id);
   const insuranceApprovedBreakdown = splitVatInclusiveAmount(order.insuranceApprovedAmount || 0, 0.05);

@@ -1,4 +1,5 @@
 import { classifyWorkOrderCosts, type ClaimApprovalMode, type ClaimApprovalInfo } from "@/lib/workOrderCosting";
+import { addUnifiedVehicleMedia, upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
 
 // Shared in-memory store for Work Orders so other modules (Inspection) can read & sync them.
 // This is a temporary client-side store until backend wiring is added.
@@ -1093,6 +1094,47 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
   if (!verified?.id) throw new Error("تم الحفظ لكن تعذر قراءة أمر العمل للتأكيد");
 
   const saved = await mapSavedJobOrder(verified);
+  if (saved.claimId) {
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      await upsertUnifiedOperationalState({
+        tenantId: ctx.tenantId,
+        claimId: saved.claimId,
+        workOrderId: saved.cloudId || data.id,
+        vehicleId: saved.vehicleId || vehicleId,
+        customerId,
+        changedFrom: "work_order",
+        changedBy: auth.user?.id || null,
+        patch: {
+          operational_status: localStatusToCloud(saved.status),
+          repair_stage: saved.status,
+          operational_notes: saved.description || saved.diagnosis || null,
+          parts_required: saved.partsNeeded || [],
+          vehicle_received_at: saved.receivedAt || null,
+        },
+      });
+      for (const photo of saved.photos || []) {
+        const path = photo.storagePath || photo.dataUrl;
+        if (!path) continue;
+        await addUnifiedVehicleMedia({
+          tenantId: ctx.tenantId,
+          claimId: saved.claimId,
+          workOrderId: saved.cloudId || data.id,
+          vehicleId: saved.vehicleId || vehicleId,
+          bucket: photo.storagePath ? "work-order-photos" : "legacy-inline",
+          path,
+          publicUrl: photo.dataUrl || null,
+          category: photo.phase || "work_order",
+          stage: photo.phase || null,
+          caption: photo.caption || null,
+          uploadedBy: auth.user?.id || null,
+          source: "work_order",
+        });
+      }
+    } catch (syncError) {
+      console.warn("[unified claim/work-order sync] skipped", syncError);
+    }
+  }
   KNOWN_CLOUD_NUMBERS.add(saved.id);
   const idx = cache.findIndex((o) => o.id === saved.id || o.cloudId === saved.cloudId);
   if (idx >= 0) cache[idx] = saved;

@@ -46,6 +46,13 @@ import { displayCustomerCode } from "@/lib/customerCode";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { isUuid } from "@/lib/uuid";
 import { saveWorkOrderToCloud, type WorkOrder } from "@/lib/workOrdersStore";
+import {
+  addUnifiedVehicleMedia,
+  fetchUnifiedOperationalState,
+  listUnifiedVehicleMedia,
+  mergeUnifiedOperationalState,
+  upsertUnifiedOperationalState,
+} from "@/lib/claimWorkOrderUnified";
 
 const PRIMARY = "#0f2f57";
 const GOLD = "#c69b43";
@@ -264,7 +271,7 @@ export default function InsuranceClaimDetailRedesigned() {
   const currentId = claimId || id;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data: claim, isLoading, error } = useClaim(currentId);
+  const { data: rawClaim, isLoading, error } = useClaim(currentId);
   const { data: documentsRows = [] } = useClaimDocuments(currentId);
   const { data: payments = [] } = usePaymentsByClaim(currentId);
   const { data: invoices = [] } = useInsuranceInvoices();
@@ -305,6 +312,27 @@ export default function InsuranceClaimDetailRedesigned() {
     vehicle_received_at: "",
     work_started_at: "",
     vehicle_delivered_at: "",
+  });
+
+  const { data: unifiedOperationalState = null } = useQuery({
+    queryKey: ["claim-work-order-operation", currentId],
+    enabled: !!currentId,
+    queryFn: () => fetchUnifiedOperationalState({ claimId: currentId }),
+  });
+
+  const claim = useMemo(
+    () => (rawClaim ? mergeUnifiedOperationalState(rawClaim as any, unifiedOperationalState) : rawClaim),
+    [rawClaim, unifiedOperationalState],
+  );
+
+  const { data: unifiedMedia = [] } = useQuery({
+    queryKey: ["vehicle_media", "claim", currentId, (claim as any)?.job_order_id, (claim as any)?.vehicle_id],
+    enabled: !!currentId,
+    queryFn: () => listUnifiedVehicleMedia({
+      claimId: currentId,
+      workOrderId: (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
+      vehicleId: (claim as any)?.vehicle_id || null,
+    }),
   });
 
   const { data: timeline = [] } = useQuery({
@@ -368,6 +396,18 @@ export default function InsuranceClaimDetailRedesigned() {
   const hasItemizedParts = Array.isArray(claim?.needed_parts) && claim!.needed_parts.some((p) => p.name?.trim());
   const laborCharges = 0;
   const partsCharges = 0;
+  const claimPhotoUrls = useMemo(() => {
+    const urls = new Map<string, string>();
+    for (const media of unifiedMedia) {
+      const url = media.public_url || media.storage_path;
+      if (url) urls.set(url, url);
+    }
+    for (const legacy of ((claim as any)?.damage_photos || [])) {
+      const url = typeof legacy === "string" ? legacy : legacy?.url || legacy?.path;
+      if (url) urls.set(url, url);
+    }
+    return Array.from(urls.values());
+  }, [claim, unifiedMedia]);
 
   const missingDocs = [
     !hasLpo ? "LPO" : "",
@@ -391,6 +431,8 @@ export default function InsuranceClaimDetailRedesigned() {
     await queryClient.invalidateQueries({ queryKey: ["insurance_claims"] });
     await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", currentId] });
     await queryClient.invalidateQueries({ queryKey: ["claim-linked-work-order", currentId] });
+    await queryClient.invalidateQueries({ queryKey: ["claim-work-order-operation", currentId] });
+    await queryClient.invalidateQueries({ queryKey: ["vehicle_media", "claim"] });
   };
 
   const operationalDates = {
@@ -444,6 +486,7 @@ export default function InsuranceClaimDetailRedesigned() {
       work_started_at: toIsoOrNull(operationalDatesDraft.work_started_at),
     };
     try {
+      const { data: auth } = await supabase.auth.getUser();
       await updateClaimColumns(currentId, patch, {
         existingNotes: claim.notes,
         markers: {
@@ -451,6 +494,21 @@ export default function InsuranceClaimDetailRedesigned() {
           VEHICLE_RECEIVED_AT: operationalDatesDraft.vehicle_received_at || null,
           WORK_STARTED_AT: operationalDatesDraft.work_started_at || null,
           VEHICLE_DELIVERED_AT: operationalDatesDraft.vehicle_delivered_at || null,
+        },
+      });
+      await upsertUnifiedOperationalState({
+        tenantId: claim.tenant_id,
+        claimId: currentId,
+        workOrderId: workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
+        vehicleId: claim.vehicle_id || null,
+        customerId: claim.customer_id || null,
+        changedFrom: "claim",
+        changedBy: auth.user?.id || null,
+        patch: {
+          vehicle_received_at: patch.vehicle_received_at,
+          work_started_at: patch.work_started_at,
+          work_completed_at: (claim as any)?.work_completed_at || null,
+          vehicle_delivered_at: patch.vehicle_delivered_at,
         },
       });
       await syncWorkOrderOperationalDates(patch);
@@ -528,6 +586,26 @@ export default function InsuranceClaimDetailRedesigned() {
           VEHICLE_LOCATION_UPDATED_AT: updatedAt,
         },
       });
+      await upsertUnifiedOperationalState({
+        tenantId: claim.tenant_id,
+        claimId: currentId,
+        workOrderId: workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
+        vehicleId: claim.vehicle_id || null,
+        customerId: claim.customer_id || null,
+        changedFrom: "claim",
+        changedBy: auth.user?.id || null,
+        patch: {
+          vehicle_location_section: locationSection,
+          vehicle_location_bay: locationBay.trim() || null,
+          vehicle_location_note: locationNote.trim() || null,
+          vehicle_location_updated_at: updatedAt,
+          vehicle_location_updated_by: auth.user?.id || null,
+          vehicle_presence_status: (locationPatch as any).vehicle_presence_status || null,
+          vehicle_received_at: (locationPatch as any).vehicle_received_at || (claim as any)?.vehicle_received_at || null,
+          vehicle_delivered_at: (locationPatch as any).vehicle_delivered_at || (claim as any)?.vehicle_delivered_at || null,
+          operational_status: (locationPatch as any).status || (claim as any)?.status || null,
+        },
+      });
       try {
         const workOrderId = workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id;
         if (workOrderId) {
@@ -559,11 +637,26 @@ export default function InsuranceClaimDetailRedesigned() {
   const approveClaim = async () => {
     if (!currentId || !claim) return;
     try {
+      const { data: auth } = await supabase.auth.getUser();
       const approvedAt = new Date().toISOString();
       await updateClaimColumns(currentId, {
         status: "approved",
         approved_at: approvedAt,
         insurance_approved_at: (claim as any).insurance_approved_at || approvedAt,
+      });
+      await upsertUnifiedOperationalState({
+        tenantId: claim.tenant_id,
+        claimId: currentId,
+        workOrderId: workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
+        vehicleId: claim.vehicle_id || null,
+        customerId: claim.customer_id || null,
+        changedFrom: "claim",
+        changedBy: auth.user?.id || null,
+        patch: {
+          operational_status: "approved",
+          insurance_approval_status: "approved",
+          repair_stage: (claim as any)?.repair_stage || "approved",
+        },
       });
       await insertTimeline(claim, "claim_approved", { claim_number: claim.claim_number, approved_at: approvedAt });
       await refreshClaim();
@@ -618,6 +711,7 @@ export default function InsuranceClaimDetailRedesigned() {
         receivedAt: (claim as any).received_at || claim.workshop_arrival_date || now.toISOString(),
       };
       const saved = await saveWorkOrderToCloud(order);
+      const { data: auth } = await supabase.auth.getUser();
       const approvedAt = new Date().toISOString();
       await updateClaimColumns(currentId, {
         status: "approved",
@@ -629,6 +723,23 @@ export default function InsuranceClaimDetailRedesigned() {
         markers: {
           LINKED_WORK_ORDER_ID: saved.cloudId || saved.id,
           LINKED_WORK_ORDER_NUMBER: saved.id,
+        },
+      });
+      await upsertUnifiedOperationalState({
+        tenantId: claim.tenant_id,
+        claimId: currentId,
+        workOrderId: saved.cloudId || null,
+        vehicleId: claim.vehicle_id || null,
+        customerId: claim.customer_id || null,
+        changedFrom: "claim",
+        changedBy: auth.user?.id || null,
+        patch: {
+          operational_status: "approved",
+          insurance_approval_status: "approved",
+          repair_stage: "work_order_created",
+          vehicle_received_at: (claim as any).received_at || claim.workshop_arrival_date || now.toISOString(),
+          operational_notes: claim.notes || null,
+          parts_required: Array.isArray((claim as any).needed_parts) ? (claim as any).needed_parts : [],
         },
       });
       await insertTimeline(claim, "work_order_created_from_claim", {
@@ -745,6 +856,19 @@ export default function InsuranceClaimDetailRedesigned() {
         idempotency_key: `claim:${currentId}:insurance-invoice`,
       });
       await insertTimeline(claim, "insurance_invoice_created", { invoice_id: invoice.id, total });
+      await upsertUnifiedOperationalState({
+        tenantId: claim.tenant_id,
+        claimId: currentId,
+        workOrderId: workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
+        vehicleId: claim.vehicle_id || null,
+        customerId: claim.customer_id || null,
+        changedFrom: "claim",
+        patch: {
+          invoice_status: "issued",
+          payment_status: "unpaid",
+          operational_status: "invoice_issued",
+        },
+      });
       await refreshClaim();
       toast.success("تم إصدار فاتورة التأمين");
     } catch (e: any) {
@@ -808,9 +932,24 @@ export default function InsuranceClaimDetailRedesigned() {
       });
       if (uploadError) throw uploadError;
       const { data } = await supabase.storage.from("insurance-docs").createSignedUrl(path, 60 * 60 * 24 * 7);
-      const photo = { url: data?.signedUrl || path, path, name: file.name, stage: statusText, taken_at: new Date().toISOString() };
+      const { data: auth } = await supabase.auth.getUser();
+      const photoUrl = data?.signedUrl || path;
+      await addUnifiedVehicleMedia({
+        tenantId: claim.tenant_id,
+        claimId: currentId,
+        workOrderId: workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
+        vehicleId: claim.vehicle_id || null,
+        bucket: "insurance-docs",
+        path,
+        publicUrl: photoUrl,
+        category: "claim",
+        stage: statusText,
+        caption: file.name,
+        uploadedBy: auth.user?.id || null,
+        source: "claim",
+      });
       await updateClaimColumns(currentId, {
-        damage_photos: [...(claim.damage_photos || []), photo],
+        damage_photos: [...(claim.damage_photos || []), photoUrl],
       });
       await insertTimeline(claim, "claim_photo_uploaded", { file: file.name, path, stage: statusText });
       await refreshClaim();
@@ -1151,13 +1290,13 @@ export default function InsuranceClaimDetailRedesigned() {
                 </Button>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                {(claim.damage_photos || []).slice(0, 6).map((url, index) => (
+                {claimPhotoUrls.slice(0, 6).map((url, index) => (
                   <button key={url} className="overflow-hidden rounded-xl border" onClick={() => window.open(url, "_blank")}>
                     <img src={url} alt={`damage-${index + 1}`} className="h-24 w-full object-cover" />
                   </button>
                 ))}
               </div>
-              {!claim.damage_photos?.length && <div className="text-sm text-muted-foreground">لا توجد صور مرفوعة.</div>}
+              {!claimPhotoUrls.length && <div className="text-sm text-muted-foreground">لا توجد صور مرفوعة.</div>}
             </Card>
           </aside>
         </div>
