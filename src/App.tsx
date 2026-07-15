@@ -134,6 +134,7 @@ const BackupRestorePage = lazy(() => import("./pages/settings/BackupRestorePage"
 const AiKeysSettingsPage = lazy(() => import("./pages/settings/AiKeysSettingsPage"));
 const PdfLayoutPage = lazy(() => import("./pages/settings/PdfLayoutPage"));
 const PdfQaPage = lazy(() => import("./pages/settings/PdfQaPage"));
+const PdfV2PreviewPage = lazy(() => import("./pages/PdfV2PreviewPage"));
 const NumberingSettingsPage = lazy(() => import("./pages/settings/NumberingSettingsPage"));
 const DailyTasks = lazy(() => import("./pages/DailyTasks"));
 const DailyLog = lazy(() => import("./pages/DailyLog"));
@@ -212,6 +213,8 @@ const App = () => (
             <Route path="/v/:plate" element={<LegacyPortalRedirect param="plate" />} />
             <Route path="/c/approve/:token" element={<SupplementApprovalPage />} />
             <Route path="/sign/:token" element={<LegacyPortalRedirect param="token" />} />
+            <Route path="/pdf/:documentType/:id" element={<ProtectedRoute><PdfV2PreviewPage /></ProtectedRoute>} />
+            <Route path="/pdf-preview/:documentType/:id" element={<ProtectedRoute><PdfV2PreviewPage /></ProtectedRoute>} />
             <Route path="/technician" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechnicianApp /></ProtectedRoute>} />
             <Route path="/technician/scan" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechQrScanPage /></ProtectedRoute>} />
             <Route path="/tech" element={<Navigate to="/technician" replace />} />

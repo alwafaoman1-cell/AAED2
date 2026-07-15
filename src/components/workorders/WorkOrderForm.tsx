@@ -98,6 +98,17 @@ function visitPrefillFields(prefillVisit: unknown): Partial<WorkOrder> {
 
 export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit }: Props) {
   const isEdit = !!initial;
+  const prefillVehicleKey = vehiclePrefillFields(prefillVehicle);
+  const prefillVisitKey = visitPrefillFields(prefillVisit);
+  const initialFormKey = [
+    initial?.cloudId || initial?.id || "new",
+    prefillCustomer || "",
+    prefillPhone || "",
+    prefillPlate || "",
+    prefillVehicleKey.vehicleId || prefillVehicleKey.plate || "",
+    prefillVisitKey.parentWorkOrderId || "",
+    prefillVisitKey.visitNumber || "",
+  ].join("|");
   const [form, setForm] = useState<WorkOrder>(() => ({
     ...empty,
     ...vehiclePrefillFields(prefillVehicle),
@@ -153,7 +164,10 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       extraExpenses: initial?.extraExpenses || [],
       partsNeeded: initial?.partsNeeded || [],
     });
-  }, [initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit]);
+    // Reset only when the loaded order/prefill identity changes. Including the full
+    // initial object here can wipe user-entered fields during realtime/refetch updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFormKey]);
 
   useEffect(() => {
     let cancelled = false;

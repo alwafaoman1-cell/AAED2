@@ -486,6 +486,7 @@ function mapCloudRow(
     workOrderType: r.work_order_type || (r.claim_id ? "insurance" : "general_customer"),
     claimId: r.claim_id || undefined,
     trackingToken: r.tracking_token || undefined,
+    customerId: r.customer_id || undefined,
     vehicleId: r.vehicle_id || undefined,
     parentWorkOrderId: r.parent_work_order_id || metadata?.parentWorkOrderId || undefined,
     parentOrderNumber: metadata?.parentOrderNumber || undefined,
@@ -605,6 +606,7 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       .from("job_orders")
       .select("*")
       .is("deleted_at", null)
+      .is("archived_at", null)
       .order("created_at", { ascending: false })
       .limit(5000);
     if (ordersResult.error && isMissingJobOrderColumnError(ordersResult.error)) {

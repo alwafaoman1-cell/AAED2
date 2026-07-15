@@ -12,11 +12,12 @@ import { Input } from "@/components/ui/input";
 import {
   ArrowRight, FileText, Image as ImageIcon, Eye, Download, Printer, Mail,
   Camera, ShieldCheck, ClipboardCheck, Wrench, Receipt, Calculator,
-  IdCard, FolderArchive, Search, Loader2, Lock,
+  IdCard, FolderArchive, Search, Loader2, Lock, Trash2,
 } from "lucide-react";
 import ArchivedPdfPreviewDialog from "@/components/ArchivedPdfPreviewDialog";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import PhotoLightbox from "@/components/vehicles/PhotoLightbox";
+import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { claimDocLabel, type ClaimDocCategory } from "@/lib/uploadHtmlAsPdf";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import { buildClaimArchiveHtml, type ArchiveSectionFile } from "@/lib/claimArchivePdf";
@@ -31,6 +32,14 @@ const VEHICLE_PHOTO_SECTIONS = new Set<SectionKey>(["reception", "damage", "work
 
 // ── Types ──
 type ArchiveFileKind = "image" | "pdf";
+type ClaimArrayField = "satisfaction_photos" | "damage_photos" | "delivery_photos";
+type ArchiveFileSource =
+  | { type: "claim_array"; field: ClaimArrayField; index: number }
+  | { type: "claim_document"; index: number }
+  | { type: "claim_single"; field: "receiver_id_photo" }
+  | { type: "inspection_photo"; inspectionId: string; index: number }
+  | { type: "generated_doc"; auditLogId: string; filePath?: string }
+  | { type: "invoice_pdf"; invoiceId: string };
 interface ArchiveFile {
   id: string;
   url: string;
@@ -39,6 +48,7 @@ interface ArchiveFile {
   section: SectionKey;
   createdAt?: string;
   meta?: string;
+  source?: ArchiveFileSource;
 }
 type SectionKey =
   | "reception"
@@ -80,6 +90,32 @@ const fileNameFromUrl = (u: string, fallback = "file") => {
   try { return decodeURIComponent(u.split("/").pop()?.split("?")[0] || fallback); }
   catch { return fallback; }
 };
+const KNOWN_STORAGE_BUCKETS = ["insurance-docs", "damage-photos", "work-order-photos", "invoices-pdf"] as const;
+function extractStoragePath(url: string, bucket: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const markers = [`/object/sign/${bucket}/`, `/object/public/${bucket}/`];
+    for (const marker of markers) {
+      const index = parsed.pathname.indexOf(marker);
+      if (index >= 0) return decodeURIComponent(parsed.pathname.slice(index + marker.length));
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+async function removeStorageObjectIfPossible(url: string, explicitPath?: string | null) {
+  const candidates = explicitPath
+    ? [{ bucket: "insurance-docs", path: explicitPath }]
+    : KNOWN_STORAGE_BUCKETS
+      .map((bucket) => ({ bucket: bucket as string, path: extractStoragePath(url, bucket) }))
+      .filter((x): x is { bucket: string; path: string } => !!x.path);
+  for (const candidate of candidates) {
+    const { error } = await supabase.storage.from(candidate.bucket).remove([candidate.path]);
+    if (!error) return;
+    console.warn("[claim archive] storage remove failed", candidate.bucket, candidate.path, error);
+  }
+}
 
 export default function ClaimArchivePage() {
   const { id } = useParams<{ id: string }>();
@@ -95,12 +131,14 @@ export default function ClaimArchivePage() {
   const [includeDocuments, setIncludeDocuments] = useState(true);
   const [unifiedPreviewOpen, setUnifiedPreviewOpen] = useState(false);
   const [unifiedPreviewHtml, setUnifiedPreviewHtml] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<ArchiveFile | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const settings = getTemplateSettings();
   const logo = settings.logoUrl;
 
   // ── جلب المطالبة + كل المصادر بالتوازي (READ ONLY) ──
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ["claim_archive", id],
     enabled: !!id,
     queryFn: async () => {
@@ -181,18 +219,21 @@ export default function ClaimArchivePage() {
     // لكن نعرض delivery_photos كاستلام/تسليم
     (c.satisfaction_photos || []).forEach((u: string, i: number) => list.push({
       id: `sat-${i}`, url: u, name: fileNameFromUrl(u, `satisfaction-${i + 1}.jpg`),
+      source: { type: "claim_array", field: "satisfaction_photos", index: i },
       kind: "image", section: "reception", meta: "صورة رضا/استلام",
     }));
 
     // Damage Photos
     (c.damage_photos || []).forEach((u: string, i: number) => list.push({
       id: `dmg-${i}`, url: u, name: fileNameFromUrl(u, `damage-${i + 1}.jpg`),
+      source: { type: "claim_array", field: "damage_photos", index: i },
       kind: "image", section: "damage",
     }));
 
     // Documents (مرفقات التأمين العامة)
     (c.documents || []).forEach((d: any, i: number) => list.push({
       id: `doc-${i}`, url: d.url, name: d.name || fileNameFromUrl(d.url, `doc-${i + 1}`),
+      source: { type: "claim_document", index: i },
       kind: isPdfUrl(d.url) ? "pdf" : isImageUrl(d.url) ? "image" : "pdf",
       section: "documents", meta: d.type,
     }));
@@ -200,6 +241,7 @@ export default function ClaimArchivePage() {
     // ID — هوية المستلم
     if (c.receiver_id_photo) list.push({
       id: "rid", url: c.receiver_id_photo, name: fileNameFromUrl(c.receiver_id_photo, "receiver-id.jpg"),
+      source: { type: "claim_single", field: "receiver_id_photo" },
       kind: isImageUrl(c.receiver_id_photo) ? "image" : "pdf", section: "id",
       meta: c.receiver_name ? `هوية: ${c.receiver_name}` : "هوية المستلم",
     });
@@ -207,6 +249,7 @@ export default function ClaimArchivePage() {
     // Delivery photos
     (c.delivery_photos || []).forEach((u: string, i: number) => list.push({
       id: `del-${i}`, url: u, name: fileNameFromUrl(u, `delivery-${i + 1}.jpg`),
+      source: { type: "claim_array", field: "delivery_photos", index: i },
       kind: "image", section: "delivery", meta: "صورة تسليم",
     }));
 
@@ -214,6 +257,7 @@ export default function ClaimArchivePage() {
     data.workOrderInspections.forEach((insp: any) => {
       (insp.photos || []).forEach((u: string, i: number) => list.push({
         id: `wo-${insp.id}-${i}`, url: u,
+        source: { type: "inspection_photo", inspectionId: insp.id, index: i },
         name: fileNameFromUrl(u, `wo-photo-${i + 1}.jpg`),
         kind: "image", section: "workorder",
         meta: insp.damage_type ? `فحص: ${insp.damage_type}` : "صورة من أمر العمل",
@@ -235,6 +279,7 @@ export default function ClaimArchivePage() {
         section,
         createdAt: d.created_at,
         meta: claimDocLabel(cat, "ar"),
+        source: { type: "generated_doc", auditLogId: d.id, filePath: d.file_path || undefined },
       });
     });
 
@@ -249,6 +294,7 @@ export default function ClaimArchivePage() {
         section: "invoices",
         createdAt: inv.invoice_date || inv.issued_at,
         meta: `فاتورة • ${inv.status}`,
+        source: { type: "invoice_pdf", invoiceId: inv.id },
       });
     });
 
@@ -310,6 +356,62 @@ export default function ClaimArchivePage() {
     ].join("\n");
     const mail = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = mail;
+  };
+
+  const handleDeleteFile = async () => {
+    const f = deleteTarget;
+    if (!f?.source || !data?.claim?.id) return;
+    setDeletingId(f.id);
+    try {
+      const source = f.source;
+      const claimId = data.claim.id;
+      if (source.type === "claim_array") {
+        const current = Array.isArray(data.claim[source.field]) ? [...data.claim[source.field]] : [];
+        const next = current.filter((_: string, index: number) => index !== source.index);
+        const { error } = await supabase.from("insurance_claims" as any).update({ [source.field]: next } as any).eq("id", claimId);
+        if (error) throw error;
+        await removeStorageObjectIfPossible(f.url);
+      } else if (source.type === "claim_document") {
+        const current = Array.isArray(data.claim.documents) ? [...data.claim.documents] : [];
+        const next = current.filter((_: unknown, index: number) => index !== source.index);
+        const { error } = await supabase.from("insurance_claims" as any).update({ documents: next } as any).eq("id", claimId);
+        if (error) throw error;
+        await removeStorageObjectIfPossible(f.url);
+      } else if (source.type === "claim_single") {
+        const { error } = await supabase.from("insurance_claims" as any).update({ [source.field]: null } as any).eq("id", claimId);
+        if (error) throw error;
+        await removeStorageObjectIfPossible(f.url);
+      } else if (source.type === "inspection_photo") {
+        const inspection = data.workOrderInspections.find((item: any) => item.id === source.inspectionId);
+        const current = Array.isArray(inspection?.photos) ? [...inspection.photos] : [];
+        const next = current.filter((_: string, index: number) => index !== source.index);
+        const { error } = await supabase.from("inspections" as any).update({ photos: next } as any).eq("id", source.inspectionId);
+        if (error) throw error;
+        await removeStorageObjectIfPossible(f.url);
+      } else if (source.type === "generated_doc") {
+        const { error } = await supabase.from("claim_audit_logs" as any).delete().eq("id", source.auditLogId).eq("claim_id", claimId);
+        if (error) throw error;
+        await removeStorageObjectIfPossible(f.url, source.filePath);
+      } else if (source.type === "invoice_pdf") {
+        const { error } = await supabase.from("insurance_invoices" as any).update({ pdf_url: null } as any).eq("id", source.invoiceId).eq("claim_id", claimId);
+        if (error) throw error;
+        await removeStorageObjectIfPossible(f.url);
+      }
+      await supabase.from("claim_audit_logs" as any).insert({
+        claim_id: claimId,
+        action: "archive_file_deleted",
+        category: "claim_summary",
+        details: { file_id: f.id, file_name: f.name, section: f.section, source: f.source },
+      } as any);
+      toast.success("تم حذف الملف من أرشيف المطالبة");
+      setDeleteTarget(null);
+      await refetch();
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message || "تعذر حذف الملف");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   // ── تصدير PDF موحّد لكل الأرشيف ──
@@ -527,6 +629,18 @@ export default function ClaimArchivePage() {
                   <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px] flex-1" onClick={() => handleEmail(f)}>
                     <Mail size={12} className="ml-1" /> بريد
                   </Button>
+                  {f.source && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-[11px] flex-1 text-destructive hover:text-destructive"
+                      onClick={() => setDeleteTarget(f)}
+                      disabled={deletingId === f.id}
+                    >
+                      {deletingId === f.id ? <Loader2 size={12} className="ml-1 animate-spin" /> : <Trash2 size={12} className="ml-1" />}
+                      حذف
+                    </Button>
+                  )}
                 </div>
               </Card>
             );
@@ -562,6 +676,20 @@ export default function ClaimArchivePage() {
           startIndex={lightboxIndex}
         />
       )}
+
+      <ConfirmDeleteDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onConfirm={handleDeleteFile}
+        title="تأكيد حذف ملف من الأرشيف"
+        description={
+          <span>
+            سيتم حذف مرجع الملف من أرشيف المطالبة وتحديث قاعدة البيانات فورًا.
+            {deleteTarget?.name ? <span className="block mt-2 font-mono text-xs" dir="ltr">{deleteTarget.name}</span> : null}
+          </span>
+        }
+        confirmLabel="حذف الملف"
+      />
 
       {/* خيارات تصدير PDF الموحّد */}
       <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>

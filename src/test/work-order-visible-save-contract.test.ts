@@ -14,4 +14,18 @@ describe("work order visible save contract", () => {
     expect(store).toContain(".is(\"deleted_at\", null)");
     expect(store).toContain(".is(\"archived_at\", null)");
   });
+
+  it("keeps the Supabase customer relation when loading work orders for editing", () => {
+    const store = read("src/lib/workOrdersStore.ts");
+    expect(store).toContain("customerId: r.customer_id || undefined");
+    expect(store).toContain("vehicleId: r.vehicle_id || undefined");
+  });
+
+  it("does not reset the edit form just because the same initial order object was refetched", () => {
+    const form = read("src/components/workorders/WorkOrderForm.tsx");
+    expect(form).toContain("const initialFormKey =");
+    expect(form).toContain("initial?.cloudId || initial?.id || \"new\"");
+    expect(form).toContain("}, [initialFormKey]);");
+    expect(form).not.toContain("}, [initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit]);");
+  });
 });

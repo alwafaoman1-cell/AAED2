@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -298,6 +298,7 @@ async function loadPdfDocument(documentType: PdfV2DocumentType, id: string): Pro
 
 export default function PdfV2PreviewPage() {
   const navigate = useNavigate();
+  const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const { documentType = "generic", id = "preview" } = useParams();
   const [search] = useSearchParams();
   const pdfOnly = window.location.pathname.startsWith("/pdf/");
@@ -335,6 +336,13 @@ export default function PdfV2PreviewPage() {
       .catch(() => undefined);
   }, [html, meta, pdfOnly]);
 
+  const printPreview = () => {
+    const frameWindow = previewFrameRef.current?.contentWindow;
+    if (!frameWindow) return;
+    frameWindow.focus();
+    frameWindow.print();
+  };
+
   if (!html && !loadError) {
     return (
       <div className="min-h-screen bg-neutral-900 text-white flex items-center justify-center gap-2 text-sm">
@@ -369,10 +377,11 @@ export default function PdfV2PreviewPage() {
       <div className="pdf-v2-toolbar sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 p-3">
         <Button variant="outline" onClick={() => navigate(-1)} className="gap-2"><ArrowLeft size={16} /> Back</Button>
         <div className="flex-1 font-semibold">{meta.title}</div>
-        <Button variant="outline" onClick={() => void openPdfV2Viewer({ html, meta })} className="gap-2"><Printer size={16} /> Open PDF</Button>
+        <Button variant="outline" onClick={printPreview} className="gap-2"><Printer size={16} /> Print</Button>
+        <Button variant="outline" onClick={() => void openPdfV2Viewer({ html, meta })} className="gap-2">Open PDF</Button>
         <Button onClick={() => void downloadPdfV2({ html, meta }, `${documentType}-${id}`)} className="gap-2"><Download size={16} /> Download PDF</Button>
       </div>
-      <iframe title="PDF v2 preview" srcDoc={srcDoc} className="flex-1 w-full border-0" />
+      <iframe ref={previewFrameRef} title="PDF v2 preview" srcDoc={srcDoc} className="flex-1 w-full border-0" />
     </div>
   );
 }
