@@ -236,8 +236,10 @@ export function addNeededPartToOrder(orderId: string, part: Omit<NeededPart, "id
     status: part.status || "pending",
     fulfilled: part.status === "received" || part.status === "secured" || !!part.fulfilled,
   };
-  list[idx] = { ...list[idx], partsNeeded: [...(list[idx].partsNeeded || []), newPart] };
+  const partsNeeded = [...(list[idx].partsNeeded || []), newPart];
+  list[idx] = { ...list[idx], partsNeeded };
   persist();
+  pushPatchToCloudNow(list[idx].id, { partsNeeded });
   return newPart;
 }
 
@@ -255,14 +257,17 @@ export function updateNeededPartInOrder(orderId: string, partId: string, patch: 
   });
   list[idx] = { ...list[idx], partsNeeded: parts };
   persist();
+  pushPatchToCloudNow(list[idx].id, { partsNeeded: parts });
 }
 
 export function removeNeededPartFromOrder(orderId: string, partId: string) {
   const list = load();
   const idx = list.findIndex(o => o.id === orderId);
   if (idx < 0) return;
-  list[idx] = { ...list[idx], partsNeeded: (list[idx].partsNeeded || []).filter(p => p.id !== partId) };
+  const partsNeeded = (list[idx].partsNeeded || []).filter(p => p.id !== partId);
+  list[idx] = { ...list[idx], partsNeeded };
   persist();
+  pushPatchToCloudNow(list[idx].id, { partsNeeded });
 }
 
 export function addWorkOrder(order: WorkOrder) {
@@ -695,7 +700,11 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       estimationType: claim.estimation_type,
     }));
 
-    const cloudOrders: WorkOrder[] = rows.map((r) => mapCloudRow(r, custMap, vehMap, claimMap));
+    const cloudOrders: WorkOrder[] = rows.map((r) => {
+      const mapped = mapCloudRow(r, custMap, vehMap, claimMap);
+      const pendingPatch = _pendingPatches.get(mapped.id);
+      return pendingPatch ? { ...mapped, ...pendingPatch } : mapped;
+    });
     KNOWN_CLOUD_NUMBERS.clear();
     cloudOrders.forEach((o) => KNOWN_CLOUD_NUMBERS.add(o.id));
 
@@ -1217,6 +1226,17 @@ async function _flushPatch(orderNumber: string) {
         .eq("order_number", orderNumber));
     }
     if (error) console.warn("[pushPatchToCloud]", error);
+    else if (patch.partsNeeded !== undefined && current?.claimId) {
+      await upsertUnifiedOperationalState({
+        tenantId: ctx.tenantId,
+        claimId: current.claimId,
+        workOrderId: current.cloudId || null,
+        vehicleId: current.vehicleId || null,
+        customerId: current.customerId || null,
+        changedFrom: "work_order",
+        patch: { parts_required: patch.partsNeeded },
+      });
+    }
   } catch (e) { console.warn("[pushPatchToCloud] exception", e); }
 }
 
@@ -1227,6 +1247,18 @@ function pushPatchToCloud(orderNumber: string, patch: Partial<WorkOrder>) {
   const existing = _patchTimers.get(orderNumber);
   if (existing) clearTimeout(existing);
   _patchTimers.set(orderNumber, setTimeout(() => _flushPatch(orderNumber), PATCH_DEBOUNCE_MS));
+}
+
+function pushPatchToCloudNow(orderNumber: string, patch: Partial<WorkOrder>) {
+  if (!KNOWN_CLOUD_NUMBERS.has(orderNumber)) return;
+  const existing = _patchTimers.get(orderNumber);
+  if (existing) {
+    clearTimeout(existing);
+    _patchTimers.delete(orderNumber);
+  }
+  const prev = _pendingPatches.get(orderNumber) || {};
+  _pendingPatches.set(orderNumber, { ...prev, ...patch });
+  void _flushPatch(orderNumber);
 }
 
 // Flush any pending patches on page unload so we don't lose the last edits.

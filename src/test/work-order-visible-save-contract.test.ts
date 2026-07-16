@@ -28,4 +28,12 @@ describe("work order visible save contract", () => {
     expect(form).toContain("}, [initialFormKey]);");
     expect(form).not.toContain("}, [initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit]);");
   });
+
+  it("flushes needed-parts edits immediately so refetch does not erase the new part", () => {
+    const store = read("src/lib/workOrdersStore.ts");
+    expect(store).toContain("pushPatchToCloudNow(list[idx].id, { partsNeeded })");
+    expect(store).toContain("const pendingPatch = _pendingPatches.get(mapped.id)");
+    expect(store).toContain("return pendingPatch ? { ...mapped, ...pendingPatch } : mapped");
+    expect(store).toContain("patch: { parts_required: patch.partsNeeded }");
+  });
 });

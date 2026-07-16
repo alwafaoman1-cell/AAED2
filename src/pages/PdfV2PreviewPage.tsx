@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buildPdfV2Html, createPdfV2Blob, downloadPdfV2, openPdfV2Viewer, type PdfV2DocumentType } from "@/lib/pdf-v2";
+import { printPdfBlob } from "@/lib/safePdfWindow";
 import { supabase } from "@/integrations/supabase/client";
 import {
   buildTrackingQrDataUrl,
@@ -304,6 +305,9 @@ export default function PdfV2PreviewPage() {
   const pdfOnly = window.location.pathname.startsWith("/pdf/");
   const [loaded, setLoaded] = useState<LoadedPdf | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [previewPdfBlob, setPreviewPdfBlob] = useState<Blob | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
   const htmlFromSearch = search.get("html") ? decodeURIComponent(search.get("html") || "") : "";
   const html = htmlFromSearch || loaded?.html || "";
   const meta = useMemo(() => ({
@@ -336,11 +340,39 @@ export default function PdfV2PreviewPage() {
       .catch(() => undefined);
   }, [html, meta, pdfOnly]);
 
-  const printPreview = () => {
-    const frameWindow = previewFrameRef.current?.contentWindow;
-    if (!frameWindow) return;
-    frameWindow.focus();
-    frameWindow.print();
+  useEffect(() => {
+    if (pdfOnly || !html) {
+      setPreviewPdfUrl(null);
+      setPreviewPdfBlob(null);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPreviewBusy(true);
+    setPreviewPdfUrl(null);
+    setPreviewPdfBlob(null);
+    createPdfV2Blob({ html, meta })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewPdfBlob(blob);
+        setPreviewPdfUrl(objectUrl);
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error?.message || "Unable to generate PDF preview");
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewBusy(false);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [html, meta, pdfOnly]);
+
+  const printPreview = async () => {
+    const blob = previewPdfBlob || await createPdfV2Blob({ html, meta });
+    await printPdfBlob(blob);
   };
 
   if (!html && !loadError) {
@@ -377,11 +409,20 @@ export default function PdfV2PreviewPage() {
       <div className="pdf-v2-toolbar sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 p-3">
         <Button variant="outline" onClick={() => navigate(-1)} className="gap-2"><ArrowLeft size={16} /> Back</Button>
         <div className="flex-1 font-semibold">{meta.title}</div>
-        <Button variant="outline" onClick={printPreview} className="gap-2"><Printer size={16} /> Print</Button>
+        <Button variant="outline" onClick={() => void printPreview()} disabled={previewBusy || !html} className="gap-2"><Printer size={16} /> Print</Button>
         <Button variant="outline" onClick={() => void openPdfV2Viewer({ html, meta })} className="gap-2">Open PDF</Button>
         <Button onClick={() => void downloadPdfV2({ html, meta }, `${documentType}-${id}`)} className="gap-2"><Download size={16} /> Download PDF</Button>
       </div>
-      <iframe ref={previewFrameRef} title="PDF v2 preview" srcDoc={srcDoc} className="flex-1 w-full border-0" />
+      {previewBusy && !previewPdfUrl ? (
+        <div className="flex-1 grid place-items-center text-sm text-muted-foreground">
+          <Loader2 className="mb-2 h-5 w-5 animate-spin" />
+          Generating PDF preview...
+        </div>
+      ) : previewPdfUrl ? (
+        <iframe ref={previewFrameRef} title="PDF v2 preview" src={previewPdfUrl} className="flex-1 w-full border-0" />
+      ) : (
+        <iframe ref={previewFrameRef} title="PDF v2 preview" srcDoc={srcDoc} className="flex-1 w-full border-0" />
+      )}
     </div>
   );
 }

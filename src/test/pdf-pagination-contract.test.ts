@@ -29,14 +29,15 @@ describe("PDF pagination contract", () => {
     expect(generator).not.toContain("Math.round(vat");
   });
 
-  it("registers PDF v2 routes and prints the preview iframe content", () => {
+  it("registers PDF v2 routes and prints the generated PDF blob instead of clipping the HTML iframe", () => {
     const app = read("src/App.tsx");
     const preview = read("src/pages/PdfV2PreviewPage.tsx");
 
     expect(app).toContain('path="/pdf/:documentType/:id"');
     expect(app).toContain('path="/pdf-preview/:documentType/:id"');
-    expect(preview).toContain("previewFrameRef.current?.contentWindow");
-    expect(preview).toContain("frameWindow.print()");
+    expect(preview).toContain("previewPdfUrl");
+    expect(preview).toContain("printPdfBlob(blob)");
+    expect(preview).not.toContain("frameWindow.print()");
     expect(preview).toContain('ref={previewFrameRef}');
   });
 });
