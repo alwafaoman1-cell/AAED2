@@ -39,6 +39,7 @@ export function useUnifiedRevenue(filters: ReportFilters) {
 
     const insInRange = insInvoices.filter((i) => inRange(i.invoice_date || i.issued_at, filters.range.from, filters.range.to));
     const insTotal = insInRange.reduce((s, i) => s + (Number(i.total) || 0), 0);
+    const insSubtotal = insInRange.reduce((s, i) => s + (Number(i.subtotal) || 0), 0);
     const insVat = insInRange.reduce((s, i) => s + (Number(i.vat) || 0), 0);
     const insPaid = insInRange.reduce((s, i) => s + (Number(i.paid_amount) || 0), 0);
     const insPending = Math.max(0, insTotal - insPaid);
@@ -51,13 +52,14 @@ export function useUnifiedRevenue(filters: ReportFilters) {
       insurance: {
         count: insInRange.length,
         total: insTotal,
+        subtotal: insSubtotal,
         vat: insVat,
         paid: insPaid,
         pending: insPending,
       },
       // الإجماليات الموحدة
       unified: {
-        totalRevenue: sales.totalRevenue + insTotal,
+        totalRevenue: sales.totalRevenue + insSubtotal,
         paidRevenue: sales.paidRevenue + insPaid,
         pendingRevenue: sales.pendingRevenue + insPending,
         // VAT المحصّلة الفعلية = من قيود اليومية (sales) + من فواتير التأمين (تُسجّل عند الإصدار)

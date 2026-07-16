@@ -28,6 +28,9 @@ export interface PostInsuranceClaimApprovalArgs {
 export function postInsuranceClaimApproval(args: PostInsuranceClaimApprovalArgs) {
   if (args.amount <= 0) return;
   removeJournalBySource("insurance_claim", args.claimId);
+  // Claim approval is only an expected/approved value. Do not recognize
+  // insurance revenue or output VAT until the final insurance invoice is issued.
+  return;
 
   const rate = args.vatRate ?? 0.05;
   const breakdown = calculateVatExclusive(args.amount, rate);
@@ -176,6 +179,9 @@ export function previewInsurancePayment(args: PostInsurancePaymentArgs): Preview
 }
 
 export function previewInsuranceClaimApproval(args: PostInsuranceClaimApprovalArgs): PreviewLine[] {
+  // Approval preview intentionally has no accounting lines. Revenue starts
+  // from the issued insurance invoice, not from the claim estimate/approval.
+  return [];
   if (args.amount <= 0) return [];
   const rate = args.vatRate ?? 0.05;
   const breakdown = calculateVatExclusive(args.amount, rate);

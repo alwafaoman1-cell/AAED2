@@ -5,7 +5,7 @@ import { calculateVatExclusive, formatOMR as formatMoneyOMR, roundMoney as round
 
 export { OMAN_VAT_RATE, OMR_DECIMALS };
 
-export type AccountingCostSource = "Actual Expenses" | "Estimated Costs" | "Manual Final Cost";
+export type AccountingCostSource = "Actual Expenses" | "Estimate Only" | "Manual Final Cost";
 export type AccountingExpenseCategory = "spare_parts" | "labour" | "towing" | "purchase" | "other";
 
 export interface AccountingDateRange {
@@ -191,10 +191,13 @@ export function buildWorkOrderAccountingRows(range?: AccountingDateRange): WorkO
       const otherExpenses = roundMoney(expenses.filter((e) => !["spare_parts", "labour"].includes(expenseCategory(e))).reduce((sum, e) => sum + Number(e.amount || 0), 0));
       const estimatedSparePartsCost = roundMoney(order.partsCost);
       const estimatedLabourCost = roundMoney(order.laborCost);
-      const finalCostSource: AccountingCostSource =
-        actualSparePartsCost > 0 || actualLabourCost > 0 || otherExpenses > 0 ? "Actual Expenses" : "Estimated Costs";
-      const sparePartsCost = actualSparePartsCost > 0 ? actualSparePartsCost : estimatedSparePartsCost;
-      const labourCost = actualLabourCost > 0 ? actualLabourCost : estimatedLabourCost;
+      const hasActualExpenses = actualSparePartsCost > 0 || actualLabourCost > 0 || otherExpenses > 0;
+      const finalCostSource: AccountingCostSource = hasActualExpenses ? "Actual Expenses" : "Estimate Only";
+      // Estimated work-order/claim costs are planning values only. They must not
+      // be recognized as actual expenses or reduce real profit until an actual
+      // expense, purchase, or labour voucher is recorded.
+      const sparePartsCost = actualSparePartsCost;
+      const labourCost = actualLabourCost;
       const totalCost = roundMoney(sparePartsCost + labourCost + otherExpenses);
       const netProfit = roundMoney(revenueExVat - totalCost);
       const profitMargin = revenueExVat > 0 ? roundMoney((netProfit / revenueExVat) * 100) : null;

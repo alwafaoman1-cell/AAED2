@@ -1,8 +1,8 @@
 // تنبيهات التأخر — يحسب الشركات المتأخرة عن payment_terms_days من تاريخ الاعتماد
 import { useMemo } from "react";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
-import { useClaimPayments } from "@/hooks/useClaimPayments";
 import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
+import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
 
 export interface OverdueCompany {
   companyId: string | null;
@@ -17,19 +17,19 @@ const DEFAULT_TERMS = 90;
 
 export function useOverdueInsuranceAlerts() {
   const { data: claims } = useInsuranceClaims();
-  const { data: payments } = useClaimPayments();
   const { data: companies } = useInsuranceCompanies();
+  const { data: invoices } = useInsuranceInvoices();
 
   return useMemo<OverdueCompany[]>(() => {
     const map = new Map<string, OverdueCompany>();
     const now = Date.now();
 
     (claims ?? []).forEach((c) => {
-      if (c.status !== "approved") return;
-      const cPayments = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
-      const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
-      const approved = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
-      const rem = approved - paid;
+      const claimInvoices = (invoices ?? []).filter((invoice) => invoice.claim_id === c.id && invoice.status !== "cancelled");
+      const invoiced = claimInvoices.reduce((s, invoice) => s + Number(invoice.total || 0), 0);
+      const paid = claimInvoices.reduce((s, invoice) => s + Number(invoice.paid_amount || 0), 0);
+      const rem = invoiced - paid;
+      if (invoiced <= 0) return;
       if (rem <= 0.01) return;
 
       const baseDate = c.approved_at ? new Date(c.approved_at).getTime() : new Date(c.created_at).getTime();
@@ -52,5 +52,5 @@ export function useOverdueInsuranceAlerts() {
     });
 
     return Array.from(map.values()).sort((a, b) => b.oldestDays - a.oldestDays);
-  }, [claims, payments, companies]);
+  }, [claims, invoices, companies]);
 }

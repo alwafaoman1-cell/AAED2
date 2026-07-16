@@ -23,12 +23,35 @@ describe("accounting core contract", () => {
     expect(core).not.toContain("order.totalCost)");
   });
 
-  it("uses actual expenses before estimated costs and does not add both", () => {
+  it("does not recognize insurance claim estimates or approvals as actual revenue", () => {
+    const insuranceAccounting = readFileSync(resolve(process.cwd(), "src/lib/insuranceAccounting.ts"), "utf8");
+    const reportsEngine = readFileSync(resolve(process.cwd(), "src/lib/reportsEngine.ts"), "utf8");
+    const unifiedRevenue = readFileSync(resolve(process.cwd(), "src/hooks/useUnifiedRevenue.ts"), "utf8");
+    const monthlyReport = readFileSync(resolve(process.cwd(), "src/pages/reports/MonthlyReport.tsx"), "utf8");
+    const accountingPage = readFileSync(resolve(process.cwd(), "src/pages/Accounting.tsx"), "utf8");
+
+    expect(insuranceAccounting).toContain("Claim approval is only an expected/approved value");
+    expect(insuranceAccounting).toContain("return [];");
+    expect(reportsEngine).toContain("Insurance claim estimates/approvals are expected values only");
+    expect(reportsEngine).toContain("const revenue = salesRevenueExVat;");
+    expect(unifiedRevenue).toContain("const insSubtotal = insInRange.reduce");
+    expect(unifiedRevenue).toContain("totalRevenue: sales.totalRevenue + insSubtotal");
+    expect(monthlyReport).toContain("Claim approval/estimate journals are not actual revenue");
+    expect(accountingPage).toContain("estimates/claim approvals are never included");
+    expect(accountingPage).toContain('if (entry.source === "insurance_claim") return false;');
+  });
+
+  it("keeps estimated work-order costs outside actual cost and profit", () => {
     const core = readFileSync(resolve(process.cwd(), "src/lib/accounting/core.ts"), "utf8");
-    expect(core).toContain("actualSparePartsCost > 0 ? actualSparePartsCost : estimatedSparePartsCost");
-    expect(core).toContain("actualLabourCost > 0 ? actualLabourCost : estimatedLabourCost");
+    const reportsEngine = readFileSync(resolve(process.cwd(), "src/lib/reportsEngine.ts"), "utf8");
+    expect(core).toContain("Estimated work-order/claim costs are planning values only");
+    expect(core).toContain("const sparePartsCost = actualSparePartsCost;");
+    expect(core).toContain("const labourCost = actualLabourCost;");
+    expect(reportsEngine).toContain("Work-order partsCost/laborCost are estimates");
     expect(core).not.toContain("actualSparePartsCost + estimatedSparePartsCost");
     expect(core).not.toContain("actualLabourCost + estimatedLabourCost");
+    expect(core).not.toContain("actualSparePartsCost > 0 ? actualSparePartsCost : estimatedSparePartsCost");
+    expect(core).not.toContain("actualLabourCost > 0 ? actualLabourCost : estimatedLabourCost");
   });
 
   it("wires reports and executive dashboard to the accounting core", () => {

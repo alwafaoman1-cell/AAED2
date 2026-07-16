@@ -17,7 +17,6 @@ import { salesStore } from "@/lib/salesStore";
 const REVENUE_ACCOUNTS = new Set([
   "إيرادات المبيعات",
   "إيرادات خدمات الورشة",
-  "إيرادات التأمين",
 ]);
 const EXPENSE_ACCOUNTS = new Set([
   "مصروف شراء",
@@ -38,12 +37,20 @@ interface AccountBreakdown {
 }
 
 function isLiveAccountingEntry(entry: JournalEntry): boolean {
+  // Legacy insurance claim approval journals represented estimates/approvals,
+  // not issued invoices. Keep them out of actual accounting dashboards.
+  if (entry.source === "insurance_claim") return false;
+
   if (entry.source === "expense") {
     const expense = expensesStore.getById(entry.sourceId);
     return !!expense && !expense.deletedAt && !expense.archivedAt;
   }
 
-  if (entry.source === "sales_invoice" || entry.source === "work_order_invoice" || entry.source === "customer_payment") {
+  if (entry.source === "customer_payment" || entry.source === "insurance_payment" || entry.source === "supplier_payment") {
+    return true;
+  }
+
+  if (entry.source === "sales_invoice" || entry.source === "work_order_invoice") {
     const doc = salesStore.get(entry.sourceId);
     return !!doc && !doc.isDeleted && doc.status !== "cancelled" && doc.status !== "draft";
   }
@@ -97,6 +104,46 @@ export default function Accounting() {
       }
       byMonth.set(ym, slot);
     }
+
+    // Actual dashboard source of truth:
+    // - revenue from issued/non-cancelled invoices only, excluding VAT
+    // - expenses from active expense vouchers only
+    // - estimates/claim approvals are never included as actual revenue/cost
+    revenue = 0;
+    expenses = 0;
+    byMonth.clear();
+    revMap.clear();
+    expMap.clear();
+
+    const actualInvoices = salesStore
+      .list({ type: "invoice" })
+      .filter((doc) => !doc.isDeleted && doc.status !== "cancelled" && doc.status !== "draft");
+    actualInvoices.forEach((doc) => {
+      const amount = Number(doc.subtotal || 0);
+      const ym = (doc.date || doc.createdAt || "").slice(0, 7);
+      const slot = byMonth.get(ym) || { revenue: 0, expenses: 0 };
+      revenue += amount;
+      slot.revenue += amount;
+      byMonth.set(ym, slot);
+    });
+    revMap.set("فواتير معتمدة", { account: "فواتير معتمدة", total: revenue, count: actualInvoices.length, entries: [] });
+
+    const actualExpenses = expensesStore
+      .getAll()
+      .filter((expense) => !expense.deletedAt && !expense.archivedAt && !expense.refunded);
+    actualExpenses.forEach((expense) => {
+      const amount = Number(expense.subtotal ?? expense.amount ?? 0);
+      const ym = (expense.date || expense.createdAt || "").slice(0, 7);
+      const slot = byMonth.get(ym) || { revenue: 0, expenses: 0 };
+      expenses += amount;
+      slot.expenses += amount;
+      byMonth.set(ym, slot);
+      const account = expense.categoryName || "سندات صرف فعلية";
+      const x = expMap.get(account) || { account, total: 0, count: 0, entries: [] };
+      x.total += amount; x.count++;
+      expMap.set(account, x);
+    });
+
     const profit = revenue - expenses;
     const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 

@@ -38,7 +38,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
   ), [order.id, order.cloudId, order.displayNumber]);
 
   const hasActualExpenses = !!row && (row.actualSparePartsCost > 0 || row.actualLabourCost > 0 || row.otherExpenses > 0);
-  const [source, setSource] = useState<AccountingCostSource>(hasActualExpenses ? "Actual Expenses" : "Estimated Costs");
+  const [source, setSource] = useState<AccountingCostSource>(hasActualExpenses ? "Actual Expenses" : "Estimate Only");
   const [manualSpare, setManualSpare] = useState(row?.sparePartsCost || 0);
   const [manualLabour, setManualLabour] = useState(row?.labourCost || 0);
   const [manualOther, setManualOther] = useState(row?.otherExpenses || 0);
@@ -197,7 +197,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
         </div>
         <div className="rounded-lg border border-border bg-card p-3 text-sm">
           <p className="text-muted-foreground">مصدر التكلفة المقترح</p>
-          <p className="font-bold">{hasActualExpenses ? "Use Actual Expenses" : "Use Estimated Costs"}</p>
+          <p className="font-bold">{hasActualExpenses ? "Use Actual Expenses" : "Estimate Only - not accounting actual"}</p>
         </div>
       </div>
 
@@ -207,7 +207,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="Actual Expenses">Use Actual Expenses</SelectItem>
-            <SelectItem value="Estimated Costs">Use Estimated Costs</SelectItem>
+            <SelectItem value="Estimate Only">Estimate Only - not actual cost</SelectItem>
             <SelectItem value="Manual Final Cost">Manual Final Cost</SelectItem>
           </SelectContent>
         </Select>

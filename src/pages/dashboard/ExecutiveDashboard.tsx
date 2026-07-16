@@ -56,6 +56,20 @@ export default function ExecutiveDashboard() {
     const range = { from: firstOfMonthISO(), to: todayISO() };
     const rows = buildWorkOrderAccountingRows(range);
     const summary = buildExecutiveAccountingSummary(range);
+    const actualExpenses = expensesStore
+      .getAll()
+      .filter((expense) => {
+        if (expense.deletedAt || expense.archivedAt || expense.refunded) return false;
+        const date = (expense.date || expense.createdAt || "").slice(0, 10);
+        return (!range.from || date >= range.from) && (!range.to || date <= range.to);
+      })
+      .reduce((sum, expense) => sum + Number(expense.subtotal ?? expense.amount ?? 0), 0);
+    const dashboardSummary = {
+      ...summary,
+      totalExpenses: actualExpenses,
+      netProfit: summary.totalRevenueExVat - actualExpenses,
+      averageProfitMargin: summary.totalRevenueExVat > 0 ? ((summary.totalRevenueExVat - actualExpenses) / summary.totalRevenueExVat) * 100 : null,
+    };
     const allRows = buildWorkOrderAccountingRows();
     const qualityIssues = buildDataQualityIssues();
     const recentDelivered = allRows
@@ -68,7 +82,7 @@ export default function ExecutiveDashboard() {
       .slice(0, 8);
     return {
       rows,
-      summary,
+      summary: dashboardSummary,
       qualityIssues,
       recentDelivered,
       recentActivity,

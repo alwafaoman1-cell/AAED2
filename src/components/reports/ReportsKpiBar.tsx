@@ -39,7 +39,7 @@ export default function ReportsKpiBar({ filters }: { filters: ReportFilters }) {
     const adjustedNetProfit = pl.netProfit + insSubtotal;
     const adjustedMargin = unifiedRevenue > 0 ? (adjustedNetProfit / unifiedRevenue) * 100 : 0;
 
-    return { pl, purchases, inv, unifiedRevenue, unifiedVatCollected, unifiedVatDue, adjustedNetProfit, adjustedMargin };
+    return { pl, purchases, inv, insSubtotal, unifiedRevenue, unifiedVatCollected, unifiedVatDue, adjustedNetProfit, adjustedMargin };
   }, [filters, unified]);
 
   const tiles: KpiTile[] = [
@@ -77,7 +77,7 @@ export default function ReportsKpiBar({ filters }: { filters: ReportFilters }) {
     },
     {
       label: "إيرادات التأمين",
-      value: fmt(unified.insurance.total),
+      value: fmt(data.insSubtotal),
       hint: `${unified.insurance.count} فاتورة • محصّل ${fmt(unified.insurance.paid)}`,
       icon: Shield,
       color: "bg-info/15 text-info border-info/30",
@@ -99,7 +99,7 @@ export default function ReportsKpiBar({ filters }: { filters: ReportFilters }) {
     {
       label: "إجمالي الإيرادات",
       value: fmt(data.unifiedRevenue),
-      hint: `أ.عمل ${fmt(unified.workOrders.totalRevenue)} • تأمين ${fmt(unified.insurance.total)}`,
+      hint: `أ.عمل ${fmt(unified.workOrders.totalRevenue)} • تأمين ${fmt(data.insSubtotal)}`,
       icon: Wallet,
       color: "bg-primary/10 text-primary border-primary/20",
     },

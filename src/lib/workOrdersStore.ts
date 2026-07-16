@@ -124,7 +124,7 @@ export interface WorkOrder {
   customerId?: string;
   closingReview?: {
     status: string;
-    finalCostSource: "Actual Expenses" | "Estimated Costs" | "Manual Final Cost";
+    finalCostSource: "Actual Expenses" | "Estimate Only" | "Manual Final Cost";
     snapshot: Record<string, number | string | boolean | null>;
     invoiceSkipped?: boolean;
     skipInvoiceReason?: string;

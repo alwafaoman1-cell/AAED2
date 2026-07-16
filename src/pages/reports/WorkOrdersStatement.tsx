@@ -23,7 +23,7 @@ function csvCell(value: unknown) {
 function costSourceLabel(source: string) {
   if (source === "Actual Expenses") return "مصروفات فعلية";
   if (source === "Manual Final Cost") return "تكلفة نهائية يدوية";
-  return "تكاليف تقديرية";
+  return "تقديري فقط - غير مكتمل محاسبيًا";
 }
 
 export default function WorkOrdersStatement() {
@@ -63,6 +63,8 @@ export default function WorkOrdersStatement() {
       "نوع السيارة",
       "نوع الصيانة",
       "الإيرادات",
+      "تقديري قطع الغيار",
+      "تقديري العمالة",
       "تكلفة قطع الغيار",
       "تكلفة العمالة",
       "مصروفات أخرى",
@@ -83,6 +85,8 @@ export default function WorkOrdersStatement() {
       row.vehicleName,
       row.serviceType,
       row.revenueExVat.toFixed(3),
+      row.estimatedSparePartsCost.toFixed(3),
+      row.estimatedLabourCost.toFixed(3),
       row.sparePartsCost.toFixed(3),
       row.labourCost.toFixed(3),
       row.otherExpenses.toFixed(3),
@@ -124,6 +128,8 @@ export default function WorkOrdersStatement() {
             { key: "customer", label: "اسم العميل" },
             { key: "plate", label: "رقم السيارة", align: "center", mono: true },
             { key: "revenue", label: "الإيرادات", align: "center", mono: true },
+            { key: "estimatedParts", label: "تقديري قطع", align: "center", mono: true },
+            { key: "estimatedLabour", label: "تقديري عمالة", align: "center", mono: true },
             { key: "parts", label: "تكلفة قطع الغيار", align: "center", mono: true },
             { key: "labour", label: "تكلفة العمالة", align: "center", mono: true },
             { key: "other", label: "مصروفات أخرى", align: "center", mono: true },
@@ -138,6 +144,8 @@ export default function WorkOrdersStatement() {
             customer: row.customerName,
             plate: row.vehiclePlate,
             revenue: row.revenueExVat.toFixed(3),
+            estimatedParts: row.estimatedSparePartsCost.toFixed(3),
+            estimatedLabour: row.estimatedLabourCost.toFixed(3),
             parts: row.sparePartsCost.toFixed(3),
             labour: row.labourCost.toFixed(3),
             other: row.otherExpenses.toFixed(3),
@@ -163,7 +171,7 @@ export default function WorkOrdersStatement() {
             تقرير تكلفة وربحية أوامر العمل
           </h1>
           <p className="text-xs text-muted-foreground">
-            الأرقام من Accounting Core: الإيرادات من الفواتير، والتكلفة النهائية من المصروفات الفعلية أو التقديرية بدون ازدواج.
+            الأرقام من Accounting Core: الإيرادات من الفواتير المعتمدة، والتكلفة الفعلية من المصروفات/المشتريات/أجور العمل المسجلة فقط. التقديرات تظهر كمعلومة ولا تدخل في الربح.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -216,6 +224,8 @@ export default function WorkOrdersStatement() {
               <TableHead className="text-center">نوع السيارة</TableHead>
               <TableHead className="text-center">نوع الصيانة</TableHead>
               <TableHead className="text-center">الإيرادات</TableHead>
+              <TableHead className="text-center">تقديري قطع</TableHead>
+              <TableHead className="text-center">تقديري عمالة</TableHead>
               <TableHead className="text-center">تكلفة قطع الغيار</TableHead>
               <TableHead className="text-center">تكلفة العمالة</TableHead>
               <TableHead className="text-center">مصروفات أخرى</TableHead>
@@ -230,7 +240,7 @@ export default function WorkOrdersStatement() {
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={18} className="py-10 text-center text-muted-foreground">لا توجد بيانات</TableCell>
+                <TableCell colSpan={20} className="py-10 text-center text-muted-foreground">لا توجد بيانات</TableCell>
               </TableRow>
             ) : rows.map((row) => (
               <ReportRow key={row.workOrderId} row={row} onOpen={() => navigate(`/work-orders/${row.workOrderNumber}`)} />
@@ -269,6 +279,8 @@ function ReportRow({ row, onOpen }: { row: WorkOrderAccountingRow; onOpen: () =>
       <TableCell className="text-center text-xs">{row.vehicleName}</TableCell>
       <TableCell className="text-center text-xs">{row.serviceType}</TableCell>
       <MoneyCell value={row.revenueExVat} tone="success" />
+      <MoneyCell value={row.estimatedSparePartsCost} />
+      <MoneyCell value={row.estimatedLabourCost} />
       <MoneyCell value={row.sparePartsCost} />
       <MoneyCell value={row.labourCost} />
       <MoneyCell value={row.otherExpenses} />

@@ -60,9 +60,10 @@ export default function MonthlyReport() {
     // 1) الإيرادات (فواتير المبيعات + قيود الإيرادات)
     const invoices = salesStore.list({ type: "invoice" })
       .filter((d) => inMonth((d.date || d.createdAt || "").slice(0, 10)));
-    const salesRevenue = invoices.reduce((s, d) => s + (Number(d.total) || 0), 0);
+    const salesRevenue = invoices.reduce((s, d) => s + (Number(d.subtotal) || 0), 0);
+    const salesInvoiceTotal = invoices.reduce((s, d) => s + (Number(d.total) || 0), 0);
     const salesPaid = invoices.reduce((s, d) => s + (Number(d.paidTotal) || 0), 0);
-    const salesUnpaid = salesRevenue - salesPaid;
+    const salesUnpaid = salesInvoiceTotal - salesPaid;
 
     // 2) إيرادات إضافية من قيود اليومية (تأمين/خدمات ورشة) لتكتمل الصورة
     const journals = journalStore.getAll().filter((j) => inMonth(j.date));
@@ -73,7 +74,9 @@ export default function MonthlyReport() {
       .filter((j) => j.creditAccount === "إيرادات خدمات الورشة")
       .reduce((s, j) => s + j.amount, 0);
 
-    const totalRevenue = salesRevenue + insuranceRevenue + workshopServiceRevenue;
+    // Claim approval/estimate journals are not actual revenue. Revenue is
+    // recognized from issued invoices only; collected cash remains separate.
+    const totalRevenue = salesRevenue + workshopServiceRevenue;
 
     // 3) المصروفات من سندات الصرف
     const expenses = expensesStore.getAll().filter((e) => inMonth(e.date));
@@ -127,7 +130,8 @@ export default function MonthlyReport() {
         sales: salesRevenue,
         salesPaid,
         salesUnpaid,
-        insurance: insuranceRevenue,
+        insurance: 0,
+        insuranceExpected: insuranceRevenue,
         workshop: workshopServiceRevenue,
         total: totalRevenue,
         invoicesCount: invoices.length,

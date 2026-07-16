@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useClaimPayments, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS } from "@/hooks/useClaimPayments";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
 import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
+import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
 import { useOverdueInsuranceAlerts, type OverdueCompany } from "@/hooks/useOverdueInsuranceAlerts";
 import { formatDateLatin } from "@/lib/numberUtils";
 
@@ -19,6 +20,7 @@ export default function InsurancePayments() {
   const { data: payments } = useClaimPayments();
   const { data: claims } = useInsuranceClaims();
   const { data: companies } = useInsuranceCompanies();
+  const { data: invoices } = useInsuranceInvoices();
   const overdueList = useOverdueInsuranceAlerts();
   const [search, setSearch] = useState("");
 
@@ -27,9 +29,8 @@ export default function InsurancePayments() {
     const startOfMonth = new Date();
     startOfMonth.setDate(1); startOfMonth.setHours(0, 0, 0, 0);
 
-    const totalApproved = (claims ?? []).reduce(
-      (s, c) => s + (Number(c.approved_amount) || Number(c.estimated_amount) || 0), 0,
-    );
+    const activeInvoices = (invoices ?? []).filter((invoice) => invoice.status !== "cancelled");
+    const totalInvoiced = activeInvoices.reduce((s, invoice) => s + Number(invoice.total || 0), 0);
     const totalPaid = (payments ?? [])
       .filter((p) => p.status !== "bounced")
       .reduce((s, p) => s + Number(p.amount), 0);
@@ -39,8 +40,8 @@ export default function InsurancePayments() {
 
     const overdueAmount = overdueList.reduce((s, o) => s + o.remaining, 0);
 
-    return { totalApproved, totalPaid, monthPaid, overdueAmount, remaining: totalApproved - totalPaid };
-  }, [claims, payments, overdueList]);
+    return { totalInvoiced, totalApproved: totalInvoiced, totalPaid, monthPaid, overdueAmount, remaining: Math.max(0, totalInvoiced - totalPaid) };
+  }, [invoices, payments, overdueList]);
 
   // Monthly payments chart (last 6 months)
   const monthlyChart = useMemo(() => {
@@ -69,10 +70,11 @@ export default function InsurancePayments() {
       if (!key) return;
       const name = c.insurance_company || companies?.find((co) => co.id === (c as any).insurance_company_id)?.name || "غير محدد";
       const companyId = (c as any).insurance_company_id || null;
-      const cPayments = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
-      const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
-      const approved = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
-      const rem = approved - paid;
+      const claimInvoices = (invoices ?? []).filter((invoice) => invoice.claim_id === c.id && invoice.status !== "cancelled");
+      const invoiced = claimInvoices.reduce((s, invoice) => s + Number(invoice.total || 0), 0);
+      const paid = claimInvoices.reduce((s, invoice) => s + Number(invoice.paid_amount || 0), 0);
+      const rem = invoiced - paid;
+      if (invoiced <= 0) return;
 
       const company = companies?.find((co) => co.id === (c as any).insurance_company_id);
       const terms = company?.payment_terms_days ?? 90;
@@ -81,14 +83,14 @@ export default function InsurancePayments() {
       const isOverdue = c.status === "approved" && rem > 0 && days > terms;
 
       const existing = map.get(key) || { name, companyId, approved: 0, paid: 0, remaining: 0, overdue: 0 };
-      existing.approved += approved;
+      existing.approved += invoiced;
       existing.paid += paid;
       existing.remaining += rem;
       if (isOverdue) existing.overdue += rem;
       map.set(key, existing);
     });
     return Array.from(map.values()).sort((a, b) => b.remaining - a.remaining);
-  }, [claims, payments, companies]);
+  }, [claims, invoices, companies]);
 
   const filteredPayments = (payments ?? []).filter((p) => {
     if (!search) return true;
@@ -385,4 +387,3 @@ function OverdueAlertsList({
     </div>
   );
 }
-

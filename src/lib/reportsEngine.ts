@@ -227,9 +227,10 @@ export function buildProfitLossReport(f: ReportFilters): ProfitLossReport {
   const sales = buildSalesReport(f);
   const purchases = buildPurchasesReport(f);
 
-  const orders = getWorkOrders().filter((o) => inRange(o.entryDate, f.range));
-  const cogs = orders.reduce((s, o) => s + (Number(o.partsCost) || 0), 0);
-  const laborCost = orders.reduce((s, o) => s + (Number(o.laborCost) || 0), 0);
+  // Work-order partsCost/laborCost are estimates. Actual COGS/labour must come
+  // from recorded purchase/expense/labour vouchers, not from planning fields.
+  const cogs = 0;
+  const laborCost = 0;
 
   // المصروفات التشغيلية = كل سندات الصرف ما عدا قطع الغيار (المحسوبة ضمن COGS)
   const expenses = expensesStore
@@ -238,15 +239,17 @@ export function buildProfitLossReport(f: ReportFilters): ProfitLossReport {
     .filter((e) => !isPartsExpense(e.categoryName))
     .reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
-  // إيرادات التأمين — من قيود اليومية (تُسجَّل تلقائياً عند اعتماد المطالبة).
-  // يمنع التكرار مع أوامر العمل ويعكس فقط المطالبات المعتمدة.
+  // Legacy insurance approval journals are expected values, not actual revenue.
+  // Kept out of revenue; insurance revenue is recognized by issued invoices.
   const insuranceRevenue = journalStore
     .getAll()
     .filter((e) => e.creditAccount === "إيرادات التأمين" && inRange(e.date, f.range))
     .reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
   const salesRevenueExVat = roundMoney(sales.totalRevenue - sales.vatCollected);
-  const revenue = salesRevenueExVat + insuranceRevenue;
+  // Insurance claim estimates/approvals are expected values only.
+  // Actual insurance revenue is handled by invoice-based cloud reports.
+  const revenue = salesRevenueExVat;
   const grossProfit = revenue - cogs - laborCost;
   const netProfit = grossProfit - expenses;
   const vatDue = sales.vatCollected - purchases.vatPaid;
@@ -302,9 +305,11 @@ export function buildPerVehicleProfitReport(f: ReportFilters): {
   const invoiceRevenueByOrder = revenueByWorkOrder(f.range);
   const rows: PerVehicleProfitRow[] = filtered.map((o) => {
     const revenue = invoiceRevenueByOrder.get(o.id) || 0;
-    const partsCost = Number(o.partsCost) || 0;
-    const laborCost = Number(o.laborCost) || 0;
-    const extraExpenses = (o.extraExpenses || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    // Work-order parts/labour fields are estimates unless backed by actual
+    // vouchers. Do not use them as real accounting cost or profit reduction.
+    const partsCost = 0;
+    const laborCost = 0;
+    const extraExpenses = 0;
     const externalVouchers = getExpensesTotalForWorkOrder(o.id);
     const totalCost = partsCost + laborCost + extraExpenses + externalVouchers;
     const profit = revenue - totalCost;
@@ -358,20 +363,11 @@ export function getVehicleProfitDetail(orderId: string): VehicleProfitDetail {
   }
 
   const services: { label: string; amount: number }[] = [];
-  if (Number(order.laborCost) > 0) {
-    services.push({ label: `أجور العمالة - ${order.serviceType || "خدمة"}`, amount: Number(order.laborCost) });
-  }
+  // Estimated labour from the work order is intentionally not shown as an
+  // actual accounting cost. Actual labour must be entered through vouchers.
 
-  // قطع الغيار - للعرض المبسط نعرض الإجمالي كسطر واحد إن لم تتوفر تفاصيل
+  // قطع الغيار الفعلية تأتي من سندات/مصروفات مرتبطة، لا من قيمة تقديرية في أمر العمل.
   const parts: { label: string; qty: number; unitPrice: number; total: number }[] = [];
-  if (Number(order.partsCost) > 0) {
-    parts.push({
-      label: "إجمالي قطع الغيار المستخدمة",
-      qty: 1,
-      unitPrice: Number(order.partsCost),
-      total: Number(order.partsCost),
-    });
-  }
 
   const internalExpenses = (order.extraExpenses || []).map((e) => ({
     label: e.label,
