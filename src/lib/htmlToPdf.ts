@@ -94,7 +94,6 @@ const PDF_EXPORT_CSS = `
     min-height:0!important;
     max-height:none!important;
     overflow:visible!important;
-    padding-bottom:max(14mm, var(--pdf-bottom-safe-space, 14mm))!important;
   }
   html.pdf-export .page + .page{page-break-before:always!important;break-before:page!important}
   /* Table integrity — never cut rows or headers across pages */
@@ -151,6 +150,42 @@ const cropCanvasWhitespace = (source: HTMLCanvasElement, preservePx = 28): HTMLC
   cctx.fillStyle = "#ffffff"; cctx.fillRect(0, 0, cropped.width, cropped.height);
   cctx.drawImage(source, left, top, cropped.width, cropped.height, 0, 0, cropped.width, cropped.height);
   return cropped;
+};
+
+const trimCanvasBlankTail = (source: HTMLCanvasElement, minimumHeightPx: number, preservePx = 24): HTMLCanvasElement => {
+  const ctx = source.getContext("2d");
+  if (!ctx || source.width === 0 || source.height <= minimumHeightPx) return source;
+  let data: Uint8ClampedArray;
+  try { data = ctx.getImageData(0, 0, source.width, source.height).data; }
+  catch { return source; }
+
+  const isBlankRow = (y: number) => {
+    const rowStart = y * source.width * 4;
+    let nonBlank = 0;
+    for (let x = 0; x < source.width; x++) {
+      const idx = rowStart + x * 4;
+      const isBlank = data[idx + 3] < 12 || (data[idx] > 248 && data[idx + 1] > 248 && data[idx + 2] > 248);
+      if (!isBlank) {
+        nonBlank += 1;
+        if (nonBlank > 2) return false;
+      }
+    }
+    return true;
+  };
+
+  let lastContentRow = source.height - 1;
+  while (lastContentRow > minimumHeightPx && isBlankRow(lastContentRow)) lastContentRow -= 1;
+  const targetHeight = Math.min(source.height, Math.max(minimumHeightPx, lastContentRow + preservePx));
+  if (source.height - targetHeight < 16) return source;
+
+  const trimmed = document.createElement("canvas");
+  trimmed.width = source.width;
+  trimmed.height = targetHeight;
+  const tctx = trimmed.getContext("2d")!;
+  tctx.fillStyle = "#ffffff";
+  tctx.fillRect(0, 0, trimmed.width, trimmed.height);
+  tctx.drawImage(source, 0, 0, source.width, targetHeight, 0, 0, source.width, targetHeight);
+  return trimmed;
 };
 
 /** Returns true if the given canvas row is uniformly near-white (safe slice boundary). */
@@ -291,6 +326,7 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
 
     const addSlicedCanvas = async (canvas: HTMLCanvasElement, targetWmm: number, targetMaxHmm: number, offsetX = 0, offsetY = 0, firstAlreadyExists = true) => {
       const pxPerMm = canvas.width / targetWmm;
+      canvas = trimCanvasBlankTail(canvas, Math.floor(targetMaxHmm * pxPerMm));
       let pageHpx = Math.floor(targetMaxHmm * pxPerMm);
       // html2canvas can round an exact A4 page a few pixels taller than the
       // calculated slice. Absorb that tiny difference to avoid a blank sliver page.

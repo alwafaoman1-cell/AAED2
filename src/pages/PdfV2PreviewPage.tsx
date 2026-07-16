@@ -335,7 +335,7 @@ export default function PdfV2PreviewPage() {
     createPdfV2Blob({ html, meta })
       .then((blob) => {
         const url = URL.createObjectURL(blob);
-        window.location.replace(url);
+        window.location.replace(`${url}#view=FitH&zoom=page-width&toolbar=1&navpanes=0`);
       })
       .catch(() => undefined);
   }, [html, meta, pdfOnly]);
@@ -356,7 +356,7 @@ export default function PdfV2PreviewPage() {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setPreviewPdfBlob(blob);
-        setPreviewPdfUrl(objectUrl);
+        setPreviewPdfUrl(`${objectUrl}#view=FitH&zoom=page-width&toolbar=1&navpanes=0`);
       })
       .catch((error) => {
         if (!cancelled) setLoadError(error?.message || "Unable to generate PDF preview");

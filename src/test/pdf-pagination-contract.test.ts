@@ -12,6 +12,8 @@ describe("PDF pagination contract", () => {
     expect(htmlToPdf).toContain("overflow:visible!important");
     expect(htmlToPdf).toContain("max-height:none!important");
     expect(htmlToPdf).toContain("page-break-before:always");
+    expect(htmlToPdf).toContain("trimCanvasBlankTail");
+    expect(htmlToPdf).not.toContain("padding-bottom:max(14mm");
     expect(htmlToPdf).not.toContain("html.pdf-export, html.pdf-export body{background:#fff!important;margin:0!important;padding:0!important;overflow:hidden!important");
 
     expect(renderer).toContain('page.style.overflow = "visible"');
@@ -36,8 +38,18 @@ describe("PDF pagination contract", () => {
     expect(app).toContain('path="/pdf/:documentType/:id"');
     expect(app).toContain('path="/pdf-preview/:documentType/:id"');
     expect(preview).toContain("previewPdfUrl");
+    expect(preview).toContain("zoom=page-width");
+    expect(preview).toContain("view=FitH");
     expect(preview).toContain("printPdfBlob(blob)");
     expect(preview).not.toContain("frameWindow.print()");
     expect(preview).toContain('ref={previewFrameRef}');
+  });
+
+  it("opens generated PDF blobs with page-width viewer defaults", () => {
+    const engine = read("src/lib/pdf-v2/pdfEngine.ts");
+
+    expect(engine).toContain("withPdfViewerDefaults");
+    expect(engine).toContain("zoom=page-width");
+    expect(engine).toContain("view=FitH");
   });
 });

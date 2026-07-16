@@ -165,6 +165,10 @@ function safeFileName(value: string) {
   return `${(value || "document").replace(/\.pdf$/i, "").replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
 }
 
+function withPdfViewerDefaults(url: string) {
+  return `${url}#view=FitH&zoom=page-width&toolbar=1&navpanes=0`;
+}
+
 function findFirstMatch(lines: string[], patterns: RegExp[]) {
   for (const pattern of patterns) {
     const line = lines.find((item) => pattern.test(item));
@@ -425,11 +429,11 @@ export async function openPdfV2Viewer(input: PdfV2BuildInput): Promise<Window | 
   const url = URL.createObjectURL(blob);
   if (placeholder) {
     try { (placeholder as any).opener = null; } catch {}
-    placeholder.location.replace(url);
+    placeholder.location.replace(withPdfViewerDefaults(url));
     setTimeout(() => URL.revokeObjectURL(url), 120_000);
     return placeholder;
   }
-  window.location.href = url;
+  window.location.href = withPdfViewerDefaults(url);
   setTimeout(() => URL.revokeObjectURL(url), 120_000);
   return null;
 }
