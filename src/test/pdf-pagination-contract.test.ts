@@ -13,6 +13,9 @@ describe("PDF pagination contract", () => {
     expect(htmlToPdf).toContain("max-height:none!important");
     expect(htmlToPdf).toContain("page-break-before:always");
     expect(htmlToPdf).toContain("trimCanvasBlankTail");
+    expect(htmlToPdf).toContain("const overflowHeight = Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight)");
+    expect(htmlToPdf).toContain("el.style.height = `${overflowHeight}px`");
+    expect(htmlToPdf).toContain("el.style.height = originalHeight");
     expect(htmlToPdf).not.toContain("padding-bottom:max(14mm");
     expect(htmlToPdf).not.toContain("html.pdf-export, html.pdf-export body{background:#fff!important;margin:0!important;padding:0!important;overflow:hidden!important");
 

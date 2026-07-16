@@ -305,7 +305,20 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
 
     const renderEl = async (el: HTMLElement) => {
       const siblings = pageEls.filter((p) => p !== el).map((p) => [p, p.style.display] as const);
+      const originalHeight = el.style.height;
+      const originalMinHeight = el.style.minHeight;
+      const originalMaxHeight = el.style.maxHeight;
       siblings.forEach(([p]) => { p.style.display = "none"; });
+      const overflowHeight = Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight);
+      if (overflowHeight > el.clientHeight + 2) {
+        // A4 `.page` containers are intentionally fixed for print preview. If
+        // content overflows that box, html2canvas captures only the border box
+        // and clips the next page before jsPDF can slice it. Expand the page
+        // only during rasterization, then restore the preview sizing.
+        el.style.height = `${overflowHeight}px`;
+        el.style.minHeight = `${overflowHeight}px`;
+        el.style.maxHeight = "none";
+      }
       await yieldToBrowser();
       try {
         return await withTimeout(html2canvas(el, {
@@ -320,6 +333,9 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
           ignoreElements: (node) => node instanceof HTMLElement && (node.classList.contains("print-bar") || node.classList.contains("no-print")),
         }), 12000, "تحضير صفحة PDF");
       } finally {
+        el.style.height = originalHeight;
+        el.style.minHeight = originalMinHeight;
+        el.style.maxHeight = originalMaxHeight;
         siblings.forEach(([p, display]) => { p.style.display = display; });
       }
     };
