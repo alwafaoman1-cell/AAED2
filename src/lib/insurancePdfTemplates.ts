@@ -540,7 +540,47 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
   // ملاحظة: تم تعطيل القالب المخصص لتقدير المطالبة لتوحيد الشكل الجديد
   // لكلا النوعين LUMP SUM و UPL مع الحفاظ على الختم لكل واحد.
   const s = getTemplateSettings();
-  const styles = baseStyles(s);
+  const styles = `${baseStyles(s)}
+    .claim-estimate-page{padding:9mm 11mm 10mm;display:flex;flex-direction:column;min-height:297mm}
+    .claim-estimate-page .header{padding-bottom:6px;margin-bottom:8px;border-bottom-width:2px}
+    .claim-estimate-page .company-info h1{font-size:14px}
+    .claim-estimate-page .company-info .en-name{font-size:9.5px;margin-bottom:2px}
+    .claim-estimate-page .company-info .details{font-size:7.4px;line-height:1.35}
+    .claim-estimate-page .doc-badge{min-width:120px;padding:6px 12px;border-radius:5px}
+    .claim-estimate-page .doc-badge .number{font-size:13px;margin:1px 0}
+    .claim-estimate-page .doc-badge .label-ar{font-size:9px}
+    .claim-estimate-page .doc-badge .label-en,.claim-estimate-page .doc-badge .date{font-size:7.5px}
+    .claim-estimate-page .insurance-banner{padding:7px 10px;margin-bottom:7px;border-radius:6px}
+    .claim-estimate-page .insurance-banner .icon{width:30px;height:30px;font-size:16px}
+    .claim-estimate-page .insurance-banner .info .name{font-size:12px}
+    .claim-estimate-page .insurance-banner .info .label,.claim-estimate-page .insurance-banner .meta{font-size:8.5px}
+    .claim-estimate-page .vehicle-card{padding:7px 10px;margin-bottom:7px;border-radius:6px}
+    .claim-estimate-page .vehicle-card .left .lbl{font-size:8.5px}
+    .claim-estimate-page .vehicle-card .left .val{font-size:11.5px}
+    .claim-estimate-page .vehicle-card .right{font-size:9px;gap:2px 10px}
+    .claim-estimate-page .vehicle-plate{padding:3px 10px;font-size:11px;border-width:1px;border-radius:4px}
+    .claim-estimate-page .section-title{font-size:10.5px;margin:8px 0 5px;padding-right:7px;border-right-width:2px}
+    .claim-estimate-page .info-grid{gap:2px 14px;margin-bottom:7px}
+    .claim-estimate-page .info-row{font-size:9px;padding:1px 0;gap:5px}
+    .claim-estimate-page .info-row .label{min-width:85px}
+    .claim-estimate-page table{margin:5px 0;font-size:9px}
+    .claim-estimate-page thead th{padding:5px 6px;font-size:8px}
+    .claim-estimate-page tbody td{padding:5px 6px}
+    .claim-estimate-page .totals-box{margin-top:7px;width:255px;border-width:1px;border-radius:5px}
+    .claim-estimate-page .totals-row{padding:5px 10px;font-size:9px}
+    .claim-estimate-page .totals-row.total{font-size:10px}
+    .claim-estimate-page .estimation-badge{margin-top:8px}
+    .claim-estimate-page .estimation-badge span{padding:4px 20px;border-width:2px;font-size:15pt;letter-spacing:4px;border-radius:4px}
+    .claim-estimate-page .notes-box{margin-top:9px;padding:7px 9px;font-size:8.2px;line-height:1.45;border-right-width:2px;border-radius:5px}
+    .claim-estimate-page .signature-area{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;direction:ltr}
+    .claim-estimate-page .signature-area .sig{padding:6px;border-radius:5px;direction:rtl;min-width:0}
+    .claim-estimate-page .signature-area .sig .name{font-size:8.5px;margin-bottom:4px}
+    .claim-estimate-page .signature-area .sig .area{height:32px}
+    .claim-estimate-page .signature-area .sig .area img{max-height:30px}
+    .claim-estimate-page .signature-area .sig .lbl{font-size:7.5px;margin-top:3px}
+    .claim-estimate-page .footer{margin-top:auto;padding-top:2mm;font-size:7px}
+    @media print{.claim-estimate-page{padding:9mm 11mm 10mm;min-height:297mm;break-after:auto;page-break-after:auto}}
+  `;
   const documentNumber = p.estimateNumber || p.claimNumber;
   const estimateTypeLabel =
     p.estimationType === "upl"
@@ -622,7 +662,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
     : "";
 
   const body = `
-    <div class="page">
+    <div class="page claim-estimate-page">
       ${s.showWatermark ? `<div class="watermark">ESTIMATE</div>` : ""}
       ${headerHtml(s, "تقدير مطالبة", "CLAIM ESTIMATE", p.claimNumber, p.date)}
       <div class="info-row" style="justify-content:flex-end;margin:-6px 0 8px;font-family:'Inter',sans-serif;direction:ltr"><span class="label">Estimate No</span><span class="value">${e(documentNumber)}</span><span style="display:none">${e(estimateTypeLabel)} ${e(estimateBadge)}</span></div>

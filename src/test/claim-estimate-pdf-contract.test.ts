@@ -46,4 +46,17 @@ describe("claim estimate PDF template", () => {
     expect(lumpHtml).toContain('<div class="estimation-badge"><span>LUMP SUM</span></div>');
     expect(lumpHtml).toContain("Workshop Stamp");
   });
+
+  it("uses the compact one-page claim estimate print layout", () => {
+    const html = getClaimEstimateHtml({
+      ...basePayload,
+      estimationType: "lump_sum",
+      notes: "Compact layout check",
+    });
+
+    expect(html).toContain("claim-estimate-page");
+    expect(html).toContain("grid-template-columns:repeat(3,minmax(0,1fr))");
+    expect(html).toContain(".claim-estimate-page .footer{margin-top:auto");
+    expect(html).toContain(".claim-estimate-page .estimation-badge span{padding:4px 20px");
+  });
 });
