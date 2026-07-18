@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import PlateInput from "@/components/vehicles/PlateInput";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { saveWorkOrderToCloud, WORK_ORDER_STATUSES, NEEDED_PART_STATUS_LABELS, type WorkOrder, type ExtraExpense, type NeededPart, type NeededPartStatus, type WorkItem } from "@/lib/workOrdersStore";
+import { getWorkOrders, saveWorkOrderToCloud, WORK_ORDER_STATUSES, NEEDED_PART_STATUS_LABELS, type WorkOrder, type ExtraExpense, type NeededPart, type NeededPartStatus, type WorkItem } from "@/lib/workOrdersStore";
 import { nextWorkOrderNumber } from "@/lib/numbering";
 import { customersStore } from "@/lib/customersStore";
 import CustomerPhoneLookup from "@/components/customers/CustomerPhoneLookup";
@@ -25,6 +25,10 @@ import { isUuid } from "@/lib/uuid";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
+
+function normalizeWorkOrderNumberInput(value: string) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
 
 const serviceTypes = ["حادث", "صيانة", "كهرباء", "برمجة", "فحص", "صيانة دورية"];
 const insuranceCompanies = ["ظفار للتأمين", "الأهلية للتأمين", "ميثاق للتأمين", "الأمانة للتأمين", "آكسا الخليج", "أخرى"];
@@ -463,7 +467,40 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       toast.error("لا يمكن حفظ أمر العمل بدون vehicle_id");
       return;
     }
-    const targetOrderNumber = isEdit ? form.id : nextWorkOrderNumber();
+    const targetOrderNumber = isEdit ? normalizeWorkOrderNumberInput(form.id || form.displayNumber || initial?.id || "") : nextWorkOrderNumber();
+    if (isEdit) {
+      if (!/^WO-\d{4}-\d+$/i.test(targetOrderNumber)) {
+        toast.error("رقم أمر العمل يجب أن يكون بصيغة WO-YYYY-0001");
+        return;
+      }
+      const localDuplicate = getWorkOrders({ includeArchived: true }).find((order) => {
+        const sameNumber = [order.id, order.displayNumber].filter(Boolean).some((value) => String(value).toLowerCase() === targetOrderNumber.toLowerCase());
+        const sameRecord = order.cloudId && initial?.cloudId ? order.cloudId === initial.cloudId : order.id === initial?.id;
+        return sameNumber && !sameRecord;
+      });
+      if (localDuplicate) {
+        toast.error(`رقم أمر العمل ${targetOrderNumber} مستخدم مسبقًا`);
+        return;
+      }
+      const tenantId = await getCurrentTenantId();
+      if (tenantId && initial?.cloudId) {
+        const { data: duplicate, error: duplicateError } = await supabase
+          .from("job_orders")
+          .select("id,order_number")
+          .eq("tenant_id", tenantId)
+          .ilike("order_number", targetOrderNumber)
+          .neq("id", initial.cloudId)
+          .maybeSingle();
+        if (duplicateError) {
+          toast.error(duplicateError.message || "تعذر التحقق من رقم أمر العمل");
+          return;
+        }
+        if ((duplicate as any)?.id) {
+          toast.error(`رقم أمر العمل ${targetOrderNumber} مستخدم مسبقًا`);
+          return;
+        }
+      }
+    }
     setSaving(true);
     let receptionPhotos = form.photos || [];
     try {
@@ -500,6 +537,25 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
   return (
     <div className="space-y-4 py-2">
+      {isEdit && (
+        <div className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+          <label className="text-xs font-semibold text-foreground">رقم أمر العمل</label>
+          <Input
+            dir="ltr"
+            value={form.id || form.displayNumber || ""}
+            onChange={(event) => {
+              const next = normalizeWorkOrderNumberInput(event.target.value);
+              setForm((prev) => ({ ...prev, id: next, displayNumber: next }));
+            }}
+            placeholder="WO-2026-0001"
+            className="mt-1 bg-card border-border font-mono text-left"
+          />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            يمكن تعديل رقم العرض فقط. العلاقات الداخلية تبقى على UUID ولا تتغير.
+          </p>
+        </div>
+      )}
+
       {isWizard && (
         <div className="rounded-xl border border-primary/25 bg-primary/5 p-3 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">

@@ -2919,6 +2919,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <ClaimDeliverySection
               claimId={id}
               workOrderId={linkedWorkOrderId || undefined}
+              vehicleId={vehicleId || null}
               initial={{
                 delivery_photos: (existing as any)?.delivery_photos ?? [],
                 satisfaction_photos: (existing as any)?.satisfaction_photos ?? [],

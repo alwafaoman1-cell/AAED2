@@ -221,9 +221,9 @@ function rowToVehicle(r: any): Vehicle {
     visits: 0,
     lastVisit: "",
     totalSpent: 0,
-    archived: !!r.archived,
-    archivedAt: r.archived_at || undefined,
-    archivedReason: r.archived_reason || undefined,
+    archived: !!r.archived || !!r.deleted_at,
+    archivedAt: r.archived_at || r.deleted_at || undefined,
+    archivedReason: r.archived_reason || (r.deleted_at ? "Archived from previous soft delete" : undefined),
   };
 }
 
@@ -341,6 +341,8 @@ export async function saveVehicleToCloud(
     archived: !!vehicle.archived,
     archived_at: vehicle.archivedAt || null,
     archived_reason: vehicle.archivedReason || null,
+    deleted_at: vehicle.archived ? undefined : null,
+    deleted_by: vehicle.archived ? undefined : null,
   };
 
   const { data, error } = await supabase
@@ -377,8 +379,8 @@ export async function deleteVehicleFromCloud(vehicle: Vehicle, reason = "Soft de
       archived: true,
       archived_at: deletedAt,
       archived_reason: reason,
-      deleted_at: deletedAt,
-      deleted_by: userData.user?.id || null,
+      deleted_at: null,
+      deleted_by: null,
     } as any)
     .eq("tenant_id", tenantId)
     .eq("id", cloudId)
@@ -386,14 +388,14 @@ export async function deleteVehicleFromCloud(vehicle: Vehicle, reason = "Soft de
     .maybeSingle();
   if (error) throw error;
   if (!data?.id) throw new Error("لم يتم حذف المركبة في Supabase");
+  const archivedVehicle = { ...vehicle, archived: true, archivedAt: deletedAt, archivedReason: reason };
   suppressCloudMutation = true;
   try {
-    vehiclesStore.remove(vehicle.id);
+    vehiclesStore.update(vehicle.id, archivedVehicle);
   } finally {
     suppressCloudMutation = false;
   }
-  KNOWN_CLOUD.delete(normPlate(vehicle.plate));
-  return vehicle;
+  return archivedVehicle;
 }
 
 async function fetchVehiclesFromCloud(): Promise<void> {
@@ -402,9 +404,8 @@ async function fetchVehiclesFromCloud(): Promise<void> {
     if (!tenantId) return;
     const { data: rows, error } = await supabase
       .from("vehicles")
-      .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,mileage,vin,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,customer_id")
+      .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,mileage,vin,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,deleted_at,customer_id")
       .eq("tenant_id", tenantId)
-      .is("deleted_at", null)
       .limit(5000);
     if (error || !rows) return;
 
@@ -442,9 +443,9 @@ async function fetchVehiclesFromCloud(): Promise<void> {
         ownerPhone: cust?.phone,
         mileage: r.mileage ? String(r.mileage) : undefined,
         vin: r.vin_number || r.vin || "",
-        archived: !!r.archived,
-        archivedAt: r.archived_at || undefined,
-        archivedReason: r.archived_reason || undefined,
+        archived: !!r.archived || !!r.deleted_at,
+        archivedAt: r.archived_at || r.deleted_at || undefined,
+        archivedReason: r.archived_reason || (r.deleted_at ? "Archived from previous soft delete" : undefined),
         coverImageUrl: r.vehicle_cover_image_url || undefined,
         thumbnailUrl: r.vehicle_thumbnail_url || undefined,
       };

@@ -1067,6 +1067,7 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     : null;
   let targetId = existingId;
   let finalOrderNumber = order.id;
+  let previousOrderNumber: string | null = null;
   if (existingId) {
     const { data: existing, error: existingError } = await supabase
       .from("job_orders")
@@ -1079,7 +1080,22 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     if ((existing as any).deleted_at || (existing as any).archived_at) {
       throw new Error("Work order is archived/deleted in Supabase and cannot be updated from this form");
     }
-    finalOrderNumber = (existing as any).order_number || order.id;
+    previousOrderNumber = (existing as any).order_number || order.id;
+    finalOrderNumber = String(order.id || previousOrderNumber || "").trim().toUpperCase();
+    if (!/^WO-\d{4}-\d+$/i.test(finalOrderNumber)) {
+      throw new Error("Work order number must use WO-YYYY-0001 format");
+    }
+    if (previousOrderNumber && finalOrderNumber.toLowerCase() !== previousOrderNumber.toLowerCase()) {
+      const { data: duplicate, error: duplicateError } = await supabase
+        .from("job_orders")
+        .select("id,order_number")
+        .eq("tenant_id", ctx.tenantId)
+        .ilike("order_number", finalOrderNumber)
+        .neq("id", existingId)
+        .maybeSingle();
+      if (duplicateError) throw duplicateError;
+      if ((duplicate as any)?.id) throw new Error(`Work order number ${finalOrderNumber} already exists`);
+    }
   } else {
     finalOrderNumber = await allocateVisibleOrderNumber(ctx.tenantId, order.id);
   }
@@ -1109,6 +1125,10 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     .maybeSingle();
   if (verifyError) throw verifyError;
   if (!verified?.id) throw new Error("تم الحفظ لكن تعذر قراءة أمر العمل للتأكيد");
+
+  if (previousOrderNumber && finalOrderNumber.toLowerCase() !== previousOrderNumber.toLowerCase()) {
+    await syncRenamedWorkOrderReferences(ctx.tenantId, previousOrderNumber, finalOrderNumber);
+  }
 
   const saved = await mapSavedJobOrder(verified);
   if (saved.claimId) {
@@ -1153,11 +1173,28 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     }
   }
   KNOWN_CLOUD_NUMBERS.add(saved.id);
-  const idx = cache.findIndex((o) => o.id === saved.id || o.cloudId === saved.cloudId);
+  const idx = cache.findIndex((o) => o.id === saved.id || o.id === previousOrderNumber || o.cloudId === saved.cloudId);
   if (idx >= 0) cache[idx] = saved;
   else cache.unshift(saved);
   persist();
   return saved;
+}
+
+async function syncRenamedWorkOrderReferences(tenantId: string, oldNumber: string, newNumber: string) {
+  const updates: Array<PromiseLike<any>> = [
+    (supabase.from("expenses") as any).update({ linked_work_order_id: newNumber }).eq("tenant_id", tenantId).eq("linked_work_order_id", oldNumber),
+    (supabase.from("expenses") as any).update({ source_work_order_id: newNumber }).eq("tenant_id", tenantId).eq("source_work_order_id", oldNumber),
+    (supabase.from("sales_documents") as any).update({ from_doc_id: newNumber }).eq("tenant_id", tenantId).eq("from_doc_id", oldNumber),
+    (supabase.from("sales_documents") as any).update({ work_order_number: newNumber }).eq("tenant_id", tenantId).eq("work_order_number", oldNumber),
+    (supabase.from("vehicle_stay_notifications" as any) as any).update({ work_order_number: newNumber }).eq("tenant_id", tenantId).eq("work_order_number", oldNumber),
+  ];
+  const results = await Promise.allSettled(updates);
+  for (const result of results) {
+    if (result.status === "fulfilled" && (result.value as any)?.error && !isMissingOptionalColumnError((result.value as any).error)) {
+      console.warn("[syncRenamedWorkOrderReferences]", (result.value as any).error);
+    }
+    if (result.status === "rejected") console.warn("[syncRenamedWorkOrderReferences]", result.reason);
+  }
 }
 
 export async function updateWorkOrderInCloud(id: string, patch: Partial<WorkOrder>): Promise<WorkOrder> {

@@ -466,6 +466,13 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
           open={receiptOpen}
           onOpenChange={setReceiptOpen}
           order={woForDialog}
+          deliveryDraft={{
+            date: deliveryDate,
+            receiverName,
+            receiverIdNumber,
+            satisfactionNotes: notes,
+            idPhotoDataUrl: receiverIdPhoto,
+          }}
         />
       )}
     </Card>

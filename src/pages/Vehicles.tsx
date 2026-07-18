@@ -13,7 +13,6 @@ import VehicleTracking from "@/components/tracking/VehicleTracking";
 import { deleteVehicleFromCloud, saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import ArchivedVehicleDetails from "@/components/vehicles/ArchivedVehicleDetails";
 import PlateInput from "@/components/vehicles/PlateInput";
-import { moveToTrash } from "@/lib/trashStore";
 import { canDelete, canEdit } from "@/lib/permissions";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { toast } from "sonner";
@@ -59,14 +58,13 @@ export default function Vehicles() {
     const items = bulk.selectedItems;
     for (const v of items) {
       try {
-        const r = await deleteVehicleFromCloud(v, "Bulk soft delete vehicle");
-        moveToTrash({ type: "vehicle", entityId: r.id, label: `${r.owner} - ${r.plate}`, payload: r });
+        await deleteVehicleFromCloud(v, "Bulk archive vehicle");
       } catch (error: any) {
         toast.error(error?.message || `تعذر حذف المركبة ${v.plate} في Supabase`);
         return;
       }
     }
-    toast.success(`تم نقل ${items.length} سيارة للمهملات`);
+    toast.success(`تم نقل ${items.length} سيارة إلى أرشيف السيارات`);
     bulk.clear();
   }
   function handleBulkExport() {
@@ -93,9 +91,8 @@ export default function Vehicles() {
   async function handleDelete() {
     if (!deleting) return;
     try {
-      const removed = await deleteVehicleFromCloud(deleting, "Soft delete vehicle");
-      moveToTrash({ type: "vehicle", entityId: removed.id, label: `${removed.owner} - ${removed.plate}`, payload: removed });
-      toast.success("تم النقل للمهملات");
+      await deleteVehicleFromCloud(deleting, "Archive vehicle");
+      toast.success("تم نقل السيارة إلى أرشيف السيارات");
     } catch (error: any) {
       toast.error(error?.message || "تعذر حذف المركبة في Supabase");
     }
@@ -337,7 +334,7 @@ export default function Vehicles() {
         onOpenChange={(o) => !o && setDeleting(null)}
         onConfirm={handleDelete}
         title={`حذف السيارة ${deleting?.plate || ""}`}
-        description={`سيتم نقل سيارة "${deleting?.owner || ""}" إلى سلة المهملات.`}
+        description={`سيتم نقل سيارة "${deleting?.owner || ""}" إلى أرشيف السيارات.`}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Printer, FileSignature, Trash2, Eraser, FileCheck2 } from "lucide-react";
 import { ResponsiveDialog, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogFooter } from "@/components/ui/responsive-dialog";
@@ -8,6 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import { getVehicleDeliveryReceiptHtml } from "@/lib/pdfGenerator";
+import {
+  buildDeliveryReceiptData,
+  getDefaultDeliveryWarrantyNotes,
+  getDeliveredDateInputValue,
+  type VehicleDeliveryReceiptDraft,
+} from "@/lib/vehicleDeliveryReceipt";
 import { syncWorkOrderInvoiceFromExpenses, isInsuranceWorkOrder } from "@/lib/workOrderInvoiceSync";
 import { supabase } from "@/integrations/supabase/client";
 import { ShieldCheck } from "lucide-react";
@@ -19,30 +25,22 @@ interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   order: WorkOrder;
+  deliveryDraft?: VehicleDeliveryReceiptDraft;
 }
 
-function formatDeliveryReceiptNumber(orderDisplay?: string): string {
-  const source = String(orderDisplay || "").trim();
-  const woMatch = source.match(/(?:WO|W)-\d{2,4}-(\d{1,6})$/i);
-  const trailingMatch = source.match(/(?:^|[-/])(\d{1,6})$/);
-  const raw = woMatch?.[1] || trailingMatch?.[1] || "";
-  const sequence = raw ? Number(raw) : 1;
-  return `DR-${String(Number.isFinite(sequence) && sequence > 0 ? sequence : 1).padStart(5, "0")}`;
-}
-
-export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order }: Props) {
+export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order, deliveryDraft }: Props) {
   const navigate = useNavigate();
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [receiverName, setReceiverName] = useState("");
-  const [receiverIdNumber, setReceiverIdNumber] = useState("");
-  const [customerIdNumber, setCustomerIdNumber] = useState("");
-  const [mileageOut, setMileageOut] = useState("");
-  const [workSummary, setWorkSummary] = useState("");
-  const [partsReplaced, setPartsReplaced] = useState("");
-  const [warrantyNotes, setWarrantyNotes] = useState("ضمان لمدة 7 أيام أو 500 كم على الأعمال المنفذة فقط — لا يشمل الأعطال غير المرتبطة بالإصلاح.");
-  const [satisfactionNotes, setSatisfactionNotes] = useState("");
-  const [idPhoto, setIdPhoto] = useState<string | null>(null);
-  const [signature, setSignature] = useState<string | null>(null);
+  const [date, setDate] = useState(() => getDeliveredDateInputValue(deliveryDraft?.date));
+  const [receiverName, setReceiverName] = useState(deliveryDraft?.receiverName || "");
+  const [receiverIdNumber, setReceiverIdNumber] = useState(deliveryDraft?.receiverIdNumber || "");
+  const [customerIdNumber, setCustomerIdNumber] = useState(deliveryDraft?.customerIdNumber || "");
+  const [mileageOut, setMileageOut] = useState(deliveryDraft?.mileageOut || "");
+  const [workSummary, setWorkSummary] = useState(deliveryDraft?.workSummary || "");
+  const [partsReplaced, setPartsReplaced] = useState(deliveryDraft?.partsReplaced || "");
+  const [warrantyNotes, setWarrantyNotes] = useState(deliveryDraft?.warrantyNotes || getDefaultDeliveryWarrantyNotes());
+  const [satisfactionNotes, setSatisfactionNotes] = useState(deliveryDraft?.satisfactionNotes || "");
+  const [idPhoto, setIdPhoto] = useState<string | null>(deliveryDraft?.idPhotoDataUrl || null);
+  const [signature, setSignature] = useState<string | null>(deliveryDraft?.signatureDataUrl || null);
 
   const [pdfOpen, setPdfOpen] = useState(false);
   const [html, setHtml] = useState("");
@@ -63,11 +61,6 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const orderDisplay = order.displayNumber || order.id;
-  const receiptNumber = useMemo(
-    () => formatDeliveryReceiptNumber(orderDisplay),
-    [orderDisplay]
-  );
-
   // ====== Signature pad ======
   const sigCanvas = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
@@ -113,29 +106,19 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
   }
 
   function buildHtml() {
-    return getVehicleDeliveryReceiptHtml({
-      receiptNumber,
+    return getVehicleDeliveryReceiptHtml(buildDeliveryReceiptData(order, {
       date,
-      workOrderNumber: orderDisplay,
-      customerName: order.customer,
-      customerPhone: order.phone,
-      customerIdNumber: customerIdNumber || undefined,
-      receiverName: receiverName || undefined,
-      receiverIdNumber: receiverIdNumber || undefined,
-      vehicleType: order.vehicleType,
-      model: order.model,
-      year: order.year,
-      plateNumber: order.plate,
-      vin: order.vin,
-      color: order.color,
-      mileageOut: mileageOut || undefined,
-      workSummary: workSummary || undefined,
-      partsReplaced: partsReplaced || undefined,
-      warrantyNotes: warrantyNotes || undefined,
-      satisfactionNotes: satisfactionNotes || undefined,
-      signatureDataUrl: signature || undefined,
-      idPhotoDataUrl: idPhoto || undefined,
-    });
+      customerIdNumber,
+      receiverName,
+      receiverIdNumber,
+      mileageOut,
+      workSummary,
+      partsReplaced,
+      warrantyNotes,
+      satisfactionNotes,
+      signatureDataUrl: signature,
+      idPhotoDataUrl: idPhoto,
+    }));
   }
 
   function handlePreview() {
