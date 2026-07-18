@@ -157,7 +157,7 @@ export function defaultSchemaFor(docType: DocType): TemplateSchema {
     case "delivery_proof":
       return {
         version: 1,
-        page: { ...page, primaryColor: "#15803d" },
+        page: { ...page, primaryColor: "#15803d", baseFontSize: 8, marginTop: 8, marginRight: 10, marginBottom: 12, marginLeft: 10 },
         blocks: [
           block("header", {}, {}, "header"),
           block("title", { text: "محضر تسليم مركبة", textEn: "VEHICLE DELIVERY PROOF" }, { color: "#15803d", marginTop: 2, marginBottom: 4 }, "header"),
@@ -174,7 +174,7 @@ export function defaultSchemaFor(docType: DocType): TemplateSchema {
             ],
           }),
           block("text", { text: "ملاحظات: {{deliveryNotes}}" }, { fontSize: 10, paddingTop: 3 }),
-          block("spacer", { size: 8 }),
+          block("spacer", { size: 3 }),
           block("stamp", { signatureLabel: "توقيع المستلم / Receiver Signature" }, {}, "footer"),
           block("footer", {}, {}, "footer"),
         ],

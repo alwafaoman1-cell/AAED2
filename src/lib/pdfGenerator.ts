@@ -317,14 +317,14 @@ function getBaseStyles(s: PdfTemplateSettings) {
     .notes-box{margin-top:12px;padding:9px 12px;background:#f8f9fa;border-radius:8px;border-right:3px solid ${s.primaryColor};font-size:10.3px;color:#555;line-height:1.55;break-inside:avoid;page-break-inside:avoid}
     .notes-box .label-en{display:block;font-size:9px;color:#999;font-family:'Inter',sans-serif;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
 
-    .footer,.pdf-flow-footer{position:static!important;margin-top:7mm;text-align:center;font-size:8.5px;color:#8a94a6;border-top:1px solid #e5e7eb;padding-top:2.5mm;line-height:1.45;break-inside:avoid;page-break-inside:avoid;clear:both}
+    .footer,.pdf-flow-footer{position:static!important;margin-top:3mm;text-align:center;font-size:7.2px;color:#8a94a6;border-top:1px solid #e5e7eb;padding-top:1.4mm;line-height:1.3;break-inside:avoid;page-break-inside:avoid;clear:both}
     .footer .en{display:block;font-family:'Inter',sans-serif;color:#bbb}
-    .pdf-signature-stamp{margin-top:7mm;display:grid;grid-template-columns:1fr 1.15fr;gap:10mm;align-items:end;break-inside:avoid;page-break-inside:avoid;clear:both;min-height:24mm}
-    .pdf-signature-stamp .pdf-signature-box,.pdf-signature-stamp .pdf-stamp-box{min-height:23mm;text-align:center}
-    .pdf-signature-stamp .pdf-stamp-box{border:1px dashed #cbd5e1;border-radius:4px;padding:2mm;color:#64748b;font-weight:700;display:flex;align-items:center;justify-content:center;background:#fff}
-    .pdf-signature-stamp .pdf-signature-line{height:18mm;display:flex;align-items:flex-end;justify-content:center}
-    .pdf-signature-stamp .pdf-signature-line:after{content:"";display:block;width:48mm;border-bottom:1px solid #10213c}
-    .pdf-signature-stamp img{max-height:21mm;max-width:70mm;object-fit:contain}
+    .pdf-signature-stamp{margin-top:4mm;display:grid;grid-template-columns:1fr 1.15fr;gap:7mm;align-items:end;break-inside:avoid;page-break-inside:avoid;clear:both;min-height:18mm}
+    .pdf-signature-stamp .pdf-signature-box,.pdf-signature-stamp .pdf-stamp-box{min-height:17mm;text-align:center}
+    .pdf-signature-stamp .pdf-stamp-box{border:1px dashed #cbd5e1;border-radius:4px;padding:1.2mm;color:#64748b;font-weight:700;display:flex;align-items:center;justify-content:center;background:#fff}
+    .pdf-signature-stamp .pdf-signature-line{height:12mm;display:flex;align-items:flex-end;justify-content:center}
+    .pdf-signature-stamp .pdf-signature-line:after{content:"";display:block;width:42mm;border-bottom:1px solid #10213c}
+    .pdf-signature-stamp img{max-height:16mm;max-width:56mm;object-fit:contain}
     .pdf-signature-title,.pdf-stamp-title{font-size:10.5px;font-weight:800;color:#263b57;margin-bottom:2mm}
 
     .status-badge{display:inline-flex;flex-direction:column;align-items:center;padding:4px 12px;border-radius:14px;font-size:10.5px;font-weight:600;line-height:1.2}
@@ -1924,11 +1924,25 @@ export interface VehicleDeliveryReceiptData {
 
 export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData): string {
   const s = getTemplateSettings();
-  const body = `<div class="page">
+  const deliveryCompactStyles = `
+    <style>
+      .vehicle-delivery-page{padding:9mm 11mm 13mm!important;font-size:8.5px!important;line-height:1.28!important}
+      .vehicle-delivery-page .header{margin-bottom:6px!important;padding-bottom:5px!important}
+      .vehicle-delivery-page .section-title{font-size:9.3px!important;margin:7px 0 4px!important}
+      .vehicle-delivery-page .info-grid{gap:2px 12px!important;margin-bottom:6px!important}
+      .vehicle-delivery-page .info-row{font-size:8.3px!important;padding:1px 0!important}
+      .vehicle-delivery-page .notes-box{padding:5px 7px!important;margin-top:5px!important;font-size:8.1px!important;line-height:1.32!important}
+      .vehicle-delivery-page .pdf-signature-stamp{margin-top:3mm!important;min-height:16mm!important;gap:6mm!important}
+      .vehicle-delivery-page .pdf-signature-stamp .pdf-signature-box,
+      .vehicle-delivery-page .pdf-signature-stamp .pdf-stamp-box{min-height:15mm!important}
+      .vehicle-delivery-page .pdf-signature-stamp img{max-height:14mm!important;max-width:48mm!important}
+      .vehicle-delivery-page .footer{margin-top:1.5mm!important;padding-top:.8mm!important;font-size:6.4px!important}
+    </style>`;
+  const body = `${deliveryCompactStyles}<div class="page vehicle-delivery-page">
     ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
     ${headerHtml(s, 'إقرار استلام سيارة', 'VEHICLE DELIVERY RECEIPT', data.receiptNumber, data.date, 'background:linear-gradient(135deg,#059669,#047857);')}
 
-    <div style="background:#f0fdf4;border:2px solid #10b981;border-radius:10px;padding:14px 16px;margin:14px 0;font-size:13px;line-height:1.9;">
+    <div style="background:#f0fdf4;border:1.5px solid #10b981;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:9px;line-height:1.45;">
       <strong style="color:#047857;">إقرار استلام:</strong>
       أقرّ أنا الموقّع أدناه بأنني استلمت سيارتي الموصوفة بياناتها أدناه من
       <strong>${s.companyName}</strong> بحالة جيدة وسليمة وقمت بمعاينتها معاينة كاملة،
@@ -1970,20 +1984,20 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
 
     ${data.idPhotoDataUrl ? `
       ${sectionTitle('صورة هوية المستلم', 'Receiver ID')}
-      <div style="text-align:center;margin:10px 0;">
-        <img src="${data.idPhotoDataUrl}" alt="id" style="max-width:60%;max-height:280px;border:1px solid #ddd;border-radius:8px;" />
+      <div style="text-align:center;margin:6px 0;">
+        <img src="${data.idPhotoDataUrl}" alt="id" style="max-width:55%;max-height:180px;border:1px solid #ddd;border-radius:8px;" />
       </div>
     ` : ''}
 
-    <div style="margin-top:50px;display:flex;justify-content:space-between;gap:20px;">
+    <div style="margin-top:14px;display:flex;justify-content:space-between;gap:14px;break-inside:avoid;page-break-inside:avoid;">
       <div style="text-align:center;flex:1;">
-        ${data.signatureDataUrl ? `<img src="${data.signatureDataUrl}" alt="sig" style="max-height:70px;display:block;margin:0 auto 4px;" />` : ''}
-        <div style="border-top:1px solid #444;padding-top:6px;font-size:11px;color:#444;font-weight:600;">
+        ${data.signatureDataUrl ? `<img src="${data.signatureDataUrl}" alt="sig" style="max-height:32px;display:block;margin:0 auto 3px;" />` : ''}
+        <div style="border-top:1px solid #444;padding-top:4px;font-size:8.5px;color:#444;font-weight:600;">
           توقيع المستلم<br/><span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;">Receiver Signature</span>
         </div>
       </div>
       <div style="text-align:center;flex:1;">
-        <div style="border-top:1px solid #444;padding-top:6px;font-size:11px;color:#444;font-weight:600;margin-top:30px;">
+        <div style="border-top:1px solid #444;padding-top:4px;font-size:8.5px;color:#444;font-weight:600;margin-top:16px;">
           مندوب الورشة<br/><span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;">Workshop Representative</span>
         </div>
       </div>

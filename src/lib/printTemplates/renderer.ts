@@ -157,17 +157,17 @@ function renderQrZatca(b: TemplateBlock, data: any): string {
 
 function renderStamp(b: TemplateBlock, data: any): string {
   const p = b.props || {};
-  const size = Math.min(Number(p.stampSize ?? 22) || 22, 22);
+  const size = Math.min(Number(p.stampSize ?? 16) || 16, 16);
   const stamp = data.stampUrl || data.companyStamp || "";
   const sig = data.signatureUrl || data.companySignature || "";
   return `<table class="tpl-stamp-section" style="width:100%;border-collapse:collapse;${styleToCss(b.style)}"><tr>
-    <td style="width:50%;text-align:center;padding:2mm 3mm;border-top:1px solid #e5e7eb">
+    <td style="width:50%;text-align:center;padding:1mm 2mm;border-top:1px solid #e5e7eb">
       <div style="font-size:8pt;color:#6b7280;margin-bottom:2mm">${escapeHtml(p.signatureLabel || "التوقيع / Signature")}</div>
-      ${sig ? `<img src="${escapeHtml(sig)}" style="height:${Math.max(9, size * 0.45)}mm;max-width:48mm;object-fit:contain"/>` : `<div style="height:9mm"></div>`}
+      ${sig ? `<img src="${escapeHtml(sig)}" style="height:${Math.max(7, size * 0.42)}mm;max-width:42mm;object-fit:contain"/>` : `<div style="height:7mm"></div>`}
     </td>
-    <td style="width:50%;text-align:center;padding:2mm 3mm;border-top:1px solid #e5e7eb">
+    <td style="width:50%;text-align:center;padding:1mm 2mm;border-top:1px solid #e5e7eb">
       <div style="font-size:8pt;color:#6b7280;margin-bottom:2mm">الختم / Stamp</div>
-      ${stamp ? `<img src="${escapeHtml(stamp)}" style="height:${size}mm;max-width:58mm;object-fit:contain"/>` : `<div style="height:${Math.min(size, 14)}mm"></div>`}
+      ${stamp ? `<img src="${escapeHtml(stamp)}" style="height:${size}mm;max-width:46mm;object-fit:contain"/>` : `<div style="height:${Math.min(size, 10)}mm"></div>`}
     </td>
   </tr></table>`;
 }
@@ -193,7 +193,7 @@ function renderSpacer(b: TemplateBlock): string {
 
 function renderFooter(b: TemplateBlock, data: any): string {
   const txt = bind(b.props?.text || "شكراً لتعاملكم معنا · Thank you for your business", data);
-  return `<table style="width:100%;border-collapse:collapse;${styleToCss(b.style)};border-top:1px solid #e5e7eb;margin-top:2mm"><tr><td style="text-align:center;padding:1.8mm 2mm;font-size:7pt;color:#6b7280">${escapeHtml(txt)}</td></tr></table>`;
+  return `<table style="width:100%;border-collapse:collapse;${styleToCss(b.style)};border-top:1px solid #e5e7eb;margin-top:1mm"><tr><td style="text-align:center;padding:1mm 2mm;font-size:6.4pt;color:#6b7280">${escapeHtml(txt)}</td></tr></table>`;
 }
 
 function renderBlock(b: TemplateBlock, data: any): string {
@@ -225,6 +225,7 @@ html, body { margin:0; padding:0; -webkit-print-color-adjust: exact; print-color
 body {
   font-family: '${page.baseFontFamily}', 'Cairo', 'Amiri', Arial, sans-serif;
   font-size: ${page.baseFontSize}pt;
+  line-height: 1.28;
   color: ${page.primaryColor};
   direction: ${page.rtl ? "rtl" : "ltr"};
   background: #fff;
@@ -243,7 +244,10 @@ img { display: inline-block; }
   margin: 0 auto;
   background: #fff;
   position: relative;
+  overflow: visible;
 }
+.page [data-zone="body"] { font-size: .88em; line-height: 1.24; }
+.page [data-zone="footer"] { font-size: .82em; margin-top: 1mm; }
 .print-actions { display: none; }
 @media screen { body { background: #f3f4f6; padding: 16px 0; } .page { box-shadow: 0 4px 24px rgba(0,0,0,.08); } }
 @media print { body { background: #fff; padding: 0; } .page { box-shadow: none; margin: 0; } }

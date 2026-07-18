@@ -170,18 +170,18 @@ function baseStyles(s: PdfTemplateSettings) {
     .photos-grid .ph img{width:100%;height:100%;object-fit:cover;display:block}
     .photos-grid .ph .cap{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.55);color:white;padding:3px 6px;font-size:9px;text-align:center}
 
-    .signature-area{margin-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;break-inside:avoid;page-break-inside:avoid}
-    .signature-area .sig{border:1px dashed #bbb;border-radius:6px;padding:6px;text-align:center;min-width:0}
-    .signature-area .sig .name{font-size:8.5px;font-weight:600;margin-bottom:3px;color:#333}
-    .signature-area .sig .area{height:30px;display:flex;align-items:center;justify-content:center}
-    .signature-area .sig .area img{max-height:28px;max-width:100%;object-fit:contain}
-    .signature-area .sig .lbl{font-size:7.5px;color:#777;margin-top:3px}
+    .signature-area{margin-top:6px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;break-inside:avoid;page-break-inside:avoid}
+    .signature-area .sig{border:1px dashed #bbb;border-radius:5px;padding:4px;text-align:center;min-width:0}
+    .signature-area .sig .name{font-size:7.6px;font-weight:600;margin-bottom:2px;color:#333}
+    .signature-area .sig .area{height:24px;display:flex;align-items:center;justify-content:center}
+    .signature-area .sig .area img{max-height:22px;max-width:100%;object-fit:contain}
+    .signature-area .sig .lbl{font-size:6.8px;color:#777;margin-top:2px}
 
     .notes-box{margin-top:9px;padding:7px 10px;background:#f8f9fa;border-radius:6px;border-right:3px solid ${s.primaryColor};font-size:9px;color:#555;line-height:1.5}
-    .footer{position:static!important;margin-top:4mm;text-align:center;font-size:7px;color:#8a94a6;border-top:1px solid #e5e7eb;padding-top:1.8mm;line-height:1.35;break-inside:avoid;page-break-inside:avoid;clear:both}
+    .footer{position:static!important;margin-top:2mm;text-align:center;font-size:6.5px;color:#8a94a6;border-top:1px solid #e5e7eb;padding-top:1mm;line-height:1.25;break-inside:avoid;page-break-inside:avoid;clear:both}
     .watermark{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:78px;font-weight:700;color:rgba(13,71,161,0.05);pointer-events:none;white-space:nowrap;font-family:'Inter',sans-serif}
-    .stamp-bottom-right{position:static!important;margin-top:7mm;width:auto;opacity:0.92;text-align:center;break-inside:avoid;page-break-inside:avoid;clear:both}
-    .stamp-bottom-right img{max-width:62mm;max-height:19mm;object-fit:contain}
+    .stamp-bottom-right{position:static!important;margin-top:4mm;width:auto;opacity:0.92;text-align:center;break-inside:avoid;page-break-inside:avoid;clear:both}
+    .stamp-bottom-right img{max-width:52mm;max-height:16mm;object-fit:contain}
     .estimation-badge{display:flex;justify-content:center;margin-top:14px}
     .estimation-badge span{display:inline-block;padding:6px 28px;border:3px solid #0d47a1;color:#0d47a1;font-size:20pt;font-weight:900;letter-spacing:5px;direction:ltr;border-radius:6px;background:rgba(13,71,161,0.04)}
 
@@ -1028,7 +1028,24 @@ export function getClaimDeliveryHtml(p: ClaimDeliveryPayload): string {
     if (custom) return custom;
   } catch {}
   const s = getTemplateSettings();
-  const styles = baseStyles(s);
+  const styles = `${baseStyles(s)}
+    .delivery-page{padding:8mm 10mm 12mm!important;font-size:8.4px!important;line-height:1.26!important}
+    .delivery-page .header{padding-bottom:5px!important;margin-bottom:6px!important}
+    .delivery-page .insurance-banner{padding:6px 9px!important;margin-bottom:6px!important}
+    .delivery-page .vehicle-card{padding:6px 9px!important;margin-bottom:6px!important}
+    .delivery-page .section-title{font-size:9.2px!important;margin:6px 0 3px!important}
+    .delivery-page .info-grid{gap:2px 10px!important;margin-bottom:5px!important}
+    .delivery-page .info-row{font-size:8.2px!important;padding:1px 0!important}
+    .delivery-page .info-row .label{min-width:88px!important}
+    .delivery-page .notes-box{margin-top:5px!important;padding:5px 7px!important;font-size:8px!important;line-height:1.32!important}
+    .delivery-page .signature-area{margin-top:5px!important;gap:5px!important}
+    .delivery-page .signature-area .sig{padding:4px!important;border-radius:4px!important}
+    .delivery-page .signature-area .sig .name{font-size:7px!important;margin-bottom:1px!important}
+    .delivery-page .signature-area .sig .area{height:20px!important}
+    .delivery-page .signature-area .sig .area img{max-height:18px!important}
+    .delivery-page .signature-area .sig .lbl{font-size:6.3px!important;margin-top:1px!important}
+    .delivery-page .footer{margin-top:1.5mm!important;padding-top:.8mm!important;font-size:6px!important}
+  `;
 
   const renderPhotoGrid = (photos: string[], label: string) => {
     if (!photos.length) return "";
@@ -1040,7 +1057,7 @@ export function getClaimDeliveryHtml(p: ClaimDeliveryPayload): string {
   };
 
   const body = `
-    <div class="page">
+    <div class="page delivery-page">
       ${s.showWatermark ? `<div class="watermark">DELIVERY</div>` : ""}
       ${headerHtml(s, "محضر تسليم", "DELIVERY PROOF", p.claimNumber, p.deliveryDate)}
       ${insuranceBanner(p.insuranceCompany, p.claimNumber)}
