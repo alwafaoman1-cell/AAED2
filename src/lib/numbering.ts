@@ -1,11 +1,11 @@
-// Centralized sequential numbering helpers — produces PREFIX-YYYY-NNNNN
+// Centralized sequential numbering helpers — produces PREFIX-YYYY-NNNN/NNNNN according to settings.
 // Pulls existing IDs from the work-orders store and finds the next number for the current year.
 import { getWorkOrders } from "@/lib/workOrdersStore";
 import { numberingStore, resolveSeriesByPrefix } from "@/lib/numberingSettings";
 
 /**
  * Generate next sequential work-order number for the current year.
- * Format: WO-YYYY-NNNNN  (e.g. WO-2026-00001)
+ * Format: WO-YYYY-NNNN  (e.g. WO-2026-0001)
  */
 export function nextWorkOrderNumber(): string {
   const year = new Date().getFullYear();
@@ -25,7 +25,7 @@ export function nextWorkOrderNumber(): string {
 
 /**
  * Generic helper: next sequential number for a custom prefix and existing list.
- * Format: PREFIX-YYYY-NNNNN
+ * Format: PREFIX-YYYY-NNNN/NNNNN according to the configured series.
  */
 export function nextSequentialNumber(prefix: string, existing: string[]): string {
   const year = new Date().getFullYear();

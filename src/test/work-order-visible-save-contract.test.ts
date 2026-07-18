@@ -36,4 +36,28 @@ describe("work order visible save contract", () => {
     expect(store).toContain("return pendingPatch ? { ...mapped, ...pendingPatch } : mapped");
     expect(store).toContain("patch: { parts_required: patch.partsNeeded }");
   });
+
+  it("does not require vehicle model when creating or linking a vehicle", () => {
+    const identity = read("src/lib/vehicleIdentity.ts");
+    const form = read("src/components/workorders/WorkOrderForm.tsx");
+    expect(identity).toContain("if (!make) throw new Error(\"أدخل ماركة المركبة قبل الحفظ\")");
+    expect(identity).not.toContain("أدخل ماركة وموديل المركبة قبل الحفظ");
+    expect(form).toContain("أدخل ماركة المركبة قبل المتابعة");
+    expect(form).toContain("أدخل ماركة المركبة قبل حفظ أمر العمل");
+    expect(form).not.toContain("أدخل ماركة وموديل المركبة قبل المتابعة");
+    expect(form).not.toContain("أدخل ماركة وموديل المركبة قبل حفظ أمر العمل");
+  });
+
+  it("uses four-digit work-order numbers and keeps a safe renumber audit migration", () => {
+    const numbering = read("src/lib/numberingSettings.ts");
+    const helper = read("src/lib/numbering.ts");
+    const migration = read("supabase/migrations/20260718090000_renumber_work_orders_four_digits.sql");
+    expect(numbering).toContain('WO:        { label: "أوامر العمل",            prefix: "WO",      startFrom: 1, padding: 4 }');
+    expect(helper).toContain("WO-YYYY-NNNN");
+    expect(migration).toContain("work_order_number_renumber_audit");
+    expect(migration).toContain("lpad(rn::text, 4, '0')");
+    expect(migration).toContain("setval('public.job_order_seq'");
+    expect(migration).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
+  });
 });

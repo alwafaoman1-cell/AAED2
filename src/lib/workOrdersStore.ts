@@ -218,7 +218,11 @@ export function updateWorkOrder(id: string, patch: Partial<WorkOrder>) {
   const list = load();
   const idx = list.findIndex(o => o.id === id);
   if (idx >= 0) {
-    list[idx] = { ...list[idx], ...patch };
+    const normalizedPatch = { ...patch };
+    if (patch.status !== undefined && isClosedWorkOrderStatus(patch.status) && patch.archivedAt === undefined) {
+      normalizedPatch.archivedAt = list[idx].archivedAt || new Date().toISOString();
+    }
+    list[idx] = { ...list[idx], ...normalizedPatch };
     persist();
   }
 }
@@ -445,6 +449,11 @@ function localStatusToCloud(s: string | undefined): string {
   return "received";
 }
 
+function isClosedWorkOrderStatus(status: string | undefined): boolean {
+  const local = (status || "").trim();
+  return ["مغلق", "تم التسليم"].includes(local) || localStatusToCloud(local) === "delivered";
+}
+
 const LEGACY_METADATA_KEY = "__aaedMetadata";
 const LEGACY_RECEPTION_DAMAGE_KEY = "__aaedReceptionDamageMarkers";
 const LEGACY_RECEPTION_SIGNATURE_KEY = "__aaedReceptionSignatureDataUrl";
@@ -612,7 +621,6 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       .from("job_orders")
       .select("*")
       .is("deleted_at", null)
-      .is("archived_at", null)
       .order("created_at", { ascending: false })
       .limit(5000);
     if (ordersResult.error && isMissingJobOrderColumnError(ordersResult.error)) {
@@ -984,7 +992,7 @@ function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string
     insurance_claim_number: o.claimNumber && o.claimNumber !== "-" ? o.claimNumber : null,
     claim_id: o.claimId && isUuid(o.claimId) ? o.claimId : null,
     work_order_type: o.claimId ? "insurance" : (o.workOrderType || "general_customer"),
-    archived_at: o.archivedAt || null,
+    archived_at: o.archivedAt || (isClosedWorkOrderStatus(o.status) ? new Date().toISOString() : null),
     notes: o.description || null,
     parts_needed: (o.partsNeeded || []) as any,
     work_items: (o.workItems || []) as any,
@@ -1175,7 +1183,12 @@ async function _flushPatch(orderNumber: string) {
     const ctx = await tenantContext(); if (!ctx) return;
     const updates: any = {};
     const current = getWorkOrderById(orderNumber);
-    if (patch.status !== undefined) updates.status = localStatusToCloud(patch.status) as any;
+    if (patch.status !== undefined) {
+      updates.status = localStatusToCloud(patch.status) as any;
+      if (isClosedWorkOrderStatus(patch.status) && patch.archivedAt === undefined) {
+        updates.archived_at = current?.archivedAt || new Date().toISOString();
+      }
+    }
     if (patch.diagnosis !== undefined) { updates.diagnosis = patch.diagnosis; updates.diagnosis_notes = patch.diagnosis; }
     if (patch.description !== undefined) updates.description = patch.description;
     if (patch.technician !== undefined) updates.technician_name = patch.technician;
@@ -1276,9 +1289,8 @@ async function pushDeleteToCloud(orderNumber: string) {
   try {
     const ctx = await tenantContext(); if (!ctx) return;
     const archivedAt = new Date().toISOString();
-    const { data: userData } = await supabase.auth.getUser();
     let { data, error } = await supabase.from("job_orders")
-      .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userData.user?.id || null } as any)
+      .update({ archived_at: archivedAt, deleted_at: null, deleted_by: null } as any)
       .eq("tenant_id", ctx.tenantId)
       .eq("order_number", orderNumber)
       .select("id")

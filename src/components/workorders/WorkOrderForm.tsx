@@ -147,7 +147,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     if (wizardStep === 0) {
       if (!form.customer) return toast.error("أكمل بيانات العميل قبل المتابعة");
       if (!form.plate) return toast.error("أدخل رقم اللوحة قبل المتابعة");
-      if (!form.vehicleType?.trim() || !form.model?.trim()) return toast.error("أدخل ماركة وموديل المركبة قبل المتابعة");
+      if (!form.vehicleType?.trim()) return toast.error("أدخل ماركة المركبة قبل المتابعة");
     }
     setWizardStep((step) => Math.min(2, step + 1) as 0 | 1 | 2);
   };
@@ -401,8 +401,8 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       toast.error("الرجاء إدخال رقم اللوحة");
       return;
     }
-    if (!form.vehicleId && !vehicleMatch?.id && (!form.vehicleType?.trim() || !form.model?.trim())) {
-      toast.error("أدخل ماركة وموديل المركبة قبل حفظ أمر العمل");
+    if (!form.vehicleId && !vehicleMatch?.id && !form.vehicleType?.trim()) {
+      toast.error("أدخل ماركة المركبة قبل حفظ أمر العمل");
       return;
     }
     if (selectedType === "insurance") {

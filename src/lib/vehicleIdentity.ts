@@ -159,7 +159,7 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
   const make = String(input.make || "").trim();
   const model = String(input.model || "").trim();
   if (!plate.digits) throw new Error("رقم اللوحة مطلوب قبل حفظ المركبة");
-  if (!make || !model) throw new Error("أدخل ماركة وموديل المركبة قبل الحفظ");
+  if (!make) throw new Error("أدخل ماركة المركبة قبل الحفظ");
   const { data, error } = await supabase
     .from("vehicles")
     .insert({

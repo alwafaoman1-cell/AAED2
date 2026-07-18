@@ -68,6 +68,7 @@ import Can from "@/components/Can";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { expensesStore } from "@/lib/expensesStore";
 import { isUuid } from "@/lib/uuid";
+import { resolveClaimVehicleForWorkOrder } from "@/lib/claimVehicleResolver";
 import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { displayCustomerCode } from "@/lib/customerCode";
@@ -871,6 +872,23 @@ export default function InsuranceClaimDetail() {
       toast.warning("تحذير: لم يتم إدخال تاريخ وصول السيارة للورشة — يُفضّل إدخاله قبل اعتماد المطالبة.");
       // نستمر في الاعتماد لكن نحذر فقط
     }
+    try {
+      const resolvedVehicleId = await resolveClaimVehicleForWorkOrder({
+        claimId: id,
+        customerId,
+        vehicleId,
+        plate: vehicle?.plate_number || vehiclePlate,
+        make: vehicle?.brand || vehicleMake,
+        model: vehicle?.model || vehicleModel,
+        year: vehicle?.year || vehicleYear,
+        color: (vehicle as any)?.color || vehicleColor,
+        vin: (vehicle as any)?.vin_number || (vehicle as any)?.vin || vehicleVin,
+      });
+      setVehicleId(resolvedVehicleId);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر إنشاء أو ربط المركبة في Supabase قبل اعتماد المطالبة");
+      return;
+    }
     updateStatus.mutate(
       { id, status: "approved", approved_amount: parseMoneyInput(approvedAmount) },
       {
@@ -950,7 +968,6 @@ export default function InsuranceClaimDetail() {
     const missing: string[] = [];
     if (!effectivePlate)        missing.push("رقم لوحة السيارة");
     if (!effectiveMake)         missing.push("ماركة السيارة");
-    if (!effectiveModel)        missing.push("موديل السيارة");
     if (!effectiveCustomerName) missing.push("اسم مالك السيارة");
     if (!company)               missing.push("شركة التأمين");
     if (!claimNumber)           missing.push("رقم المطالبة");
@@ -959,6 +976,25 @@ export default function InsuranceClaimDetail() {
         description: "أكمل البيانات في تبويب «معلومات المطالبة» ثم أعد المحاولة.",
         duration: 7000,
       });
+      return;
+    }
+
+    let resolvedVehicleId: string;
+    try {
+      resolvedVehicleId = await resolveClaimVehicleForWorkOrder({
+        claimId: id,
+        customerId,
+        vehicleId,
+        plate: effectivePlate,
+        make: effectiveMake,
+        model: effectiveModel,
+        year: effectiveYear,
+        color: (vehicle as any)?.color || vehicleColor,
+        vin: (vehicle as any)?.vin_number || (vehicle as any)?.vin || vehicleVin,
+      });
+      setVehicleId(resolvedVehicleId);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر إنشاء أو ربط المركبة في Supabase قبل حفظ أمر العمل");
       return;
     }
 
@@ -978,7 +1014,7 @@ export default function InsuranceClaimDetail() {
       customer: company || effectiveCustomerName, // payer = insurance company
       phone: effectivePhone,
       customerId,
-      vehicleId,
+      vehicleId: resolvedVehicleId,
       claimId: id && isUuid(id) ? id : undefined,
       workOrderType: "insurance",
       plate: effectivePlate,

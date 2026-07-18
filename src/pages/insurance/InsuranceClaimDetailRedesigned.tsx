@@ -46,6 +46,7 @@ import { displayCustomerCode } from "@/lib/customerCode";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { isUuid } from "@/lib/uuid";
 import { saveWorkOrderToCloud, type WorkOrder } from "@/lib/workOrdersStore";
+import { resolveClaimVehicleForWorkOrder } from "@/lib/claimVehicleResolver";
 import {
   addUnifiedVehicleMedia,
   fetchUnifiedOperationalState,
@@ -639,16 +640,28 @@ export default function InsuranceClaimDetailRedesigned() {
     try {
       const { data: auth } = await supabase.auth.getUser();
       const approvedAt = new Date().toISOString();
+      const resolvedVehicleId = await resolveClaimVehicleForWorkOrder({
+        claimId: currentId,
+        customerId: claim.customer_id,
+        vehicleId: claim.vehicle_id,
+        plate: inlineVehicle.plate || plate,
+        make: vehicle?.brand || inlineVehicle.make,
+        model: vehicle?.model || inlineVehicle.model,
+        year: vehicle?.year || inlineVehicle.year,
+        color: vehicle?.color || inlineVehicle.color,
+        vin: (vehicle as any)?.vin_number || (vehicle as any)?.vin || inlineVehicle.vin,
+      });
       await updateClaimColumns(currentId, {
         status: "approved",
         approved_at: approvedAt,
         insurance_approved_at: (claim as any).insurance_approved_at || approvedAt,
+        vehicle_id: resolvedVehicleId,
       });
       await upsertUnifiedOperationalState({
         tenantId: claim.tenant_id,
         claimId: currentId,
         workOrderId: workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
-        vehicleId: claim.vehicle_id || null,
+        vehicleId: resolvedVehicleId,
         customerId: claim.customer_id || null,
         changedFrom: "claim",
         changedBy: auth.user?.id || null,
@@ -672,12 +685,23 @@ export default function InsuranceClaimDetailRedesigned() {
       navigate(`/work-orders/${workOrder.order_number || workOrder.id}`);
       return;
     }
-    if (!claim.customer_id || !claim.vehicle_id) {
-      toast.error("لا يمكن إنشاء أمر عمل بدون ربط عميل ومركبة بالمطالبة");
+    if (!claim.customer_id) {
+      toast.error("لا يمكن إنشاء أمر عمل بدون ربط العميل بالمطالبة");
       return;
     }
     setWorkOrderSaving(true);
     try {
+      const resolvedVehicleId = await resolveClaimVehicleForWorkOrder({
+        claimId: currentId,
+        customerId: claim.customer_id,
+        vehicleId: claim.vehicle_id,
+        plate: inlineVehicle.plate || plate,
+        make: vehicle?.brand || inlineVehicle.make,
+        model: vehicle?.model || inlineVehicle.model,
+        year: vehicle?.year || inlineVehicle.year,
+        color: vehicle?.color || inlineVehicle.color,
+        vin: (vehicle as any)?.vin_number || (vehicle as any)?.vin || inlineVehicle.vin,
+      });
       const now = new Date();
       const orderNumber = `WO-${now.getFullYear()}-${String(now.getTime() % 100000).padStart(5, "0")}`;
       const order: WorkOrder = {
@@ -685,7 +709,7 @@ export default function InsuranceClaimDetailRedesigned() {
         workOrderType: "insurance",
         claimId: currentId,
         customerId: claim.customer_id,
-        vehicleId: claim.vehicle_id,
+        vehicleId: resolvedVehicleId,
         customer: customer?.name || (claim as any).vehicle_owner_name || "Insurance Customer",
         phone: customer?.phone || (claim as any).vehicle_owner_phone || "",
         plate: plate || inlineVehicle.plate || "-",
@@ -729,7 +753,7 @@ export default function InsuranceClaimDetailRedesigned() {
         tenantId: claim.tenant_id,
         claimId: currentId,
         workOrderId: saved.cloudId || null,
-        vehicleId: claim.vehicle_id || null,
+        vehicleId: resolvedVehicleId,
         customerId: claim.customer_id || null,
         changedFrom: "claim",
         changedBy: auth.user?.id || null,

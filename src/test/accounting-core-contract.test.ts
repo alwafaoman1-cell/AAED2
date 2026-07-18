@@ -72,4 +72,27 @@ describe("accounting core contract", () => {
     expect(migration).not.toMatch(/\bDELETE\s+FROM\b/i);
     expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
   });
+
+  it("keeps payment voucher template stable while adding advanced expense filters", () => {
+    const expenses = readFileSync(resolve(process.cwd(), "src/pages/accounting/ExpenseNew.tsx"), "utf8");
+    expect(expenses).toContain("getPaymentVoucherHtml");
+    expect(expenses).toContain("filterCashbox");
+    expect(expenses).toContain("filterPaymentMethod");
+    expect(expenses).toContain("filterDateFrom");
+    expect(expenses).toContain("filterAmountMin");
+    expect(expenses).toContain("filterVehiclePlate");
+    expect(expenses).toContain("filterWorkOrder");
+    expect(expenses).toContain("downloadExpenseReportPdf");
+    expect(expenses).toContain("downloadTaxReportPdf");
+  });
+
+  it("adds printable receipt vouchers without changing payment vouchers", () => {
+    const receipts = readFileSync(resolve(process.cwd(), "src/pages/accounting/Receipts.tsx"), "utf8");
+    expect(receipts).toContain("buildReceiptHtml");
+    expect(receipts).toContain("openReceiptPdf");
+    expect(receipts).toContain("PdfPreviewDialog");
+    expect(receipts).toContain("RECEIPT VOUCHER");
+    expect(receipts).toContain("filterSource");
+    expect(receipts).toContain("filterPaymentMethod");
+  });
 });

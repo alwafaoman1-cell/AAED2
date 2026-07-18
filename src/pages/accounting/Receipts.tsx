@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, FileSpreadsheet, Pencil, Plus, ReceiptText, Save, Trash2, X } from "lucide-react";
+import { ArrowRight, FileSpreadsheet, FileText, Pencil, Plus, Printer, ReceiptText, Save, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +25,7 @@ import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { exportRowsAsCsv, useBulkSelection } from "@/hooks/useBulkSelection";
 import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
+import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 
 interface Receipt {
   id: string;
@@ -49,6 +50,14 @@ export default function Receipts() {
   const [unifiedOpen, setUnifiedOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfHtml, setPdfHtml] = useState("");
+  const [pdfTitle, setPdfTitle] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterSource, setFilterSource] = useState<"all" | Receipt["source"]>("all");
+  const [filterPaymentMethod, setFilterPaymentMethod] = useState<string>("all");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
 
   const allowManage = canManageFinance();
   const categories = incomeCategoriesStore.getAll().filter((category) => category.active);
@@ -301,8 +310,87 @@ export default function Receipts() {
     await fetchCloudReceipts();
   }
 
-  const total = receipts.reduce((sum, receipt) => sum + receipt.amount, 0);
-  const bulk = useBulkSelection(receipts);
+  const filteredReceipts = useMemo(() => receipts.filter((receipt) => {
+    if (filterSource !== "all" && receipt.source !== filterSource) return false;
+    if (filterPaymentMethod !== "all" && receipt.paymentMethod !== filterPaymentMethod) return false;
+    if (filterDateFrom && receipt.date < filterDateFrom) return false;
+    if (filterDateTo && receipt.date > filterDateTo) return false;
+    if (searchTerm.trim()) {
+      const q = searchTerm.trim().toLowerCase();
+      const hay = `${receipt.number} ${receipt.payerName} ${receipt.notes || ""} ${receipt.source} ${receipt.paymentMethod}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }), [receipts, filterSource, filterPaymentMethod, filterDateFrom, filterDateTo, searchTerm]);
+
+  const total = filteredReceipts.reduce((sum, receipt) => sum + receipt.amount, 0);
+  const bulk = useBulkSelection(filteredReceipts);
+
+  const escapeHtml = (value: unknown) => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+  const getReceiptSourceLabel = (source: Receipt["source"]) =>
+    source === "sales" ? "فاتورة مبيعات" : source === "claim" ? "مطالبة تأمين" : "يدوي";
+
+  const buildReceiptHtml = (receipt: Receipt) => {
+    const category = categories.find((item) => item.id === receipt.categoryId);
+    const cashbox = cashboxes.find((item) => item.id === receipt.cashboxId);
+    const amount = Number(receipt.amount || 0).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"/>
+      <title>سند قبض ${escapeHtml(receipt.number)}</title>
+      <style>
+        @page{size:A4;margin:0}
+        *{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+        body{margin:0;background:#f1f5f9;font-family:Tahoma,Arial,sans-serif;color:#0f172a}
+        .page{width:210mm;min-height:297mm;margin:0 auto;background:white;padding:14mm;position:relative}
+        .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #16a34a;padding-bottom:8mm}
+        .badge{background:linear-gradient(135deg,#16a34a,#166534);color:white;border-radius:8px;padding:8mm 10mm;text-align:center;min-width:58mm}
+        .badge .small{font-size:12px;opacity:.9}.badge .num{font-size:22px;font-weight:800;font-family:Arial,sans-serif;direction:ltr}
+        .company{text-align:left;font-size:11px;line-height:1.7}.company b{font-size:16px;color:#0f172a}
+        h1{font-size:18px;margin:10mm 0 5mm;color:#166534}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:4mm;margin:5mm 0}
+        .row{border:1px solid #dbe3ef;border-radius:7px;padding:4mm;background:#f8fafc}
+        .row label{display:block;font-size:10px;color:#64748b;margin-bottom:1mm}.row strong{font-size:13px}
+        .amount{margin:9mm 0;background:linear-gradient(135deg,#16a34a,#166534);color:white;border-radius:10px;padding:8mm;text-align:center}
+        .amount .label{font-size:12px;opacity:.9}.amount .value{font-size:32px;font-weight:900;font-family:Arial,sans-serif;direction:ltr}
+        .notes{border-right:4px solid #16a34a;background:#f0fdf4;padding:5mm;border-radius:8px;min-height:22mm}
+        .signatures{display:flex;justify-content:space-between;margin-top:24mm;gap:12mm}
+        .sign{flex:1;text-align:center;border-top:1px solid #94a3b8;padding-top:3mm;color:#64748b;font-size:11px}
+        .footer{position:absolute;left:14mm;right:14mm;bottom:10mm;border-top:1px solid #e2e8f0;padding-top:3mm;text-align:center;color:#94a3b8;font-size:10px}
+        @media print{body{background:white}.page{margin:0;box-shadow:none}}
+      </style></head><body><div class="page">
+        <div class="header">
+          <div class="badge"><div class="small">سند قبض<br/>RECEIPT VOUCHER</div><div class="num">${escapeHtml(receipt.number)}</div><div class="small">${escapeHtml(receipt.date)}</div></div>
+          <div class="company"><b>شركة الوفاء للأعمال المتكاملة</b><br/>Al Wafa Integrated Business Company LLC<br/>Muscat, Sultanate of Oman</div>
+        </div>
+        <h1>بيانات سند القبض</h1>
+        <div class="grid">
+          <div class="row"><label>استلمنا من السيد / الجهة</label><strong>${escapeHtml(receipt.payerName || "—")}</strong></div>
+          <div class="row"><label>المصدر</label><strong>${escapeHtml(getReceiptSourceLabel(receipt.source))}</strong></div>
+          <div class="row"><label>التصنيف</label><strong>${escapeHtml(category?.name || receipt.categoryId || receipt.source)}</strong></div>
+          <div class="row"><label>الخزينة</label><strong>${escapeHtml(cashbox?.cashboxName || (receipt.source === "manual" ? receipt.cashboxId : "سحابي"))}</strong></div>
+          <div class="row"><label>طريقة الدفع</label><strong>${escapeHtml(PAYMENT_METHOD_LABELS[receipt.paymentMethod] || receipt.paymentMethod)}</strong></div>
+          <div class="row"><label>تاريخ الإنشاء</label><strong>${escapeHtml(receipt.createdAt || receipt.date)}</strong></div>
+        </div>
+        <div class="amount"><div class="label">المبلغ المستلم / Amount Received</div><div class="value">${amount} OMR</div></div>
+        <div class="notes"><strong>ملاحظات:</strong><br/>${escapeHtml(receipt.notes || "—")}</div>
+        <div class="signatures">
+          <div class="sign">توقيع المستلم<br/>Recipient Signature</div>
+          <div class="sign">المحاسب<br/>Accountant</div>
+          <div class="sign">المدير المعتمد<br/>Authorized Manager</div>
+        </div>
+        <div class="footer">Generated by TEMO Auto ERP • ${new Date().toISOString().slice(0, 10)}</div>
+      </div></body></html>`;
+  };
+
+  const openReceiptPdf = (receipt: Receipt) => {
+    setPdfHtml(buildReceiptHtml(receipt));
+    setPdfTitle(`سند قبض ${receipt.number}`);
+    setPdfOpen(true);
+  };
 
   async function handleBulkDelete() {
     const manualItems = bulk.selectedItems.filter((receipt) => receipt.source === "manual");
@@ -369,7 +457,7 @@ export default function Receipts() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-card border border-border rounded-xl p-4 shadow-card">
           <p className="text-xs text-muted-foreground">إجمالي السندات</p>
-          <p className="text-xl font-bold text-foreground mt-1">{loading ? "…" : receipts.length}</p>
+          <p className="text-xl font-bold text-foreground mt-1">{loading ? "…" : filteredReceipts.length}</p>
         </div>
         <div className="bg-card border border-border rounded-xl p-4 shadow-card">
           <p className="text-xs text-muted-foreground">إجمالي المقبوض</p>
@@ -377,11 +465,40 @@ export default function Receipts() {
         </div>
         <div className="bg-card border border-border rounded-xl p-4 shadow-card">
           <p className="text-xs text-muted-foreground">آخر سند</p>
-          <p className="text-xl font-bold text-foreground mt-1">{receipts[0]?.number ?? "—"}</p>
+          <p className="text-xl font-bold text-foreground mt-1">{filteredReceipts[0]?.number ?? "—"}</p>
         </div>
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3 p-4 border-b border-border bg-secondary/10">
+          <div className="relative md:col-span-2">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+            <Input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="بحث برقم السند / الدافع / الملاحظات"
+              className="pr-9 h-9"
+            />
+          </div>
+          <Select value={filterSource} onValueChange={(value) => setFilterSource(value as typeof filterSource)}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">كل المصادر</SelectItem>
+              <SelectItem value="manual">يدوي</SelectItem>
+              <SelectItem value="sales">فواتير المبيعات</SelectItem>
+              <SelectItem value="claim">مطالبات التأمين</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterPaymentMethod} onValueChange={setFilterPaymentMethod}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">كل طرق الدفع</SelectItem>
+              {Object.entries(PAYMENT_METHOD_LABELS).map(([key, value]) => <SelectItem key={key} value={key}>{value}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Input type="date" value={filterDateFrom} onChange={(event) => setFilterDateFrom(event.target.value)} className="h-9" title="من تاريخ" />
+          <Input type="date" value={filterDateTo} onChange={(event) => setFilterDateTo(event.target.value)} className="h-9" title="إلى تاريخ" />
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-secondary/30 text-muted-foreground text-xs">
@@ -393,13 +510,13 @@ export default function Receipts() {
                 <th className="text-right p-3">المصدر</th>
                 <th className="text-right p-3">طريقة الدفع</th>
                 <th className="text-right p-3">المبلغ</th>
-                {allowManage && <th className="text-right p-3">إجراءات</th>}
+                <th className="text-right p-3">إجراءات</th>
               </tr>
             </thead>
             <tbody>
-              {receipts.length === 0 ? (
-                <tr><td colSpan={allowManage ? 8 : 7} className="text-center p-8 text-muted-foreground">{loading ? "جارِ التحميل…" : "لا توجد سندات قبض بعد"}</td></tr>
-              ) : receipts.map((receipt) => (
+              {filteredReceipts.length === 0 ? (
+                <tr><td colSpan={8} className="text-center p-8 text-muted-foreground">{loading ? "جارِ التحميل…" : "لا توجد سندات قبض مطابقة"}</td></tr>
+              ) : filteredReceipts.map((receipt) => (
                 <tr key={receipt.id} className="border-t border-border hover:bg-secondary/10">
                   <td className="p-3"><Checkbox checked={bulk.isSelected(receipt.id)} onCheckedChange={() => bulk.toggle(receipt.id)} /></td>
                   <td className="p-3 font-mono text-xs">{receipt.number}</td>
@@ -412,18 +529,26 @@ export default function Receipts() {
                   </td>
                   <td className="p-3">{PAYMENT_METHOD_LABELS[receipt.paymentMethod] ?? receipt.paymentMethod}</td>
                   <td className="p-3 font-bold text-success">{receipt.amount.toLocaleString()} ر.ع</td>
-                  {allowManage && (
-                    <td className="p-3">
-                      <div className="flex gap-1">
+                  <td className="p-3">
+                    <div className="flex gap-1">
+                      <button onClick={() => openReceiptPdf(receipt)} className="p-1.5 rounded hover:bg-success/10 text-muted-foreground hover:text-success" title="طباعة / PDF">
+                        <Printer size={14} />
+                      </button>
+                      <button onClick={() => openReceiptPdf(receipt)} className="p-1.5 rounded hover:bg-info/10 text-muted-foreground hover:text-info" title="معاينة / تنزيل PDF">
+                        <FileText size={14} />
+                      </button>
+                      {allowManage && (
+                        <>
                         <button onClick={() => openEdit(receipt)} className="p-1.5 rounded hover:bg-info/10 text-muted-foreground hover:text-info" title="تعديل">
                           <Pencil size={14} />
                         </button>
                         <button onClick={() => setDeleteId(receipt.id)} className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="أرشفة">
                           <Trash2 size={14} />
                         </button>
-                      </div>
-                    </td>
-                  )}
+                        </>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -518,6 +643,14 @@ export default function Receipts() {
         onConfirm={() => void confirmDelete()}
         title="أرشفة سند القبض"
         description="سيتم أرشفة السند اليدوي وإخفاؤه من القائمة العادية. دفعات الفواتير والمطالبات تُدار من مصدرها الأصلي."
+      />
+
+      <PdfPreviewDialog
+        open={pdfOpen}
+        onOpenChange={setPdfOpen}
+        htmlContent={pdfHtml}
+        title={pdfTitle}
+        fileName={pdfTitle}
       />
     </div>
   );

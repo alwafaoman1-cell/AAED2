@@ -30,6 +30,7 @@ import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { vehiclesStore } from "@/lib/vehiclesStore";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import { getPaymentVoucherHtml } from "@/lib/pdfGenerator";
+import { generatePdfFromHtml } from "@/lib/htmlToPdf";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { logActivity } from "@/lib/auditLogStore";
 import BulkExpenseDialog from "@/components/accounting/BulkExpenseDialog";
@@ -89,6 +90,16 @@ export default function ExpenseNew() {
   // List filters
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [filterCashbox, setFilterCashbox] = useState<string>("all");
+  const [filterPaymentMethod, setFilterPaymentMethod] = useState<string>("all");
+  const [filterVehiclePlate, setFilterVehiclePlate] = useState("");
+  const [filterWorkOrder, setFilterWorkOrder] = useState("");
+  const [filterClaim, setFilterClaim] = useState("");
+  const [filterBeneficiary, setFilterBeneficiary] = useState("");
+  const [filterAmountMin, setFilterAmountMin] = useState("");
+  const [filterAmountMax, setFilterAmountMax] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>("all");
   const [reportDate, setReportDate] = useState(() => new Date().toISOString().slice(0, 10));
 
@@ -271,6 +282,22 @@ export default function ExpenseNew() {
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
 
+  const resetAdvancedFilters = () => {
+    setSearchTerm("");
+    setFilterCategory("all");
+    setFilterCashbox("all");
+    setFilterPaymentMethod("all");
+    setFilterVehiclePlate("");
+    setFilterWorkOrder("");
+    setFilterClaim("");
+    setFilterBeneficiary("");
+    setFilterAmountMin("");
+    setFilterAmountMax("");
+    setFilterDateFrom("");
+    setFilterDateTo("");
+    setReportPeriod("all");
+  };
+
   // Filtering + reports
   const filtered = useMemo(() => {
     const all = expensesStore.getAll();
@@ -280,9 +307,29 @@ export default function ExpenseNew() {
       if (linkContext.vehicleId && r.vehicleId !== linkContext.vehicleId) return false;
       if (linkContext.customerId && r.customerId !== linkContext.customerId) return false;
       if (filterCategory !== "all" && r.categoryId !== filterCategory) return false;
+      if (filterCashbox !== "all" && r.cashboxId !== filterCashbox) return false;
+      if (filterPaymentMethod !== "all" && r.paymentMethod !== filterPaymentMethod) return false;
+      if (filterDateFrom && r.date < filterDateFrom) return false;
+      if (filterDateTo && r.date > filterDateTo) return false;
+      const min = filterAmountMin ? parseMoneyInput(filterAmountMin) : null;
+      const max = filterAmountMax ? parseMoneyInput(filterAmountMax) : null;
+      if (min != null && min > 0 && r.amount < min) return false;
+      if (max != null && max > 0 && r.amount > max) return false;
+      if (filterVehiclePlate.trim() && !String(r.linkedVehiclePlate || "").toLowerCase().includes(filterVehiclePlate.trim().toLowerCase())) return false;
+      if (filterWorkOrder.trim()) {
+        const q = filterWorkOrder.trim().toLowerCase();
+        const hay = `${r.linkedWorkOrderId || ""} ${r.sourceWorkOrderId || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (filterClaim.trim()) {
+        const q = filterClaim.trim().toLowerCase();
+        const hay = `${r.claimId || ""} ${r.sourceClaimId || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (filterBeneficiary.trim() && !String(r.beneficiary || "").toLowerCase().includes(filterBeneficiary.trim().toLowerCase())) return false;
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
-        const hay = `${r.voucherNumber} ${r.beneficiary || ""} ${r.description || ""} ${r.categoryName || ""} ${r.cashboxName || ""} ${r.claimId || ""} ${r.linkedWorkOrderId || ""} ${r.vehicleId || ""} ${r.customerId || ""}`.toLowerCase();
+        const hay = `${r.voucherNumber} ${r.beneficiary || ""} ${r.description || ""} ${r.categoryName || ""} ${r.cashboxName || ""} ${r.claimId || ""} ${r.sourceClaimId || ""} ${r.linkedWorkOrderId || ""} ${r.sourceWorkOrderId || ""} ${r.vehicleId || ""} ${r.customerId || ""} ${r.linkedVehiclePlate || ""} ${r.supplierTaxNumber || ""} ${r.supplierInvoiceNumber || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (reportPeriod !== "all") {
@@ -294,7 +341,7 @@ export default function ExpenseNew() {
       }
       return true;
     });
-  }, [searchTerm, filterCategory, reportPeriod, reportDate, linkContext, expensesStore.getAll().length]);
+  }, [searchTerm, filterCategory, filterCashbox, filterPaymentMethod, filterVehiclePlate, filterWorkOrder, filterClaim, filterBeneficiary, filterAmountMin, filterAmountMax, filterDateFrom, filterDateTo, reportPeriod, reportDate, linkContext, expensesStore.getAll().length]);
 
   const totals = useMemo(() => {
     const total = filtered.reduce((s, r) => s + r.amount, 0);
@@ -361,7 +408,7 @@ export default function ExpenseNew() {
     toast.success("تم تصدير التقرير");
   };
 
-  const printReport = () => {
+  const buildExpenseReportHtml = () => {
     const periodLabel = reportPeriod === "day" ? `يومي - ${reportDate}` :
       reportPeriod === "month" ? `شهري - ${reportDate.slice(0, 7)}` :
       reportPeriod === "year" ? `سنوي - ${reportDate.slice(0, 4)}` : "كامل الفترة";
@@ -375,7 +422,7 @@ export default function ExpenseNew() {
     const catHtml = Object.entries(totals.byCategory).map(([k, v]) =>
       `<tr><td>${k}</td><td style="text-align:left;">${v.toLocaleString()} ر.ع</td></tr>`
     ).join("");
-    const html = `<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/>
+    return `<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/>
       <title>تقرير المصروفات</title>
       <style>
         body{font-family:Tahoma,sans-serif;padding:20px;color:#1a1a2e}
@@ -400,7 +447,26 @@ export default function ExpenseNew() {
         <th>#</th><th>رقم السند</th><th>التاريخ</th><th>التصنيف</th><th>المستفيد</th><th>طريقة الدفع</th><th>المبلغ</th>
       </tr></thead><tbody>${rowsHtml}</tbody></table>
       </body></html>`;
-    openAndPrintWindow(html);
+  };
+
+  const printReport = () => {
+    openAndPrintWindow(buildExpenseReportHtml());
+  };
+
+  const downloadExpenseReportPdf = async () => {
+    try {
+      toast.loading("جاري تجهيز PDF...", { id: "expense-report-pdf" });
+      await generatePdfFromHtml({
+        htmlContent: buildExpenseReportHtml(),
+        fileName: `expenses-report-${reportPeriod}-${reportDate}`,
+        download: true,
+        orientation: "portrait",
+        metadata: { title: "تقرير المصروفات", subject: "Expense report" },
+      });
+      toast.success("تم تنزيل PDF", { id: "expense-report-pdf" });
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تنزيل PDF", { id: "expense-report-pdf" });
+    }
   };
 
   // ===== تقرير ضريبي رسمي: يعرض فقط المصروفات التي تحمل بيانات فاتورة المورد (رقم ضريبي/رقم فاتورة) =====
@@ -414,7 +480,7 @@ export default function ExpenseNew() {
     return { base, vat, totalIncl: roundMoney(base + vat), count: taxRows.length };
   }, [taxRows]);
 
-  const printTaxReport = () => {
+  const buildTaxReportHtml = () => {
     const periodLabel = reportPeriod === "day" ? `يومي - ${reportDate}` :
       reportPeriod === "month" ? `شهري - ${reportDate.slice(0, 7)}` :
       reportPeriod === "year" ? `سنوي - ${reportDate.slice(0, 4)}` : "كامل الفترة";
@@ -434,7 +500,7 @@ export default function ExpenseNew() {
         <td style="text-align:left;font-weight:700">${breakdown.totalIncludingVat.toFixed(3)}</td>
       </tr>`;
     }).join("");
-    const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"/>
+    return `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"/>
       <title>تقرير ضريبة المدخلات</title>
       <style>
         body{font-family:Tahoma,sans-serif;padding:14mm;color:#1a1a2e}
@@ -465,7 +531,26 @@ export default function ExpenseNew() {
       </table>
       <p style="font-size:10px;color:#666;margin-top:20px">تقرير معد للأغراض الضريبية — جهاز الضرائب — سلطنة عُمان. المبالغ بالريال العُماني (ر.ع).</p>
       </body></html>`;
-    openAndPrintWindow(html);
+  };
+
+  const printTaxReport = () => {
+    openAndPrintWindow(buildTaxReportHtml());
+  };
+
+  const downloadTaxReportPdf = async () => {
+    try {
+      toast.loading("جاري تجهيز PDF الضريبي...", { id: "tax-report-pdf" });
+      await generatePdfFromHtml({
+        htmlContent: buildTaxReportHtml(),
+        fileName: `tax-input-vat-${reportPeriod}-${reportDate}`,
+        download: true,
+        orientation: "portrait",
+        metadata: { title: "تقرير ضريبة المدخلات", subject: "Input VAT report" },
+      });
+      toast.success("تم تنزيل PDF الضريبي", { id: "tax-report-pdf" });
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تنزيل PDF الضريبي", { id: "tax-report-pdf" });
+    }
   };
 
   const exportTaxCsv = () => {
@@ -680,7 +765,7 @@ export default function ExpenseNew() {
               <div className="relative md:col-span-2">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
                 <Input
-                  placeholder="ابحث برقم السند / المستفيد / البيان..."
+                  placeholder="ابحث برقم السند / المستفيد / البيان / أمر العمل / المطالبة..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pr-9"
@@ -699,6 +784,66 @@ export default function ExpenseNew() {
                 </Button>
                 <Button variant="outline" onClick={printReport} className="flex-1 gap-1">
                   <Printer size={14} /> طباعة
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4 rounded-lg border border-border bg-secondary/10 p-3">
+              <div className="space-y-1">
+                <Label className="text-xs">من تاريخ</Label>
+                <Input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">إلى تاريخ</Label>
+                <Input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">الخزينة</Label>
+                <Select value={filterCashbox} onValueChange={setFilterCashbox}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">كل الخزائن</SelectItem>
+                    {cashboxes.map((c) => <SelectItem key={c.id} value={c.id}>{c.cashboxName}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">طريقة الدفع</Label>
+                <Select value={filterPaymentMethod} onValueChange={setFilterPaymentMethod}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">كل الطرق</SelectItem>
+                    {Object.entries(PAYMENT_METHOD_LABELS).map(([key, value]) => <SelectItem key={key} value={key}>{value}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">أقل مبلغ</Label>
+                <Input value={filterAmountMin} onChange={(e) => setFilterAmountMin(e.target.value)} inputMode="decimal" className="h-9" placeholder="0.000" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">أعلى مبلغ</Label>
+                <Input value={filterAmountMax} onChange={(e) => setFilterAmountMax(e.target.value)} inputMode="decimal" className="h-9" placeholder="0.000" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">المستفيد</Label>
+                <Input value={filterBeneficiary} onChange={(e) => setFilterBeneficiary(e.target.value)} className="h-9" placeholder="اسم المورد/المستفيد" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">رقم اللوحة</Label>
+                <Input value={filterVehiclePlate} onChange={(e) => setFilterVehiclePlate(e.target.value)} className="h-9" placeholder="مثال 77140" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">أمر العمل</Label>
+                <Input value={filterWorkOrder} onChange={(e) => setFilterWorkOrder(e.target.value)} className="h-9" placeholder="WO-..." />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">المطالبة</Label>
+                <Input value={filterClaim} onChange={(e) => setFilterClaim(e.target.value)} className="h-9" placeholder="C/..." />
+              </div>
+              <div className="md:col-span-2 flex items-end">
+                <Button type="button" variant="outline" onClick={resetAdvancedFilters} className="h-9 w-full">
+                  مسح الفلاتر
                 </Button>
               </div>
             </div>
@@ -881,11 +1026,17 @@ export default function ExpenseNew() {
               <Button onClick={printReport} className="gap-2">
                 <Printer size={16} /> طباعة التقرير
               </Button>
+              <Button variant="outline" onClick={() => void downloadExpenseReportPdf()} className="gap-2">
+                <FileText size={16} /> تنزيل PDF
+              </Button>
               <Button variant="outline" onClick={exportCsv} className="gap-2">
                 <Download size={16} /> تصدير CSV
               </Button>
               <Button onClick={printTaxReport} className="gap-2 bg-sky-600 hover:bg-sky-700 text-white">
-                🧾 تقرير ضريبي رسمي (PDF)
+                🧾 طباعة التقرير الضريبي
+              </Button>
+              <Button variant="outline" onClick={() => void downloadTaxReportPdf()} className="gap-2 border-sky-500 text-sky-700">
+                <FileText size={16} /> تنزيل PDF ضريبي
               </Button>
               <Button variant="outline" onClick={exportTaxCsv} className="gap-2 border-sky-500 text-sky-700">
                 <Download size={16} /> تقرير ضريبي CSV

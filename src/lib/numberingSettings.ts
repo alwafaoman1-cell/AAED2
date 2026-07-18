@@ -38,7 +38,7 @@ export interface NumberSeriesConfig {
 
 export const DEFAULT_NUMBERING: Record<NumberSeries, NumberSeriesConfig> = {
   CUST:      { label: "Customer Codes",                 prefix: "CUST",    startFrom: 1, padding: 4 },
-  WO:        { label: "أوامر العمل",            prefix: "WO",      startFrom: 1, padding: 5 },
+  WO:        { label: "أوامر العمل",            prefix: "WO",      startFrom: 1, padding: 4 },
   INV:       { label: "فواتير البيع",            prefix: "INV",     startFrom: 1, padding: 5 },
   QT:        { label: "عروض الأسعار",            prefix: "QT",      startFrom: 1, padding: 5 },
   CN:        { label: "إشعارات دائنة",           prefix: "CN",      startFrom: 1, padding: 5 },

@@ -55,4 +55,14 @@ describe("PDF pagination contract", () => {
     expect(engine).toContain("zoom=page-width");
     expect(engine).toContain("view=FitH");
   });
+
+  it("does not append an extra standalone QR to every PDF document", () => {
+    const engine = read("src/lib/pdf-v2/pdfEngine.ts");
+
+    expect(engine).toContain("shouldAppendStandaloneQr");
+    expect(engine).toContain("data-pdf-append-qr='true'");
+    expect(engine).toContain("const appendStandaloneQr = layoutName === \"qr-label\" || shouldAppendStandaloneQr(input.html)");
+    expect(engine).toContain("const qrText = appendStandaloneQr ? extractQrText(input.html) : \"\"");
+    expect(engine).not.toContain("const qrText = extractQrText(input.html);");
+  });
 });

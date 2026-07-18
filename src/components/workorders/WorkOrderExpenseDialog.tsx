@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Save, X, Trash2, Pencil, Plus, Receipt, Package, Eye } from "lucide-react";
+import { Building2, Save, X, Trash2, Pencil, Plus, Receipt, Package, Eye, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
   expenseCategoriesStore,
@@ -23,6 +23,7 @@ import ExpensePreviewDialog from "@/components/workorders/ExpensePreviewDialog";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import { writeOperationalAudit } from "@/lib/deletePolicy";
+import { suppliersStore, type Supplier } from "@/lib/suppliersStore";
 
 interface Props {
   order: WorkOrder | null;
@@ -74,6 +75,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
   const [cashboxId, setCashboxId] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [beneficiary, setBeneficiary] = useState("");
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
   const [supplierTaxNumber, setSupplierTaxNumber] = useState("");
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState("");
   const [description, setDescription] = useState("");
@@ -95,6 +97,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       expenseCategoriesStore.subscribe(() => force((n) => n + 1)),
       employeeCashboxesStore.subscribe(() => force((n) => n + 1)),
       expensesStore.subscribe(() => force((n) => n + 1)),
+      suppliersStore.subscribe(() => force((n) => n + 1)),
     ];
     return () => subs.forEach((u) => u());
   }, []);
@@ -112,6 +115,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       setDate(new Date().toISOString().slice(0, 10));
       setAmount("");
       setBeneficiary("");
+      setSelectedSupplierId("");
       setSupplierTaxNumber("");
       setSupplierInvoiceNumber("");
       setDescription("");
@@ -136,6 +140,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
 
   const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
+  const suppliers = suppliersStore.getAll();
   const linkedExpenses = useMemo(
     () => (order ? getExpensesForWorkOrder(order.id) : []),
     [order, expensesStore.getAll().length]
@@ -146,6 +151,57 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
   // هل التصنيف الحالي = قطع غيار؟
   const currentCat = categories.find((c) => c.id === categoryId);
   const isPartsCategory = currentCat?.name === "قطع غيار المركبات";
+  const supplierSearch = beneficiary.trim().toLowerCase();
+  const filteredSuppliers = useMemo(
+    () => suppliers
+      .filter((supplier) => {
+        if (!supplierSearch) return true;
+        return [
+          supplier.name,
+          supplier.phone,
+          supplier.email,
+          supplier.taxNumber,
+          supplier.category,
+          supplier.notes,
+          ...(supplier.vehicleBrands || []),
+        ].some((value) => String(value || "").toLowerCase().includes(supplierSearch));
+      })
+      .slice(0, 6),
+    [suppliers, supplierSearch],
+  );
+  const exactSupplier = suppliers.find((supplier) => supplier.name.trim().toLowerCase() === supplierSearch);
+
+  const selectSupplier = (supplier: Supplier) => {
+    setSelectedSupplierId(supplier.id);
+    setBeneficiary(supplier.name);
+    if (supplier.taxNumber) setSupplierTaxNumber(supplier.taxNumber);
+  };
+
+  const createSupplierFromBeneficiary = () => {
+    const name = beneficiary.trim();
+    if (!name) {
+      toast.error("اكتب اسم المورد أولاً");
+      return;
+    }
+    const existing = suppliers.find((supplier) => supplier.name.trim().toLowerCase() === name.toLowerCase());
+    if (existing) {
+      selectSupplier(existing);
+      toast.info("المورد موجود مسبقاً وتم اختياره");
+      return;
+    }
+    const supplier: Supplier = {
+      id: `SUP-${Date.now()}`,
+      name,
+      phone: "",
+      taxNumber: supplierTaxNumber.trim() || undefined,
+      notes: "أُضيف من سند صرف أمر العمل",
+      category: isPartsCategory ? "قطع غيار" : "مصروفات",
+      createdAt: new Date().toISOString(),
+    };
+    suppliersStore.add(supplier);
+    selectSupplier(supplier);
+    toast.success(`تم إضافة المورد ${name}`);
+  };
 
   // مزامنة المبلغ تلقائياً عند تصنيف قطع غيار = سعر الشراء × الكمية (هذا هو المصروف الفعلي)
   useEffect(() => {
@@ -173,6 +229,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     setCashboxId(rec.cashboxId);
     setPaymentMethod(rec.paymentMethod);
     setBeneficiary(rec.beneficiary || "");
+    setSelectedSupplierId(rec.supplierId || "");
     setSupplierTaxNumber(rec.supplierTaxNumber || "");
     setSupplierInvoiceNumber(rec.supplierInvoiceNumber || "");
     setDescription(rec.description || "");
@@ -188,6 +245,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     setEditingId(null);
     setAmount("");
     setBeneficiary("");
+    setSelectedSupplierId("");
     setSupplierTaxNumber("");
     setSupplierInvoiceNumber("");
     setDescription("");
@@ -224,7 +282,12 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       };
     }
 
+    const effectiveSupplier = selectedSupplierId
+      ? suppliers.find((supplier) => supplier.id === selectedSupplierId)
+      : exactSupplier;
     const supplierFields: Partial<ExpenseRecord> = {
+      supplierId: effectiveSupplier?.id,
+      supplierName: beneficiary.trim() || effectiveSupplier?.name,
       supplierTaxNumber: supplierTaxNumber.trim() || undefined,
       supplierInvoiceNumber: supplierInvoiceNumber.trim() || undefined,
     };
@@ -237,7 +300,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
         try {
           savedExpense = await expensesStore.update(editingId, {
             date, amount: value, categoryId, categoryName: cat?.name,
-            cashboxId, cashboxName: cb?.cashboxName, paymentMethod, beneficiary, description, photo,
+            cashboxId, cashboxName: cb?.cashboxName, paymentMethod, beneficiary: beneficiary.trim(), description, photo,
             ...supplierFields,
             ...partsFields,
             ...(isPartsCategory ? {} : { partId: undefined, partName: undefined, partNumber: undefined, partQty: undefined, unitBuyPrice: undefined, unitSellPrice: undefined }),
@@ -270,7 +333,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       date, amount: value,
       categoryId, categoryName: cat?.name,
       cashboxId, cashboxName: cb?.cashboxName,
-      paymentMethod, beneficiary, description, photo,
+      paymentMethod, beneficiary: beneficiary.trim(), description, photo,
       linkedWorkOrderId: order.id,
       // ربط تلقائي للسيارة (مهم لتتبع تكلفة كل سيارة من قطع الغيار)
       linkedVehiclePlate: order.plate,
@@ -310,7 +373,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     logActivity({
       action: "create", entity: "expense", entityId: number,
       label: `${cat?.name || "مصروف"} لأمر العمل ${order.id}`,
-      description: `إضافة مصروف بقيمة ${value.toLocaleString()} ر.ع — ${beneficiary || "بدون مستفيد"}`,
+      description: `إضافة مصروف بقيمة ${value.toLocaleString()} ر.ع — ${beneficiary.trim() || "بدون مستفيد"}`,
       amount: value,
       metadata: {
         workOrderId: order.id,
@@ -409,7 +472,10 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
               onExtracted={(d) => {
                 if (d.date) setDate(d.date);
                 if (d.total) setAmount(String(d.total).replace(/[^\d.]/g, ""));
-                if (d.vendor) setBeneficiary(d.vendor);
+                if (d.vendor) {
+                  setBeneficiary(d.vendor);
+                  setSelectedSupplierId("");
+                }
                 if (d.invoice_number) setSupplierInvoiceNumber(d.invoice_number);
                 if (d.notes || d.category) {
                   setDescription([d.category, d.notes].filter(Boolean).join(" — "));
@@ -463,7 +529,59 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">المستفيد / المورد</Label>
-                <Input value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} placeholder="اسم المستفيد" />
+                <div className="relative">
+                  <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={beneficiary}
+                    onChange={(e) => {
+                      setBeneficiary(e.target.value);
+                      setSelectedSupplierId("");
+                    }}
+                    placeholder="ابحث باسم المورد أو الهاتف أو الرقم الضريبي"
+                    className="pr-9"
+                  />
+                </div>
+                <div className="rounded-md border border-border bg-background">
+                  {filteredSuppliers.length > 0 ? (
+                    <div className="max-h-36 overflow-auto">
+                      {filteredSuppliers.map((supplier) => (
+                        <button
+                          key={supplier.id}
+                          type="button"
+                          onClick={() => selectSupplier(supplier)}
+                          className={`w-full text-right px-3 py-2 text-xs hover:bg-secondary/60 border-b border-border/50 last:border-b-0 ${
+                            selectedSupplierId === supplier.id ? "bg-primary/10 text-primary" : ""
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">{supplier.name}</span>
+                            <span className="text-[10px] text-muted-foreground font-mono">{supplier.phone || supplier.taxNumber || supplier.id}</span>
+                          </div>
+                          {(supplier.category || supplier.vehicleBrands?.length) && (
+                            <div className="mt-0.5 text-[10px] text-muted-foreground">
+                              {[supplier.category, ...(supplier.vehicleBrands || [])].filter(Boolean).join(" • ")}
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">لا يوجد مورد مطابق</div>
+                  )}
+                  {beneficiary.trim() && !exactSupplier && (
+                    <button
+                      type="button"
+                      onClick={createSupplierFromBeneficiary}
+                      className="w-full px-3 py-2 text-xs text-right text-primary hover:bg-primary/10 flex items-center gap-2 border-t border-border"
+                    >
+                      <Building2 size={13} />
+                      إضافة مورد جديد: {beneficiary.trim()}
+                    </button>
+                  )}
+                </div>
+                {selectedSupplierId && (
+                  <p className="text-[10px] text-success">تم اختيار مورد محفوظ من قائمة الموردين.</p>
+                )}
               </div>
 
               {/* بيانات المورد الضريبية */}

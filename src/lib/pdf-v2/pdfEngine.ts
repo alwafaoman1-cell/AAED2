@@ -209,6 +209,12 @@ function extractQrText(html: string): string {
   return text.match(/https?:\/\/[^\s<>"']+\/p\/[A-Za-z0-9._-]+/)?.[0] || text.match(/\/p\/[A-Za-z0-9._-]+/)?.[0] || "";
 }
 
+function shouldAppendStandaloneQr(html: string): boolean {
+  const doc = new DOMParser().parseFromString(sanitizePdfV2Html(html), "text/html");
+  const explicit = doc.querySelector("[data-pdf-append-qr='true'], [data-pdf-standalone-qr='true']");
+  return Boolean(explicit);
+}
+
 async function qrDataUrl(value: string): Promise<string | null> {
   if (!value) return null;
   try {
@@ -244,7 +250,8 @@ export async function createPdfV2Blob(input: PdfV2BuildInput): Promise<Blob> {
   const tables = extractTables(input.html);
   const bodyLines = stripHtmlTables(extractBodyLinesWithoutTables(input.html), tables);
   const allLines = extractPlainTextFromHtml(input.html);
-  const qrText = extractQrText(input.html);
+  const appendStandaloneQr = layoutName === "qr-label" || shouldAppendStandaloneQr(input.html);
+  const qrText = appendStandaloneQr ? extractQrText(input.html) : "";
   const qr = await qrDataUrl(qrText);
   const vehicleInfo = [
     { label: isRtl ? "المستند" : "Document", value: docNo || title },

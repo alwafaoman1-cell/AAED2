@@ -47,6 +47,8 @@ export interface ExpenseRecord {
   refundedAt?: string;
   supplierTaxNumber?: string;
   supplierInvoiceNumber?: string;
+  supplierId?: string;
+  supplierName?: string;
   partId?: string;
   partName?: string;
   partNumber?: string;
@@ -139,6 +141,8 @@ function rowToRecord(r: any): ExpenseRecord {
     refundedAt: meta.refundedAt,
     supplierTaxNumber: r.supplier_tax_number || meta.supplierTaxNumber,
     supplierInvoiceNumber: r.supplier_invoice_number || meta.supplierInvoiceNumber,
+    supplierId: meta.supplierId,
+    supplierName: meta.supplierName,
     partId: meta.partId,
     partName: meta.partName,
     partNumber: meta.partNumber,
@@ -171,6 +175,8 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
   if (e.refundedAt !== undefined) meta.refundedAt = e.refundedAt;
   if (e.supplierTaxNumber) meta.supplierTaxNumber = e.supplierTaxNumber;
   if (e.supplierInvoiceNumber) meta.supplierInvoiceNumber = e.supplierInvoiceNumber;
+  if (e.supplierId) meta.supplierId = e.supplierId;
+  if (e.supplierName) meta.supplierName = e.supplierName;
   if (e.partId) meta.partId = e.partId;
   if (e.partName) meta.partName = e.partName;
   if (e.partNumber) meta.partNumber = e.partNumber;
