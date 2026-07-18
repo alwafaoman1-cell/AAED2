@@ -16,6 +16,7 @@ import {
 import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { vehiclesStore } from "@/lib/vehiclesStore";
 import { logActivity } from "@/lib/auditLogStore";
+import SupplierPicker from "@/components/suppliers/SupplierPicker";
 
 interface PartLine {
   id: string;
@@ -32,6 +33,8 @@ interface ExpenseItem {
   cashboxId: string;
   paymentMethod: PaymentMethod;
   beneficiary: string;
+  supplierId?: string;
+  supplierTaxNumber?: string;
   description: string;
   amount: string;
   linkedVehiclePlate: string;
@@ -60,6 +63,8 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
     cashboxId: defaultCb?.id ?? "",
     paymentMethod: settings.defaultPaymentMethod,
     beneficiary: "",
+    supplierId: "",
+    supplierTaxNumber: "",
     description: "",
     amount: "",
     linkedVehiclePlate: "",
@@ -105,6 +110,7 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
       if (!amt || amt <= 0) errors.push(`البند ${idx + 1}: المبلغ صفر`);
       if (!it.categoryId) errors.push(`البند ${idx + 1}: لم يتم اختيار التصنيف`);
       if (!it.cashboxId) errors.push(`البند ${idx + 1}: لم يتم اختيار الخزينة`);
+      if (it.beneficiary.trim() && !it.supplierId) errors.push(`البند ${idx + 1}: اختر المورد من القائمة أو أضف موردًا جديدًا`);
     });
     if (errors.length) return toast.error(errors[0]);
 
@@ -134,6 +140,9 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
             cashboxId: it.cashboxId, cashboxName: cb?.cashboxName,
             paymentMethod: it.paymentMethod,
             beneficiary: it.beneficiary,
+            supplierId: it.supplierId || undefined,
+            supplierName: it.beneficiary || undefined,
+            supplierTaxNumber: it.supplierTaxNumber || undefined,
             description: `${it.description ? it.description + " — " : ""}${p.name}${p.partNumber ? ` (#${p.partNumber})` : ""}`,
             photo: null,
             linkedVehiclePlate: it.linkedVehiclePlate || undefined,
@@ -156,7 +165,11 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
           categoryId: it.categoryId, categoryName: cat?.name,
           cashboxId: it.cashboxId, cashboxName: cb?.cashboxName,
           paymentMethod: it.paymentMethod,
-          beneficiary: it.beneficiary, description: it.description, photo: null,
+          beneficiary: it.beneficiary,
+          supplierId: it.supplierId || undefined,
+          supplierName: it.beneficiary || undefined,
+          supplierTaxNumber: it.supplierTaxNumber || undefined,
+          description: it.description, photo: null,
           linkedVehiclePlate: isParts && it.linkedVehiclePlate ? it.linkedVehiclePlate : undefined,
           linkedVehicleName: isParts && linkedVehicle ? `${linkedVehicle.type} — ${linkedVehicle.plate}` : undefined,
           createdAt: new Date().toISOString(),
@@ -252,8 +265,18 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">المستفيد</Label>
-                  <Input value={item.beneficiary} onChange={(e) => updateItem(item.id, { beneficiary: e.target.value })} placeholder="اسم المستفيد" />
+                  <SupplierPicker
+                    supplierId={item.supplierId || ""}
+                    supplierName={item.beneficiary}
+                    taxNumber={item.supplierTaxNumber}
+                    label="المورد"
+                    onChange={(supplier) => updateItem(item.id, {
+                      supplierId: supplier.id,
+                      beneficiary: supplier.name,
+                      supplierTaxNumber: supplier.taxNumber || item.supplierTaxNumber,
+                    })}
+                    onClear={() => updateItem(item.id, { supplierId: "" })}
+                  />
                 </div>
                 {item.parts.length === 0 && (
                   <div>

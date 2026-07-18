@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Building2, Save, X, Trash2, Pencil, Plus, Receipt, Package, Eye, Search } from "lucide-react";
+import { Save, X, Trash2, Pencil, Plus, Receipt, Package, Eye } from "lucide-react";
 import { toast } from "sonner";
 import {
   expenseCategoriesStore,
@@ -23,7 +23,7 @@ import ExpensePreviewDialog from "@/components/workorders/ExpensePreviewDialog";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import { writeOperationalAudit } from "@/lib/deletePolicy";
-import { suppliersStore, type Supplier } from "@/lib/suppliersStore";
+import SupplierPicker from "@/components/suppliers/SupplierPicker";
 
 interface Props {
   order: WorkOrder | null;
@@ -97,7 +97,6 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       expenseCategoriesStore.subscribe(() => force((n) => n + 1)),
       employeeCashboxesStore.subscribe(() => force((n) => n + 1)),
       expensesStore.subscribe(() => force((n) => n + 1)),
-      suppliersStore.subscribe(() => force((n) => n + 1)),
     ];
     return () => subs.forEach((u) => u());
   }, []);
@@ -140,7 +139,6 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
 
   const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
-  const suppliers = suppliersStore.getAll();
   const linkedExpenses = useMemo(
     () => (order ? getExpensesForWorkOrder(order.id) : []),
     [order, expensesStore.getAll().length]
@@ -151,57 +149,6 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
   // هل التصنيف الحالي = قطع غيار؟
   const currentCat = categories.find((c) => c.id === categoryId);
   const isPartsCategory = currentCat?.name === "قطع غيار المركبات";
-  const supplierSearch = beneficiary.trim().toLowerCase();
-  const filteredSuppliers = useMemo(
-    () => suppliers
-      .filter((supplier) => {
-        if (!supplierSearch) return true;
-        return [
-          supplier.name,
-          supplier.phone,
-          supplier.email,
-          supplier.taxNumber,
-          supplier.category,
-          supplier.notes,
-          ...(supplier.vehicleBrands || []),
-        ].some((value) => String(value || "").toLowerCase().includes(supplierSearch));
-      })
-      .slice(0, 6),
-    [suppliers, supplierSearch],
-  );
-  const exactSupplier = suppliers.find((supplier) => supplier.name.trim().toLowerCase() === supplierSearch);
-
-  const selectSupplier = (supplier: Supplier) => {
-    setSelectedSupplierId(supplier.id);
-    setBeneficiary(supplier.name);
-    if (supplier.taxNumber) setSupplierTaxNumber(supplier.taxNumber);
-  };
-
-  const createSupplierFromBeneficiary = () => {
-    const name = beneficiary.trim();
-    if (!name) {
-      toast.error("اكتب اسم المورد أولاً");
-      return;
-    }
-    const existing = suppliers.find((supplier) => supplier.name.trim().toLowerCase() === name.toLowerCase());
-    if (existing) {
-      selectSupplier(existing);
-      toast.info("المورد موجود مسبقاً وتم اختياره");
-      return;
-    }
-    const supplier: Supplier = {
-      id: `SUP-${Date.now()}`,
-      name,
-      phone: "",
-      taxNumber: supplierTaxNumber.trim() || undefined,
-      notes: "أُضيف من سند صرف أمر العمل",
-      category: isPartsCategory ? "قطع غيار" : "مصروفات",
-      createdAt: new Date().toISOString(),
-    };
-    suppliersStore.add(supplier);
-    selectSupplier(supplier);
-    toast.success(`تم إضافة المورد ${name}`);
-  };
 
   // مزامنة المبلغ تلقائياً عند تصنيف قطع غيار = سعر الشراء × الكمية (هذا هو المصروف الفعلي)
   useEffect(() => {
@@ -263,6 +210,9 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     if (!value || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
     if (!categoryId) return toast.error("اختر التصنيف");
     if (!cashboxId) return toast.error("اختر الخزينة");
+    if (beneficiary.trim() && !selectedSupplierId) {
+      return toast.error("اختر المورد من القائمة أو أضف موردًا جديدًا قبل الحفظ");
+    }
 
     const cat = categories.find((c) => c.id === categoryId);
     const cb = employeeCashboxesStore.getAll().find((c) => c.id === cashboxId);
@@ -282,12 +232,9 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       };
     }
 
-    const effectiveSupplier = selectedSupplierId
-      ? suppliers.find((supplier) => supplier.id === selectedSupplierId)
-      : exactSupplier;
     const supplierFields: Partial<ExpenseRecord> = {
-      supplierId: effectiveSupplier?.id,
-      supplierName: beneficiary.trim() || effectiveSupplier?.name,
+      supplierId: selectedSupplierId || undefined,
+      supplierName: beneficiary.trim() || undefined,
       supplierTaxNumber: supplierTaxNumber.trim() || undefined,
       supplierInvoiceNumber: supplierInvoiceNumber.trim() || undefined,
     };
@@ -527,62 +474,18 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">المستفيد / المورد</Label>
-                <div className="relative">
-                  <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    value={beneficiary}
-                    onChange={(e) => {
-                      setBeneficiary(e.target.value);
-                      setSelectedSupplierId("");
-                    }}
-                    placeholder="ابحث باسم المورد أو الهاتف أو الرقم الضريبي"
-                    className="pr-9"
-                  />
-                </div>
-                <div className="rounded-md border border-border bg-background">
-                  {filteredSuppliers.length > 0 ? (
-                    <div className="max-h-36 overflow-auto">
-                      {filteredSuppliers.map((supplier) => (
-                        <button
-                          key={supplier.id}
-                          type="button"
-                          onClick={() => selectSupplier(supplier)}
-                          className={`w-full text-right px-3 py-2 text-xs hover:bg-secondary/60 border-b border-border/50 last:border-b-0 ${
-                            selectedSupplierId === supplier.id ? "bg-primary/10 text-primary" : ""
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold">{supplier.name}</span>
-                            <span className="text-[10px] text-muted-foreground font-mono">{supplier.phone || supplier.taxNumber || supplier.id}</span>
-                          </div>
-                          {(supplier.category || supplier.vehicleBrands?.length) && (
-                            <div className="mt-0.5 text-[10px] text-muted-foreground">
-                              {[supplier.category, ...(supplier.vehicleBrands || [])].filter(Boolean).join(" • ")}
-                            </div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="px-3 py-2 text-xs text-muted-foreground">لا يوجد مورد مطابق</div>
-                  )}
-                  {beneficiary.trim() && !exactSupplier && (
-                    <button
-                      type="button"
-                      onClick={createSupplierFromBeneficiary}
-                      className="w-full px-3 py-2 text-xs text-right text-primary hover:bg-primary/10 flex items-center gap-2 border-t border-border"
-                    >
-                      <Building2 size={13} />
-                      إضافة مورد جديد: {beneficiary.trim()}
-                    </button>
-                  )}
-                </div>
-                {selectedSupplierId && (
-                  <p className="text-[10px] text-success">تم اختيار مورد محفوظ من قائمة الموردين.</p>
-                )}
-              </div>
+              <SupplierPicker
+                supplierId={selectedSupplierId}
+                supplierName={beneficiary}
+                taxNumber={supplierTaxNumber}
+                label="المورد"
+                onChange={(supplier) => {
+                  setSelectedSupplierId(supplier.id);
+                  setBeneficiary(supplier.name);
+                  if (supplier.taxNumber) setSupplierTaxNumber(supplier.taxNumber);
+                }}
+                onClear={() => setSelectedSupplierId("")}
+              />
 
               {/* بيانات المورد الضريبية */}
               <div className="space-y-1">

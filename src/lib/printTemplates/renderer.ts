@@ -157,17 +157,17 @@ function renderQrZatca(b: TemplateBlock, data: any): string {
 
 function renderStamp(b: TemplateBlock, data: any): string {
   const p = b.props || {};
-  const size = p.stampSize ?? 30;
+  const size = Math.min(Number(p.stampSize ?? 22) || 22, 22);
   const stamp = data.stampUrl || data.companyStamp || "";
   const sig = data.signatureUrl || data.companySignature || "";
-  return `<table style="width:100%;border-collapse:collapse;${styleToCss(b.style)}"><tr>
-    <td style="width:50%;text-align:center;padding:4mm;border-top:1px solid #e5e7eb">
+  return `<table class="tpl-stamp-section" style="width:100%;border-collapse:collapse;${styleToCss(b.style)}"><tr>
+    <td style="width:50%;text-align:center;padding:2mm 3mm;border-top:1px solid #e5e7eb">
       <div style="font-size:8pt;color:#6b7280;margin-bottom:2mm">${escapeHtml(p.signatureLabel || "التوقيع / Signature")}</div>
-      ${sig ? `<img src="${escapeHtml(sig)}" style="height:${size * 0.5}mm;object-fit:contain"/>` : `<div style="height:${size * 0.5}mm"></div>`}
+      ${sig ? `<img src="${escapeHtml(sig)}" style="height:${Math.max(9, size * 0.45)}mm;max-width:48mm;object-fit:contain"/>` : `<div style="height:9mm"></div>`}
     </td>
-    <td style="width:50%;text-align:center;padding:4mm;border-top:1px solid #e5e7eb">
+    <td style="width:50%;text-align:center;padding:2mm 3mm;border-top:1px solid #e5e7eb">
       <div style="font-size:8pt;color:#6b7280;margin-bottom:2mm">الختم / Stamp</div>
-      ${stamp ? `<img src="${escapeHtml(stamp)}" style="height:${size}mm;object-fit:contain"/>` : `<div style="height:${size}mm"></div>`}
+      ${stamp ? `<img src="${escapeHtml(stamp)}" style="height:${size}mm;max-width:58mm;object-fit:contain"/>` : `<div style="height:${Math.min(size, 14)}mm"></div>`}
     </td>
   </tr></table>`;
 }
@@ -193,7 +193,7 @@ function renderSpacer(b: TemplateBlock): string {
 
 function renderFooter(b: TemplateBlock, data: any): string {
   const txt = bind(b.props?.text || "شكراً لتعاملكم معنا · Thank you for your business", data);
-  return `<table style="width:100%;border-collapse:collapse;${styleToCss(b.style)};border-top:1px solid #e5e7eb;margin-top:4mm"><tr><td style="text-align:center;padding:3mm;font-size:8pt;color:#6b7280">${escapeHtml(txt)}</td></tr></table>`;
+  return `<table style="width:100%;border-collapse:collapse;${styleToCss(b.style)};border-top:1px solid #e5e7eb;margin-top:2mm"><tr><td style="text-align:center;padding:1.8mm 2mm;font-size:7pt;color:#6b7280">${escapeHtml(txt)}</td></tr></table>`;
 }
 
 function renderBlock(b: TemplateBlock, data: any): string {
@@ -231,6 +231,11 @@ body {
 }
 table { border-collapse: collapse; }
 img { display: inline-block; }
+.tpl-stamp-section,
+[data-zone="footer"] {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
 .page {
   width: ${page.size === "A4" ? "210mm" : page.size === "A5" ? "148mm" : "216mm"};
   min-height: ${page.size === "A4" ? "297mm" : page.size === "A5" ? "210mm" : "279mm"};

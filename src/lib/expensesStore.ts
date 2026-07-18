@@ -141,7 +141,7 @@ function rowToRecord(r: any): ExpenseRecord {
     refundedAt: meta.refundedAt,
     supplierTaxNumber: r.supplier_tax_number || meta.supplierTaxNumber,
     supplierInvoiceNumber: r.supplier_invoice_number || meta.supplierInvoiceNumber,
-    supplierId: meta.supplierId,
+    supplierId: r.supplier_id || meta.supplierId,
     supplierName: meta.supplierName,
     partId: meta.partId,
     partName: meta.partName,
@@ -216,6 +216,7 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     is_vat_applicable: e.isVatApplicable ?? true,
     supplier_tax_number: e.supplierTaxNumber || null,
     supplier_invoice_number: e.supplierInvoiceNumber || null,
+    supplier_id: e.supplierId && isUuid(e.supplierId) ? e.supplierId : null,
     beneficiary: e.beneficiary || null,
     description: e.description || null,
     linked_work_order_id: e.linkedWorkOrderId || null,
@@ -242,6 +243,7 @@ function stripExpenseAccountingColumns(row: Record<string, any>) {
     is_vat_applicable,
     supplier_tax_number,
     supplier_invoice_number,
+    supplier_id,
     ...legacy
   } = row;
   return legacy;
@@ -249,7 +251,7 @@ function stripExpenseAccountingColumns(row: Record<string, any>) {
 
 function isMissingAccountingColumnError(error: any): boolean {
   const msg = String(error?.message || error?.details || "");
-  return /expense_type|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|subtotal|total/.test(msg)
+  return /expense_type|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|supplier_id|subtotal|total/.test(msg)
     && /column|schema|cache/i.test(msg);
 }
 

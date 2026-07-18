@@ -44,7 +44,18 @@ function createEmptyPage(source: HTMLElement, orientation: PdfOrientation): HTML
 }
 
 function pageOverflows(page: HTMLElement): boolean {
-  return page.scrollHeight > page.clientHeight + 2 || page.scrollWidth > page.clientWidth + 2;
+  if (page.scrollHeight > page.clientHeight + 2 || page.scrollWidth > page.clientWidth + 2) return true;
+
+  const pageRect = page.getBoundingClientRect();
+  let maxBottom = pageRect.top;
+  let maxRight = pageRect.left;
+  for (const child of Array.from(page.querySelectorAll<HTMLElement>("*"))) {
+    const rect = child.getBoundingClientRect();
+    if (!rect.width && !rect.height) continue;
+    maxBottom = Math.max(maxBottom, rect.bottom);
+    maxRight = Math.max(maxRight, rect.right);
+  }
+  return maxBottom > pageRect.bottom + 2 || maxRight > pageRect.right + 2;
 }
 
 function splitTableBlock(

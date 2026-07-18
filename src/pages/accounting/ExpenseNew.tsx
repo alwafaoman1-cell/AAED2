@@ -36,6 +36,7 @@ import { logActivity } from "@/lib/auditLogStore";
 import BulkExpenseDialog from "@/components/accounting/BulkExpenseDialog";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
+import SupplierPicker from "@/components/suppliers/SupplierPicker";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -79,6 +80,7 @@ export default function ExpenseNew() {
   const [amount, setAmount] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(settings.defaultPaymentMethod);
   const [beneficiary, setBeneficiary] = useState("");
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [description, setDescription] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [linkedVehiclePlate, setLinkedVehiclePlate] = useState<string>("");
@@ -119,6 +121,7 @@ export default function ExpenseNew() {
     setAmount("");
     setPaymentMethod(settings.defaultPaymentMethod);
     setBeneficiary("");
+    setSelectedSupplierId("");
     setDescription("");
     setPhoto(null);
     setLinkedVehiclePlate("");
@@ -139,6 +142,9 @@ export default function ExpenseNew() {
     if (!value || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
     if (!categoryId) return toast.error("اختر تصنيف المصروف");
     if (!cashboxId) return toast.error("اختر الخزينة");
+    if ((beneficiary.trim() || supplierCompany.trim()) && !selectedSupplierId) {
+      return toast.error("اختر المورد من القائمة أو أضف موردًا جديدًا قبل الحفظ");
+    }
     if (settings.paymentVoucherRequirePhoto && !photo && !editingId) return toast.error("صورة الإيصال مطلوبة");
 
     const cat = categories.find((c) => c.id === categoryId);
@@ -162,10 +168,12 @@ export default function ExpenseNew() {
         try {
           await expensesStore.update(editingId, {
           date, amount: value, categoryId, categoryName: cat?.name, cashboxId,
-          cashboxName: cb?.cashboxName, paymentMethod, beneficiary, description, photo,
+          cashboxName: cb?.cashboxName, paymentMethod, beneficiary: beneficiary.trim(), description, photo,
+          supplierId: selectedSupplierId || undefined,
+          supplierName: beneficiary.trim() || undefined,
           supplierTaxNumber: supplierTaxNumber || undefined,
           supplierInvoiceNumber: supplierInvoiceNumber || undefined,
-          ...(supplierCompany ? { beneficiary: beneficiary || supplierCompany } : {}),
+          ...(supplierCompany ? { beneficiary: beneficiary.trim() || supplierCompany } : {}),
           ...linkContext,
           ...vehicleFields,
           });
@@ -196,7 +204,9 @@ export default function ExpenseNew() {
       categoryId, categoryName: cat?.name,
       cashboxId, cashboxName: cb?.cashboxName,
       paymentMethod,
-      beneficiary: beneficiary || supplierCompany,
+      beneficiary: beneficiary.trim() || supplierCompany,
+      supplierId: selectedSupplierId || undefined,
+      supplierName: beneficiary.trim() || supplierCompany || undefined,
       description, photo,
       supplierTaxNumber: supplierTaxNumber || undefined,
       supplierInvoiceNumber: supplierInvoiceNumber || undefined,
@@ -229,6 +239,7 @@ export default function ExpenseNew() {
     setAmount(String(rec.amount));
     setPaymentMethod(rec.paymentMethod);
     setBeneficiary(rec.beneficiary || "");
+    setSelectedSupplierId(rec.supplierId || "");
     setDescription(rec.description || "");
     setPhoto(rec.photo || null);
     setLinkedVehiclePlate(rec.linkedVehiclePlate || "");
@@ -615,7 +626,10 @@ export default function ExpenseNew() {
             onExtracted={(d) => {
               if (d.total) setAmount(String(d.total).replace(/[^\d.]/g, ""));
               if (d.date) setDate(d.date);
-              if (d.vendor) setBeneficiary(d.vendor);
+              if (d.vendor) {
+                setBeneficiary(d.vendor);
+                setSelectedSupplierId("");
+              }
               if (d.notes || d.invoice_number) {
                 setDescription([d.notes, d.invoice_number && `رقم الفاتورة: ${d.invoice_number}`].filter(Boolean).join(" — "));
               }
@@ -666,8 +680,19 @@ export default function ExpenseNew() {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>المستفيد / المورد</Label>
-            <Input value={beneficiary} onChange={(e) => setBeneficiary(e.target.value)} placeholder="اسم المستفيد" />
+            <SupplierPicker
+              supplierId={selectedSupplierId}
+              supplierName={beneficiary}
+              taxNumber={supplierTaxNumber}
+              label="المورد"
+              onChange={(supplier) => {
+                setSelectedSupplierId(supplier.id);
+                setBeneficiary(supplier.name);
+                setSupplierCompany(supplier.name);
+                if (supplier.taxNumber) setSupplierTaxNumber(supplier.taxNumber);
+              }}
+              onClear={() => setSelectedSupplierId("")}
+            />
           </div>
 
           {/* ===== حقول ضريبية رسمية للمورد (لتقرير الضريبة) ===== */}
@@ -675,11 +700,7 @@ export default function ExpenseNew() {
             <div className="text-xs font-semibold text-primary mb-2 flex items-center gap-1">
               🧾 بيانات الفاتورة الضريبية للمورد (اختياري — تظهر في التقرير الضريبي)
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">اسم الشركة / المورد</Label>
-                <Input value={supplierCompany} onChange={(e) => setSupplierCompany(e.target.value)} placeholder="اسم الشركة كما في الفاتورة" />
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">الرقم الضريبي للمورد</Label>
                 <Input value={supplierTaxNumber} onChange={(e) => setSupplierTaxNumber(e.target.value)} placeholder="OMxxxxxxxxx" />

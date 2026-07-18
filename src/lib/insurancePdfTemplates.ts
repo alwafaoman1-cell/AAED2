@@ -112,7 +112,7 @@ function baseStyles(s: PdfTemplateSettings) {
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;direction:rtl;color:#1a1a2e;background:#f8f9fa;padding:0}
-    .page{width:210mm;min-height:297mm;margin:8mm auto;background:white;padding:12mm 12mm 15mm;box-shadow:0 2px 20px rgba(0,0,0,0.1);position:relative;overflow:visible}
+    .page{width:210mm;min-height:297mm;margin:8mm auto;background:white;padding:10mm 12mm 14mm;box-shadow:0 2px 20px rgba(0,0,0,0.1);position:relative;overflow:visible}
     .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${s.primaryColor};padding-bottom:10px;margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
     .company-info h1{font-size:17px;font-weight:700;color:#1a1a2e;margin-bottom:2px}
     .company-info .en-name{font-size:11.5px;color:#444;font-weight:600;margin-bottom:4px;font-family:'Inter',sans-serif}
@@ -170,15 +170,15 @@ function baseStyles(s: PdfTemplateSettings) {
     .photos-grid .ph img{width:100%;height:100%;object-fit:cover;display:block}
     .photos-grid .ph .cap{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.55);color:white;padding:3px 6px;font-size:9px;text-align:center}
 
-    .signature-area{margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;break-inside:avoid;page-break-inside:avoid}
-    .signature-area .sig{border:1px dashed #bbb;border-radius:8px;padding:12px;text-align:center}
-    .signature-area .sig .name{font-size:11px;font-weight:600;margin-bottom:6px;color:#333}
-    .signature-area .sig .area{height:50px;display:flex;align-items:center;justify-content:center}
-    .signature-area .sig .area img{max-height:44px;max-width:100%}
-    .signature-area .sig .lbl{font-size:9.5px;color:#777;margin-top:6px}
+    .signature-area{margin-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;break-inside:avoid;page-break-inside:avoid}
+    .signature-area .sig{border:1px dashed #bbb;border-radius:6px;padding:6px;text-align:center;min-width:0}
+    .signature-area .sig .name{font-size:8.5px;font-weight:600;margin-bottom:3px;color:#333}
+    .signature-area .sig .area{height:30px;display:flex;align-items:center;justify-content:center}
+    .signature-area .sig .area img{max-height:28px;max-width:100%;object-fit:contain}
+    .signature-area .sig .lbl{font-size:7.5px;color:#777;margin-top:3px}
 
-    .notes-box{margin-top:18px;padding:11px 14px;background:#f8f9fa;border-radius:8px;border-right:3px solid ${s.primaryColor};font-size:10.5px;color:#555;line-height:1.7}
-    .footer{position:static!important;margin-top:7mm;text-align:center;font-size:8.5px;color:#8a94a6;border-top:1px solid #e5e7eb;padding-top:2.5mm;line-height:1.45;break-inside:avoid;page-break-inside:avoid;clear:both}
+    .notes-box{margin-top:9px;padding:7px 10px;background:#f8f9fa;border-radius:6px;border-right:3px solid ${s.primaryColor};font-size:9px;color:#555;line-height:1.5}
+    .footer{position:static!important;margin-top:4mm;text-align:center;font-size:7px;color:#8a94a6;border-top:1px solid #e5e7eb;padding-top:1.8mm;line-height:1.35;break-inside:avoid;page-break-inside:avoid;clear:both}
     .watermark{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:78px;font-weight:700;color:rgba(13,71,161,0.05);pointer-events:none;white-space:nowrap;font-family:'Inter',sans-serif}
     .stamp-bottom-right{position:static!important;margin-top:7mm;width:auto;opacity:0.92;text-align:center;break-inside:avoid;page-break-inside:avoid;clear:both}
     .stamp-bottom-right img{max-width:62mm;max-height:19mm;object-fit:contain}

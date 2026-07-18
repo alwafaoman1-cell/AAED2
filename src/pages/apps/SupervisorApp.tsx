@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import AiExtractButton from "@/components/ai/AiExtractButton";
+import SupplierPicker from "@/components/suppliers/SupplierPicker";
 import VinScannerButton from "@/components/scanner/VinScannerButton";
 import CustomerAutocomplete from "@/components/customers/CustomerAutocomplete";
 import PhoneAutocomplete from "@/components/customers/PhoneAutocomplete";
@@ -243,6 +244,7 @@ export default function SupervisorApp() {
     linkedVehiclePlate: "" as string,
     linkedVehicleName: "" as string,
     photo: null as string | null,
+    supplierId: "",
     supplierCompany: "",
     supplierTaxNumber: "",
     supplierInvoiceNumber: "",
@@ -296,7 +298,7 @@ export default function SupervisorApp() {
     setExp((s) => ({
       ...s, amount: "", beneficiary: "", description: "", reference: "", date: today,
       linkedWorkOrderId: "", linkedVehiclePlate: "", linkedVehicleName: "", photo: null,
-      supplierCompany: "", supplierTaxNumber: "", supplierInvoiceNumber: "",
+      supplierId: "", supplierCompany: "", supplierTaxNumber: "", supplierInvoiceNumber: "",
     }));
 
 
@@ -307,6 +309,9 @@ export default function SupervisorApp() {
     if (!exp.cashboxId) return toast.error(t("supervisor.errCashbox"));
     if (expMode === "workorder" && !exp.linkedWorkOrderId) {
       return toast.error(isAr ? "اختر أمر العمل المرتبط بالمصروف" : "Select a work order to link this expense");
+    }
+    if ((exp.beneficiary.trim() || exp.supplierCompany.trim()) && !exp.supplierId) {
+      return toast.error(isAr ? "اختر المورد من القائمة أو أضف موردًا جديدًا قبل الحفظ" : "Select an existing supplier or add a new supplier before saving");
     }
     const cat = categories.find((c) => c.id === exp.categoryId);
     const cb = employeeCashboxesStore.getAll().find((c) => c.id === exp.cashboxId);
@@ -329,6 +334,8 @@ export default function SupervisorApp() {
         cashboxName: cb?.cashboxName,
         paymentMethod: exp.paymentMethod,
         beneficiary: exp.beneficiary || exp.supplierCompany,
+        supplierId: exp.supplierId || undefined,
+        supplierName: exp.beneficiary || exp.supplierCompany || undefined,
         description: exp.description,
         reference: exp.reference || undefined,
         photo: exp.photo,
@@ -363,6 +370,8 @@ export default function SupervisorApp() {
       cashboxName: cb?.cashboxName,
       paymentMethod: exp.paymentMethod,
       beneficiary: exp.beneficiary || exp.supplierCompany,
+      supplierId: exp.supplierId || undefined,
+      supplierName: exp.beneficiary || exp.supplierCompany || undefined,
       description: exp.description,
       reference: exp.reference || undefined,
       photo: exp.photo,
@@ -409,6 +418,7 @@ export default function SupervisorApp() {
       linkedVehiclePlate: rec.linkedVehiclePlate || "",
       linkedVehicleName: rec.linkedVehicleName || "",
       photo: rec.photo || null,
+      supplierId: rec.supplierId || "",
       supplierCompany: "",
       supplierTaxNumber: rec.supplierTaxNumber || "",
       supplierInvoiceNumber: rec.supplierInvoiceNumber || "",
@@ -918,7 +928,22 @@ export default function SupervisorApp() {
                 </div>
                 <div>
                   <label className="text-[11px] text-muted-foreground">{t("supervisor.beneficiary")}</label>
-                  <Input value={exp.beneficiary} onChange={(e) => setExpField("beneficiary", e.target.value)} className="h-11" />
+                  <SupplierPicker
+                    supplierId={exp.supplierId}
+                    supplierName={exp.beneficiary || exp.supplierCompany}
+                    taxNumber={exp.supplierTaxNumber}
+                    label={t("supervisor.beneficiary")}
+                    onChange={(supplier) => {
+                      setExp((s) => ({
+                        ...s,
+                        supplierId: supplier.id,
+                        beneficiary: supplier.name,
+                        supplierCompany: supplier.name,
+                        supplierTaxNumber: supplier.taxNumber || s.supplierTaxNumber,
+                      }));
+                    }}
+                    onClear={() => setExpField("supplierId", "")}
+                  />
                 </div>
                 <div className="col-span-2">
                   <label className="text-[11px] text-muted-foreground">{isAr ? "المرجع (رقم فاتورة/شيك/تحويل)" : "Reference (invoice/cheque/ref #)"}</label>
@@ -931,12 +956,6 @@ export default function SupervisorApp() {
                     🧾 {isAr ? "بيانات ضريبية للمورد (للتقرير الضريبي)" : "Supplier tax info (for tax report)"}
                   </div>
                   <div className="grid grid-cols-1 gap-2">
-                    <Input
-                      value={exp.supplierCompany}
-                      onChange={(e) => setExpField("supplierCompany", e.target.value)}
-                      className="h-10 text-sm"
-                      placeholder={isAr ? "اسم الشركة / المورد" : "Supplier company"}
-                    />
                     <Input
                       value={exp.supplierTaxNumber}
                       onChange={(e) => setExpField("supplierTaxNumber", e.target.value)}
@@ -974,7 +993,9 @@ export default function SupervisorApp() {
                     onExtracted={(d) => {
                       if (d.total) setExpField("amount", String(d.total).replace(/[^\d.]/g, ""));
                       if (d.date) setExpField("date", d.date);
-                      if (d.vendor) { setExpField("beneficiary", d.vendor); setExpField("supplierCompany", d.vendor); }
+                      if (d.vendor) {
+                        setExp((s) => ({ ...s, beneficiary: d.vendor, supplierCompany: d.vendor, supplierId: "" }));
+                      }
                       if (d.invoice_number) { setExpField("reference", d.invoice_number); setExpField("supplierInvoiceNumber", d.invoice_number); }
                       if ((d as any).tax_number || (d as any).vat_number) setExpField("supplierTaxNumber", String((d as any).tax_number || (d as any).vat_number));
                       if (d.notes || d.category) setExpField("description", [d.category, d.notes].filter(Boolean).join(" — "));

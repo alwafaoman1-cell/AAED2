@@ -26,6 +26,7 @@ import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { logActivity } from "@/lib/auditLogStore";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { syncWorkOrderInvoiceFromExpenses } from "@/lib/workOrderInvoiceSync";
+import SupplierPicker from "@/components/suppliers/SupplierPicker";
 
 interface PartLine {
   id: string;
@@ -43,6 +44,8 @@ interface ExpenseItem {
   cashboxId: string;
   paymentMethod: PaymentMethod;
   beneficiary: string;
+  supplierId?: string;
+  supplierTaxNumber?: string;
   description: string;
   amount: string;
   parts: PartLine[];
@@ -98,6 +101,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       cashboxId: defaultCb?.id ?? "",
       paymentMethod: settings.defaultPaymentMethod,
       beneficiary: "",
+      supplierId: "",
+      supplierTaxNumber: "",
       description: "",
       amount: "",
       parts: [newPart()],
@@ -179,6 +184,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       if (!it.categoryId) errors.push(`البند ${idx + 1}: لم يُحدّد التصنيف`);
       else if (!it.cashboxId) errors.push(`البند ${idx + 1}: لم تُحدّد الخزينة`);
       else if (amt <= 0) errors.push(`البند ${idx + 1}: المبلغ صفر`);
+      else if (it.beneficiary.trim() && !it.supplierId) errors.push(`البند ${idx + 1}: اختر المورد من القائمة أو أضف موردًا جديدًا`);
     });
     if (errors.length) return toast.error(errors[0]);
 
@@ -211,6 +217,9 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             cashboxId: it.cashboxId, cashboxName: cb?.cashboxName,
             paymentMethod: it.paymentMethod,
             beneficiary: it.beneficiary,
+            supplierId: it.supplierId || undefined,
+            supplierName: it.beneficiary || undefined,
+            supplierTaxNumber: it.supplierTaxNumber || undefined,
             description: `${it.description ? it.description + " — " : ""}${p.name}${p.partNumber ? ` (#${p.partNumber})` : ""}`,
             photo: null,
             linkedWorkOrderId: order.id,
@@ -236,7 +245,11 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           categoryId: it.categoryId, categoryName: cat?.name,
           cashboxId: it.cashboxId, cashboxName: cb?.cashboxName,
           paymentMethod: it.paymentMethod,
-          beneficiary: it.beneficiary, description: it.description, photo: null,
+          beneficiary: it.beneficiary,
+          supplierId: it.supplierId || undefined,
+          supplierName: it.beneficiary || undefined,
+          supplierTaxNumber: it.supplierTaxNumber || undefined,
+          description: it.description, photo: null,
           linkedWorkOrderId: order.id,
           linkedVehiclePlate: order.plate,
           linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
@@ -376,8 +389,18 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-xs">المستفيد / المورد</Label>
-                  <Input value={item.beneficiary} onChange={(e) => updateItem(item.id, { beneficiary: e.target.value })} />
+                  <SupplierPicker
+                    supplierId={item.supplierId || ""}
+                    supplierName={item.beneficiary}
+                    taxNumber={item.supplierTaxNumber}
+                    label="المورد"
+                    onChange={(supplier) => updateItem(item.id, {
+                      supplierId: supplier.id,
+                      beneficiary: supplier.name,
+                      supplierTaxNumber: supplier.taxNumber || item.supplierTaxNumber,
+                    })}
+                    onClear={() => updateItem(item.id, { supplierId: "" })}
+                  />
                 </div>
                 {!partsCat && (
                   <div>
