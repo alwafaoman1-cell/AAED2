@@ -21,6 +21,15 @@ interface Props {
   order: WorkOrder;
 }
 
+function formatDeliveryReceiptNumber(orderDisplay?: string): string {
+  const source = String(orderDisplay || "").trim();
+  const woMatch = source.match(/(?:WO|W)-\d{2,4}-(\d{1,6})$/i);
+  const trailingMatch = source.match(/(?:^|[-/])(\d{1,6})$/);
+  const raw = woMatch?.[1] || trailingMatch?.[1] || "";
+  const sequence = raw ? Number(raw) : 1;
+  return `DR-${String(Number.isFinite(sequence) && sequence > 0 ? sequence : 1).padStart(5, "0")}`;
+}
+
 export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order }: Props) {
   const navigate = useNavigate();
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -55,7 +64,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
 
   const orderDisplay = order.displayNumber || order.id;
   const receiptNumber = useMemo(
-    () => `DR-${orderDisplay}-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, "0")}`,
+    () => formatDeliveryReceiptNumber(orderDisplay),
     [orderDisplay]
   );
 
