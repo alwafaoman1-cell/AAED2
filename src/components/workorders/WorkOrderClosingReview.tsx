@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getCurrentRole } from "@/lib/permissions";
-import type { WorkOrder } from "@/lib/workOrdersStore";
+import { normalizeWorkOrderStatus, type WorkOrder } from "@/lib/workOrdersStore";
 import { buildWorkOrderAccountingRows, formatOMR, type AccountingCostSource } from "@/lib/accounting/core";
 import { logActivity } from "@/lib/auditLogStore";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,7 +19,9 @@ import { isInsuranceWorkOrder } from "@/lib/workOrderType";
 export const CLOSING_STATUSES = ["جاهز للتسليم", "تم التسليم", "مغلق", "Ready", "Completed", "Delivered", "Closed"];
 
 export function isClosingStatus(status?: string) {
-  return CLOSING_STATUSES.some((item) => String(status || "").toLowerCase().includes(item.toLowerCase()));
+  const normalized = normalizeWorkOrderStatus(status).toLowerCase();
+  return ["جاهز للتسليم", "تم التسليم", "مغلق", "ready", "completed", "delivered", "closed"]
+    .some((item) => normalized.includes(item.toLowerCase()));
 }
 
 interface Props {

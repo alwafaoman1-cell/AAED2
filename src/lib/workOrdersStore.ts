@@ -153,15 +153,48 @@ export const STAGE_LABELS: Record<StagePhase, { ar: string; en: string }> = {
 };
 
 export const WORK_ORDER_STATUSES = [
-  "طھط­طھ ط§ظ„ظپط­طµ",
-  "ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ظ…ظˆط§ظپظ‚ط©",
-  "ط¨ط§ظ†طھط¸ط§ط± ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط±",
-  "طھط­طھ ط§ظ„ط¥طµظ„ط§ط­",
-  "ط¶ط¨ط· ط§ظ„ط¬ظˆط¯ط©",
-  "ط¬ط§ظ‡ط² ظ„ظ„طھط³ظ„ظٹظ…",
-  "طھظ… ط§ظ„طھط³ظ„ظٹظ…",
-  "ظ…ط؛ظ„ظ‚",
+  "تحت الفحص",
+  "بانتظار الموافقة",
+  "بانتظار قطع الغيار",
+  "تحت الإصلاح",
+  "ضبط الجودة",
+  "جاهز للتسليم",
+  "تم التسليم",
+  "مغلق",
 ];
+
+const WORK_ORDER_STATUS_MOJIBAKE_FIX: Record<string, string> = {
+  "طھط­طھ ط§ظ„ظپط­طµ": "تحت الفحص",
+  "ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ظ…ظˆط§ظپظ‚ط©": "بانتظار الموافقة",
+  "ط¨ط§ظ†طھط¸ط§ط± ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط±": "بانتظار قطع الغيار",
+  "طھط­طھ ط§ظ„ط¥طµظ„ط§ط­": "تحت الإصلاح",
+  "ط¶ط¨ط· ط§ظ„ط¬ظˆط¯ط©": "ضبط الجودة",
+  "ط¬ط§ظ‡ط² ظ„ظ„طھط³ظ„ظٹظ…": "جاهز للتسليم",
+  "طھظ… ط§ظ„طھط³ظ„ظٹظ…": "تم التسليم",
+  "ظ…ط؛ظ„ظ‚": "مغلق",
+};
+
+export function normalizeWorkOrderStatus(status: string | null | undefined): string {
+  const raw = String(status || "").trim();
+  if (!raw) return "تحت الفحص";
+  if (WORK_ORDER_STATUS_MOJIBAKE_FIX[raw]) return WORK_ORDER_STATUS_MOJIBAKE_FIX[raw];
+  if (WORK_ORDER_STATUSES.includes(raw)) return raw;
+  switch (raw) {
+    case "received":
+    case "inspection":
+      return "تحت الفحص";
+    case "waiting_parts":
+      return "بانتظار قطع الغيار";
+    case "in_progress":
+      return "تحت الإصلاح";
+    case "completed":
+      return "جاهز للتسليم";
+    case "delivered":
+      return "تم التسليم";
+    default:
+      return raw;
+  }
+}
 
 let cache: WorkOrder[] = [];
 const listeners = new Set<() => void>();
@@ -223,6 +256,7 @@ export function updateWorkOrder(id: string, patch: Partial<WorkOrder>) {
   const idx = list.findIndex(o => o.id === id);
   if (idx >= 0) {
     const normalizedPatch = { ...patch };
+    if (patch.status !== undefined) normalizedPatch.status = normalizeWorkOrderStatus(patch.status);
     if (patch.status !== undefined && isClosedWorkOrderStatus(patch.status) && patch.archivedAt === undefined) {
       normalizedPatch.archivedAt = list[idx].archivedAt || new Date().toISOString();
     }
@@ -434,28 +468,28 @@ import { sanitizeWorkOrderWritePayload } from "@/lib/supabasePayload";
 
 function cloudStatusToLocal(s: string | null | undefined): string {
   switch (s) {
-    case "delivered": return "طھظ… ط§ظ„طھط³ظ„ظٹظ…";
-    case "completed": return "ط¬ط§ظ‡ط² ظ„ظ„طھط³ظ„ظٹظ…";
-    case "in_progress": return "طھط­طھ ط§ظ„ط¥طµظ„ط§ط­";
-    case "waiting_parts": return "ط¨ط§ظ†طھط¸ط§ط± ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط±";
-    case "inspection": return "طھط­طھ ط§ظ„ظپط­طµ";
+    case "delivered": return "تم التسليم";
+    case "completed": return "جاهز للتسليم";
+    case "in_progress": return "تحت الإصلاح";
+    case "waiting_parts": return "بانتظار قطع الغيار";
+    case "inspection": return "تحت الفحص";
     case "received":
-    default: return "طھط­طھ ط§ظ„ظپط­طµ";
+    default: return normalizeWorkOrderStatus(s);
   }
 }
 function localStatusToCloud(s: string | undefined): string {
-  const n = (s || "").trim();
-  if (["ظ…ط؛ظ„ظ‚", "طھظ… ط§ظ„طھط³ظ„ظٹظ…"].includes(n)) return "delivered";
-  if (["ط¬ط§ظ‡ط² ظ„ظ„طھط³ظ„ظٹظ…", "ط¶ط¨ط· ط§ظ„ط¬ظˆط¯ط©"].includes(n)) return "completed";
-  if (["طھط­طھ ط§ظ„ط¥طµظ„ط§ط­"].includes(n)) return "in_progress";
-  if (["ط¨ط§ظ†طھط¸ط§ط± ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط±", "ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ظ…ظˆط§ظپظ‚ط©"].includes(n)) return "waiting_parts";
-  if (["طھط­طھ ط§ظ„ظپط­طµ"].includes(n)) return "inspection";
+  const n = normalizeWorkOrderStatus(s);
+  if (["مغلق", "تم التسليم"].includes(n)) return "delivered";
+  if (["جاهز للتسليم", "ضبط الجودة"].includes(n)) return "completed";
+  if (["تحت الإصلاح"].includes(n)) return "in_progress";
+  if (["بانتظار قطع الغيار", "بانتظار الموافقة"].includes(n)) return "waiting_parts";
+  if (["تحت الفحص"].includes(n)) return "inspection";
   return "received";
 }
 
 function isClosedWorkOrderStatus(status: string | undefined): boolean {
-  const local = (status || "").trim();
-  return ["ظ…ط؛ظ„ظ‚", "طھظ… ط§ظ„طھط³ظ„ظٹظ…"].includes(local) || localStatusToCloud(local) === "delivered";
+  const local = normalizeWorkOrderStatus(status);
+  return ["مغلق", "تم التسليم"].includes(local) || localStatusToCloud(local) === "delivered";
 }
 
 const LEGACY_METADATA_KEY = "__aaedMetadata";

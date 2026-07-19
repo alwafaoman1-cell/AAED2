@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Check, ChevronLeft, Camera, Image as ImageIcon, Send, Save, Trash2, Loader2 } from "lucide-react";
-import { WORK_ORDER_STATUSES, updateWorkOrderInCloud, type WorkOrder, type StagePhase, type StagePhoto } from "@/lib/workOrdersStore";
+import { WORK_ORDER_STATUSES, normalizeWorkOrderStatus, updateWorkOrderInCloud, type WorkOrder, type StagePhase, type StagePhoto } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
@@ -39,7 +39,52 @@ const STATUS_TO_PHASE: Record<string, StagePhase> = {
   "مغلق": "delivery",
 };
 
+function getStatusColor(status: string): string {
+  const normalized = normalizeWorkOrderStatus(status);
+  const colors: Record<string, string> = {
+    "تحت الفحص": "bg-primary/15 text-primary border-primary/30",
+    "بانتظار الموافقة": "bg-info/15 text-info border-info/30",
+    "بانتظار قطع الغيار": "bg-warning/15 text-warning border-warning/30",
+    "تحت الإصلاح": "bg-warning/15 text-warning border-warning/30",
+    "ضبط الجودة": "bg-info/15 text-info border-info/30",
+    "جاهز للتسليم": "bg-success/15 text-success border-success/30",
+    "تم التسليم": "bg-success/25 text-success border-success/40",
+    "مغلق": "bg-muted text-muted-foreground border-border",
+  };
+  return colors[normalized] || statusColor[status] || "bg-primary/15 text-primary border-primary";
+}
+
+function getStatusPhase(status: string): StagePhase {
+  const normalized = normalizeWorkOrderStatus(status);
+  const phases: Record<string, StagePhase> = {
+    "تحت الفحص": "inspection",
+    "بانتظار الموافقة": "inspection",
+    "بانتظار قطع الغيار": "in_progress",
+    "تحت الإصلاح": "in_progress",
+    "ضبط الجودة": "quality",
+    "جاهز للتسليم": "delivery",
+    "تم التسليم": "delivery",
+    "مغلق": "delivery",
+  };
+  return phases[normalized] || STATUS_TO_PHASE[status] || "in_progress";
+}
+
 function defaultMessage(status: string, customer: string, orderNo: string): string {
+  const normalizedStatus = normalizeWorkOrderStatus(status);
+  const readableMessages: Record<string, string> = {
+    "تحت الفحص": "نود إعلامكم أن مركبتكم حالياً تحت الفحص في الورشة.",
+    "بانتظار الموافقة": "مركبتكم بانتظار اعتماد التقدير من شركة التأمين.",
+    "بانتظار قطع الغيار": "مركبتكم بانتظار وصول قطع الغيار المطلوبة.",
+    "تحت الإصلاح": "مركبتكم حالياً قيد الإصلاح.",
+    "ضبط الجودة": "مركبتكم في مرحلة فحص الجودة النهائي.",
+    "جاهز للتسليم": "مركبتكم جاهزة للاستلام. يسعدنا استقبالكم في الورشة.",
+    "تم التسليم": "تم تسليم مركبتكم. شكراً لثقتكم بنا.",
+    "مغلق": "تم إغلاق أمر العمل الخاص بكم.",
+  };
+  if (WORK_ORDER_STATUSES.includes(normalizedStatus)) {
+    const greet = customer ? `مرحباً ${customer}،\n` : "";
+    return `${greet}${readableMessages[normalizedStatus] || `تم تحديث حالة أمر العمل إلى: ${normalizedStatus}`}\nرقم أمر العمل: ${orderNo}`;
+  }
   const greet = customer ? `مرحباً ${customer}،\n` : "";
   const tail = `\nرقم أمر العمل: ${orderNo}`;
   const map: Record<string, string> = {
@@ -85,8 +130,9 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
 
   useEffect(() => {
     if (open && order) {
-      setSelected(order.status);
-      setMessage(defaultMessage(order.status, order.customer || "", order.id));
+      const normalizedStatus = normalizeWorkOrderStatus(order.status);
+      setSelected(normalizedStatus);
+      setMessage(defaultMessage(normalizedStatus, order.customer || "", order.id));
       setPendingPhotos([]);
       setClosingReview(null);
     }
@@ -102,8 +148,9 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
 
   if (!order) return null;
 
-  const currentIdx = WORK_ORDER_STATUSES.indexOf(order.status);
-  const statusChanged = selected && selected !== order.status;
+  const normalizedOrderStatus = normalizeWorkOrderStatus(order.status);
+  const currentIdx = WORK_ORDER_STATUSES.indexOf(normalizedOrderStatus);
+  const statusChanged = selected && selected !== normalizedOrderStatus;
   const hasPhotos = pendingPhotos.length > 0;
   const requiresClosingReview = !!statusChanged && isClosingStatus(selected);
 
@@ -113,7 +160,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     try {
       const { convertImageToWebp } = await import("@/lib/imageToWebp");
       const { uploadStagePhoto } = await import("@/lib/workOrderPhotosStorage");
-      const phase = STATUS_TO_PHASE[selected || order!.status] || "in_progress";
+      const phase = getStatusPhase(selected || order!.status);
       const newOnes: StagePhoto[] = [];
       for (const f of Array.from(files).slice(0, 6)) {
         if (!f.type.startsWith("image/")) continue;
@@ -141,7 +188,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
 
   async function persist(): Promise<boolean> {
     const patch: Partial<WorkOrder> = {};
-    if (statusChanged) patch.status = selected;
+    if (statusChanged) patch.status = normalizeWorkOrderStatus(selected);
     if (requiresClosingReview) {
       if (!closingReview) {
         toast.error("يجب اعتماد Work Order Closing Review قبل حفظ الحالة النهائية.");
@@ -219,7 +266,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
             <p className="text-xs text-muted-foreground mb-2">1) اختر الحالة الجديدة:</p>
             <div className="space-y-1.5">
               {WORK_ORDER_STATUSES.map((s, i) => {
-                const isSelected = (selected || order.status) === s;
+                const isSelected = normalizeWorkOrderStatus(selected || normalizedOrderStatus) === s;
                 const isPast = i < currentIdx;
                 const isCurrent = i === currentIdx;
                 return (
@@ -229,7 +276,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
                     onClick={() => setSelected(s)}
                     className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg border transition-all text-right ${
                       isSelected
-                        ? `${statusColor[s] || "bg-primary/15 text-primary border-primary"} ring-2 ring-primary/40`
+                        ? `${getStatusColor(s)} ring-2 ring-primary/40`
                         : isPast
                         ? "bg-success/5 border-border text-muted-foreground hover:bg-secondary"
                         : "bg-secondary/40 border-border text-foreground hover:bg-secondary"
@@ -254,7 +301,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
             <WorkOrderClosingReview
               order={order}
               targetStatus={selected}
-              onCancel={() => setSelected(order.status)}
+              onCancel={() => setSelected(normalizedOrderStatus)}
               onConfirm={(review) => {
                 setClosingReview(review);
                 toast.success("تم اعتماد مراجعة الإغلاق. اضغط حفظ لإتمام تغيير الحالة.");

@@ -36,6 +36,7 @@ import {
   updateWorkOrderInCloud,
   WORK_ORDER_STATUSES,
   isPartStillNeeded,
+  normalizeWorkOrderStatus,
   type WorkOrder,
 } from "@/lib/workOrdersStore";
 import { staffStore } from "@/lib/staffStore";
@@ -105,6 +106,28 @@ const STATUS_GROUPS: Record<string, string[]> = {
   ready: ["جاهز للتسليم"],
   delivered: ["تم التسليم", "مغلق"],
 };
+
+const NORMALIZED_STATUS_GROUPS: Record<string, string[]> = {
+  repair: ["تحت الإصلاح", "تحت الفحص"],
+  waiting: ["بانتظار الموافقة", "بانتظار قطع الغيار"],
+  ready: ["جاهز للتسليم"],
+  delivered: ["تم التسليم", "مغلق"],
+};
+
+function workOrderStatusColor(status: string): string {
+  const normalized = normalizeWorkOrderStatus(status);
+  const colors: Record<string, string> = {
+    "تحت الفحص": "bg-primary/15 text-primary",
+    "بانتظار الموافقة": "bg-info/15 text-info",
+    "بانتظار قطع الغيار": "bg-warning/15 text-warning",
+    "تحت الإصلاح": "bg-warning/15 text-warning",
+    "ضبط الجودة": "bg-info/15 text-info",
+    "جاهز للتسليم": "bg-success/15 text-success",
+    "تم التسليم": "bg-success/25 text-success",
+    "مغلق": "bg-muted text-muted-foreground",
+  };
+  return colors[normalized] || statusColors[status] || "bg-muted text-muted-foreground";
+}
 
 const hasOrderValue = (value?: string) => !!(value && value.trim() !== "" && value.trim() !== "-");
 const isInsuranceOrder = (order: WorkOrder) => isInsuranceWorkOrder(order);
@@ -235,13 +258,14 @@ export default function WorkOrders() {
     const matchesSearch = !normalizedSearch || [
       o.customer, o.plate, o.id, o.phone, o.claimNumber, o.insurance, o.technician,
     ].some((value) => (value || "").toLowerCase().includes(normalizedSearch));
-    const statusGroup = STATUS_GROUPS[statusFilter];
+    const normalizedStatus = normalizeWorkOrderStatus(o.status);
+    const statusGroup = NORMALIZED_STATUS_GROUPS[statusFilter] || STATUS_GROUPS[statusFilter];
     const delay = getOrderDelayStyle(o);
     const matchesStatus =
       statusFilter === "all" ||
       (statusFilter === "overdue"
         ? delay.days !== null && delay.level !== "green"
-        : (statusGroup ? statusGroup.includes(o.status) : o.status === statusFilter));
+        : (statusGroup ? statusGroup.includes(normalizedStatus) : normalizedStatus === normalizeWorkOrderStatus(statusFilter)));
     const matchesOwnership = ownershipFilter === "all" || (ownershipFilter === "insurance" ? isInsuranceOrder(o) : !isInsuranceOrder(o));
     const matchesParts = !partsOnlyFilter || (o.partsNeeded && o.partsNeeded.some(isPartStillNeeded));
     const matchesTechnician = technicianFilter === "all" || o.technician === technicianFilter;
@@ -335,12 +359,12 @@ export default function WorkOrders() {
   }
 
   // Stats
-  const inProgress = orders.filter(o => o.status === "تحت الإصلاح" || o.status === "تحت الفحص").length;
-  const ready = orders.filter(o => o.status === "جاهز للتسليم").length;
-  const waiting = orders.filter(o => o.status === "بانتظار الموافقة" || o.status === "بانتظار قطع الغيار").length;
+  const inProgress = orders.filter(o => ["تحت الإصلاح", "تحت الفحص"].includes(normalizeWorkOrderStatus(o.status))).length;
+  const ready = orders.filter(o => normalizeWorkOrderStatus(o.status) === "جاهز للتسليم").length;
+  const waiting = orders.filter(o => ["بانتظار الموافقة", "بانتظار قطع الغيار"].includes(normalizeWorkOrderStatus(o.status))).length;
   const insuranceCount = orders.filter(isInsuranceOrder).length;
   const cashCount = orders.length - insuranceCount;
-  const delivered = orders.filter(o => o.status === "تم التسليم" || o.status === "مغلق").length;
+  const delivered = orders.filter(o => ["تم التسليم", "مغلق"].includes(normalizeWorkOrderStatus(o.status))).length;
   const overdue = orders.filter(o => {
     const delay = getOrderDelayStyle(o);
     return delay.days !== null && delay.level !== "green";
@@ -436,7 +460,7 @@ export default function WorkOrders() {
         </button>
         <button type="button" onClick={() => setStatusFilter("بانتظار قطع الغيار")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-warning/40">
           <p className="text-[10px] text-muted-foreground">بانتظار القطع</p>
-          <p className="text-lg font-bold text-warning">{orders.filter(o => o.status === "بانتظار قطع الغيار").length}</p>
+          <p className="text-lg font-bold text-warning">{orders.filter(o => normalizeWorkOrderStatus(o.status) === "بانتظار قطع الغيار").length}</p>
         </button>
         <button type="button" onClick={() => setStatusFilter("delivered")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-success/40">
           <p className="text-[10px] text-muted-foreground">تم التسليم</p>
@@ -624,10 +648,10 @@ export default function WorkOrders() {
                   <td className="py-3 px-4">
                     <button
                       onClick={(e) => { e.stopPropagation(); openStatus(order); }}
-                      className={`text-[10px] px-2 py-1 rounded-full font-medium hover:ring-2 hover:ring-primary/30 transition-all cursor-pointer ${statusColors[order.status] || ""}`}
+                      className={`text-[10px] px-2 py-1 rounded-full font-medium hover:ring-2 hover:ring-primary/30 transition-all cursor-pointer ${workOrderStatusColor(order.status)}`}
                       title="انقر لتغيير الحالة"
                     >
-                      {order.status}
+                      {normalizeWorkOrderStatus(order.status)}
                     </button>
                   </td>
                   <td className="py-3 px-4 text-foreground font-medium hidden md:table-cell" style={{ fontFamily: "Inter, sans-serif", direction: "ltr", textAlign: "right" }} data-amount="true">{toEnglishDigits(order.totalCost.toLocaleString("en-US"))} OMR</td>
@@ -725,7 +749,7 @@ export default function WorkOrders() {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onClick={() => {
-                            const msg = `مرحباً ${order.customer}،\nحالة سيارتكم (${order.plate}) في الورشة الآن: ${order.status}\nأمر العمل: ${order.id}\nشكراً لكم — شركة الوفاء للأعمال المتكاملة.`;
+                            const msg = `مرحباً ${order.customer}،\nحالة سيارتكم (${order.plate}) في الورشة الآن: ${normalizeWorkOrderStatus(order.status)}\nأمر العمل: ${order.id}\nشكراً لكم — شركة الوفاء للأعمال المتكاملة.`;
                             void sendWhatsAppAndLog({
                               message: msg,
                               phone: order.phone,
@@ -871,7 +895,7 @@ export default function WorkOrders() {
                   claimNumber={order.claimNumber}
                   insurance={order.insurance}
                 />
-                <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${statusColors[order.status] || "bg-muted"}`}>{order.status}</span>
+                <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${workOrderStatusColor(order.status)}`}>{normalizeWorkOrderStatus(order.status)}</span>
                 {delay.level !== "green" && delay.days !== null && <span className="rounded-full bg-destructive/10 px-2 py-1 text-[10px] font-semibold text-destructive">{delay.days} يوم</span>}
               </div>
               <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-xs">

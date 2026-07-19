@@ -42,6 +42,7 @@ import {
   type StagePhase,
   refreshWorkOrdersFromCloud,
   isPartStillNeeded,
+  normalizeWorkOrderStatus,
 } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
 import { inspectionsStore } from "@/lib/inspectionsStore";
@@ -99,6 +100,21 @@ const statusColors: Record<string, string> = {
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function workOrderStatusColor(status: string): string {
+  const normalized = normalizeWorkOrderStatus(status);
+  const colors: Record<string, string> = {
+    "تحت الفحص": "bg-primary/15 text-primary",
+    "بانتظار الموافقة": "bg-info/15 text-info",
+    "بانتظار قطع الغيار": "bg-warning/15 text-warning",
+    "تحت الإصلاح": "bg-warning/15 text-warning",
+    "ضبط الجودة": "bg-info/15 text-info",
+    "جاهز للتسليم": "bg-success/15 text-success",
+    "تم التسليم": "bg-success/25 text-success",
+    "مغلق": "bg-muted text-muted-foreground",
+  };
+  return colors[normalized] || statusColors[status] || "bg-muted text-muted-foreground";
+}
 
 const SUPA_STATUS_TO_AR: Record<string, string> = {
   received: "تحت الفحص",
@@ -284,7 +300,7 @@ export default function WorkOrderDetail() {
             entryDate: ((data as any).created_at || "").slice(0, 10),
             technician: "",
             serviceType: (data as any).insurance_claim_number ? "حادث" : "صيانة",
-            status: SUPA_STATUS_TO_AR[(data as any).status] || "تحت الفحص",
+            status: normalizeWorkOrderStatus(SUPA_STATUS_TO_AR[(data as any).status] || (data as any).status || "تحت الفحص"),
             totalCost: costs.totalCost,
             laborCost: costs.laborCost,
             partsCost: costs.partsCost,
@@ -592,9 +608,9 @@ export default function WorkOrderDetail() {
               تفاصيل أمر العمل
               <span className="font-mono text-primary text-sm">{displayNo}</span>
               <span
-                className={`text-[10px] px-2 py-1 rounded-full font-medium ${statusColors[order.status] || ""}`}
+                className={`text-[10px] px-2 py-1 rounded-full font-medium ${workOrderStatusColor(order.status)}`}
               >
-                {order.status}
+                {normalizeWorkOrderStatus(order.status)}
               </span>
             </h1>
             <p className="text-xs text-muted-foreground">
@@ -918,8 +934,8 @@ export default function WorkOrderDetail() {
                     <p className="text-[11px] text-muted-foreground">مركز تحكم أمر العمل</p>
                     <h2 className="text-lg sm:text-xl font-bold text-foreground font-mono">{displayNo}</h2>
                   </div>
-                  <span className={`text-[11px] px-2.5 py-1 rounded-full font-semibold ${statusColors[order.status] || "bg-muted text-muted-foreground"}`}>
-                    {order.status}
+                  <span className={`text-[11px] px-2.5 py-1 rounded-full font-semibold ${workOrderStatusColor(order.status)}`}>
+                    {normalizeWorkOrderStatus(order.status)}
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground leading-relaxed">
@@ -1107,12 +1123,12 @@ export default function WorkOrderDetail() {
           <SmartCustomerSendBar
             jobOrderId={cloudJobOrderId}
             orderNumber={displayNo}
-            status={order.status}
+            status={normalizeWorkOrderStatus(order.status)}
             customerName={order.customer}
             customerPhone={order.phone}
           />
           <div className="flex justify-end">
-            <SendStageNotificationButton jobOrderId={cloudJobOrderId} status={order.status} />
+            <SendStageNotificationButton jobOrderId={cloudJobOrderId} status={normalizeWorkOrderStatus(order.status)} />
           </div>
         </div>
       )}
