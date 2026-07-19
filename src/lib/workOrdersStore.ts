@@ -1121,7 +1121,6 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     .eq("tenant_id", ctx.tenantId)
     .eq("id", data.id)
     .is("deleted_at", null)
-    .is("archived_at", null)
     .maybeSingle();
   if (verifyError) throw verifyError;
   if (!verified?.id) throw new Error("تم الحفظ لكن تعذر قراءة أمر العمل للتأكيد");

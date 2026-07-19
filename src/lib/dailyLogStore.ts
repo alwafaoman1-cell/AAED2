@@ -8,6 +8,7 @@ import { customersStore } from "./customersStore";
 import { expensesStore, type ExpenseRecord } from "./expensesStore";
 import { expenseCategoriesStore, employeeCashboxesStore, voucherSettingsStore } from "./financeSettingsStore";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
+import { findExistingVehicle } from "./vehicleIdentity";
 
 export interface DailyLogRow {
   id: string;
@@ -100,8 +101,14 @@ export function autoNetRevenue(r: Pick<DailyLogRow, "paidAmount" | "partsBuy">):
 export async function generateOrderAndInvoiceForRow(row: DailyLogRow): Promise<{
   workOrderId: string; invoiceId: string; invoiceNumber: string; expenseId?: string;
 }> {
+  const existingVehicle = await findExistingVehicle({
+    plate: row.plate,
+    make: row.vehicleType,
+  }).catch(() => null);
+
   // 1) ضمان وجود العميل
   const savedCustomer = await customersStore.ensureCloudCustomer({
+    id: existingVehicle?.customer_id || undefined,
     name: row.customer || "غير محدد",
     phone: row.phone || "",
   });
@@ -122,6 +129,7 @@ export async function generateOrderAndInvoiceForRow(row: DailyLogRow): Promise<{
   const wo: WorkOrder = {
     id: woNumber,
     customerId: savedCustomer.id,
+    vehicleId: existingVehicle?.id,
     customer: row.customer || "غير محدد",
     phone: row.phone || "",
     plate: row.plate || "—",
