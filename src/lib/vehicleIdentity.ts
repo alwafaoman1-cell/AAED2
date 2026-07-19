@@ -139,7 +139,11 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
 
   const existing = await findExistingVehicle(input);
   if (existing?.id) {
-    if (input.vehicleId !== existing.id) {
+    const sameCustomer = !existing.customer_id || existing.customer_id === input.customerId;
+    if (input.vehicleId && input.vehicleId !== existing.id) {
+      throw new Error(vehicleSelectionRequiredMessage());
+    }
+    if (!input.vehicleId && !sameCustomer) {
       throw new Error(vehicleSelectionRequiredMessage());
     }
     const confirmedVinCandidate = existing.source !== "vin" || input.allowVinCandidate || input.vehicleId === existing.id;

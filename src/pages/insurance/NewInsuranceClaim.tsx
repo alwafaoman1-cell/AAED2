@@ -1005,7 +1005,19 @@ function Step1({
                   color: draft.vehicleColor,
                 });
                 if (existing?.id) {
-                  toast.error("هذه المركبة موجودة مسبقًا. اختر Use This Vehicle أو غيّر بيانات اللوحة.");
+                  if (existing.customer_id && existing.customer_id !== draft.customerId) {
+                    toast.error("هذه المركبة موجودة مسبقًا ومرتبطة بعميل آخر. اختر Use This Vehicle أو صحح العميل قبل الحفظ.");
+                    return;
+                  }
+                  update({
+                    vehicleId: existing.id,
+                    vehicleMake: existing.brand || draft.vehicleMake,
+                    vehicleModel: existing.model || draft.vehicleModel,
+                    vehicleYear: existing.year ? String(existing.year) : draft.vehicleYear,
+                    vehicleColor: existing.color || draft.vehicleColor,
+                    vehicleVin: existing.vin_number || existing.vin || draft.vehicleVin,
+                  });
+                  toast.success("تم ربط المركبة الموجودة");
                   return;
                 }
                 const resolved = await ensureVehicleForCustomer({

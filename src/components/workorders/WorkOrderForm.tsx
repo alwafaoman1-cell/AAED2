@@ -431,7 +431,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       return;
     }
     let resolvedVehicleId = form.vehicleId;
-    if (vehicleMatch?.id && !useExistingVehicle && form.vehicleId !== vehicleMatch.id) {
+    if (vehicleMatch?.id && vehicleOwnershipConflict && !useExistingVehicle && form.vehicleId !== vehicleMatch.id) {
       toast.error("هذه المركبة موجودة مسبقًا. اختر Use This Vehicle أو غيّر بيانات اللوحة.");
       return;
     }
