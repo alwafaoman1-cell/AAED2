@@ -363,6 +363,96 @@ export async function saveVehicleToCloud(
   return saved;
 }
 
+async function archiveVehicleOperationalLinks(tenantId: string, vehicle: Vehicle, cloudId: string, archivedAt: string, reason: string) {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id || null;
+  const safeUpdate = async (label: string, query: PromiseLike<{ error: any }>) => {
+    const { error } = await query;
+    if (error) console.warn(`[vehicle operational archive] ${label}`, error);
+  };
+
+  const { data: workOrders } = await supabase
+    .from("job_orders")
+    .select("id,order_number")
+    .eq("tenant_id", tenantId)
+    .eq("vehicle_id", cloudId);
+  const workOrderKeys = Array.from(new Set(((workOrders || []) as any[])
+    .flatMap((row) => [row.id, row.order_number])
+    .filter(Boolean)
+    .map(String)));
+
+  const { data: invoices } = workOrderKeys.length
+    ? await (supabase.from("sales_documents") as any)
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .in("work_order_id", workOrderKeys)
+    : { data: [] as any[] };
+  const invoiceIds = ((invoices || []) as any[]).map((row) => row.id).filter(Boolean);
+
+  const { data: claims } = await supabase
+    .from("insurance_claims" as any)
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("vehicle_id", cloudId);
+  const claimIds = ((claims || []) as any[]).map((row) => row.id).filter(Boolean);
+
+  await safeUpdate("job_orders", (supabase.from("job_orders") as any)
+    .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userId } as any)
+    .eq("tenant_id", tenantId)
+    .eq("vehicle_id", cloudId));
+
+  await safeUpdate("insurance_claims", (supabase.from("insurance_claims" as any) as any)
+    .update({ archived_at: archivedAt } as any)
+    .eq("tenant_id", tenantId)
+    .eq("vehicle_id", cloudId));
+
+  await safeUpdate("expenses_by_vehicle_id", (supabase.from("expenses") as any)
+    .update({ archived_at: archivedAt } as any)
+    .eq("tenant_id", tenantId)
+    .eq("vehicle_id", cloudId));
+
+  if (vehicle.plate) {
+    await safeUpdate("expenses_by_plate", (supabase.from("expenses") as any)
+      .update({ archived_at: archivedAt } as any)
+      .eq("tenant_id", tenantId)
+      .eq("linked_vehicle_plate", vehicle.plate));
+  }
+
+  if (workOrderKeys.length) {
+    await safeUpdate("expenses_by_work_order", (supabase.from("expenses") as any)
+      .update({ archived_at: archivedAt } as any)
+      .eq("tenant_id", tenantId)
+      .in("linked_work_order_id", workOrderKeys));
+
+    await safeUpdate("sales_documents", (supabase.from("sales_documents") as any)
+      .update({ status: "cancelled", archived_at: archivedAt } as any)
+      .eq("tenant_id", tenantId)
+      .in("work_order_id", workOrderKeys));
+  }
+
+  if (invoiceIds.length) {
+    await safeUpdate("sales_payments", (supabase.from("sales_payments" as any) as any)
+      .update({ archived_at: archivedAt } as any)
+      .eq("tenant_id", tenantId)
+      .in("sales_document_id", invoiceIds));
+  }
+
+  if (claimIds.length) {
+    await safeUpdate("claim_payments", (supabase.from("claim_payments" as any) as any)
+      .update({ archived_at: archivedAt } as any)
+      .eq("tenant_id", tenantId)
+      .in("claim_id", claimIds));
+  }
+
+  console.info("[vehicle operational archive] completed", {
+    vehicleId: cloudId,
+    reason,
+    workOrders: workOrderKeys.length,
+    invoices: invoiceIds.length,
+    claims: claimIds.length,
+  });
+}
+
 export async function deleteVehicleFromCloud(vehicle: Vehicle, reason = "Soft delete vehicle"): Promise<Vehicle> {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
@@ -388,6 +478,7 @@ export async function deleteVehicleFromCloud(vehicle: Vehicle, reason = "Soft de
     .maybeSingle();
   if (error) throw error;
   if (!data?.id) throw new Error("لم يتم حذف المركبة في Supabase");
+  await archiveVehicleOperationalLinks(tenantId, vehicle, cloudId, deletedAt, reason);
   const archivedVehicle = { ...vehicle, archived: true, archivedAt: deletedAt, archivedReason: reason };
   suppressCloudMutation = true;
   try {
