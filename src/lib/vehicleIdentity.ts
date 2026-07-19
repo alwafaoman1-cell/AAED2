@@ -11,6 +11,7 @@ import { isUuid } from "@/lib/uuid";
 export interface VehicleIdentityInput {
   vehicleId?: string | null;
   allowVinCandidate?: boolean;
+  allowDifferentCustomer?: boolean;
   customerId?: string | null;
   plate?: string | null;
   plateNumber?: string | null;
@@ -143,7 +144,7 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
     if (input.vehicleId && input.vehicleId !== existing.id) {
       throw new Error(vehicleSelectionRequiredMessage());
     }
-    if (!input.vehicleId && !sameCustomer) {
+    if (!input.vehicleId && !sameCustomer && !input.allowDifferentCustomer) {
       throw new Error(vehicleSelectionRequiredMessage());
     }
     const confirmedVinCandidate = existing.source !== "vin" || input.allowVinCandidate || input.vehicleId === existing.id;

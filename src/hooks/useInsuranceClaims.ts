@@ -238,9 +238,6 @@ export function useCreateClaim() {
 
         const attachVehicleToClaim = (vehicle: any) => {
           claim = { ...claim, vehicle_id: vehicle.id };
-          if (vehicle.customer_id && vehicle.customer_id !== claim.customer_id) {
-            claim = { ...claim, customer_id: vehicle.customer_id };
-          }
           return vehicle;
         };
 

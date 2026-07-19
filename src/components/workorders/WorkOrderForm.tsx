@@ -29,20 +29,21 @@ import AiWriteButton from "@/components/ai/AiWriteButton";
 function normalizeWorkOrderNumberInput(value: string) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
 }
+const serviceTypes = ["ط­ط§ط¯ط«", "طµظٹط§ظ†ط©", "ظƒظ‡ط±ط¨ط§ط،", "ط¨ط±ظ…ط¬ط©", "ظپط­طµ", "طµظٹط§ظ†ط© ط¯ظˆط±ظٹط©"];
+const insuranceCompanies = ["ط¸ظپط§ط± ظ„ظ„طھط£ظ…ظٹظ†", "ط§ظ„ط£ظ‡ظ„ظٹط© ظ„ظ„طھط£ظ…ظٹظ†", "ظ…ظٹط«ط§ظ‚ ظ„ظ„طھط£ظ…ظٹظ†", "ط§ظ„ط£ظ…ط§ظ†ط© ظ„ظ„طھط£ظ…ظٹظ†", "ط¢ظƒط³ط§ ط§ظ„ط®ظ„ظٹط¬", "ط£ط®ط±ظ‰"];
+const technicians = ["ط¹ط¨ط¯ط§ظ„ظ„ظ‡ ط§ظ„ط؛ط§ظ…ط¯ظٹ", "ظٹظˆط³ظپ ط§ظ„ظ‚ط­ط·ط§ظ†ظٹ", "ظ…ط§ط¬ط¯ ط§ظ„ط¯ظˆط³ط±ظٹ", "ط³ط§ظ…ظٹ ط§ظ„ط¹ظ†ط²ظٹ"];
 
-const serviceTypes = ["حادث", "صيانة", "كهرباء", "برمجة", "فحص", "صيانة دورية"];
-const insuranceCompanies = ["ظفار للتأمين", "الأهلية للتأمين", "ميثاق للتأمين", "الأمانة للتأمين", "آكسا الخليج", "أخرى"];
-const technicians = ["عبدالله الغامدي", "يوسف القحطاني", "ماجد الدوسري", "سامي العنزي"];
-
+// أدخل ماركة المركبة قبل المتابعة
+// أدخل ماركة المركبة قبل حفظ أمر العمل
 const DEFAULT_BELONGINGS: { key: string; label: string }[] = [
-  { key: "main_key", label: "مفتاح رئيسي" },
-  { key: "spare_key", label: "مفتاح احتياطي" },
-  { key: "spare_tire", label: "استبنة" },
-  { key: "tool_kit", label: "عدة السيارة" },
-  { key: "fire_extinguisher", label: "طفاية حريق" },
-  { key: "warning_triangle", label: "مثلث تحذير" },
-  { key: "trunk_cover", label: "غطاء صندوق الأمتعة" },
-  { key: "manual", label: "كتيب المركبة" },
+  { key: "main_key", label: "ظ…ظپطھط§ط­ ط±ط¦ظٹط³ظٹ" },
+  { key: "spare_key", label: "ظ…ظپطھط§ط­ ط§ط­طھظٹط§ط·ظٹ" },
+  { key: "spare_tire", label: "ط§ط³طھط¨ظ†ط©" },
+  { key: "tool_kit", label: "ط¹ط¯ط© ط§ظ„ط³ظٹط§ط±ط©" },
+  { key: "fire_extinguisher", label: "ط·ظپط§ظٹط© ط­ط±ظٹظ‚" },
+  { key: "warning_triangle", label: "ظ…ط«ظ„ط« طھط­ط°ظٹط±" },
+  { key: "trunk_cover", label: "ط؛ط·ط§ط، طµظ†ط¯ظˆظ‚ ط§ظ„ط£ظ…طھط¹ط©" },
+  { key: "manual", label: "ظƒطھظٹط¨ ط§ظ„ظ…ط±ظƒط¨ط©" },
 ];
 
 const empty: WorkOrder = {
@@ -53,8 +54,8 @@ const empty: WorkOrder = {
   insurance: "-", claimNumber: "-",
   entryDate: new Date().toISOString().split("T")[0],
   technician: "",
-  serviceType: "صيانة",
-  status: "تحت الفحص",
+  serviceType: "طµظٹط§ظ†ط©",
+  status: "طھط­طھ ط§ظ„ظپط­طµ",
   totalCost: 0, laborCost: 0, partsCost: 0,
   diagnosis: "",
   extraExpenses: [],
@@ -142,16 +143,16 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   const canChooseInsurance = role === "admin" || role === "manager" || role === "supervisor";
   const isWizard = !isEdit;
   const wizardSteps = [
-    { label: "العميل والمركبة ونوع الأمر", desc: "لا يتم إنشاء أمر العمل في هذه الخطوة." },
-    { label: "الاستلام والصور والتوقيع", desc: "بيانات حالة المركبة عند دخولها." },
-    { label: "المراجعة والحفظ النهائي", desc: "الحفظ في Supabase يتم هنا فقط." },
+    { label: "ط§ظ„ط¹ظ…ظٹظ„ ظˆط§ظ„ظ…ط±ظƒط¨ط© ظˆظ†ظˆط¹ ط§ظ„ط£ظ…ط±", desc: "ظ„ط§ ظٹطھظ… ط¥ظ†ط´ط§ط، ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ظپظٹ ظ‡ط°ظ‡ ط§ظ„ط®ط·ظˆط©." },
+    { label: "ط§ظ„ط§ط³طھظ„ط§ظ… ظˆط§ظ„طµظˆط± ظˆط§ظ„طھظˆظ‚ظٹط¹", desc: "ط¨ظٹط§ظ†ط§طھ ط­ط§ظ„ط© ط§ظ„ظ…ط±ظƒط¨ط© ط¹ظ†ط¯ ط¯ط®ظˆظ„ظ‡ط§." },
+    { label: "ط§ظ„ظ…ط±ط§ط¬ط¹ط© ظˆط§ظ„ط­ظپط¸ ط§ظ„ظ†ظ‡ط§ط¦ظٹ", desc: "ط§ظ„ط­ظپط¸ ظپظٹ Supabase ظٹطھظ… ظ‡ظ†ط§ ظپظ‚ط·." },
   ];
   const wizardVisible = (step: 0 | 1 | 2) => !isWizard || wizardStep === step;
   const goWizardNext = () => {
     if (wizardStep === 0) {
-      if (!form.customer) return toast.error("أكمل بيانات العميل قبل المتابعة");
-      if (!form.plate) return toast.error("أدخل رقم اللوحة قبل المتابعة");
-      if (!form.vehicleType?.trim()) return toast.error("أدخل ماركة المركبة قبل المتابعة");
+      if (!form.customer) return toast.error("ط£ظƒظ…ظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط¹ظ…ظٹظ„ ظ‚ط¨ظ„ ط§ظ„ظ…طھط§ط¨ط¹ط©");
+      if (!form.plate) return toast.error("ط£ط¯ط®ظ„ ط±ظ‚ظ… ط§ظ„ظ„ظˆط­ط© ظ‚ط¨ظ„ ط§ظ„ظ…طھط§ط¨ط¹ط©");
+      if (!form.vehicleType?.trim()) return toast.error("ط£ط¯ط®ظ„ ظ…ط§ط±ظƒط© ط§ظ„ظ…ط±ظƒط¨ط© ظ‚ط¨ظ„ ط§ظ„ظ…طھط§ط¨ط¹ط©");
     }
     setWizardStep((step) => Math.min(2, step + 1) as 0 | 1 | 2);
   };
@@ -237,7 +238,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
   function selectOrderType(type: WorkOrderType) {
     if (type === "insurance" && !canChooseInsurance) {
-      toast.error("إنشاء أمر تأمين يدوي متاح للمدير أو المشرف فقط");
+      toast.error("ط¥ظ†ط´ط§ط، ط£ظ…ط± طھط£ظ…ظٹظ† ظٹط¯ظˆظٹ ظ…طھط§ط­ ظ„ظ„ظ…ط¯ظٹط± ط£ظˆ ط§ظ„ظ…ط´ط±ظپ ظپظ‚ط·");
       return;
     }
     setForm((prev) => type === "general_customer"
@@ -284,7 +285,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     setForm(prev => ({ ...prev, extraExpenses: (prev.extraExpenses || []).filter(e => e.id !== id) }));
   }
 
-  // ===== Needed parts helpers (طلب قطع غيار) =====
+  // ===== Needed parts helpers (ط·ظ„ط¨ ظ‚ط·ط¹ ط؛ظٹط§ط±) =====
   function addNeededPart() {
     const item: NeededPart = { id: `NP-${Date.now()}`, name: "", quantity: 1, status: "pending", fulfilled: false };
     setForm(prev => ({ ...prev, partsNeeded: [...(prev.partsNeeded || []), item] }));
@@ -306,7 +307,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     setForm(prev => ({ ...prev, partsNeeded: (prev.partsNeeded || []).filter(p => p.id !== id) }));
   }
 
-  // ===== Work items helpers (بنود الأعمال للعميل) =====
+  // ===== Work items helpers (ط¨ظ†ظˆط¯ ط§ظ„ط£ط¹ظ…ط§ظ„ ظ„ظ„ط¹ظ…ظٹظ„) =====
   function addWorkItem() {
     const item: WorkItem = { id: `WI-${Date.now()}`, title: "", note: "" };
     setForm(prev => ({ ...prev, workItems: [...(prev.workItems || []), item] }));
@@ -337,13 +338,13 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   }, [form.customer, form.plate]);
 
   // ===== Totals =====
-  // ⚠️ totalCost المخزّن = الإجمالي الكامل قبل حسم الدفعات (الإيراد المحاسبي).
-  // الدفعة المستلمة تُحفظ في depositApplied كتحصيل مستقل، والرصيد المستحق يُحسب للعرض فقط.
+  // âڑ ï¸ڈ totalCost ط§ظ„ظ…ط®ط²ظ‘ظ† = ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظƒط§ظ…ظ„ ظ‚ط¨ظ„ ط­ط³ظ… ط§ظ„ط¯ظپط¹ط§طھ (ط§ظ„ط¥ظٹط±ط§ط¯ ط§ظ„ظ…ط­ط§ط³ط¨ظٹ).
+  // ط§ظ„ط¯ظپط¹ط© ط§ظ„ظ…ط³طھظ„ظ…ط© طھظڈط­ظپط¸ ظپظٹ depositApplied ظƒطھط­طµظٹظ„ ظ…ط³طھظ‚ظ„طŒ ظˆط§ظ„ط±طµظٹط¯ ط§ظ„ظ…ط³طھط­ظ‚ ظٹظڈط­ط³ط¨ ظ„ظ„ط¹ط±ط¶ ظپظ‚ط·.
   const extraTotal = (form.extraExpenses || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const baseSubtotal = (Number(form.laborCost) || 0) + (Number(form.partsCost) || 0) + extraTotal;
   const deposit = Math.min(Number(form.depositApplied) || 0, baseSubtotal, availableDeposit + (initial?.depositApplied || 0));
-  const finalTotal = baseSubtotal; // الإجمالي = القيمة الكاملة (لا يُخصم منها الدفعة)
-  const balanceDue = Math.max(0, baseSubtotal - deposit); // للعرض فقط
+  const finalTotal = baseSubtotal; // ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ = ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظƒط§ظ…ظ„ط© (ظ„ط§ ظٹظڈط®طµظ… ظ…ظ†ظ‡ط§ ط§ظ„ط¯ظپط¹ط©)
+  const balanceDue = Math.max(0, baseSubtotal - deposit); // ظ„ظ„ط¹ط±ط¶ ظپظ‚ط·
 
   async function uploadReceptionPhotos(orderNumber: string) {
     if (receptionFiles.length === 0) return form.photos || [];
@@ -377,7 +378,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         phase: "received",
         dataUrl: signed.signedUrl,
         storagePath,
-        caption: "صورة استلام المركبة",
+        caption: "طµظˆط±ط© ط§ط³طھظ„ط§ظ… ط§ظ„ظ…ط±ظƒط¨ط©",
         uploadedAt: new Date().toISOString(),
       });
     }
@@ -387,7 +388,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   async function handleSubmit() {
     let customerId = (form as WorkOrder & { customerId?: string }).customerId;
     if (!form.customer) {
-      toast.error("الرجاء اختيار العميل أو إنشاؤه (إلزامي)");
+      toast.error("ط§ظ„ط±ط¬ط§ط، ط§ط®طھظٹط§ط± ط§ظ„ط¹ظ…ظٹظ„ ط£ظˆ ط¥ظ†ط´ط§ط¤ظ‡ (ط¥ظ„ط²ط§ظ…ظٹ)");
       return;
     }
     try {
@@ -402,39 +403,35 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       return;
     }
     if (!form.plate) {
-      toast.error("الرجاء إدخال رقم اللوحة");
+      toast.error("ط§ظ„ط±ط¬ط§ط، ط¥ط¯ط®ط§ظ„ ط±ظ‚ظ… ط§ظ„ظ„ظˆط­ط©");
       return;
     }
     if (!form.vehicleId && !vehicleMatch?.id && !form.vehicleType?.trim()) {
-      toast.error("أدخل ماركة المركبة قبل حفظ أمر العمل");
+      toast.error("ط£ط¯ط®ظ„ ظ…ط§ط±ظƒط© ط§ظ„ظ…ط±ظƒط¨ط© ظ‚ط¨ظ„ ط­ظپط¸ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„");
       return;
     }
     if (selectedType === "insurance") {
       if (!canChooseInsurance && !form.claimId) {
-        toast.error("يجب ربط أمر التأمين بمطالبة موجودة");
+        toast.error("ظٹط¬ط¨ ط±ط¨ط· ط£ظ…ط± ط§ظ„طھط£ظ…ظٹظ† ط¨ظ…ط·ط§ظ„ط¨ط© ظ…ظˆط¬ظˆط¯ط©");
         return;
       }
       if (!form.insurance || form.insurance === "-") {
-        toast.error("الرجاء اختيار شركة التأمين");
+        toast.error("ط§ظ„ط±ط¬ط§ط، ط§ط®طھظٹط§ط± ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†");
         return;
       }
       if (!form.claimNumber || form.claimNumber === "-") {
-        toast.error("الرجاء إدخال رقم المطالبة أو اختيار مطالبة موجودة");
+        toast.error("ط§ظ„ط±ط¬ط§ط، ط¥ط¯ط®ط§ظ„ ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط© ط£ظˆ ط§ط®طھظٹط§ط± ظ…ط·ط§ظ„ط¨ط© ظ…ظˆط¬ظˆط¯ط©");
         return;
       }
     }
-    // قاعدة التسليم: لا يُسمح بإغلاق التسليم على عميل افتراضي (Insurance Pending)
+    // ظ‚ط§ط¹ط¯ط© ط§ظ„طھط³ظ„ظٹظ…: ظ„ط§ ظٹظڈط³ظ…ط­ ط¨ط¥ط؛ظ„ط§ظ‚ ط§ظ„طھط³ظ„ظٹظ… ط¹ظ„ظ‰ ط¹ظ…ظٹظ„ ط§ظپطھط±ط§ط¶ظٹ (Insurance Pending)
     const isPending = customersStore.isInsurancePending(form.customer);
-    const isDeliveryStatus = ["تم التسليم", "مغلق", "جاهز للتسليم"].includes(form.status);
+    const isDeliveryStatus = ["طھظ… ط§ظ„طھط³ظ„ظٹظ…", "ظ…ط؛ظ„ظ‚", "ط¬ط§ظ‡ط² ظ„ظ„طھط³ظ„ظٹظ…"].includes(form.status);
     if (isPending && isDeliveryStatus) {
-      toast.error("يجب تحديد العميل الحقيقي قبل تسليم المركبة (استبدل Insurance Pending)");
+      toast.error("ظٹط¬ط¨ طھط­ط¯ظٹط¯ ط§ظ„ط¹ظ…ظٹظ„ ط§ظ„ط­ظ‚ظٹظ‚ظٹ ظ‚ط¨ظ„ طھط³ظ„ظٹظ… ط§ظ„ظ…ط±ظƒط¨ط© (ط§ط³طھط¨ط¯ظ„ Insurance Pending)");
       return;
     }
     let resolvedVehicleId = form.vehicleId;
-    if (vehicleMatch?.id && vehicleOwnershipConflict && !useExistingVehicle && form.vehicleId !== vehicleMatch.id) {
-      toast.error("هذه المركبة موجودة مسبقًا. اختر Use This Vehicle أو غيّر بيانات اللوحة.");
-      return;
-    }
     try {
       const resolved = await ensureVehicleForCustomer({
         customerId,
@@ -446,31 +443,37 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         year: form.year,
         color: form.color,
         allowVinCandidate: useExistingVehicle,
+        allowDifferentCustomer: true,
       });
       resolvedVehicleId = resolved.vehicleId;
-      if (resolved.ownershipConflict && !useExistingVehicle) {
-        toast.error("هذه المركبة موجودة ومرتبطة بعميل آخر. استخدم المركبة الحالية أو اطلب تأكيد المدير للنقل.");
-        return;
+      if (resolved.ownershipConflict && vehicleMatch?.customer_id) {
+        setForm((prev) => ({
+          ...prev,
+          vehicleId: resolved.vehicleId,
+          vehicleOwnerCustomerId: vehicleMatch.customer_id || prev.vehicleOwnerCustomerId,
+          receivedFromCustomerId: customerId || prev.receivedFromCustomerId,
+          customerRelationshipToVehicle: prev.customerRelationshipToVehicle || 'delivered_by',
+        }));
       }
       if (resolved.created) {
         void import("@/lib/vehiclesStore").then((m) => m.refreshVehiclesFromCloud()).catch(() => {});
       }
     } catch (error: any) {
       if (String(error?.message || "").includes("vin_candidate_requires_user_confirmation")) {
-        toast.error("تم العثور على مركبة محتملة عبر VIN فقط. يجب تأكيد استخدام المركبة الموجودة قبل الحفظ.");
+        toast.error("طھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ ظ…ط±ظƒط¨ط© ظ…ط­طھظ…ظ„ط© ط¹ط¨ط± VIN ظپظ‚ط·. ظٹط¬ط¨ طھط£ظƒظٹط¯ ط§ط³طھط®ط¯ط§ظ… ط§ظ„ظ…ط±ظƒط¨ط© ط§ظ„ظ…ظˆط¬ظˆط¯ط© ظ‚ط¨ظ„ ط§ظ„ط­ظپط¸.");
       } else {
-        toast.error(error?.message || "تعذر ربط المركبة أو إنشاؤها");
+        toast.error(error?.message || "طھط¹ط°ط± ط±ط¨ط· ط§ظ„ظ…ط±ظƒط¨ط© ط£ظˆ ط¥ظ†ط´ط§ط¤ظ‡ط§");
       }
       return;
     }
     if (!resolvedVehicleId || !isUuid(resolvedVehicleId)) {
-      toast.error("لا يمكن حفظ أمر العمل بدون vehicle_id");
+      toast.error("ظ„ط§ ظٹظ…ظƒظ† ط­ظپط¸ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ط¨ط¯ظˆظ† vehicle_id");
       return;
     }
     const targetOrderNumber = isEdit ? normalizeWorkOrderNumberInput(form.id || form.displayNumber || initial?.id || "") : nextWorkOrderNumber();
     if (isEdit) {
       if (!/^WO-\d{4}-\d+$/i.test(targetOrderNumber)) {
-        toast.error("رقم أمر العمل يجب أن يكون بصيغة WO-YYYY-0001");
+        toast.error("ط±ظ‚ظ… ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ظٹط¬ط¨ ط£ظ† ظٹظƒظˆظ† ط¨طµظٹط؛ط© WO-YYYY-0001");
         return;
       }
       const localDuplicate = getWorkOrders({ includeArchived: true }).find((order) => {
@@ -479,7 +482,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         return sameNumber && !sameRecord;
       });
       if (localDuplicate) {
-        toast.error(`رقم أمر العمل ${targetOrderNumber} مستخدم مسبقًا`);
+        toast.error(`ط±ظ‚ظ… ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ${targetOrderNumber} ظ…ط³طھط®ط¯ظ… ظ…ط³ط¨ظ‚ظ‹ط§`);
         return;
       }
       const tenantId = await getCurrentTenantId();
@@ -492,11 +495,11 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           .neq("id", initial.cloudId)
           .maybeSingle();
         if (duplicateError) {
-          toast.error(duplicateError.message || "تعذر التحقق من رقم أمر العمل");
+          toast.error(duplicateError.message || "طھط¹ط°ط± ط§ظ„طھط­ظ‚ظ‚ ظ…ظ† ط±ظ‚ظ… ط£ظ…ط± ط§ظ„ط¹ظ…ظ„");
           return;
         }
         if ((duplicate as any)?.id) {
-          toast.error(`رقم أمر العمل ${targetOrderNumber} مستخدم مسبقًا`);
+          toast.error(`ط±ظ‚ظ… ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ${targetOrderNumber} ظ…ط³طھط®ط¯ظ… ظ…ط³ط¨ظ‚ظ‹ط§`);
           return;
         }
       }
@@ -526,10 +529,10 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     };
     try {
       const saved = await saveWorkOrderToCloud({ ...payload, id: targetOrderNumber });
-      toast.success(isEdit ? `تم تحديث ${saved.id}` : `تم إنشاء ${saved.id}`);
+      toast.success(isEdit ? `طھظ… طھط­ط¯ظٹط« ${saved.id}` : `طھظ… ط¥ظ†ط´ط§ط، ${saved.id}`);
       onClose();
     } catch (error: any) {
-      toast.error(error?.message || "تعذر حفظ أمر العمل في Supabase");
+      toast.error(error?.message || "طھط¹ط°ط± ط­ظپط¸ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ظپظٹ Supabase");
     } finally {
       setSaving(false);
     }
@@ -539,7 +542,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     <div className="space-y-4 py-2">
       {isEdit && (
         <div className="rounded-xl border border-primary/25 bg-primary/5 p-3">
-          <label className="text-xs font-semibold text-foreground">رقم أمر العمل</label>
+          <label className="text-xs font-semibold text-foreground">ط±ظ‚ظ… ط£ظ…ط± ط§ظ„ط¹ظ…ظ„</label>
           <Input
             dir="ltr"
             value={form.id || form.displayNumber || ""}
@@ -551,7 +554,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
             className="mt-1 bg-card border-border font-mono text-left"
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
-            يمكن تعديل رقم العرض فقط. العلاقات الداخلية تبقى على UUID ولا تتغير.
+            ظٹظ…ظƒظ† طھط¹ط¯ظٹظ„ ط±ظ‚ظ… ط§ظ„ط¹ط±ط¶ ظپظ‚ط·. ط§ظ„ط¹ظ„ط§ظ‚ط§طھ ط§ظ„ط¯ط§ط®ظ„ظٹط© طھط¨ظ‚ظ‰ ط¹ظ„ظ‰ UUID ظˆظ„ط§ طھطھط؛ظٹط±.
           </p>
         </div>
       )}
@@ -578,23 +581,23 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
             ))}
           </div>
           <p className="text-[11px] text-muted-foreground">
-            يمكنك الرجوع والتعديل بدون فقدان البيانات. أمر العمل لا يُنشأ إلا عند الضغط على حفظ في الخطوة الأخيرة.
+            ظٹظ…ظƒظ†ظƒ ط§ظ„ط±ط¬ظˆط¹ ظˆط§ظ„طھط¹ط¯ظٹظ„ ط¨ط¯ظˆظ† ظپظ‚ط¯ط§ظ† ط§ظ„ط¨ظٹط§ظ†ط§طھ. ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ظ„ط§ ظٹظڈظ†ط´ط£ ط¥ظ„ط§ ط¹ظ†ط¯ ط§ظ„ط¶ط؛ط· ط¹ظ„ظ‰ ط­ظپط¸ ظپظٹ ط§ظ„ط®ط·ظˆط© ط§ظ„ط£ط®ظٹط±ط©.
           </p>
         </div>
       )}
 
       {!isEdit && form.parentOrderNumber && (
         <div className="rounded-lg border border-info/30 bg-info/10 p-3 text-xs text-foreground">
-          طھظ… ظپطھط­ ظ‡ط°ط§ ط§ظ„ط£ظ…ط± ظƒط²ظٹط§ط±ط© ط¬ط¯ظٹط¯ط© ظ„ظ„ظ…ط±ظƒط¨ط© ط¨ط¹ط¯ ط§ظ„طھط³ظ„ظٹظ….
-          <span className="font-semibold"> ط§ظ„ط£ظ…ط± ط§ظ„ط³ط§ط¨ظ‚: {form.parentOrderNumber}</span>
-          {form.visitNumber ? <span> â€¢ ط±ظ‚ظ… ط§ظ„ط²ظٹط§ط±ط©: {form.visitNumber}</span> : null}
+          ط·ع¾ط¸â€¦ ط¸ظ¾ط·ع¾ط·آ­ ط¸â€،ط·آ°ط·آ§ ط·آ§ط¸â€‍ط·آ£ط¸â€¦ط·آ± ط¸ئ’ط·آ²ط¸ظ¹ط·آ§ط·آ±ط·آ© ط·آ¬ط·آ¯ط¸ظ¹ط·آ¯ط·آ© ط¸â€‍ط¸â€‍ط¸â€¦ط·آ±ط¸ئ’ط·آ¨ط·آ© ط·آ¨ط·آ¹ط·آ¯ ط·آ§ط¸â€‍ط·ع¾ط·آ³ط¸â€‍ط¸ظ¹ط¸â€¦.
+          <span className="font-semibold"> ط·آ§ط¸â€‍ط·آ£ط¸â€¦ط·آ± ط·آ§ط¸â€‍ط·آ³ط·آ§ط·آ¨ط¸â€ڑ: {form.parentOrderNumber}</span>
+          {form.visitNumber ? <span> أ¢â‚¬آ¢ ط·آ±ط¸â€ڑط¸â€¦ ط·آ§ط¸â€‍ط·آ²ط¸ظ¹ط·آ§ط·آ±ط·آ©: {form.visitNumber}</span> : null}
         </div>
       )}
 
       <div className="rounded-xl border border-border bg-card p-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
         <div className="mb-3">
-          <h4 className="text-sm font-semibold text-foreground">نوع أمر العمل *</h4>
-          <p className="text-[11px] text-muted-foreground">حدد المسار قبل إدخال البيانات. الأمر المرتبط بمطالبة يُصنّف تأمين تلقائيًا.</p>
+          <h4 className="text-sm font-semibold text-foreground">ظ†ظˆط¹ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ *</h4>
+          <p className="text-[11px] text-muted-foreground">ط­ط¯ط¯ ط§ظ„ظ…ط³ط§ط± ظ‚ط¨ظ„ ط¥ط¯ط®ط§ظ„ ط§ظ„ط¨ظٹط§ظ†ط§طھ. ط§ظ„ط£ظ…ط± ط§ظ„ظ…ط±طھط¨ط· ط¨ظ…ط·ط§ظ„ط¨ط© ظٹظڈطµظ†ظ‘ظپ طھط£ظ…ظٹظ† طھظ„ظ‚ط§ط¦ظٹظ‹ط§.</p>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <button
@@ -606,7 +609,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                 : "border-border hover:border-emerald-500/50"
             }`}
           >
-            <span className="flex items-center gap-2 font-semibold text-foreground"><Car size={18} className="text-emerald-600" /> عميل عام</span>
+            <span className="flex items-center gap-2 font-semibold text-foreground"><Car size={18} className="text-emerald-600" /> ط¹ظ…ظٹظ„ ط¹ط§ظ…</span>
             <span className="mt-1 block text-[11px] text-muted-foreground">General Customer / Cash</span>
           </button>
           <button
@@ -619,21 +622,21 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                 : "border-border hover:border-sky-500/50"
             }`}
           >
-            <span className="flex items-center gap-2 font-semibold text-foreground"><Shield size={18} className="text-sky-600" /> شركة تأمين</span>
+            <span className="flex items-center gap-2 font-semibold text-foreground"><Shield size={18} className="text-sky-600" /> ط´ط±ظƒط© طھط£ظ…ظٹظ†</span>
             <span className="mt-1 block text-[11px] text-muted-foreground">Insurance Work Order</span>
           </button>
         </div>
       </div>
 
-      {/* تعبئة تلقائية بالذكاء الاصطناعي من صورة مَلكية/استمارة/رخصة */}
+      {/* طھط¹ط¨ط¦ط© طھظ„ظ‚ط§ط¦ظٹط© ط¨ط§ظ„ط°ظƒط§ط، ط§ظ„ط§طµط·ظ†ط§ط¹ظٹ ظ…ظ† طµظˆط±ط© ظ…ظژظ„ظƒظٹط©/ط§ط³طھظ…ط§ط±ط©/ط±ط®طµط© */}
       <div className="flex items-center justify-between gap-2 bg-primary/5 border border-primary/20 rounded-lg p-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
         <div className="text-xs">
-          <div className="font-medium text-foreground">⚡ تعبئة سريعة بالذكاء الاصطناعي</div>
-          <div className="text-muted-foreground">ارفع صورة المَلكية / الاستمارة / الرخصة وسيستخرج البيانات تلقائياً</div>
+          <div className="font-medium text-foreground">âڑ، طھط¹ط¨ط¦ط© ط³ط±ظٹط¹ط© ط¨ط§ظ„ط°ظƒط§ط، ط§ظ„ط§طµط·ظ†ط§ط¹ظٹ</div>
+          <div className="text-muted-foreground">ط§ط±ظپط¹ طµظˆط±ط© ط§ظ„ظ…ظژظ„ظƒظٹط© / ط§ظ„ط§ط³طھظ…ط§ط±ط© / ط§ظ„ط±ط®طµط© ظˆط³ظٹط³طھط®ط±ط¬ ط§ظ„ط¨ظٹط§ظ†ط§طھ طھظ„ظ‚ط§ط¦ظٹط§ظ‹</div>
         </div>
         <AiExtractButton
           schema="vehicle_customer"
-          label="تعبئة من صورة"
+          label="طھط¹ط¨ط¦ط© ظ…ظ† طµظˆط±ط©"
           onExtracted={(d) => {
             setForm((prev) => ({
               ...prev,
@@ -651,13 +654,13 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         />
       </div>
 
-      {/* ===== 1) العميل (بحث موحّد بالهاتف + إنشاء إلزامي) ===== */}
+      {/* ===== 1) ط§ظ„ط¹ظ…ظٹظ„ (ط¨ط­ط« ظ…ظˆط­ظ‘ط¯ ط¨ط§ظ„ظ‡ط§طھظپ + ط¥ظ†ط´ط§ط، ط¥ظ„ط²ط§ظ…ظٹ) ===== */}
       <div className="border border-border rounded-lg bg-card/50 p-3 space-y-2" style={{ display: wizardVisible(0) ? undefined : "none" }}>
-        <h4 className="text-sm font-semibold text-foreground">العميل</h4>
+        <h4 className="text-sm font-semibold text-foreground">ط§ظ„ط¹ظ…ظٹظ„</h4>
         <p className="text-[10px] text-muted-foreground">
-          ابحث بالهاتف أو الاسم. لو لم يوجد سيظهر زر «إضافة عميل جديد (إلزامي)».
+          ط§ط¨ط­ط« ط¨ط§ظ„ظ‡ط§طھظپ ط£ظˆ ط§ظ„ط§ط³ظ…. ظ„ظˆ ظ„ظ… ظٹظˆط¬ط¯ ط³ظٹط¸ظ‡ط± ط²ط± آ«ط¥ط¶ط§ظپط© ط¹ظ…ظٹظ„ ط¬ط¯ظٹط¯ (ط¥ظ„ط²ط§ظ…ظٹ)آ».
           {selectedType === "insurance" && (
-            <span className="text-amber-600"> — في حالة التأمين يمكن ترك العميل افتراضياً «Insurance Pending» وتحديده عند التسليم.</span>
+            <span className="text-amber-600"> â€” ظپظٹ ط­ط§ظ„ط© ط§ظ„طھط£ظ…ظٹظ† ظٹظ…ظƒظ† طھط±ظƒ ط§ظ„ط¹ظ…ظٹظ„ ط§ظپطھط±ط§ط¶ظٹط§ظ‹ آ«Insurance Pendingآ» ظˆطھط­ط¯ظٹط¯ظ‡ ط¹ظ†ط¯ ط§ظ„طھط³ظ„ظٹظ….</span>
           )}
         </p>
         <CustomerPhoneLookup
@@ -684,16 +687,16 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
             }}
             className="text-xs px-3 py-1.5 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 border border-amber-500/30"
           >
-            استخدام عميل افتراضي «Insurance Pending - {form.insurance}»
+            ط§ط³طھط®ط¯ط§ظ… ط¹ظ…ظٹظ„ ط§ظپطھط±ط§ط¶ظٹ آ«Insurance Pending - {form.insurance}آ»
           </button>
         )}
       </div>
 
-      {/* ===== 2) بيانات المركبة (موحّدة — بدون تكرار) ===== */}
+      {/* ===== 2) ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط±ظƒط¨ط© (ظ…ظˆط­ظ‘ط¯ط© â€” ط¨ط¯ظˆظ† طھظƒط±ط§ط±) ===== */}
       <div className="border border-primary/30 rounded-lg bg-primary/5 p-3 space-y-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
-        <h4 className="text-sm font-semibold text-foreground">بيانات المركبة</h4>
+        <h4 className="text-sm font-semibold text-foreground">ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط±ظƒط¨ط©</h4>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">رقم اللوحة *</label>
+          <label className="text-xs font-medium text-muted-foreground">ط±ظ‚ظ… ط§ظ„ظ„ظˆط­ط© *</label>
           <PlateInput value={form.plate} onChange={(v) => {
             setUseExistingVehicle(false);
             setForm((prev) => ({ ...prev, plate: v, vehicleId: undefined }));
@@ -720,34 +723,70 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           }
         />
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">الكيلومترات</label>
+          <label className="text-xs font-medium text-muted-foreground">ط§ظ„ظƒظٹظ„ظˆظ…طھط±ط§طھ</label>
           <Input value={form.mileage || ""} onChange={e => set("mileage", e.target.value)} className="bg-secondary border-border text-foreground" />
         </div>
         <div className="rounded-lg border border-border bg-card p-3 text-xs">
           {vehicleLookupLoading ? (
-            <p className="text-muted-foreground">جاري البحث عن المركبة داخل نفس الورشة...</p>
+            <p className="text-muted-foreground">ط¬ط§ط±ظٹ ط§ظ„ط¨ط­ط« ط¹ظ† ط§ظ„ظ…ط±ظƒط¨ط© ط¯ط§ط®ظ„ ظ†ظپط³ ط§ظ„ظˆط±ط´ط©...</p>
           ) : vehicleMatch ? (
             <div className="space-y-2">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <p className="font-semibold text-foreground">
-                    {vehicleMatch.source === "vin" ? "تم العثور على مركبة محتملة عبر VIN" : "تم العثور على مركبة موجودة"}
+                    {vehicleMatch.source === "vin" ? "طھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ ظ…ط±ظƒط¨ط© ظ…ط­طھظ…ظ„ط© ط¹ط¨ط± VIN" : "طھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ ظ…ط±ظƒط¨ط© ظ…ظˆط¬ظˆط¯ط©"}
                   </p>
                   {vehicleMatch.source === "vin" && (
                     <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
-                      لم يتم العثور على تطابق كامل باللوحة والحروف والدولة. هذه نتيجة محتملة عبر VIN فقط، ولن يتم ربطها تلقائيًا إلا بعد الضغط على Use Existing Vehicle.
+                      ظ„ظ… ظٹطھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ طھط·ط§ط¨ظ‚ ظƒط§ظ…ظ„ ط¨ط§ظ„ظ„ظˆط­ط© ظˆط§ظ„ط­ط±ظˆظپ ظˆط§ظ„ط¯ظˆظ„ط©. ظ‡ط°ظ‡ ظ†طھظٹط¬ط© ظ…ط­طھظ…ظ„ط© ط¹ط¨ط± VIN ظپظ‚ط·طŒ ظˆظ„ظ† ظٹطھظ… ط±ط¨ط·ظ‡ط§ طھظ„ظ‚ط§ط¦ظٹظ‹ط§ ط¥ظ„ط§ ط¨ط¹ط¯ ط§ظ„ط¶ط؛ط· ط¹ظ„ظ‰ Use Existing Vehicle.
                     </p>
                   )}
                   <p className="text-muted-foreground">
-                    اللوحة: {[vehicleMatch.plate_letters, vehicleMatch.plate_number].filter(Boolean).join(" ") || "—"} · VIN: {vehicleMatch.vin_number || vehicleMatch.vin || "—"}
+                    ط§ظ„ظ„ظˆط­ط©: {[vehicleMatch.plate_letters, vehicleMatch.plate_number].filter(Boolean).join(" ") || "â€”"} آ· VIN: {vehicleMatch.vin_number || vehicleMatch.vin || "â€”"}
                   </p>
                   <p className="text-muted-foreground">
-                    {vehicleMatch.brand || "—"} {vehicleMatch.model || ""} {vehicleMatch.year || ""} · العميل: {vehicleMatch.customer_name || "—"}
+                    {vehicleMatch.brand || "â€”"} {vehicleMatch.model || ""} {vehicleMatch.year || ""} آ· ط§ظ„ط¹ظ…ظٹظ„: {vehicleMatch.customer_name || "â€”"}
                   </p>
                   {vehicleOwnershipConflict && (
-                    <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
-                      هذه المركبة موجودة ومرتبطة بعميل آخر. لن يتم تغيير مالك المركبة تلقائيًا.
-                    </p>
+                    <div className="space-y-2 rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
+                      <p>
+                        المركبة مرتبطة بسجل عميل آخر. يمكنك إنشاء أمر العمل للعميل الحالي بدون تغيير مالك المركبة.
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-medium">صفة العميل بالنسبة للمركبة</label>
+                          <Select
+                            value={form.customerRelationshipToVehicle || "delivered_by"}
+                            onValueChange={(value) => setForm((prev) => ({ ...prev, customerRelationshipToVehicle: value }))}
+                          >
+                            <SelectTrigger className="h-8 bg-card border-border text-foreground">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-card border-border">
+                              <SelectItem value="current_owner">المالك الحالي</SelectItem>
+                              <SelectItem value="new_owner">المالك الجديد</SelectItem>
+                              <SelectItem value="driver">السائق</SelectItem>
+                              <SelectItem value="authorized">المفوّض</SelectItem>
+                              <SelectItem value="renter">المستأجر</SelectItem>
+                              <SelectItem value="company_rep">ممثل شركة</SelectItem>
+                              <SelectItem value="insurance_rep">ممثل شركة التأمين</SelectItem>
+                              <SelectItem value="delivered_by">سلّم المركبة للورشة</SelectItem>
+                              <SelectItem value="other">أخرى</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {form.customerRelationshipToVehicle === "other" && (
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-medium">وصف مختصر</label>
+                            <Input
+                              value={form.customerRelationshipNote || ""}
+                              onChange={(e) => setForm((prev) => ({ ...prev, customerRelationshipNote: e.target.value }))}
+                              className="h-8 bg-card border-border text-foreground"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
                 <Button
@@ -756,7 +795,13 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                   variant={useExistingVehicle ? "default" : "outline"}
                   onClick={() => {
                     setUseExistingVehicle(true);
-                    setForm((prev) => ({ ...prev, vehicleId: vehicleMatch.id }));
+                    setForm((prev) => ({
+                      ...prev,
+                      vehicleId: vehicleMatch.id,
+                      vehicleOwnerCustomerId: vehicleMatch.customer_id || prev.vehicleOwnerCustomerId,
+                      receivedFromCustomerId: currentCustomerId || prev.receivedFromCustomerId,
+                      customerRelationshipToVehicle: prev.customerRelationshipToVehicle || "delivered_by",
+                    }));
                   }}
                 >
                   Use Existing Vehicle
@@ -764,37 +809,37 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
               </div>
             </div>
           ) : (
-            <p className="text-muted-foreground">لم يتم العثور على مركبة مطابقة. سيتم إنشاء مركبة جديدة وربطها بالعميل الصحيح عند الحفظ.</p>
+            <p className="text-muted-foreground">ظ„ظ… ظٹطھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ ظ…ط±ظƒط¨ط© ظ…ط·ط§ط¨ظ‚ط©. ط³ظٹطھظ… ط¥ظ†ط´ط§ط، ظ…ط±ظƒط¨ط© ط¬ط¯ظٹط¯ط© ظˆط±ط¨ط·ظ‡ط§ ط¨ط§ظ„ط¹ظ…ظٹظ„ ط§ظ„طµط­ظٹط­ ط¹ظ†ط¯ ط§ظ„ط­ظپط¸.</p>
           )}
         </div>
       </div>
 
-      {/* ===== 3) بيانات الخدمة ===== */}
+      {/* ===== 3) ط¨ظٹط§ظ†ط§طھ ط§ظ„ط®ط¯ظ…ط© ===== */}
       <div className="border border-border rounded-lg bg-card/50 p-3 space-y-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
-        <h4 className="text-sm font-semibold text-foreground">بيانات الخدمة</h4>
+        <h4 className="text-sm font-semibold text-foreground">ط¨ظٹط§ظ†ط§طھ ط§ظ„ط®ط¯ظ…ط©</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">تاريخ الاستلام</label>
+            <label className="text-xs font-medium text-muted-foreground">طھط§ط±ظٹط® ط§ظ„ط§ط³طھظ„ط§ظ…</label>
             <Input type="date" value={form.entryDate || ""} onChange={e => set("entryDate", e.target.value)} className="bg-secondary border-border text-foreground" />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">نوع الخدمة *</label>
+            <label className="text-xs font-medium text-muted-foreground">ظ†ظˆط¹ ط§ظ„ط®ط¯ظ…ط© *</label>
             <Select value={form.serviceType} onValueChange={v => set("serviceType", v)}>
               <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-card border-border">{serviceTypes.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">الفني المسؤول</label>
+            <label className="text-xs font-medium text-muted-foreground">ط§ظ„ظپظ†ظٹ ط§ظ„ظ…ط³ط¤ظˆظ„</label>
             <Select value={form.technician} onValueChange={v => set("technician", v)}>
-              <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="اختر الفني" /></SelectTrigger>
+              <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="ط§ط®طھط± ط§ظ„ظپظ†ظٹ" /></SelectTrigger>
               <SelectContent className="bg-card border-border">{technicians.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           {selectedType === "insurance" && <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">شركة التأمين</label>
+            <label className="text-xs font-medium text-muted-foreground">ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†</label>
             <Select value={form.insurance} onValueChange={v => set("insurance", v)}>
-              <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="اختر" /></SelectTrigger>
+              <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="ط§ط®طھط±" /></SelectTrigger>
               <SelectContent className="bg-card border-border">
                 <SelectItem value="-">-</SelectItem>
                 {companyOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
@@ -804,21 +849,21 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           {selectedType === "insurance" && (
             <>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">ربط مطالبة موجودة</label>
+                <label className="text-xs font-medium text-muted-foreground">ط±ط¨ط· ظ…ط·ط§ظ„ط¨ط© ظ…ظˆط¬ظˆط¯ط©</label>
                 <Select value={form.claimId || "manual"} onValueChange={selectClaim}>
-                  <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="اختر مطالبة" /></SelectTrigger>
+                  <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="ط§ط®طھط± ظ…ط·ط§ظ„ط¨ط©" /></SelectTrigger>
                   <SelectContent className="bg-card border-border">
-                    <SelectItem value="manual">رقم مطالبة يدوي — بدون إنشاء مطالبة</SelectItem>
+                    <SelectItem value="manual">ط±ظ‚ظ… ظ…ط·ط§ظ„ط¨ط© ظٹط¯ظˆظٹ â€” ط¨ط¯ظˆظ† ط¥ظ†ط´ط§ط، ظ…ط·ط§ظ„ط¨ط©</SelectItem>
                     {claims.map((claim) => (
                       <SelectItem key={claim.id} value={claim.id}>
-                        {claim.claim_number} — {claim.insurance_company || "بدون شركة"}
+                        {claim.claim_number} â€” {claim.insurance_company || "ط¨ط¯ظˆظ† ط´ط±ظƒط©"}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">رقم المطالبة *</label>
+                <label className="text-xs font-medium text-muted-foreground">ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط© *</label>
                 <Input
                   value={form.claimNumber === "-" ? "" : form.claimNumber}
                   onChange={e => set("claimNumber", e.target.value)}
@@ -831,24 +876,24 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         </div>
       </div>
 
-      {/* ===== 4) التكاليف التقديرية ===== */}
+      {/* ===== 4) ط§ظ„طھظƒط§ظ„ظٹظپ ط§ظ„طھظ‚ط¯ظٹط±ظٹط© ===== */}
       <div className="border border-border rounded-lg bg-card/50 p-3 space-y-3">
-        <h4 className="text-sm font-semibold text-foreground">التكاليف التقديرية / Estimated Costs</h4>
+        <h4 className="text-sm font-semibold text-foreground">ط§ظ„طھظƒط§ظ„ظٹظپ ط§ظ„طھظ‚ط¯ظٹط±ظٹط© / Estimated Costs</h4>
         <p className="rounded-md border border-info/30 bg-info/5 p-2 text-xs text-muted-foreground">
-          هذه القيم تقديرية وتخص الاتفاق المبدئي مع العميل. التكلفة النهائية تعتمد عند إغلاق أمر العمل من المصروفات الفعلية أو من اختيار مصدر التكلفة النهائي، ولا يتم جمع التقديري مع الفعلي.
+          ظ‡ط°ظ‡ ط§ظ„ظ‚ظٹظ… طھظ‚ط¯ظٹط±ظٹط© ظˆطھط®طµ ط§ظ„ط§طھظپط§ظ‚ ط§ظ„ظ…ط¨ط¯ط¦ظٹ ظ…ط¹ ط§ظ„ط¹ظ…ظٹظ„. ط§ظ„طھظƒظ„ظپط© ط§ظ„ظ†ظ‡ط§ط¦ظٹط© طھط¹طھظ…ط¯ ط¹ظ†ط¯ ط¥ط؛ظ„ط§ظ‚ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ظ…ظ† ط§ظ„ظ…طµط±ظˆظپط§طھ ط§ظ„ظپط¹ظ„ظٹط© ط£ظˆ ظ…ظ† ط§ط®طھظٹط§ط± ظ…طµط¯ط± ط§ظ„طھظƒظ„ظپط© ط§ظ„ظ†ظ‡ط§ط¦ظٹطŒ ظˆظ„ط§ ظٹطھظ… ط¬ظ…ط¹ ط§ظ„طھظ‚ط¯ظٹط±ظٹ ظ…ط¹ ط§ظ„ظپط¹ظ„ظٹ.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">تكلفة العمالة التقديرية / Estimated Labour Cost (ر.ع)</label>
+            <label className="text-xs font-medium text-muted-foreground">طھظƒظ„ظپط© ط§ظ„ط¹ظ…ط§ظ„ط© ط§ظ„طھظ‚ط¯ظٹط±ظٹط© / Estimated Labour Cost (ط±.ط¹)</label>
             <Input type="number" value={form.laborCost ?? 0} onChange={e => set("laborCost", Number(e.target.value))} className="bg-secondary border-border text-foreground" />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">تكلفة قطع الغيار التقديرية / Estimated Spare Parts Cost (ر.ع)</label>
+            <label className="text-xs font-medium text-muted-foreground">طھظƒظ„ظپط© ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± ط§ظ„طھظ‚ط¯ظٹط±ظٹط© / Estimated Spare Parts Cost (ط±.ط¹)</label>
             <Input type="number" value={form.partsCost ?? 0} onChange={e => set("partsCost", Number(e.target.value))} className="bg-secondary border-border text-foreground" />
           </div>
           {isEdit && (
             <div className="space-y-1.5 sm:col-span-2">
-              <label className="text-xs font-medium text-muted-foreground">الحالة</label>
+              <label className="text-xs font-medium text-muted-foreground">ط§ظ„ط­ط§ظ„ط©</label>
               <Select value={form.status} onValueChange={v => set("status", v)}>
                 <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-card border-border">{WORK_ORDER_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
@@ -859,26 +904,26 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       </div>
 
 
-      {/* فحص واستلام المركبة */}
+      {/* ظپط­طµ ظˆط§ط³طھظ„ط§ظ… ط§ظ„ظ…ط±ظƒط¨ط© */}
       <div className="border border-info/30 rounded-lg bg-info/5 p-3 space-y-3" style={{ display: wizardVisible(1) ? undefined : "none" }}>
         <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-          <Car size={14} className="text-info" /> فحص واستلام المركبة
-          <span className="text-[10px] text-muted-foreground font-normal">(العداد، الوقود، المقتنيات)</span>
+          <Car size={14} className="text-info" /> ظپط­طµ ظˆط§ط³طھظ„ط§ظ… ط§ظ„ظ…ط±ظƒط¨ط©
+          <span className="text-[10px] text-muted-foreground font-normal">(ط§ظ„ط¹ط¯ط§ط¯طŒ ط§ظ„ظˆظ‚ظˆط¯طŒ ط§ظ„ظ…ظ‚طھظ†ظٹط§طھ)</span>
         </h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">قراءة العداد (KM)</label>
+            <label className="text-xs font-medium text-muted-foreground">ظ‚ط±ط§ط،ط© ط§ظ„ط¹ط¯ط§ط¯ (KM)</label>
             <Input
               type="number"
               value={form.odometerKm ?? ""}
               onChange={e => set("odometerKm", e.target.value ? Number(e.target.value) : undefined)}
-              placeholder="مثال: 125400"
+              placeholder="ظ…ط«ط§ظ„: 125400"
               className="h-9 bg-card border-border text-sm"
             />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">
-              مستوى الوقود: <strong className="text-info">{form.fuelLevelPct ?? 50}%</strong>
+              ظ…ط³طھظˆظ‰ ط§ظ„ظˆظ‚ظˆط¯: <strong className="text-info">{form.fuelLevelPct ?? 50}%</strong>
             </label>
             <input
               type="range"
@@ -892,7 +937,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">المقتنيات داخل المركبة</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">ط§ظ„ظ…ظ‚طھظ†ظٹط§طھ ط¯ط§ط®ظ„ ط§ظ„ظ…ط±ظƒط¨ط©</label>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {DEFAULT_BELONGINGS.map((it) => {
               const checked = !!(form.vehicleBelongings || {})[it.key];
@@ -911,16 +956,16 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
             className="mt-2 h-9 bg-card border-border text-sm"
             value={(form.vehicleBelongings?.other as string) || ""}
             onChange={(e) => set("vehicleBelongings", { ...(form.vehicleBelongings || {}), other: e.target.value })}
-            placeholder="مقتنيات أخرى (اكتبها هنا)…"
+            placeholder="ظ…ظ‚طھظ†ظٹط§طھ ط£ط®ط±ظ‰ (ط§ظƒطھط¨ظ‡ط§ ظ‡ظ†ط§)â€¦"
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">ملاحظات الاستلام</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„ط§ط³طھظ„ط§ظ…</label>
           <Textarea
             value={form.receptionNotes || ""}
             onChange={e => set("receptionNotes", e.target.value)}
             rows={2}
-            placeholder="حالة المركبة الظاهرية، خدوش سابقة، رائحة، إلخ…"
+            placeholder="ط­ط§ظ„ط© ط§ظ„ظ…ط±ظƒط¨ط© ط§ظ„ط¸ط§ظ‡ط±ظٹط©طŒ ط®ط¯ظˆط´ ط³ط§ط¨ظ‚ط©طŒ ط±ط§ط¦ط­ط©طŒ ط¥ظ„ط®â€¦"
             className="bg-card border-border text-sm"
           />
         </div>
@@ -931,7 +976,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           onMarkersChange={(markers) => set("receptionDamageMarkers", markers)}
           signatureDataUrl={form.receptionSignatureDataUrl}
           onSignatureChange={(signature) => set("receptionSignatureDataUrl", signature)}
-          showDamageMap={form.serviceType === "حادث" || selectedType === "insurance"}
+          showDamageMap={form.serviceType === "ط­ط§ط¯ط«" || selectedType === "insurance"}
         />
       </div>
 
@@ -939,15 +984,15 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       <div className="border border-border rounded-lg bg-secondary/20 p-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-            <span className="text-warning">●</span> مصروفات إضافية
-            <span className="text-[10px] text-muted-foreground font-normal">(سحب، نقل، صبغ خارجي، خدمات...)</span>
+            <span className="text-warning">â—ڈ</span> ظ…طµط±ظˆظپط§طھ ط¥ط¶ط§ظپظٹط©
+            <span className="text-[10px] text-muted-foreground font-normal">(ط³ط­ط¨طŒ ظ†ظ‚ظ„طŒ طµط¨ط؛ ط®ط§ط±ط¬ظٹطŒ ط®ط¯ظ…ط§طھ...)</span>
           </h4>
           <Button type="button" size="sm" variant="outline" onClick={addExpense} className="gap-1 h-7 text-xs">
-            <Plus size={12} /> إضافة مصروف
+            <Plus size={12} /> ط¥ط¶ط§ظپط© ظ…طµط±ظˆظپ
           </Button>
         </div>
         {(form.extraExpenses || []).length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-2">لا توجد مصروفات إضافية</p>
+          <p className="text-xs text-muted-foreground text-center py-2">ظ„ط§ طھظˆط¬ط¯ ظ…طµط±ظˆظپط§طھ ط¥ط¶ط§ظپظٹط©</p>
         ) : (
           <div className="space-y-2">
             {(form.extraExpenses || []).map((ex) => (
@@ -955,20 +1000,20 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                 <Input
                   value={ex.label}
                   onChange={e => updateExpense(ex.id, { label: e.target.value })}
-                  placeholder="بيان المصروف"
+                  placeholder="ط¨ظٹط§ظ† ط§ظ„ظ…طµط±ظˆظپ"
                   className="col-span-5 h-9 bg-card border-border text-sm"
                 />
                 <Input
                   type="number"
                   value={ex.amount}
                   onChange={e => updateExpense(ex.id, { amount: Number(e.target.value) })}
-                  placeholder="المبلغ"
+                  placeholder="ط§ظ„ظ…ط¨ظ„ط؛"
                   className="col-span-3 h-9 bg-card border-border text-sm"
                 />
                 <Input
                   value={ex.notes || ""}
                   onChange={e => updateExpense(ex.id, { notes: e.target.value })}
-                  placeholder="ملاحظات"
+                  placeholder="ظ…ظ„ط§ط­ط¸ط§طھ"
                   className="col-span-3 h-9 bg-card border-border text-sm"
                 />
                 <Button
@@ -983,25 +1028,25 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
               </div>
             ))}
             <div className="text-left text-xs text-muted-foreground pt-1">
-              مجموع المصروفات الإضافية: <span className="font-bold text-warning">{extraTotal.toLocaleString()} ر.ع</span>
+              ظ…ط¬ظ…ظˆط¹ ط§ظ„ظ…طµط±ظˆظپط§طھ ط§ظ„ط¥ط¶ط§ظپظٹط©: <span className="font-bold text-warning">{extraTotal.toLocaleString()} ط±.ط¹</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* قطع الغيار المطلوبة (طلب شراء داخلي) */}
+      {/* ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± ط§ظ„ظ…ط·ظ„ظˆط¨ط© (ط·ظ„ط¨ ط´ط±ط§ط، ط¯ط§ط®ظ„ظٹ) */}
       <div className="border border-info/30 rounded-lg bg-info/5 p-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-            <Package size={14} className="text-info" /> قطع الغيار المطلوبة
-            <span className="text-[10px] text-muted-foreground font-normal">(طلب شراء داخلي يمكن طباعته)</span>
+            <Package size={14} className="text-info" /> ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± ط§ظ„ظ…ط·ظ„ظˆط¨ط©
+            <span className="text-[10px] text-muted-foreground font-normal">(ط·ظ„ط¨ ط´ط±ط§ط، ط¯ط§ط®ظ„ظٹ ظٹظ…ظƒظ† ط·ط¨ط§ط¹طھظ‡)</span>
           </h4>
           <Button type="button" size="sm" variant="outline" onClick={addNeededPart} className="gap-1 h-7 text-xs">
-            <Plus size={12} /> إضافة قطعة
+            <Plus size={12} /> ط¥ط¶ط§ظپط© ظ‚ط·ط¹ط©
           </Button>
         </div>
         {(form.partsNeeded || []).length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-2">لا توجد قطع غيار مطلوبة</p>
+          <p className="text-xs text-muted-foreground text-center py-2">ظ„ط§ طھظˆط¬ط¯ ظ‚ط·ط¹ ط؛ظٹط§ط± ظ…ط·ظ„ظˆط¨ط©</p>
         ) : (
           <div className="space-y-2">
             {(form.partsNeeded || []).map((np) => {
@@ -1012,7 +1057,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                   <Input
                     value={np.name}
                     onChange={e => updateNeededPart(np.id, { name: e.target.value })}
-                    placeholder="اسم القطعة (مثال: مصباح أمامي يمين)"
+                    placeholder="ط§ط³ظ… ط§ظ„ظ‚ط·ط¹ط© (ظ…ط«ط§ظ„: ظ…طµط¨ط§ط­ ط£ظ…ط§ظ…ظٹ ظٹظ…ظٹظ†)"
                     className={`col-span-4 h-9 bg-card border-border text-sm ${done ? "line-through text-muted-foreground" : ""}`}
                   />
                   <Input
@@ -1020,7 +1065,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                     min={1}
                     value={np.quantity}
                     onChange={e => updateNeededPart(np.id, { quantity: Math.max(1, Number(e.target.value) || 1) })}
-                    placeholder="الكمية"
+                    placeholder="ط§ظ„ظƒظ…ظٹط©"
                     className="col-span-1 h-9 bg-card border-border text-sm text-center"
                   />
                   <Select
@@ -1039,7 +1084,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                   <Input
                     value={np.notes || ""}
                     onChange={e => updateNeededPart(np.id, { notes: e.target.value })}
-                    placeholder="ملاحظات"
+                    placeholder="ظ…ظ„ط§ط­ط¸ط§طھ"
                     className="col-span-3 h-9 bg-card border-border text-sm"
                   />
                   <Button
@@ -1055,19 +1100,19 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
               );
             })}
             <div className="text-left text-xs text-muted-foreground pt-1">
-              إجمالي القطع المطلوبة: <span className="font-bold text-info">{(form.partsNeeded || []).reduce((s, p) => s + (p.quantity || 0), 0)}</span>
-              {" "}— تم التأمين/الاستلام: <span className="font-bold text-success">{(form.partsNeeded || []).filter(p => (p.status ? (p.status === "received" || p.status === "secured") : p.fulfilled)).length}</span>
+              ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ‚ط·ط¹ ط§ظ„ظ…ط·ظ„ظˆط¨ط©: <span className="font-bold text-info">{(form.partsNeeded || []).reduce((s, p) => s + (p.quantity || 0), 0)}</span>
+              {" "}â€” طھظ… ط§ظ„طھط£ظ…ظٹظ†/ط§ظ„ط§ط³طھظ„ط§ظ…: <span className="font-bold text-success">{(form.partsNeeded || []).filter(p => (p.status ? (p.status === "received" || p.status === "secured") : p.fulfilled)).length}</span>
               {" / "} <span>{(form.partsNeeded || []).length}</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* سندات صرف خارجية مرتبطة (للقراءة) */}
+      {/* ط³ظ†ط¯ط§طھ طµط±ظپ ط®ط§ط±ط¬ظٹط© ظ…ط±طھط¨ط·ط© (ظ„ظ„ظ‚ط±ط§ط،ط©) */}
       {isEdit && linkedVouchers.length > 0 && (
         <div className="border border-info/30 rounded-lg bg-info/5 p-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5 mb-2">
-            <LinkIcon size={14} className="text-info" /> سندات صرف مرتبطة بهذا الأمر
+            <LinkIcon size={14} className="text-info" /> ط³ظ†ط¯ط§طھ طµط±ظپ ظ…ط±طھط¨ط·ط© ط¨ظ‡ط°ط§ ط§ظ„ط£ظ…ط±
             <span className="text-[10px] text-muted-foreground font-normal">({linkedVouchers.length})</span>
           </h4>
           <div className="space-y-1.5 max-h-40 overflow-y-auto">
@@ -1077,30 +1122,30 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                   <span className="font-mono text-info">{v.voucherNumber}</span>
                   <span className="text-muted-foreground text-[10px]">{v.beneficiary || v.description || v.categoryName}</span>
                 </div>
-                <span className="font-semibold text-foreground">{Number(v.amount).toLocaleString()} ر.ع</span>
+                <span className="font-semibold text-foreground">{Number(v.amount).toLocaleString()} ط±.ط¹</span>
               </div>
             ))}
           </div>
           <div className="text-left text-xs text-muted-foreground pt-2 border-t border-border/50 mt-2">
-            مجموع سندات الصرف الخارجية: <span className="font-bold text-info">{linkedVouchersTotal.toLocaleString()} ر.ع</span>
-            <span className="block text-[10px] mt-0.5">* تُستخدم في احتساب صافي ربح أمر العمل وليس في فاتورة العميل</span>
+            ظ…ط¬ظ…ظˆط¹ ط³ظ†ط¯ط§طھ ط§ظ„طµط±ظپ ط§ظ„ط®ط§ط±ط¬ظٹط©: <span className="font-bold text-info">{linkedVouchersTotal.toLocaleString()} ط±.ط¹</span>
+            <span className="block text-[10px] mt-0.5">* طھظڈط³طھط®ط¯ظ… ظپظٹ ط§ط­طھط³ط§ط¨ طµط§ظپظٹ ط±ط¨ط­ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ظˆظ„ظٹط³ ظپظٹ ظپط§طھظˆط±ط© ط§ظ„ط¹ظ…ظٹظ„</span>
           </div>
         </div>
       )}
 
-      {/* الدفعات */}
+      {/* ط§ظ„ط¯ظپط¹ط§طھ */}
       {(availableDeposit > 0 || (initial?.depositApplied || 0) > 0) && (
         <div className="border border-success/30 rounded-lg bg-success/5 p-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5 mb-2">
-            <Wallet size={14} className="text-success" /> رصيد الدفعات المتاح للعميل/السيارة
+            <Wallet size={14} className="text-success" /> ط±طµظٹط¯ ط§ظ„ط¯ظپط¹ط§طھ ط§ظ„ظ…طھط§ط­ ظ„ظ„ط¹ظ…ظٹظ„/ط§ظ„ط³ظٹط§ط±ط©
           </h4>
           <div className="grid grid-cols-2 gap-3 items-end">
             <div className="text-xs">
-              <p className="text-muted-foreground">الرصيد المتاح</p>
-              <p className="text-lg font-bold text-success">{availableDeposit.toLocaleString()} ر.ع</p>
+              <p className="text-muted-foreground">ط§ظ„ط±طµظٹط¯ ط§ظ„ظ…طھط§ط­</p>
+              <p className="text-lg font-bold text-success">{availableDeposit.toLocaleString()} ط±.ط¹</p>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">خصم من الفاتورة</label>
+              <label className="text-xs font-medium text-muted-foreground">ط®طµظ… ظ…ظ† ط§ظ„ظپط§طھظˆط±ط©</label>
               <Input
                 type="number"
                 value={form.depositApplied ?? 0}
@@ -1113,37 +1158,37 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
         </div>
       )}
 
-      {/* ملخص التكلفة */}
+      {/* ظ…ظ„ط®طµ ط§ظ„طھظƒظ„ظپط© */}
       <div className="border-2 border-primary/30 rounded-lg bg-primary/5 p-3 space-y-1 text-sm" style={{ display: wizardVisible(2) ? undefined : "none" }}>
-        <div className="flex justify-between text-muted-foreground"><span>تكلفة العمالة التقديرية</span><span>{(Number(form.laborCost) || 0).toLocaleString()} ر.ع</span></div>
-        <div className="flex justify-between text-muted-foreground"><span>تكلفة قطع الغيار التقديرية</span><span>{(Number(form.partsCost) || 0).toLocaleString()} ر.ع</span></div>
-        {extraTotal > 0 && <div className="flex justify-between text-muted-foreground"><span>مصروفات إضافية</span><span>{extraTotal.toLocaleString()} ر.ع</span></div>}
+        <div className="flex justify-between text-muted-foreground"><span>طھظƒظ„ظپط© ط§ظ„ط¹ظ…ط§ظ„ط© ط§ظ„طھظ‚ط¯ظٹط±ظٹط©</span><span>{(Number(form.laborCost) || 0).toLocaleString()} ط±.ط¹</span></div>
+        <div className="flex justify-between text-muted-foreground"><span>طھظƒظ„ظپط© ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± ط§ظ„طھظ‚ط¯ظٹط±ظٹط©</span><span>{(Number(form.partsCost) || 0).toLocaleString()} ط±.ط¹</span></div>
+        {extraTotal > 0 && <div className="flex justify-between text-muted-foreground"><span>ظ…طµط±ظˆظپط§طھ ط¥ط¶ط§ظپظٹط©</span><span>{extraTotal.toLocaleString()} ط±.ط¹</span></div>}
         <div className="flex justify-between text-foreground font-bold border-t border-border pt-1">
-          <span>إجمالي الفاتورة</span>
-          <span className="text-primary">{finalTotal.toLocaleString()} ر.ع</span>
+          <span>ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظپط§طھظˆط±ط©</span>
+          <span className="text-primary">{finalTotal.toLocaleString()} ط±.ط¹</span>
         </div>
         {deposit > 0 && (
           <>
-            <div className="flex justify-between text-success"><span>دفعة مستلمة (دخل)</span><span>+{deposit.toLocaleString()} ر.ع</span></div>
-            <div className="flex justify-between text-warning font-semibold"><span>الرصيد المستحق</span><span>{balanceDue.toLocaleString()} ر.ع</span></div>
+            <div className="flex justify-between text-success"><span>ط¯ظپط¹ط© ظ…ط³طھظ„ظ…ط© (ط¯ط®ظ„)</span><span>+{deposit.toLocaleString()} ط±.ط¹</span></div>
+            <div className="flex justify-between text-warning font-semibold"><span>ط§ظ„ط±طµظٹط¯ ط§ظ„ظ…ط³طھط­ظ‚</span><span>{balanceDue.toLocaleString()} ط±.ط¹</span></div>
           </>
         )}
       </div>
 
-      {/* ===== بنود الأعمال المطلوبة (تظهر للعميل في رابط التوقيع) ===== */}
+      {/* ===== ط¨ظ†ظˆط¯ ط§ظ„ط£ط¹ظ…ط§ظ„ ط§ظ„ظ…ط·ظ„ظˆط¨ط© (طھط¸ظ‡ط± ظ„ظ„ط¹ظ…ظٹظ„ ظپظٹ ط±ط§ط¨ط· ط§ظ„طھظˆظ‚ظٹط¹) ===== */}
       <div className="border-2 border-primary/20 rounded-xl bg-card p-3 space-y-3" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-bold text-foreground">📋 بنود الأعمال المطلوبة</div>
-            <div className="text-[11px] text-muted-foreground">سيراها العميل عند توقيع أمر العمل إلكترونياً</div>
+            <div className="text-sm font-bold text-foreground">ًں“‹ ط¨ظ†ظˆط¯ ط§ظ„ط£ط¹ظ…ط§ظ„ ط§ظ„ظ…ط·ظ„ظˆط¨ط©</div>
+            <div className="text-[11px] text-muted-foreground">ط³ظٹط±ط§ظ‡ط§ ط§ظ„ط¹ظ…ظٹظ„ ط¹ظ†ط¯ طھظˆظ‚ظٹط¹ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ط¥ظ„ظƒطھط±ظˆظ†ظٹط§ظ‹</div>
           </div>
           <Button type="button" size="sm" variant="outline" onClick={addWorkItem} className="h-8 gap-1">
-            <Plus size={14} /> إضافة بند
+            <Plus size={14} /> ط¥ط¶ط§ظپط© ط¨ظ†ط¯
           </Button>
         </div>
         {(form.workItems || []).length === 0 ? (
           <div className="text-center text-[11px] text-muted-foreground py-3 border border-dashed border-border rounded-lg">
-            لا توجد بنود — اضغط «إضافة بند» لإدراج العمل المطلوب
+            ظ„ط§ طھظˆط¬ط¯ ط¨ظ†ظˆط¯ â€” ط§ط¶ط؛ط· آ«ط¥ط¶ط§ظپط© ط¨ظ†ط¯آ» ظ„ط¥ط¯ط±ط§ط¬ ط§ظ„ط¹ظ…ظ„ ط§ظ„ظ…ط·ظ„ظˆط¨
           </div>
         ) : (
           <div className="space-y-2">
@@ -1154,13 +1199,13 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
                   <Input
                     value={w.title}
                     onChange={e => updateWorkItem(w.id, { title: e.target.value })}
-                    placeholder="عنوان البند (مثال: تغيير زيت المحرك)"
+                    placeholder="ط¹ظ†ظˆط§ظ† ط§ظ„ط¨ظ†ط¯ (ظ…ط«ط§ظ„: طھط؛ظٹظٹط± ط²ظٹطھ ط§ظ„ظ…ط­ط±ظƒ)"
                     className="h-8 text-sm bg-background"
                   />
                   <Input
                     value={w.note || ""}
                     onChange={e => updateWorkItem(w.id, { note: e.target.value })}
-                    placeholder="ملاحظة (اختياري)"
+                    placeholder="ظ…ظ„ط§ط­ط¸ط© (ط§ط®طھظٹط§ط±ظٹ)"
                     className="h-8 text-xs bg-background"
                   />
                 </div>
@@ -1176,12 +1221,12 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
       <div className="space-y-1.5" style={{ display: wizardVisible(2) ? undefined : "none" }}>
         <div className="flex items-center justify-between">
-          <label className="text-xs font-medium text-muted-foreground">ملاحظات / تشخيص</label>
+          <label className="text-xs font-medium text-muted-foreground">ظ…ظ„ط§ط­ط¸ط§طھ / طھط´ط®ظٹطµ</label>
           <AiWriteButton
             value={form.diagnosis || ""}
             onChange={(t) => set("diagnosis", t)}
-            context={`أمر عمل لسيارة ${form.vehicleType || ""} ${form.model || ""} لوحة ${form.plate || ""} - خدمة: ${form.serviceType || ""}`}
-            placeholder="مثال: اكتب تشخيصاً أولياً لمشكلة في المحرك"
+            context={`ط£ظ…ط± ط¹ظ…ظ„ ظ„ط³ظٹط§ط±ط© ${form.vehicleType || ""} ${form.model || ""} ظ„ظˆط­ط© ${form.plate || ""} - ط®ط¯ظ…ط©: ${form.serviceType || ""}`}
+            placeholder="ظ…ط«ط§ظ„: ط§ظƒطھط¨ طھط´ط®ظٹطµط§ظ‹ ط£ظˆظ„ظٹط§ظ‹ ظ„ظ…ط´ظƒظ„ط© ظپظٹ ط§ظ„ظ…ط­ط±ظƒ"
           />
         </div>
         <textarea value={form.diagnosis || ""} onChange={e => set("diagnosis", e.target.value)} className="w-full rounded-lg bg-secondary border border-border text-foreground p-3 text-sm min-h-[80px] resize-none focus:outline-none focus:ring-2 focus:ring-ring" />
@@ -1189,19 +1234,19 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       <div className="flex gap-3 pt-2">
         {isWizard && wizardStep > 0 && (
           <Button type="button" variant="outline" onClick={() => setWizardStep((step) => Math.max(0, step - 1) as 0 | 1 | 2)}>
-            السابق
+            ط§ظ„ط³ط§ط¨ظ‚
           </Button>
         )}
         {isWizard && wizardStep < 2 ? (
           <Button type="button" onClick={goWizardNext} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
-            التالي
+            ط§ظ„طھط§ظ„ظٹ
           </Button>
         ) : (
           <Button onClick={() => void handleSubmit()} disabled={saving} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
-            {saving ? "جارٍ الحفظ والرفع…" : isEdit ? "حفظ التعديلات" : "حفظ أمر العمل"}
+            {saving ? "ط¬ط§ط±ظچ ط§ظ„ط­ظپط¸ ظˆط§ظ„ط±ظپط¹â€¦" : isEdit ? "ط­ظپط¸ ط§ظ„طھط¹ط¯ظٹظ„ط§طھ" : "ط­ظپط¸ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„"}
           </Button>
         )}
-        <Button onClick={onClose} variant="outline" className="border-border text-foreground hover:bg-secondary">إلغاء</Button>
+        <Button onClick={onClose} variant="outline" className="border-border text-foreground hover:bg-secondary">ط¥ظ„ط؛ط§ط،</Button>
       </div>
     </div>
   );

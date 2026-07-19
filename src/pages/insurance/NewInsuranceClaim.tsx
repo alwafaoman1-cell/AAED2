@@ -32,47 +32,48 @@ import { toE164 } from "@/lib/phoneUtils";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 
-// ───────────────────── أنواع داخلية ─────────────────────
-// ⚠️ هذه الصفحة من منظور "الكراج": نستلم سيارة من شركة تأمين ونطالبها بالمستحقات.
-// لا نُصدر بوالص ولا نتعامل مع مخمّن داخلي — كل ذلك من اختصاص شركة التأمين.
+// إنشاء/ربط المركبة يتم مركزياً داخل useCreateClaim
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ط£ظ†ظˆط§ط¹ ط¯ط§ط®ظ„ظٹط© â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// âڑ ï¸ڈ ظ‡ط°ظ‡ ط§ظ„طµظپط­ط© ظ…ظ† ظ…ظ†ط¸ظˆط± "ط§ظ„ظƒط±ط§ط¬": ظ†ط³طھظ„ظ… ط³ظٹط§ط±ط© ظ…ظ† ط´ط±ظƒط© طھط£ظ…ظٹظ† ظˆظ†ط·ط§ظ„ط¨ظ‡ط§ ط¨ط§ظ„ظ…ط³طھط­ظ‚ط§طھ.
+// ظ„ط§ ظ†ظڈطµط¯ط± ط¨ظˆط§ظ„طµ ظˆظ„ط§ ظ†طھط¹ط§ظ…ظ„ ظ…ط¹ ظ…ط®ظ…ظ‘ظ† ط¯ط§ط®ظ„ظٹ â€” ظƒظ„ ط°ظ„ظƒ ظ…ظ† ط§ط®طھطµط§طµ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†.
 type Step = 0 | 1 | 2 | 3 | 4;
 
 interface Draft {
-  // company (مَن سندفع له الفاتورة)
+  // company (ظ…ظژظ† ط³ظ†ط¯ظپط¹ ظ„ظ‡ ط§ظ„ظپط§طھظˆط±ط©)
   company: string;
   companyId: string | null;
   insuranceEmployeeId: string | null;
-  claimNumber: string;     // الرقم الذي تعطيه شركة التأمين أو نولّده مؤقتاً
-  // owner (صاحب السيارة لتسليمها له بعد الإصلاح)
+  claimNumber: string;     // ط§ظ„ط±ظ‚ظ… ط§ظ„ط°ظٹ طھط¹ط·ظٹظ‡ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ† ط£ظˆ ظ†ظˆظ„ظ‘ط¯ظ‡ ظ…ط¤ظ‚طھط§ظ‹
+  // owner (طµط§ط­ط¨ ط§ظ„ط³ظٹط§ط±ط© ظ„طھط³ظ„ظٹظ…ظ‡ط§ ظ„ظ‡ ط¨ط¹ط¯ ط§ظ„ط¥طµظ„ط§ط­)
   customerId: string | null;
   ownerName: string;
   ownerPhone: string;
-  expectedDeliveryDate: string; // تاريخ التسليم المتوقع للعميل
+  expectedDeliveryDate: string; // طھط§ط±ظٹط® ط§ظ„طھط³ظ„ظٹظ… ط§ظ„ظ…طھظˆظ‚ط¹ ظ„ظ„ط¹ظ…ظٹظ„
   // vehicle
-  vehicleId: string | null; // ربط بمركبة موجودة في قاعدة البيانات
+  vehicleId: string | null; // ط±ط¨ط· ط¨ظ…ط±ظƒط¨ط© ظ…ظˆط¬ظˆط¯ط© ظپظٹ ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ
   vehicleMake: string;
   vehicleModel: string;
   vehiclePlate: string;
   vehicleYear: string;
   vehicleColor: string;
   vehicleVin: string;
-  // incident / damage description (وصف الضرر فقط — لا نحتاج موقع الحادث)
+  // incident / damage description (ظˆطµظپ ط§ظ„ط¶ط±ط± ظپظ‚ط· â€” ظ„ط§ ظ†ط­طھط§ط¬ ظ…ظˆظ‚ط¹ ط§ظ„ط­ط§ط¯ط«)
   incidentDate: string;
   damageDescription: string;
-  // estimation (تسعيرنا نحن الكراج — قابل للتبديل بين إجمالي وبنود)
+  // estimation (طھط³ط¹ظٹط±ظ†ط§ ظ†ط­ظ† ط§ظ„ظƒط±ط§ط¬ â€” ظ‚ط§ط¨ظ„ ظ„ظ„طھط¨ط¯ظٹظ„ ط¨ظٹظ† ط¥ط¬ظ…ط§ظ„ظٹ ظˆط¨ظ†ظˆط¯)
   estimationType: "auto" | "lump_sum" | "upl";
-  estimatedCost: string;     // المبلغ الإجمالي المطالب به (lump sum)
-  uplItems: UplItem[];       // البنود التفصيلية (UPL)
+  estimatedCost: string;     // ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ط·ط§ظ„ط¨ ط¨ظ‡ (lump sum)
+  uplItems: UplItem[];       // ط§ظ„ط¨ظ†ظˆط¯ ط§ظ„طھظپطµظٹظ„ظٹط© (UPL)
   // misc
   notes: string;
 }
 
 const STEPS: { key: Step; label: string; icon: any }[] = [
-  { key: 0, label: "شركة التأمين", icon: Building2 },
-  { key: 1, label: "السيارة والعميل", icon: Car },
-  { key: 2, label: "وصف الضرر", icon: AlertTriangle },
-  { key: 3, label: "تسعير الكراج", icon: Calculator },
-  { key: 4, label: "المراجعة", icon: CheckCircle2 },
+  { key: 0, label: "ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†", icon: Building2 },
+  { key: 1, label: "ط§ظ„ط³ظٹط§ط±ط© ظˆط§ظ„ط¹ظ…ظٹظ„", icon: Car },
+  { key: 2, label: "ظˆطµظپ ط§ظ„ط¶ط±ط±", icon: AlertTriangle },
+  { key: 3, label: "طھط³ط¹ظٹط± ط§ظ„ظƒط±ط§ط¬", icon: Calculator },
+  { key: 4, label: "ط§ظ„ظ…ط±ط§ط¬ط¹ط©", icon: CheckCircle2 },
 ];
 
 const DRAFT_KEY = "insurance_claim_draft_v3"; // bumped: removed internal-cost & templates
@@ -103,7 +104,7 @@ async function resolveTenantForClaim(): Promise<string> {
   return String(data);
 }
 
-// ───────────────────── المكون الرئيسي ─────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ط§ظ„ظ…ظƒظˆظ† ط§ظ„ط±ط¦ظٹط³ظٹ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function NewInsuranceClaim() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -121,7 +122,7 @@ export default function NewInsuranceClaim() {
   const cloudDraftKey = useMemo(() => `${DRAFT_KEY}:${user?.id || "anonymous"}`, [user?.id]);
   const [existingCustomerByPhone, setExistingCustomerByPhone] = useState<{ id: string; name: string; phone: string | null } | null>(null);
 
-  // ── استرجاع المسودة ──
+  // â”€â”€ ط§ط³طھط±ط¬ط§ط¹ ط§ظ„ظ…ط³ظˆط¯ط© â”€â”€
   useEffect(() => {
     let cancelled = false;
     draftHydratedRef.current = false;
@@ -171,7 +172,7 @@ export default function NewInsuranceClaim() {
     };
   }, [cloudDraftKey, params]);
 
-  // ── حفظ المسودة تلقائياً ──
+  // â”€â”€ ط­ظپط¸ ط§ظ„ظ…ط³ظˆط¯ط© طھظ„ظ‚ط§ط¦ظٹط§ظ‹ â”€â”€
   useEffect(() => {
     if (!draftHydratedRef.current) return;
     if (skipNextDraftSaveRef.current) {
@@ -233,14 +234,14 @@ export default function NewInsuranceClaim() {
     };
   }, [draft.ownerPhone, draft.customerId]);
 
-  // ── توليد رقم مرجعي مؤقت للكراج ──
+  // â”€â”€ طھظˆظ„ظٹط¯ ط±ظ‚ظ… ظ…ط±ط¬ط¹ظٹ ظ…ط¤ظ‚طھ ظ„ظ„ظƒط±ط§ط¬ â”€â”€
   const generateClaimNumber = () => {
     const yr = new Date().getFullYear();
     const seq = String(Math.floor(Math.random() * 9000) + 1000);
     update({ claimNumber: `CLM-${yr}-${seq}` });
   };
 
-  // ── حسابات ──
+  // â”€â”€ ط­ط³ط§ط¨ط§طھ â”€â”€
   const uplTotal = useMemo(
     () => draft.uplItems.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0),
     [draft.uplItems]
@@ -249,11 +250,11 @@ export default function NewInsuranceClaim() {
   const vatAmount = finalEstimate * 0.05;
   const finalWithVat = finalEstimate + vatAmount;
 
-  // ── تحقق من كل خطوة ──
+  // â”€â”€ طھط­ظ‚ظ‚ ظ…ظ† ظƒظ„ ط®ط·ظˆط© â”€â”€
   const stepValid = (s: Step): boolean => {
     switch (s) {
       case 0: return !!draft.company.trim() && !!draft.claimNumber.trim();
-      // يكفي إدخال بيانات السيارة الأساسية يدوياً (ستُنشأ المركبة تلقائياً عند الحفظ)
+      // ظٹظƒظپظٹ ط¥ط¯ط®ط§ظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط³ظٹط§ط±ط© ط§ظ„ط£ط³ط§ط³ظٹط© ظٹط¯ظˆظٹط§ظ‹ (ط³طھظڈظ†ط´ط£ ط§ظ„ظ…ط±ظƒط¨ط© طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ†ط¯ ط§ظ„ط­ظپط¸)
       case 1: return !!(
         draft.vehicleMake.trim() &&
         draft.vehicleModel.trim() &&
@@ -270,27 +271,27 @@ export default function NewInsuranceClaim() {
   const canNext = stepValid(step);
   const allValid = stepValid(0) && stepValid(1) && stepValid(2) && stepValid(3);
 
-  // رسالة توضيحية تشرح سبب عدم اكتمال خطوة معينة
+  // ط±ط³ط§ظ„ط© طھظˆط¶ظٹط­ظٹط© طھط´ط±ط­ ط³ط¨ط¨ ط¹ط¯ظ… ط§ظƒطھظ…ط§ظ„ ط®ط·ظˆط© ظ…ط¹ظٹظ†ط©
   const stepMissingMsg = (s: Step): string | null => {
     switch (s) {
       case 0: {
         const miss: string[] = [];
-        if (!draft.company.trim()) miss.push("اسم شركة التأمين");
-        if (!draft.claimNumber.trim()) miss.push("رقم المطالبة");
-        return miss.length ? `أكمل: ${miss.join(" و ")}` : null;
+        if (!draft.company.trim()) miss.push("ط§ط³ظ… ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†");
+        if (!draft.claimNumber.trim()) miss.push("ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط©");
+        return miss.length ? `ط£ظƒظ…ظ„: ${miss.join(" ظˆ ")}` : null;
       }
       case 1: {
         const miss: string[] = [];
-        if (!draft.vehicleMake.trim()) miss.push("الماركة");
-        if (!draft.vehicleModel.trim()) miss.push("الموديل");
-        if (!draft.vehiclePlate.trim()) miss.push("رقم اللوحة");
-        if (!draft.customerId && !draft.ownerName.trim()) miss.push("اسم المالك أو اختيار عميل موجود");
-        return miss.length ? `أكمل بيانات السيارة والمالك: ${miss.join("، ")}` : null;
+        if (!draft.vehicleMake.trim()) miss.push("ط§ظ„ظ…ط§ط±ظƒط©");
+        if (!draft.vehicleModel.trim()) miss.push("ط§ظ„ظ…ظˆط¯ظٹظ„");
+        if (!draft.vehiclePlate.trim()) miss.push("ط±ظ‚ظ… ط§ظ„ظ„ظˆط­ط©");
+        if (!draft.customerId && !draft.ownerName.trim()) miss.push("ط§ط³ظ… ط§ظ„ظ…ط§ظ„ظƒ ط£ظˆ ط§ط®طھظٹط§ط± ط¹ظ…ظٹظ„ ظ…ظˆط¬ظˆط¯");
+        return miss.length ? `ط£ظƒظ…ظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط³ظٹط§ط±ط© ظˆط§ظ„ظ…ط§ظ„ظƒ: ${miss.join("طŒ ")}` : null;
       }
-      case 2: return draft.incidentDate ? null : "حدد تاريخ التقدير";
+      case 2: return draft.incidentDate ? null : "ط­ط¯ط¯ طھط§ط±ظٹط® ط§ظ„طھظ‚ط¯ظٹط±";
       case 3: return draft.estimationType === "upl"
-        ? (draft.uplItems.length > 0 && uplTotal > 0 ? null : "أضف بنود التسعير بقيم صحيحة")
-        : (parseMoneyInput(draft.estimatedCost) > 0 ? null : "أدخل المبلغ المطالب به");
+        ? (draft.uplItems.length > 0 && uplTotal > 0 ? null : "ط£ط¶ظپ ط¨ظ†ظˆط¯ ط§ظ„طھط³ط¹ظٹط± ط¨ظ‚ظٹظ… طµط­ظٹط­ط©")
+        : (parseMoneyInput(draft.estimatedCost) > 0 ? null : "ط£ط¯ط®ظ„ ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ط·ط§ظ„ط¨ ط¨ظ‡");
       default: return null;
     }
   };
@@ -309,33 +310,33 @@ export default function NewInsuranceClaim() {
     handleSubmit(action);
   };
 
-  // ── تنبيهات ذكية ──
+  // â”€â”€ طھظ†ط¨ظٹظ‡ط§طھ ط°ظƒظٹط© â”€â”€
   const smartWarnings = useMemo(() => {
     const w: string[] = [];
     if (draft.claimNumber && draft.claimNumber.length < 5)
-      w.push("ℹ️ رقم المطالبة قصير، يفضّل أن يكون كاملاً كما تعطيه شركة التأمين.");
+      w.push("â„¹ï¸ڈ ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظ‚طµظٹط±طŒ ظٹظپط¶ظ‘ظ„ ط£ظ† ظٹظƒظˆظ† ظƒط§ظ…ظ„ط§ظ‹ ظƒظ…ط§ طھط¹ط·ظٹظ‡ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†.");
     if (finalEstimate > 3000)
-      w.push("💰 مبلغ مرتفع — تأكد من توثيق الصور قبل/بعد لإثبات الإصلاح.");
+      w.push("ًں’° ظ…ط¨ظ„ط؛ ظ…ط±طھظپط¹ â€” طھط£ظƒط¯ ظ…ظ† طھظˆط«ظٹظ‚ ط§ظ„طµظˆط± ظ‚ط¨ظ„/ط¨ط¹ط¯ ظ„ط¥ط«ط¨ط§طھ ط§ظ„ط¥طµظ„ط§ط­.");
     if (draft.companyId) {
       const co = companies.find((c) => c.id === draft.companyId);
       if (co && co.payment_terms_days >= 60)
-        w.push(`⏳ مدة سداد هذه الشركة ${co.payment_terms_days} يوماً — تأكد من السيولة.`);
+        w.push(`âڈ³ ظ…ط¯ط© ط³ط¯ط§ط¯ ظ‡ط°ظ‡ ط§ظ„ط´ط±ظƒط© ${co.payment_terms_days} ظٹظˆظ…ط§ظ‹ â€” طھط£ظƒط¯ ظ…ظ† ط§ظ„ط³ظٹظˆظ„ط©.`);
     }
     return w;
   }, [draft, finalEstimate, companies]);
 
-  // ── إرسال ──
+  // â”€â”€ ط¥ط±ط³ط§ظ„ â”€â”€
   const handleSubmit = async (action: "save" | "save_and_open" | "save_and_new") => {
     if (!allValid) {
-      toast.error("الرجاء استكمال البيانات المطلوبة في جميع الخطوات");
+      toast.error("ط§ظ„ط±ط¬ط§ط، ط§ط³طھظƒظ…ط§ظ„ ط§ظ„ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط·ظ„ظˆط¨ط© ظپظٹ ط¬ظ…ظٹط¹ ط§ظ„ط®ط·ظˆط§طھ");
       return;
     }
     setSubmitting(true);
     try {
       const tenantId = await resolveTenantForClaim();
-      if (!tenantId) throw new Error("لا يمكن تحديد المستأجر");
+      if (!tenantId) throw new Error("ظ„ط§ ظٹظ…ظƒظ† طھط­ط¯ظٹط¯ ط§ظ„ظ…ط³طھط£ط¬ط±");
 
-      // فحص تكرار رقم المطالبة داخل نفس الورشة فقط.
+      // ظپط­طµ طھظƒط±ط§ط± ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط© ط¯ط§ط®ظ„ ظ†ظپط³ ط§ظ„ظˆط±ط´ط© ظپظ‚ط·.
       const cn = draft.claimNumber.trim();
       const { data: existingClaim, error: existingClaimError } = await supabase
         .from("insurance_claims" as any)
@@ -346,7 +347,7 @@ export default function NewInsuranceClaim() {
         .maybeSingle();
       if (existingClaimError) throw existingClaimError;
       if ((existingClaim as any)?.id) {
-        toast.warning("رقم المطالبة موجود مسبقًا. سيتم فتح المطالبة الموجودة.");
+        toast.warning("ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظ…ظˆط¬ظˆط¯ ظ…ط³ط¨ظ‚ظ‹ط§. ط³ظٹطھظ… ظپطھط­ ط§ظ„ظ…ط·ط§ظ„ط¨ط© ط§ظ„ظ…ظˆط¬ظˆط¯ط©.");
         navigate(`/insurance/${(existingClaim as any).id}`);
         return;
       }
@@ -392,7 +393,7 @@ export default function NewInsuranceClaim() {
         }
         if (!customerId) {
           const customerName = draft.ownerName.trim() || draft.company.trim();
-          if (!customerName) throw new Error("اختر عميلًا موجودًا أو أدخل اسم المالك أو استخدم شركة التأمين كعميل");
+          if (!customerName) throw new Error("ط§ط®طھط± ط¹ظ…ظٹظ„ظ‹ط§ ظ…ظˆط¬ظˆط¯ظ‹ط§ ط£ظˆ ط£ط¯ط®ظ„ ط§ط³ظ… ط§ظ„ظ…ط§ظ„ظƒ ط£ظˆ ط§ط³طھط®ط¯ظ… ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ† ظƒط¹ظ…ظٹظ„");
 
           const { data: sameNameRows } = await supabase
             .from("customers")
@@ -444,12 +445,6 @@ export default function NewInsuranceClaim() {
         const linkedVehicle = await findExistingVehicle({ vehicleId });
         if (!linkedVehicle?.id) {
           vehicleId = null;
-        } else if (linkedVehicle.customer_id && linkedVehicle.customer_id !== customerId) {
-          const vehicleCustomer = await loadCustomerRecord(linkedVehicle.customer_id);
-          if (vehicleCustomer?.id) {
-            customerRecord = vehicleCustomer;
-            customerId = vehicleCustomer.id;
-          }
         }
       }
 
@@ -464,17 +459,10 @@ export default function NewInsuranceClaim() {
         });
         if (vehicleCandidate?.id) {
           vehicleId = vehicleCandidate.id;
-          if (vehicleCandidate.customer_id && vehicleCandidate.customer_id !== customerId) {
-            const vehicleCustomer = await loadCustomerRecord(vehicleCandidate.customer_id);
-            if (vehicleCustomer?.id) {
-              customerRecord = vehicleCustomer;
-              customerId = vehicleCustomer.id;
-            }
-          }
         }
       }
-      // لا تنشئ المركبة هنا. إنشاء/ربط المركبة يتم مركزياً داخل useCreateClaim بنفس tenant_id
-      // حتى لا يحدث اختلاف بين tenant الصفحة وtenant resolver الخارجي.
+      // ظ„ط§ طھظ†ط´ط¦ ط§ظ„ظ…ط±ظƒط¨ط© ظ‡ظ†ط§. ط¥ظ†ط´ط§ط،/ط±ط¨ط· ط§ظ„ظ…ط±ظƒط¨ط© ظٹطھظ… ظ…ط±ظƒط²ظٹط§ظ‹ ط¯ط§ط®ظ„ useCreateClaim ط¨ظ†ظپط³ tenant_id
+      // ط­طھظ‰ ظ„ط§ ظٹط­ط¯ط« ط§ط®طھظ„ط§ظپ ط¨ظٹظ† tenant ط§ظ„طµظپط­ط© ظˆtenant resolver ط§ظ„ط®ط§ط±ط¬ظٹ.
       if (vehicleId) {
         const { data: sameVehicleClaims, error: sameVehicleError } = await supabase
           .from("insurance_claims" as any)
@@ -487,11 +475,11 @@ export default function NewInsuranceClaim() {
         if (sameVehicleError) throw sameVehicleError;
         if ((sameVehicleClaims as any[])?.length) {
           const lines = [
-            "تنبيه: نفس المركبة لديها مطالبة أخرى برقم مختلف.",
+            "طھظ†ط¨ظٹظ‡: ظ†ظپط³ ط§ظ„ظ…ط±ظƒط¨ط© ظ„ط¯ظٹظ‡ط§ ظ…ط·ط§ظ„ط¨ط© ط£ط®ط±ظ‰ ط¨ط±ظ‚ظ… ظ…ط®طھظ„ظپ.",
             "",
-            ...((sameVehicleClaims as any[]) || []).map((d) => `• مطالبة ${d.claim_number} — ${d.insurance_company || ""} (${d.status})`),
+            ...((sameVehicleClaims as any[]) || []).map((d) => `â€¢ ظ…ط·ط§ظ„ط¨ط© ${d.claim_number} â€” ${d.insurance_company || ""} (${d.status})`),
             "",
-            "هل تريد المتابعة وإنشاء مطالبة جديدة لهذه المركبة؟",
+            "ظ‡ظ„ طھط±ظٹط¯ ط§ظ„ظ…طھط§ط¨ط¹ط© ظˆط¥ظ†ط´ط§ط، ظ…ط·ط§ظ„ط¨ط© ط¬ط¯ظٹط¯ط© ظ„ظ‡ط°ظ‡ ط§ظ„ظ…ط±ظƒط¨ط©طں",
           ].join("\n");
           if (!window.confirm(lines)) {
             setSubmitting(false);
@@ -502,10 +490,10 @@ export default function NewInsuranceClaim() {
 
 
 
-      // ملاحظات
+      // ظ…ظ„ط§ط­ط¸ط§طھ
       const internalNotes = [
         draft.notes,
-        draft.expectedDeliveryDate ? `تاريخ التسليم المتوقع: ${draft.expectedDeliveryDate}` : "",
+        draft.expectedDeliveryDate ? `طھط§ط±ظٹط® ط§ظ„طھط³ظ„ظٹظ… ط§ظ„ظ…طھظˆظ‚ط¹: ${draft.expectedDeliveryDate}` : "",
       ].filter(Boolean).join("\n");
 
       const created: any = await createClaim.mutateAsync({
@@ -521,7 +509,7 @@ export default function NewInsuranceClaim() {
         status: "pending",
         notes: internalNotes || undefined,
         incident_date: draft.incidentDate ? new Date(draft.incidentDate).toISOString() : null,
-        // تاريخ التقدير مستقل عن وصول المركبة؛ الوصول وبدء العمل يُسجلان فعليًا من صفحة المطالبة.
+        // طھط§ط±ظٹط® ط§ظ„طھظ‚ط¯ظٹط± ظ…ط³طھظ‚ظ„ ط¹ظ† ظˆطµظˆظ„ ط§ظ„ظ…ط±ظƒط¨ط©ط› ط§ظ„ظˆطµظˆظ„ ظˆط¨ط¯ط، ط§ظ„ط¹ظ…ظ„ ظٹظڈط³ط¬ظ„ط§ظ† ظپط¹ظ„ظٹظ‹ط§ ظ…ظ† طµظپط­ط© ط§ظ„ظ…ط·ط§ظ„ط¨ط©.
         estimate_date: draft.incidentDate || null,
         workshop_arrival_date: null,
         work_started_at: null,
@@ -554,49 +542,49 @@ export default function NewInsuranceClaim() {
       if (e?.message === "claim_number_exists" && e?.existingClaimId) {
         const shouldOpen = window.confirm(
           e?.existingClaimInactive
-            ? "رقم المطالبة موجود في سجل محذوف/مؤرشف. هل تريد فتح السجل الموجود؟"
-            : "رقم المطالبة موجود مسبقًا. هل تريد فتح السجل الموجود؟",
+            ? "ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظ…ظˆط¬ظˆط¯ ظپظٹ ط³ط¬ظ„ ظ…ط­ط°ظˆظپ/ظ…ط¤ط±ط´ظپ. ظ‡ظ„ طھط±ظٹط¯ ظپطھط­ ط§ظ„ط³ط¬ظ„ ط§ظ„ظ…ظˆط¬ظˆط¯طں"
+            : "ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظ…ظˆط¬ظˆط¯ ظ…ط³ط¨ظ‚ظ‹ط§. ظ‡ظ„ طھط±ظٹط¯ ظپطھط­ ط§ظ„ط³ط¬ظ„ ط§ظ„ظ…ظˆط¬ظˆط¯طں",
         );
         if (shouldOpen) navigate(`/insurance/${e.existingClaimId}`);
         return;
       }
       if (String(e?.message || "").includes("vin_candidate_requires_user_confirmation")) {
-        toast.error("تم العثور على مركبة محتملة عبر VIN فقط. اربط مركبة موجودة يدويًا أو أكمل بيانات اللوحة والحروف والدولة قبل حفظ المطالبة.");
+        toast.error("طھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ ظ…ط±ظƒط¨ط© ظ…ط­طھظ…ظ„ط© ط¹ط¨ط± VIN ظپظ‚ط·. ط§ط±ط¨ط· ظ…ط±ظƒط¨ط© ظ…ظˆط¬ظˆط¯ط© ظٹط¯ظˆظٹظ‹ط§ ط£ظˆ ط£ظƒظ…ظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ„ظˆط­ط© ظˆط§ظ„ط­ط±ظˆظپ ظˆط§ظ„ط¯ظˆظ„ط© ظ‚ط¨ظ„ ط­ظپط¸ ط§ظ„ظ…ط·ط§ظ„ط¨ط©.");
       } else {
-        toast.error(e?.message ?? "فشل إنشاء المطالبة");
+        toast.error(e?.message ?? "ظپط´ظ„ ط¥ظ†ط´ط§ط، ط§ظ„ظ…ط·ط§ظ„ط¨ط©");
       }
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ───────────────────── العرض ─────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ط§ظ„ط¹ط±ط¶ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <div className="space-y-4 md:space-y-6">
-      {/* العنوان */}
+      {/* ط§ظ„ط¹ظ†ظˆط§ظ† */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
-            <Wrench className="text-primary" /> مطالبة كراج جديدة
+            <Wrench className="text-primary" /> ظ…ط·ط§ظ„ط¨ط© ظƒط±ط§ط¬ ط¬ط¯ظٹط¯ط©
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
-            إصلاح سيارة لشركة تأمين • {STEPS.length} خطوات • حفظ تلقائي للمسودة
+            ط¥طµظ„ط§ط­ ط³ظٹط§ط±ط© ظ„ط´ط±ظƒط© طھط£ظ…ظٹظ† â€¢ {STEPS.length} ط®ط·ظˆط§طھ â€¢ ط­ظپط¸ طھظ„ظ‚ط§ط¦ظٹ ظ„ظ„ظ…ط³ظˆط¯ط©
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => smartBack(navigate, "/insurance/list")}>
-            <X size={16} /> إلغاء
+            <X size={16} /> ط¥ظ„ط؛ط§ط،
           </Button>
           {savedDraftAt && (
             <Badge variant="outline" className="gap-1 text-[10px]">
-              <Save size={11} /> مسودة محفوظة
+              <Save size={11} /> ظ…ط³ظˆط¯ط© ظ…ط­ظپظˆط¸ط©
             </Badge>
           )}
         </div>
       </div>
 
 
-      {/* شريط الخطوات */}
+      {/* ط´ط±ظٹط· ط§ظ„ط®ط·ظˆط§طھ */}
       <Card className="p-3 md:p-4">
         <div className="flex items-center justify-between gap-1 overflow-x-auto">
           {STEPS.map((s, idx) => {
@@ -631,7 +619,7 @@ export default function NewInsuranceClaim() {
         </div>
       </Card>
 
-      {/* تنبيهات ذكية */}
+      {/* طھظ†ط¨ظٹظ‡ط§طھ ط°ظƒظٹط© */}
       {smartWarnings.length > 0 && (
         <Card className="p-3 border-warning/30 bg-warning/5">
           <div className="flex items-start gap-2">
@@ -645,20 +633,20 @@ export default function NewInsuranceClaim() {
         </Card>
       )}
 
-      {/* تعبئة تلقائية بالذكاء الاصطناعي من ملف المطالبة (PDF أو صورة) */}
+      {/* طھط¹ط¨ط¦ط© طھظ„ظ‚ط§ط¦ظٹط© ط¨ط§ظ„ط°ظƒط§ط، ط§ظ„ط§طµط·ظ†ط§ط¹ظٹ ظ…ظ† ظ…ظ„ظپ ط§ظ„ظ…ط·ط§ظ„ط¨ط© (PDF ط£ظˆ طµظˆط±ط©) */}
       <Card className="p-3 md:p-4 bg-gradient-to-l from-primary/5 to-transparent border-primary/30">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="text-xs md:text-sm">
             <div className="font-semibold text-foreground flex items-center gap-1.5">
-              ⚡ تعبئة سريعة بالذكاء الاصطناعي
+              âڑ، طھط¹ط¨ط¦ط© ط³ط±ظٹط¹ط© ط¨ط§ظ„ط°ظƒط§ط، ط§ظ„ط§طµط·ظ†ط§ط¹ظٹ
             </div>
             <div className="text-muted-foreground mt-0.5">
-              ارفع ملف المطالبة، تقرير الشرطة، أو صورة المَلكية — سنملأ كل الحقول تلقائياً (PDF/JPG/PNG)
+              ط§ط±ظپط¹ ظ…ظ„ظپ ط§ظ„ظ…ط·ط§ظ„ط¨ط©طŒ طھظ‚ط±ظٹط± ط§ظ„ط´ط±ط·ط©طŒ ط£ظˆ طµظˆط±ط© ط§ظ„ظ…ظژظ„ظƒظٹط© â€” ط³ظ†ظ…ظ„ط£ ظƒظ„ ط§ظ„ط­ظ‚ظˆظ„ طھظ„ظ‚ط§ط¦ظٹط§ظ‹ (PDF/JPG/PNG)
             </div>
           </div>
           <AiExtractButton
             schema="insurance_claim"
-            label="استخراج من مستند"
+            label="ط§ط³طھط®ط±ط§ط¬ ظ…ظ† ظ…ط³طھظ†ط¯"
             onExtracted={(d) => {
               const patch: Partial<Draft> = {};
               if (d.insurance_company) patch.company = d.insurance_company;
@@ -680,7 +668,7 @@ export default function NewInsuranceClaim() {
         </div>
       </Card>
 
-      {/* محتوى الخطوة */}
+      {/* ظ…ط­طھظˆظ‰ ط§ظ„ط®ط·ظˆط© */}
       <Card className="p-4 md:p-6 space-y-4">
         {step === 0 && (
           <Step0 draft={draft} update={update} generateClaimNumber={generateClaimNumber} companies={companies} />
@@ -712,7 +700,7 @@ export default function NewInsuranceClaim() {
         )}
       </Card>
 
-      {/* أزرار التنقل */}
+      {/* ط£ط²ط±ط§ط± ط§ظ„طھظ†ظ‚ظ„ */}
       <div className="flex flex-col-reverse md:flex-row md:items-center md:justify-between gap-3">
         <div className="flex gap-2">
           <Button
@@ -720,7 +708,7 @@ export default function NewInsuranceClaim() {
             disabled={step === 0}
             onClick={() => setStep((s) => (s - 1) as Step)}
           >
-            <ArrowRight size={14} /> السابق
+            <ArrowRight size={14} /> ط§ظ„ط³ط§ط¨ظ‚
           </Button>
           <Button
             variant="ghost"
@@ -730,16 +718,16 @@ export default function NewInsuranceClaim() {
               clearStoredDraft();
               setSavedDraftAt(null);
               setStep(0);
-              toast.info("تم تفريغ النموذج");
+              toast.info("طھظ… طھظپط±ظٹط؛ ط§ظ„ظ†ظ…ظˆط°ط¬");
             }}
           >
-            <Trash2 size={14} /> تفريغ النموذج
+            <Trash2 size={14} /> طھظپط±ظٹط؛ ط§ظ„ظ†ظ…ظˆط°ط¬
           </Button>
         </div>
 
         {step < 4 ? (
           <Button onClick={goNext}>
-            التالي <ArrowLeft size={14} />
+            ط§ظ„طھط§ظ„ظٹ <ArrowLeft size={14} />
           </Button>
         ) : (
           <div className="flex flex-wrap gap-2">
@@ -749,7 +737,7 @@ export default function NewInsuranceClaim() {
               disabled={submitting}
             >
               {submitting ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} />}
-              حفظ + جديدة
+              ط­ظپط¸ + ط¬ط¯ظٹط¯ط©
             </Button>
             <Button
               variant="outline"
@@ -757,14 +745,14 @@ export default function NewInsuranceClaim() {
               disabled={submitting}
             >
               {submitting ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
-              حفظ والعودة للقائمة
+              ط­ظپط¸ ظˆط§ظ„ط¹ظˆط¯ط© ظ„ظ„ظ‚ط§ط¦ظ…ط©
             </Button>
             <Button
               onClick={() => trySubmit("save_and_open")}
               disabled={submitting}
             >
               {submitting ? <Loader2 className="animate-spin" size={14} /> : <BadgeCheck size={14} />}
-              حفظ وفتح المطالبة
+              ط­ظپط¸ ظˆظپطھط­ ط§ظ„ظ…ط·ط§ظ„ط¨ط©
             </Button>
           </div>
         )}
@@ -772,17 +760,16 @@ export default function NewInsuranceClaim() {
     </div>
   );
 }
-
-// ───────────────────── الخطوة 0: شركة التأمين ─────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ط§ظ„ط®ط·ظˆط© 0: ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ† â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Step0({ draft, update, generateClaimNumber, companies }: { draft: Draft; update: (p: Partial<Draft>) => void; generateClaimNumber: () => void; companies: any[] }) {
   const co = companies.find((c) => c.id === draft.companyId);
   return (
     <div className="space-y-5">
-      <SectionHeader icon={Building2} title="شركة التأمين (الجهة الدافعة)" desc="من هي الشركة التي ستدفع لك فاتورة الإصلاح؟" />
+      <SectionHeader icon={Building2} title="ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ† (ط§ظ„ط¬ظ‡ط© ط§ظ„ط¯ط§ظپط¹ط©)" desc="ظ…ظ† ظ‡ظٹ ط§ظ„ط´ط±ظƒط© ط§ظ„طھظٹ ط³طھط¯ظپط¹ ظ„ظƒ ظپط§طھظˆط±ط© ط§ظ„ط¥طµظ„ط§ط­طں" />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>شركة التأمين *</Label>
+          <Label>ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ† *</Label>
           <InsuranceCompanyAutocomplete
             value={draft.company}
             companyId={draft.companyId}
@@ -791,43 +778,43 @@ function Step0({ draft, update, generateClaimNumber, companies }: { draft: Draft
         </div>
 
         <div className="space-y-1.5">
-          <Label>موظف شركة التأمين</Label>
+          <Label>ظ…ظˆط¸ظپ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†</Label>
           <InsuranceEmployeeSelect
             companyId={draft.companyId}
             value={draft.insuranceEmployeeId}
             onChange={(insuranceEmployeeId) => update({ insuranceEmployeeId })}
-            placeholder="اختر الموظف المسؤول"
+            placeholder="ط§ط®طھط± ط§ظ„ظ…ظˆط¸ظپ ط§ظ„ظ…ط³ط¤ظˆظ„"
           />
-          <p className="text-[10px] text-muted-foreground">اختياري، ويظهر لاحقًا في تفاصيل المطالبة والفلاتر.</p>
+          <p className="text-[10px] text-muted-foreground">ط§ط®طھظٹط§ط±ظٹطŒ ظˆظٹط¸ظ‡ط± ظ„ط§ط­ظ‚ظ‹ط§ ظپظٹ طھظپط§طµظٹظ„ ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظˆط§ظ„ظپظ„ط§طھط±.</p>
         </div>
 
         <div className="space-y-1.5">
-          <Label>رقم المطالبة *</Label>
+          <Label>ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط© *</Label>
           <div className="flex gap-2">
             <Input
               value={draft.claimNumber}
               onChange={(e) => update({ claimNumber: e.target.value })}
-              placeholder="من شركة التأمين أو ولّد رقماً مؤقتاً"
+              placeholder="ظ…ظ† ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ† ط£ظˆ ظˆظ„ظ‘ط¯ ط±ظ‚ظ…ط§ظ‹ ظ…ط¤ظ‚طھط§ظ‹"
               dir="ltr"
               className="flex-1"
             />
-            <Button variant="outline" size="icon" onClick={generateClaimNumber} title="توليد رقم مؤقت">
+            <Button variant="outline" size="icon" onClick={generateClaimNumber} title="طھظˆظ„ظٹط¯ ط±ظ‚ظ… ظ…ط¤ظ‚طھ">
               <Wand2 size={14} />
             </Button>
           </div>
-          <p className="text-[10px] text-muted-foreground">أدخل الرقم الذي تعطيه لك شركة التأمين، أو ولّد رقماً مؤقتاً ريثما يصلك.</p>
+          <p className="text-[10px] text-muted-foreground">ط£ط¯ط®ظ„ ط§ظ„ط±ظ‚ظ… ط§ظ„ط°ظٹ طھط¹ط·ظٹظ‡ ظ„ظƒ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†طŒ ط£ظˆ ظˆظ„ظ‘ط¯ ط±ظ‚ظ…ط§ظ‹ ظ…ط¤ظ‚طھط§ظ‹ ط±ظٹط«ظ…ط§ ظٹطµظ„ظƒ.</p>
         </div>
       </div>
 
       {co && (
         <Card className="p-3 bg-muted/40 border-muted">
           <div className="text-xs font-semibold mb-2 flex items-center gap-1">
-            <FileText size={13} className="text-primary" /> معلومات سداد الشركة
+            <FileText size={13} className="text-primary" /> ظ…ط¹ظ„ظˆظ…ط§طھ ط³ط¯ط§ط¯ ط§ظ„ط´ط±ظƒط©
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-            <div><span className="text-muted-foreground">مدة السداد:</span> <span className="font-semibold">{co.payment_terms_days} يوم</span></div>
-            {co.contact_person && <div><span className="text-muted-foreground">المسؤول:</span> <span className="font-semibold">{co.contact_person}</span></div>}
-            {co.phone && <div dir="ltr" className="text-left"><span className="text-muted-foreground">هاتف:</span> <span className="font-semibold">{co.phone}</span></div>}
+            <div><span className="text-muted-foreground">ظ…ط¯ط© ط§ظ„ط³ط¯ط§ط¯:</span> <span className="font-semibold">{co.payment_terms_days} ظٹظˆظ…</span></div>
+            {co.contact_person && <div><span className="text-muted-foreground">ط§ظ„ظ…ط³ط¤ظˆظ„:</span> <span className="font-semibold">{co.contact_person}</span></div>}
+            {co.phone && <div dir="ltr" className="text-left"><span className="text-muted-foreground">ظ‡ط§طھظپ:</span> <span className="font-semibold">{co.phone}</span></div>}
           </div>
         </Card>
       )}
@@ -835,7 +822,7 @@ function Step0({ draft, update, generateClaimNumber, companies }: { draft: Draft
   );
 }
 
-// ───────────────────── الخطوة 1: السيارة والعميل ─────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ط§ظ„ط®ط·ظˆط© 1: ط§ظ„ط³ظٹط§ط±ط© ظˆط§ظ„ط¹ظ…ظٹظ„ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Step1({
   draft,
   update,
@@ -915,16 +902,16 @@ function Step1({
       ownerPhone: v.customers?.phone || draft.ownerPhone,
     });
     setPickerOpen(false);
-    toast.success("تم ربط المركبة");
+    toast.success("طھظ… ط±ط¨ط· ط§ظ„ظ…ط±ظƒط¨ط©");
   }
 
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <SectionHeader icon={Car} title="السيارة والمالك" desc="بيانات السيارة المستلمة، ومالكها لتسليمها له بعد الإصلاح" />
+        <SectionHeader icon={Car} title="ط§ظ„ط³ظٹط§ط±ط© ظˆط§ظ„ظ…ط§ظ„ظƒ" desc="ط¨ظٹط§ظ†ط§طھ ط§ظ„ط³ظٹط§ط±ط© ط§ظ„ظ…ط³طھظ„ظ…ط©طŒ ظˆظ…ط§ظ„ظƒظ‡ط§ ظ„طھط³ظ„ظٹظ…ظ‡ط§ ظ„ظ‡ ط¨ط¹ط¯ ط§ظ„ط¥طµظ„ط§ط­" />
         <Button type="button" variant={draft.vehicleId ? "outline" : "default"} size="sm" onClick={() => setPickerOpen(true)}>
           <Car size={14} className="ml-1" />
-          {draft.vehicleId ? "تغيير المركبة المرتبطة" : "ربط مركبة موجودة *"}
+          {draft.vehicleId ? "طھط؛ظٹظٹط± ط§ظ„ظ…ط±ظƒط¨ط© ط§ظ„ظ…ط±طھط¨ط·ط©" : "ط±ط¨ط· ظ…ط±ظƒط¨ط© ظ…ظˆط¬ظˆط¯ط© *"}
         </Button>
       </div>
 
@@ -932,32 +919,32 @@ function Step1({
         <div className="rounded-lg border border-success/40 bg-success/5 p-3 text-sm flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <CheckCircle2 size={16} className="text-success" />
-            <span className="font-semibold">مركبة مرتبطة:</span>
+            <span className="font-semibold">ظ…ط±ظƒط¨ط© ظ…ط±طھط¨ط·ط©:</span>
             <span className="font-mono" dir="ltr">{draft.vehiclePlate}</span>
-            <span className="text-muted-foreground">— {draft.vehicleMake} {draft.vehicleModel}</span>
+            <span className="text-muted-foreground">â€” {draft.vehicleMake} {draft.vehicleModel}</span>
           </div>
           <Button type="button" variant="ghost" size="sm" onClick={() => update({ vehicleId: null })}>
-            <X size={12} className="ml-1" /> إلغاء الربط
+            <X size={12} className="ml-1" /> ط¥ظ„ط؛ط§ط، ط§ظ„ط±ط¨ط·
           </Button>
         </div>
       ) : vehicleLookupLoading ? (
         <div className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
-          جاري البحث عن المركبة داخل نفس الورشة...
+          ط¬ط§ط±ظٹ ط§ظ„ط¨ط­ط« ط¹ظ† ط§ظ„ظ…ط±ظƒط¨ط© ط¯ط§ط®ظ„ ظ†ظپط³ ط§ظ„ظˆط±ط´ط©...
         </div>
       ) : vehicleMatch ? (
         <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs space-y-2">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="space-y-1">
-              <p className="font-semibold text-foreground">المركبة موجودة</p>
+              <p className="font-semibold text-foreground">ط§ظ„ظ…ط±ظƒط¨ط© ظ…ظˆط¬ظˆط¯ط©</p>
               <p className="text-muted-foreground">
-                اللوحة: {[vehicleMatch.plate_letters, vehicleMatch.plate_number].filter(Boolean).join(" ") || "—"} · VIN: {vehicleMatch.vin_number || vehicleMatch.vin || "—"}
+                ط§ظ„ظ„ظˆط­ط©: {[vehicleMatch.plate_letters, vehicleMatch.plate_number].filter(Boolean).join(" ") || "â€”"} آ· VIN: {vehicleMatch.vin_number || vehicleMatch.vin || "â€”"}
               </p>
               <p className="text-muted-foreground">
-                {vehicleMatch.brand || "—"} {vehicleMatch.model || ""} {vehicleMatch.year || ""} · العميل الحالي: {vehicleMatch.customer_name || "—"}
+                {vehicleMatch.brand || "â€”"} {vehicleMatch.model || ""} {vehicleMatch.year || ""} آ· ط§ظ„ط¹ظ…ظٹظ„ ط§ظ„ط­ط§ظ„ظٹ: {vehicleMatch.customer_name || "â€”"}
               </p>
               {vehicleMatch.customer_id && draft.customerId && vehicleMatch.customer_id !== draft.customerId && (
                 <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
-                  هذه المركبة مرتبطة بعميل آخر. لن يتم ربطها أو نقلها تلقائيًا.
+                  ظ‡ط°ظ‡ ط§ظ„ظ…ط±ظƒط¨ط© ظ…ط±طھط¨ط·ط© ط¨ط¹ظ…ظٹظ„ ط¢ط®ط±. ظ„ظ† ظٹطھظ… ط±ط¨ط·ظ‡ط§ ط£ظˆ ظ†ظ‚ظ„ظ‡ط§ طھظ„ظ‚ط§ط¦ظٹظ‹ط§.
                 </p>
               )}
             </div>
@@ -968,7 +955,6 @@ function Step1({
               onClick={() => {
                 update({
                   vehicleId: vehicleMatch.id,
-                  customerId: vehicleMatch.customer_id || draft.customerId,
                   vehicleMake: vehicleMatch.brand || draft.vehicleMake,
                   vehicleModel: vehicleMatch.model || draft.vehicleModel,
                   vehiclePlate: formatVehiclePlateForClaim(vehicleMatch),
@@ -976,7 +962,7 @@ function Step1({
                   vehicleColor: vehicleMatch.color || draft.vehicleColor,
                   vehicleVin: vehicleMatch.vin_number || vehicleMatch.vin || draft.vehicleVin,
                 });
-                toast.success("تم اختيار المركبة الموجودة");
+                toast.success("طھظ… ط§ط®طھظٹط§ط± ط§ظ„ظ…ط±ظƒط¨ط© ط§ظ„ظ…ظˆط¬ظˆط¯ط©");
               }}
             >
               Use This Vehicle
@@ -987,7 +973,7 @@ function Step1({
         <div className="rounded-lg border border-info/40 bg-info/5 p-3 text-xs flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <CheckCircle2 size={14} className="text-info" />
-            <span>بيانات السيارة جاهزة — ستُنشأ المركبة تلقائياً عند حفظ المطالبة، أو اضغط «حفظ السيارة الآن» لإنشائها فوراً.</span>
+            <span>ط¨ظٹط§ظ†ط§طھ ط§ظ„ط³ظٹط§ط±ط© ط¬ط§ظ‡ط²ط© â€” ط³طھظڈظ†ط´ط£ ط§ظ„ظ…ط±ظƒط¨ط© طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ†ط¯ ط­ظپط¸ ط§ظ„ظ…ط·ط§ظ„ط¨ط©طŒ ط£ظˆ ط§ط¶ط؛ط· آ«ط­ظپط¸ ط§ظ„ط³ظٹط§ط±ط© ط§ظ„ط¢ظ†آ» ظ„ط¥ظ†ط´ط§ط¦ظ‡ط§ ظپظˆط±ط§ظ‹.</span>
           </div>
           <Button
             type="button"
@@ -995,7 +981,7 @@ function Step1({
             size="sm"
             onClick={async () => {
               try {
-                if (!draft.customerId) throw new Error("اضغط Use Existing Customer أو احفظ المطالبة لإنشاء العميل أولاً");
+                if (!draft.customerId) throw new Error("ط§ط¶ط؛ط· Use Existing Customer ط£ظˆ ط§ط­ظپط¸ ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظ„ط¥ظ†ط´ط§ط، ط§ظ„ط¹ظ…ظٹظ„ ط£ظˆظ„ط§ظ‹");
                 const existing = await findExistingVehicle({
                   plate: draft.vehiclePlate,
                   vin: draft.vehicleVin,
@@ -1005,10 +991,6 @@ function Step1({
                   color: draft.vehicleColor,
                 });
                 if (existing?.id) {
-                  if (existing.customer_id && existing.customer_id !== draft.customerId) {
-                    toast.error("هذه المركبة موجودة مسبقًا ومرتبطة بعميل آخر. اختر Use This Vehicle أو صحح العميل قبل الحفظ.");
-                    return;
-                  }
                   update({
                     vehicleId: existing.id,
                     vehicleMake: existing.brand || draft.vehicleMake,
@@ -1017,11 +999,12 @@ function Step1({
                     vehicleColor: existing.color || draft.vehicleColor,
                     vehicleVin: existing.vin_number || existing.vin || draft.vehicleVin,
                   });
-                  toast.success("تم ربط المركبة الموجودة");
+                  toast.success("طھظ… ط±ط¨ط· ط§ظ„ظ…ط±ظƒط¨ط© ط§ظ„ظ…ظˆط¬ظˆط¯ط©");
                   return;
                 }
                 const resolved = await ensureVehicleForCustomer({
                   customerId: draft.customerId,
+                  allowDifferentCustomer: true,
                   plate: draft.vehiclePlate,
                   vin: draft.vehicleVin,
                   make: draft.vehicleMake,
@@ -1030,18 +1013,18 @@ function Step1({
                   color: draft.vehicleColor,
                 });
                 update({ vehicleId: resolved.vehicleId });
-                toast.success("تم حفظ السيارة وربطها");
+                toast.success("طھظ… ط­ظپط¸ ط§ظ„ط³ظٹط§ط±ط© ظˆط±ط¨ط·ظ‡ط§");
               } catch (e: any) {
-                toast.error(e?.message ?? "فشل حفظ السيارة");
+                toast.error(e?.message ?? "ظپط´ظ„ ط­ظپط¸ ط§ظ„ط³ظٹط§ط±ط©");
               }
             }}
           >
-            <Save size={12} className="ml-1" /> حفظ السيارة الآن
+            <Save size={12} className="ml-1" /> ط­ظپط¸ ط§ظ„ط³ظٹط§ط±ط© ط§ظ„ط¢ظ†
           </Button>
         </div>
       ) : (
         <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs text-warning-foreground/80">
-          ⚠ اختر مركبة موجودة من «ربط مركبة موجودة»، أو أدخل (الماركة + الموديل + اللوحة) أدناه وستُنشأ تلقائياً عند حفظ المطالبة.
+          âڑ  ط§ط®طھط± ظ…ط±ظƒط¨ط© ظ…ظˆط¬ظˆط¯ط© ظ…ظ† آ«ط±ط¨ط· ظ…ط±ظƒط¨ط© ظ…ظˆط¬ظˆط¯ط©آ»طŒ ط£ظˆ ط£ط¯ط®ظ„ (ط§ظ„ظ…ط§ط±ظƒط© + ط§ظ„ظ…ظˆط¯ظٹظ„ + ط§ظ„ظ„ظˆط­ط©) ط£ط¯ظ†ط§ظ‡ ظˆط³طھظڈظ†ط´ط£ طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¹ظ†ط¯ ط­ظپط¸ ط§ظ„ظ…ط·ط§ظ„ط¨ط©.
         </div>
       )}
 
@@ -1053,7 +1036,7 @@ function Step1({
         color={draft.vehicleColor}
         vin={draft.vehicleVin}
         onChange={(patch) => update({
-          vehicleId: null, // أي تعديل يدوي يُفصل الربط
+          vehicleId: null, // ط£ظٹ طھط¹ط¯ظٹظ„ ظٹط¯ظˆظٹ ظٹظڈظپطµظ„ ط§ظ„ط±ط¨ط·
           vehicleMake: patch.make ?? draft.vehicleMake,
           vehicleModel: patch.model ?? draft.vehicleModel,
           vehiclePlate: patch.plate ?? draft.vehiclePlate,
@@ -1064,18 +1047,18 @@ function Step1({
       />
 
       <div className="border-t pt-4 mt-4">
-        <SectionHeader icon={Phone} title="مالك السيارة (لتسليمها)" desc="بيانات صاحب السيارة لاستلامها بعد الإصلاح" small />
+        <SectionHeader icon={Phone} title="ظ…ط§ظ„ظƒ ط§ظ„ط³ظٹط§ط±ط© (ظ„طھط³ظ„ظٹظ…ظ‡ط§)" desc="ط¨ظٹط§ظ†ط§طھ طµط§ط­ط¨ ط§ظ„ط³ظٹط§ط±ط© ظ„ط§ط³طھظ„ط§ظ…ظ‡ط§ ط¨ط¹ط¯ ط§ظ„ط¥طµظ„ط§ط­" small />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
           <div className="space-y-1.5">
-            <Label>اسم المالك</Label>
+            <Label>ط§ط³ظ… ط§ظ„ظ…ط§ظ„ظƒ</Label>
             <Input
               value={draft.ownerName}
               onChange={(e) => update({ ownerName: e.target.value })}
-              placeholder="الاسم الكامل"
+              placeholder="ط§ظ„ط§ط³ظ… ط§ظ„ظƒط§ظ…ظ„"
             />
           </div>
           <div className="space-y-1.5">
-            <Label>هاتف المالك</Label>
+            <Label>ظ‡ط§طھظپ ط§ظ„ظ…ط§ظ„ظƒ</Label>
             <Input
               value={draft.ownerPhone}
               onChange={(e) => update({ ownerPhone: e.target.value })}
@@ -1085,7 +1068,7 @@ function Step1({
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="flex items-center gap-1"><Truck size={13} /> تاريخ التسليم المتوقع</Label>
+            <Label className="flex items-center gap-1"><Truck size={13} /> طھط§ط±ظٹط® ط§ظ„طھط³ظ„ظٹظ… ط§ظ„ظ…طھظˆظ‚ط¹</Label>
             <Input
               type="date"
               value={draft.expectedDeliveryDate}
@@ -1096,9 +1079,9 @@ function Step1({
         {existingCustomerByPhone && draft.customerId !== existingCustomerByPhone.id && (
           <div className="mt-3 rounded-lg border border-info/40 bg-info/5 p-3 text-xs flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <div className="font-semibold">عميل موجود بنفس رقم الهاتف</div>
+              <div className="font-semibold">ط¹ظ…ظٹظ„ ظ…ظˆط¬ظˆط¯ ط¨ظ†ظپط³ ط±ظ‚ظ… ط§ظ„ظ‡ط§طھظپ</div>
               <div className="text-muted-foreground">
-                {existingCustomerByPhone.name} — <span dir="ltr">{existingCustomerByPhone.phone}</span>
+                {existingCustomerByPhone.name} â€” <span dir="ltr">{existingCustomerByPhone.phone}</span>
               </div>
             </div>
             <Button
@@ -1111,15 +1094,15 @@ function Step1({
                 ownerPhone: existingCustomerByPhone.phone || draft.ownerPhone,
               })}
             >
-              استخدام العميل الموجود
+              ط§ط³طھط®ط¯ط§ظ… ط§ظ„ط¹ظ…ظٹظ„ ط§ظ„ظ…ظˆط¬ظˆط¯
             </Button>
           </div>
         )}
         <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
           <div className="rounded-lg border border-border bg-card/60 p-3">
-            <div className="font-semibold text-foreground">إنشاء عميل جديد</div>
+            <div className="font-semibold text-foreground">ط¥ظ†ط´ط§ط، ط¹ظ…ظٹظ„ ط¬ط¯ظٹط¯</div>
             <div className="text-muted-foreground mt-1">
-              إذا لم يوجد عميل بنفس الهاتف أو الاسم، سيتم إنشاء عميل جديد عند حفظ المطالبة.
+              ط¥ط°ط§ ظ„ظ… ظٹظˆط¬ط¯ ط¹ظ…ظٹظ„ ط¨ظ†ظپط³ ط§ظ„ظ‡ط§طھظپ ط£ظˆ ط§ظ„ط§ط³ظ…طŒ ط³ظٹطھظ… ط¥ظ†ط´ط§ط، ط¹ظ…ظٹظ„ ط¬ط¯ظٹط¯ ط¹ظ†ط¯ ط­ظپط¸ ط§ظ„ظ…ط·ط§ظ„ط¨ط©.
             </div>
           </div>
           <button
@@ -1132,9 +1115,9 @@ function Step1({
             })}
             className="rounded-lg border border-info/40 bg-info/5 p-3 text-right transition hover:bg-info/10 disabled:opacity-50 disabled:hover:bg-info/5"
           >
-            <div className="font-semibold text-foreground">اختيار عميل محفوظ</div>
+            <div className="font-semibold text-foreground">ط§ط®طھظٹط§ط± ط¹ظ…ظٹظ„ ظ…ط­ظپظˆط¸</div>
             <div className="text-muted-foreground mt-1">
-              {existingCustomerByPhone ? existingCustomerByPhone.name : "يظهر تلقائيًا عند تطابق رقم الهاتف."}
+              {existingCustomerByPhone ? existingCustomerByPhone.name : "ظٹط¸ظ‡ط± طھظ„ظ‚ط§ط¦ظٹظ‹ط§ ط¹ظ†ط¯ طھط·ط§ط¨ظ‚ ط±ظ‚ظ… ط§ظ„ظ‡ط§طھظپ."}
             </div>
           </button>
           <button
@@ -1147,9 +1130,9 @@ function Step1({
             })}
             className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-right transition hover:bg-amber-500/15 disabled:opacity-50 disabled:hover:bg-amber-500/10"
           >
-            <div className="font-semibold text-foreground">العميل = شركة التأمين</div>
+            <div className="font-semibold text-foreground">ط§ظ„ط¹ظ…ظٹظ„ = ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†</div>
             <div className="text-muted-foreground mt-1">
-              يستخدم اسم شركة التأمين كعميل عند عدم وجود مالك محدد.
+              ظٹط³طھط®ط¯ظ… ط§ط³ظ… ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ† ظƒط¹ظ…ظٹظ„ ط¹ظ†ط¯ ط¹ط¯ظ… ظˆط¬ظˆط¯ ظ…ط§ظ„ظƒ ظ…ط­ط¯ط¯.
             </div>
           </button>
         </div>
@@ -1160,22 +1143,22 @@ function Step1({
         <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur flex items-center justify-center p-4" onClick={() => setPickerOpen(false)}>
           <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-border flex items-center justify-between">
-              <div className="flex items-center gap-2 font-semibold"><Car size={16} className="text-primary" /> اختر مركبة من قاعدة البيانات</div>
+              <div className="flex items-center gap-2 font-semibold"><Car size={16} className="text-primary" /> ط§ط®طھط± ظ…ط±ظƒط¨ط© ظ…ظ† ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ</div>
               <Button variant="ghost" size="icon" onClick={() => setPickerOpen(false)}><X size={14} /></Button>
             </div>
             <div className="p-3 border-b border-border">
-              <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث برقم اللوحة أو الماركة أو اسم المالك..." />
+              <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ط§ط¨ط­ط« ط¨ط±ظ‚ظ… ط§ظ„ظ„ظˆط­ط© ط£ظˆ ط§ظ„ظ…ط§ط±ظƒط© ط£ظˆ ط§ط³ظ… ط§ظ„ظ…ط§ظ„ظƒ..." />
             </div>
             <div className="overflow-auto flex-1 divide-y divide-border">
               {filtered.length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
-                  لا توجد مركبات. أغلق هذه النافذة وأدخل بياناتها يدوياً، أو سجّلها أولاً من صفحة المركبات.
+                  ظ„ط§ طھظˆط¬ط¯ ظ…ط±ظƒط¨ط§طھ. ط£ط؛ظ„ظ‚ ظ‡ط°ظ‡ ط§ظ„ظ†ط§ظپط°ط© ظˆط£ط¯ط®ظ„ ط¨ظٹط§ظ†ط§طھظ‡ط§ ظٹط¯ظˆظٹط§ظ‹طŒ ط£ظˆ ط³ط¬ظ‘ظ„ظ‡ط§ ط£ظˆظ„ط§ظ‹ ظ…ظ† طµظپط­ط© ط§ظ„ظ…ط±ظƒط¨ط§طھ.
                 </div>
               ) : filtered.map((v) => (
                 <button key={v.id} className="w-full text-right p-3 hover:bg-secondary/50 transition flex items-center justify-between gap-3" onClick={() => pickVehicle(v)}>
                   <div>
                     <div className="font-mono text-sm" dir="ltr">{formatVehiclePlateForClaim(v)}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">{v.brand} {v.model} {v.year ? `• ${v.year}` : ""}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{v.brand} {v.model} {v.year ? `â€¢ ${v.year}` : ""}</div>
                   </div>
                   <div className="text-xs text-muted-foreground">{v.customers?.name}</div>
                 </button>
@@ -1188,38 +1171,38 @@ function Step1({
   );
 }
 
-// ───────────────────── الخطوة 2: وصف الضرر ─────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ط§ظ„ط®ط·ظˆط© 2: ظˆطµظپ ط§ظ„ط¶ط±ط± â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Step2({ draft, update }: { draft: Draft; update: (p: Partial<Draft>) => void }) {
   return (
     <div className="space-y-5">
-      <SectionHeader icon={AlertTriangle} title="وصف الضرر" desc="ما الذي يحتاج إصلاحه في السيارة؟" />
+      <SectionHeader icon={AlertTriangle} title="ظˆطµظپ ط§ظ„ط¶ط±ط±" desc="ظ…ط§ ط§ظ„ط°ظٹ ظٹط­طھط§ط¬ ط¥طµظ„ط§ط­ظ‡ ظپظٹ ط§ظ„ط³ظٹط§ط±ط©طں" />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label className="flex items-center gap-1"><CalendarClock size={13} /> تاريخ التقدير *</Label>
+          <Label className="flex items-center gap-1"><CalendarClock size={13} /> طھط§ط±ظٹط® ط§ظ„طھظ‚ط¯ظٹط± *</Label>
           <Input
             type="date"
             value={draft.incidentDate}
             onChange={(e) => update({ incidentDate: e.target.value })}
           />
-          <p className="text-[10px] text-muted-foreground">اليوم الذي استلمت فيه السيارة في الكراج.</p>
+          <p className="text-[10px] text-muted-foreground">ط§ظ„ظٹظˆظ… ط§ظ„ط°ظٹ ط§ط³طھظ„ظ…طھ ظپظٹظ‡ ط§ظ„ط³ظٹط§ط±ط© ظپظٹ ط§ظ„ظƒط±ط§ط¬.</p>
         </div>
       </div>
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label>وصف الضرر / الأعمال المطلوبة</Label>
+          <Label>ظˆطµظپ ط§ظ„ط¶ط±ط± / ط§ظ„ط£ط¹ظ…ط§ظ„ ط§ظ„ظ…ط·ظ„ظˆط¨ط©</Label>
           <AiWriteButton
             value={draft.damageDescription}
             onChange={(t) => update({ damageDescription: t })}
-            context={`مطالبة تأمين - سيارة ${draft.vehicleMake || ""} ${draft.vehicleModel || ""} لوحة ${draft.vehiclePlate || ""}`}
-            placeholder="مثال: حادث أمامي، يحتاج صدام ورفرف وصباغة"
+            context={`ظ…ط·ط§ظ„ط¨ط© طھط£ظ…ظٹظ† - ط³ظٹط§ط±ط© ${draft.vehicleMake || ""} ${draft.vehicleModel || ""} ظ„ظˆط­ط© ${draft.vehiclePlate || ""}`}
+            placeholder="ظ…ط«ط§ظ„: ط­ط§ط¯ط« ط£ظ…ط§ظ…ظٹطŒ ظٹط­طھط§ط¬ طµط¯ط§ظ… ظˆط±ظپط±ظپ ظˆطµط¨ط§ط؛ط©"
           />
         </div>
         <Textarea
           value={draft.damageDescription}
           onChange={(e) => update({ damageDescription: e.target.value })}
-          placeholder="مثال: صدمة في الواجهة الأمامية - يحتاج استبدال صدام + رفرف أيمن + صباغة..."
+          placeholder="ظ…ط«ط§ظ„: طµط¯ظ…ط© ظپظٹ ط§ظ„ظˆط§ط¬ظ‡ط© ط§ظ„ط£ظ…ط§ظ…ظٹط© - ظٹط­طھط§ط¬ ط§ط³طھط¨ط¯ط§ظ„ طµط¯ط§ظ… + ط±ظپط±ظپ ط£ظٹظ…ظ† + طµط¨ط§ط؛ط©..."
           rows={5}
         />
       </div>
@@ -1228,9 +1211,9 @@ function Step2({ draft, update }: { draft: Draft; update: (p: Partial<Draft>) =>
         <div className="flex items-start gap-2 text-xs">
           <Camera size={14} className="text-info mt-0.5 shrink-0" />
           <div>
-            <div className="font-semibold text-info">نصيحة</div>
+            <div className="font-semibold text-info">ظ†طµظٹط­ط©</div>
             <div className="text-muted-foreground mt-0.5">
-              صور قبل/بعد ومستندات الفحص يمكن رفعها بعد حفظ المطالبة من صفحة التفاصيل.
+              طµظˆط± ظ‚ط¨ظ„/ط¨ط¹ط¯ ظˆظ…ط³طھظ†ط¯ط§طھ ط§ظ„ظپط­طµ ظٹظ…ظƒظ† ط±ظپط¹ظ‡ط§ ط¨ط¹ط¯ ط­ظپط¸ ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظ…ظ† طµظپط­ط© ط§ظ„طھظپط§طµظٹظ„.
             </div>
           </div>
         </div>
@@ -1239,9 +1222,7 @@ function Step2({ draft, update }: { draft: Draft; update: (p: Partial<Draft>) =>
   );
 }
 
-
-
-// ───────────────────── الخطوة 3: التسعير ─────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ط§ظ„ط®ط·ظˆط© 3: ط§ظ„طھط³ط¹ظٹط± â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Step3({
   draft, update, uplTotal, finalEstimate, vatAmount, finalWithVat,
 }: {
@@ -1250,11 +1231,11 @@ function Step3({
 }) {
   return (
     <div className="space-y-5">
-      <SectionHeader icon={Calculator} title="تسعير الكراج" desc="السعر الذي ستطالب به شركة التأمين" />
+      <SectionHeader icon={Calculator} title="طھط³ط¹ظٹط± ط§ظ„ظƒط±ط§ط¬" desc="ط§ظ„ط³ط¹ط± ط§ظ„ط°ظٹ ط³طھط·ط§ظ„ط¨ ط¨ظ‡ ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†" />
 
-      {/* نوع التقدير — أزرار مقطّعة (Segmented) واضحة وقابلة للتبديل */}
+      {/* ظ†ظˆط¹ ط§ظ„طھظ‚ط¯ظٹط± â€” ط£ط²ط±ط§ط± ظ…ظ‚ط·ظ‘ط¹ط© (Segmented) ظˆط§ط¶ط­ط© ظˆظ‚ط§ط¨ظ„ط© ظ„ظ„طھط¨ط¯ظٹظ„ */}
       <div>
-        <Label className="text-xs text-muted-foreground mb-2 block">طريقة التسعير</Label>
+        <Label className="text-xs text-muted-foreground mb-2 block">ط·ط±ظٹظ‚ط© ط§ظ„طھط³ط¹ظٹط±</Label>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 p-1 rounded-lg bg-muted border">
           <button
             type="button"
@@ -1265,8 +1246,8 @@ function Step3({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span>تقدير أولي تلقائي</span>
-            <span className="text-[10px] font-normal opacity-70">مبلغ فقط بدون ختم في الورقة</span>
+            <span>طھظ‚ط¯ظٹط± ط£ظˆظ„ظٹ طھظ„ظ‚ط§ط¦ظٹ</span>
+            <span className="text-[10px] font-normal opacity-70">ظ…ط¨ظ„ط؛ ظپظ‚ط· ط¨ط¯ظˆظ† ط®طھظ… ظپظٹ ط§ظ„ظˆط±ظ‚ط©</span>
           </button>
           <button
             type="button"
@@ -1277,8 +1258,8 @@ function Step3({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span>مبلغ إجمالي (Lump Sum)</span>
-            <span className="text-[10px] font-normal opacity-70">رقم واحد للمطالبة</span>
+            <span>ظ…ط¨ظ„ط؛ ط¥ط¬ظ…ط§ظ„ظٹ (Lump Sum)</span>
+            <span className="text-[10px] font-normal opacity-70">ط±ظ‚ظ… ظˆط§ط­ط¯ ظ„ظ„ظ…ط·ط§ظ„ط¨ط©</span>
           </button>
           <button
             type="button"
@@ -1292,12 +1273,12 @@ function Step3({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span>تسعير بالبنود (UPL)</span>
-            <span className="text-[10px] font-normal opacity-70">قائمة أسعار موحّدة بالتفصيل</span>
+            <span>طھط³ط¹ظٹط± ط¨ط§ظ„ط¨ظ†ظˆط¯ (UPL)</span>
+            <span className="text-[10px] font-normal opacity-70">ظ‚ط§ط¦ظ…ط© ط£ط³ط¹ط§ط± ظ…ظˆط­ظ‘ط¯ط© ط¨ط§ظ„طھظپطµظٹظ„</span>
           </button>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1">
-          يمكنك التبديل بين الطريقتين الآن أو لاحقاً عند تعديل المطالبة.
+          ظٹظ…ظƒظ†ظƒ ط§ظ„طھط¨ط¯ظٹظ„ ط¨ظٹظ† ط§ظ„ط·ط±ظٹظ‚طھظٹظ† ط§ظ„ط¢ظ† ط£ظˆ ظ„ط§ط­ظ‚ط§ظ‹ ط¹ظ†ط¯ طھط¹ط¯ظٹظ„ ط§ظ„ظ…ط·ط§ظ„ط¨ط©.
         </p>
       </div>
 
@@ -1305,7 +1286,7 @@ function Step3({
         <UplItemsEditor items={draft.uplItems} onChange={(items) => update({ uplItems: items })} suggestedAmount={parseMoneyInput(draft.estimatedCost) || 0} />
       ) : (
         <div className="space-y-1.5">
-          <Label>المبلغ المطالب به (ر.ع) *</Label>
+          <Label>ط§ظ„ظ…ط¨ظ„ط؛ ط§ظ„ظ…ط·ط§ظ„ط¨ ط¨ظ‡ (ط±.ط¹) *</Label>
           <Input
             type="text"
             value={draft.estimatedCost}
@@ -1317,29 +1298,29 @@ function Step3({
         </div>
       )}
 
-      {/* ملخص المطالبة لشركة التأمين */}
+      {/* ظ…ظ„ط®طµ ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظ„ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ† */}
       <Card className="p-4 bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20 space-y-2">
         <div className="text-xs font-semibold text-primary mb-2 flex items-center gap-1">
-          <Calculator size={13} /> الإجمالي المطالب به من شركة التأمين
+          <Calculator size={13} /> ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ط·ط§ظ„ط¨ ط¨ظ‡ ظ…ظ† ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†
         </div>
-        <Row label="المجموع قبل الضريبة" value={finalEstimate} />
-        <Row label="ضريبة القيمة المضافة (5%)" value={vatAmount} />
-        <Row label="إجمالي الفاتورة" value={finalWithVat} bold />
+        <Row label="ط§ظ„ظ…ط¬ظ…ظˆط¹ ظ‚ط¨ظ„ ط§ظ„ط¶ط±ظٹط¨ط©" value={finalEstimate} />
+        <Row label="ط¶ط±ظٹط¨ط© ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظ…ط¶ط§ظپط© (5%)" value={vatAmount} />
+        <Row label="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظپط§طھظˆط±ط©" value={finalWithVat} bold />
       </Card>
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label>ملاحظات</Label>
+          <Label>ظ…ظ„ط§ط­ط¸ط§طھ</Label>
           <AiWriteButton
             value={draft.notes}
             onChange={(t) => update({ notes: t })}
-            context="ملاحظات داخلية للمطالبة"
+            context="ظ…ظ„ط§ط­ط¸ط§طھ ط¯ط§ط®ظ„ظٹط© ظ„ظ„ظ…ط·ط§ظ„ط¨ط©"
           />
         </div>
         <Textarea
           value={draft.notes}
           onChange={(e) => update({ notes: e.target.value })}
-          placeholder="أي ملاحظات للأرشيف الداخلي..."
+          placeholder="ط£ظٹ ظ…ظ„ط§ط­ط¸ط§طھ ظ„ظ„ط£ط±ط´ظٹظپ ط§ظ„ط¯ط§ط®ظ„ظٹ..."
           rows={3}
         />
       </div>
@@ -1347,7 +1328,7 @@ function Step3({
   );
 }
 
-// ───────────────────── الخطوة 4: المراجعة ─────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ط§ظ„ط®ط·ظˆط© 4: ط§ظ„ظ…ط±ط§ط¬ط¹ط© â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Step4({
   draft, finalEstimate, vatAmount, finalWithVat, goTo,
 }: {
@@ -1356,43 +1337,43 @@ function Step4({
 }) {
   return (
     <div className="space-y-4">
-      <SectionHeader icon={ClipboardList} title="مراجعة نهائية" desc="راجع البيانات قبل الحفظ. اضغط على أي قسم لتعديله" />
+      <SectionHeader icon={ClipboardList} title="ظ…ط±ط§ط¬ط¹ط© ظ†ظ‡ط§ط¦ظٹط©" desc="ط±ط§ط¬ط¹ ط§ظ„ط¨ظٹط§ظ†ط§طھ ظ‚ط¨ظ„ ط§ظ„ط­ظپط¸. ط§ط¶ط؛ط· ط¹ظ„ظ‰ ط£ظٹ ظ‚ط³ظ… ظ„طھط¹ط¯ظٹظ„ظ‡" />
 
-      <ReviewBlock title="شركة التأمين" icon={Building2} onEdit={() => goTo(0)}>
-        <KV k="الشركة" v={draft.company} />
-        <KV k="رقم المطالبة" v={draft.claimNumber} ltr />
+      <ReviewBlock title="ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†" icon={Building2} onEdit={() => goTo(0)}>
+        <KV k="ط§ظ„ط´ط±ظƒط©" v={draft.company} />
+        <KV k="ط±ظ‚ظ… ط§ظ„ظ…ط·ط§ظ„ط¨ط©" v={draft.claimNumber} ltr />
       </ReviewBlock>
 
-      <ReviewBlock title="السيارة والمالك" icon={Car} onEdit={() => goTo(1)}>
-        <KV k="السيارة" v={`${draft.vehicleMake} ${draft.vehicleModel} ${draft.vehicleYear ? `(${draft.vehicleYear})` : ""}`} />
-        <KV k="اللوحة" v={draft.vehiclePlate} ltr />
-        <KV k="اللون" v={draft.vehicleColor || "—"} />
-        <KV k="المالك" v={draft.ownerName || "—"} />
-        <KV k="هاتف المالك" v={draft.ownerPhone || "—"} ltr />
-        <KV k="التسليم المتوقع" v={draft.expectedDeliveryDate || "—"} ltr />
+      <ReviewBlock title="ط§ظ„ط³ظٹط§ط±ط© ظˆط§ظ„ظ…ط§ظ„ظƒ" icon={Car} onEdit={() => goTo(1)}>
+        <KV k="ط§ظ„ط³ظٹط§ط±ط©" v={`${draft.vehicleMake} ${draft.vehicleModel} ${draft.vehicleYear ? `(${draft.vehicleYear})` : ""}`} />
+        <KV k="ط§ظ„ظ„ظˆط­ط©" v={draft.vehiclePlate} ltr />
+        <KV k="ط§ظ„ظ„ظˆظ†" v={draft.vehicleColor || "â€”"} />
+        <KV k="ط§ظ„ظ…ط§ظ„ظƒ" v={draft.ownerName || "â€”"} />
+        <KV k="ظ‡ط§طھظپ ط§ظ„ظ…ط§ظ„ظƒ" v={draft.ownerPhone || "â€”"} ltr />
+        <KV k="ط§ظ„طھط³ظ„ظٹظ… ط§ظ„ظ…طھظˆظ‚ط¹" v={draft.expectedDeliveryDate || "â€”"} ltr />
       </ReviewBlock>
 
-      <ReviewBlock title="الضرر" icon={AlertTriangle} onEdit={() => goTo(2)}>
-        <KV k="تاريخ التقدير" v={draft.incidentDate} ltr />
-        <KV k="الوصف" v={draft.damageDescription || "—"} full />
+      <ReviewBlock title="ط§ظ„ط¶ط±ط±" icon={AlertTriangle} onEdit={() => goTo(2)}>
+        <KV k="طھط§ط±ظٹط® ط§ظ„طھظ‚ط¯ظٹط±" v={draft.incidentDate} ltr />
+        <KV k="ط§ظ„ظˆطµظپ" v={draft.damageDescription || "â€”"} full />
       </ReviewBlock>
 
-      <ReviewBlock title="المطالبة لشركة التأمين" icon={Calculator} onEdit={() => goTo(3)}>
-        <KV k="نوع التسعير" v={draft.estimationType === "upl" ? "بنود UPL" : draft.estimationType === "auto" ? "تقدير أولي تلقائي" : "مبلغ إجمالي"} />
+      <ReviewBlock title="ط§ظ„ظ…ط·ط§ظ„ط¨ط© ظ„ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†" icon={Calculator} onEdit={() => goTo(3)}>
+        <KV k="ظ†ظˆط¹ ط§ظ„طھط³ط¹ظٹط±" v={draft.estimationType === "upl" ? "ط¨ظ†ظˆط¯ UPL" : draft.estimationType === "auto" ? "طھظ‚ط¯ظٹط± ط£ظˆظ„ظٹ طھظ„ظ‚ط§ط¦ظٹ" : "ظ…ط¨ظ„ط؛ ط¥ط¬ظ…ط§ظ„ظٹ"} />
         {draft.estimationType === "upl" && (
-          <KV k="عدد البنود" v={String(draft.uplItems.length)} ltr />
+          <KV k="ط¹ط¯ط¯ ط§ظ„ط¨ظ†ظˆط¯" v={String(draft.uplItems.length)} ltr />
         )}
-        <KV k="المجموع" v={`${toEnglishDigits(finalEstimate.toFixed(3))} OMR`} ltr />
-        <KV k="الضريبة (5%)" v={`${toEnglishDigits(vatAmount.toFixed(3))} OMR`} ltr />
-        <KV k="إجمالي الفاتورة" v={`${toEnglishDigits(finalWithVat.toFixed(3))} OMR`} ltr highlight />
+        <KV k="ط§ظ„ظ…ط¬ظ…ظˆط¹" v={`${toEnglishDigits(finalEstimate.toFixed(3))} OMR`} ltr />
+        <KV k="ط§ظ„ط¶ط±ظٹط¨ط© (5%)" v={`${toEnglishDigits(vatAmount.toFixed(3))} OMR`} ltr />
+        <KV k="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظپط§طھظˆط±ط©" v={`${toEnglishDigits(finalWithVat.toFixed(3))} OMR`} ltr highlight />
       </ReviewBlock>
 
       <Card className="p-4 bg-success/5 border-success/30 flex items-start gap-3">
         <CheckCircle2 className="text-success mt-0.5 shrink-0" size={20} />
         <div className="text-sm">
-          <div className="font-semibold text-success">جاهزة للحفظ</div>
+          <div className="font-semibold text-success">ط¬ط§ظ‡ط²ط© ظ„ظ„ط­ظپط¸</div>
           <div className="text-xs text-muted-foreground mt-1">
-            ستُحفظ بحالة "بانتظار الاعتماد". بعد الحفظ يمكنك رفع صور قبل/بعد، إصدار فاتورة، وتتبع التحصيل من شركة التأمين.
+            ط³طھظڈط­ظپط¸ ط¨ط­ط§ظ„ط© "ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ط§ط¹طھظ…ط§ط¯". ط¨ط¹ط¯ ط§ظ„ط­ظپط¸ ظٹظ…ظƒظ†ظƒ ط±ظپط¹ طµظˆط± ظ‚ط¨ظ„/ط¨ط¹ط¯طŒ ط¥طµط¯ط§ط± ظپط§طھظˆط±ط©طŒ ظˆطھطھط¨ط¹ ط§ظ„طھط­طµظٹظ„ ظ…ظ† ط´ط±ظƒط© ط§ظ„طھط£ظ…ظٹظ†.
           </div>
         </div>
       </Card>
@@ -1400,7 +1381,7 @@ function Step4({
   );
 }
 
-// ───────────────────── مكونات مساعدة ─────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ظ…ظƒظˆظ†ط§طھ ظ…ط³ط§ط¹ط¯ط© â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function SectionHeader({ icon: Icon, title, desc, small }: { icon: any; title: string; desc?: string; small?: boolean }) {
   return (
     <div className="flex items-start gap-3">
@@ -1432,7 +1413,7 @@ function ReviewBlock({ title, icon: Icon, onEdit, children }: { title: string; i
           <Icon size={15} className="text-primary" />
           <h4 className="text-sm font-semibold">{title}</h4>
         </div>
-        <Button variant="ghost" size="sm" onClick={onEdit}>تعديل</Button>
+        <Button variant="ghost" size="sm" onClick={onEdit}>طھط¹ط¯ظٹظ„</Button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
         {children}

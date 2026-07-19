@@ -55,9 +55,6 @@ export async function resolveClaimVehicleForWorkOrder(input: ResolveClaimVehicle
   });
 
   if (existing?.id) {
-    if (existing.customer_id && existing.customer_id !== input.customerId) {
-      throw new Error("المركبة موجودة في Supabase لكنها مرتبطة بعميل آخر. افتح سجل المركبة أو اختر العميل الصحيح قبل إنشاء أمر العمل.");
-    }
     if (!existing.customer_id) {
       const { error } = await supabase
         .from("vehicles")
@@ -78,6 +75,7 @@ export async function resolveClaimVehicleForWorkOrder(input: ResolveClaimVehicle
 
   const created = await ensureVehicleForCustomer({
     customerId: input.customerId!,
+    allowDifferentCustomer: true,
     plate: input.plate,
     plateNumber: input.plateNumber || plate.digits,
     plateLetters: input.plateLetters || plate.letters,

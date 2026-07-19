@@ -1,4 +1,4 @@
-import { classifyWorkOrderCosts, type ClaimApprovalMode, type ClaimApprovalInfo } from "@/lib/workOrderCosting";
+﻿import { classifyWorkOrderCosts, type ClaimApprovalMode, type ClaimApprovalInfo } from "@/lib/workOrderCosting";
 import { addUnifiedVehicleMedia, upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
 
 // Shared in-memory store for Work Orders so other modules (Inspection) can read & sync them.
@@ -24,14 +24,14 @@ export interface ExtraExpense {
   notes?: string;
 }
 
-/** حالة القطعة المطلوبة في طلب الشراء الداخلي */
+/** ط­ط§ظ„ط© ط§ظ„ظ‚ط·ط¹ط© ط§ظ„ظ…ط·ظ„ظˆط¨ط© ظپظٹ ط·ظ„ط¨ ط§ظ„ط´ط±ط§ط، ط§ظ„ط¯ط§ط®ظ„ظٹ */
 export type NeededPartStatus = "pending" | "ordered" | "secured" | "received";
 
 export const NEEDED_PART_STATUS_LABELS: Record<NeededPartStatus, string> = {
-  pending: "بانتظار",
-  ordered: "قيد الطلب",
-  secured: "مؤمّنة",
-  received: "تم الاستلام",
+  pending: "ط¨ط§ظ†طھط¸ط§ط±",
+  ordered: "ظ‚ظٹط¯ ط§ظ„ط·ظ„ط¨",
+  secured: "ظ…ط¤ظ…ظ‘ظ†ط©",
+  received: "طھظ… ط§ظ„ط§ط³طھظ„ط§ظ…",
 };
 
 export interface NeededPart {
@@ -43,13 +43,13 @@ export interface NeededPart {
   convertedToExpense?: boolean;
   convertedExpenseId?: string;
   convertedAt?: string;
-  /** الحالة التفصيلية للقطعة */
+  /** ط§ظ„ط­ط§ظ„ط© ط§ظ„طھظپطµظٹظ„ظٹط© ظ„ظ„ظ‚ط·ط¹ط© */
   status?: NeededPartStatus;
-  /** متروكة للتوافق الخلفي — تعتبر true عندما status === "received" أو "secured" */
+  /** ظ…طھط±ظˆظƒط© ظ„ظ„طھظˆط§ظپظ‚ ط§ظ„ط®ظ„ظپظٹ â€” طھط¹طھط¨ط± true ط¹ظ†ط¯ظ…ط§ status === "received" ط£ظˆ "secured" */
   fulfilled?: boolean;
 }
 
-/** هل القطعة لا تزال مطلوبة (لم تُستلم ولم تُؤمّن) */
+/** ظ‡ظ„ ط§ظ„ظ‚ط·ط¹ط© ظ„ط§ طھط²ط§ظ„ ظ…ط·ظ„ظˆط¨ط© (ظ„ظ… طھظڈط³طھظ„ظ… ظˆظ„ظ… طھظڈط¤ظ…ظ‘ظ†) */
 export function isPartStillNeeded(p: NeededPart): boolean {
   if (p.status) return p.status !== "received" && p.status !== "secured";
   return !p.fulfilled;
@@ -57,9 +57,9 @@ export function isPartStillNeeded(p: NeededPart): boolean {
 
 export interface WorkOrder {
   id: string;
-  /** UUID الداخلي في Supabase. لا يُستخدم في الروابط العامة. */
+  /** UUID ط§ظ„ط¯ط§ط®ظ„ظٹ ظپظٹ Supabase. ظ„ط§ ظٹظڈط³طھط®ط¯ظ… ظپظٹ ط§ظ„ط±ظˆط§ط¨ط· ط§ظ„ط¹ط§ظ…ط©. */
   cloudId?: string;
-  /** رقم عرض احترافي للأمر (مثل WO-2026-00012). إن لم يُحدّد يُستخدم id كرقم. */
+  /** ط±ظ‚ظ… ط¹ط±ط¶ ط§ط­طھط±ط§ظپظٹ ظ„ظ„ط£ظ…ط± (ظ…ط«ظ„ WO-2026-00012). ط¥ظ† ظ„ظ… ظٹظڈط­ط¯ظ‘ط¯ ظٹظڈط³طھط®ط¯ظ… id ظƒط±ظ‚ظ…. */
   displayNumber?: string;
   workOrderType?: import("@/lib/workOrderType").WorkOrderType;
   claimId?: string;
@@ -100,17 +100,17 @@ export interface WorkOrder {
   lumpSumNotItemized?: boolean;
   paintMaterialsCost?: number;
   photos?: StagePhoto[];
-  /** مصروفات إضافية داخلية (سحب، نقل، صبغ خارجي...) تُحتسب في الإجمالي */
+  /** ظ…طµط±ظˆظپط§طھ ط¥ط¶ط§ظپظٹط© ط¯ط§ط®ظ„ظٹط© (ط³ط­ط¨طŒ ظ†ظ‚ظ„طŒ طµط¨ط؛ ط®ط§ط±ط¬ظٹ...) طھظڈط­طھط³ط¨ ظپظٹ ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ */
   extraExpenses?: ExtraExpense[];
-  /** أرقام سندات الصرف الخارجية المرتبطة بهذا الأمر */
+  /** ط£ط±ظ‚ط§ظ… ط³ظ†ط¯ط§طھ ط§ظ„طµط±ظپ ط§ظ„ط®ط§ط±ط¬ظٹط© ط§ظ„ظ…ط±طھط¨ط·ط© ط¨ظ‡ط°ط§ ط§ظ„ط£ظ…ط± */
   linkedExpenseVoucherIds?: string[];
-  /** مبلغ العربون المخصوم من الفاتورة النهائية */
+  /** ظ…ط¨ظ„ط؛ ط§ظ„ط¹ط±ط¨ظˆظ† ط§ظ„ظ…ط®طµظˆظ… ظ…ظ† ط§ظ„ظپط§طھظˆط±ط© ط§ظ„ظ†ظ‡ط§ط¦ظٹط© */
   depositApplied?: number;
-  /** قائمة قطع الغيار المطلوبة (طلب شراء داخلي) */
+  /** ظ‚ط§ط¦ظ…ط© ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط± ط§ظ„ظ…ط·ظ„ظˆط¨ط© (ط·ظ„ط¨ ط´ط±ط§ط، ط¯ط§ط®ظ„ظٹ) */
   partsNeeded?: NeededPart[];
-  /** كلمة مرور مخصصة لصفحة تتبع العميل العامة (اختياري — الافتراضي رقم هاتف العميل) */
+  /** ظƒظ„ظ…ط© ظ…ط±ظˆط± ظ…ط®طµطµط© ظ„طµظپط­ط© طھطھط¨ط¹ ط§ظ„ط¹ظ…ظٹظ„ ط§ظ„ط¹ط§ظ…ط© (ط§ط®طھظٹط§ط±ظٹ â€” ط§ظ„ط§ظپطھط±ط§ط¶ظٹ ط±ظ‚ظ… ظ‡ط§طھظپ ط§ظ„ط¹ظ…ظٹظ„) */
   trackPassword?: string;
-  /** بيانات استلام المركبة */
+  /** ط¨ظٹط§ظ†ط§طھ ط§ط³طھظ„ط§ظ… ط§ظ„ظ…ط±ظƒط¨ط© */
   odometerKm?: number;
   fuelLevelPct?: number;
   receptionNotes?: string;
@@ -118,10 +118,14 @@ export interface WorkOrder {
   receptionSignatureDataUrl?: string;
   vehicleBelongings?: Record<string, boolean | string>;
   receivedAt?: string;
-  /** بنود الأعمال المطلوبة من العميل (تظهر له في رابط التوقيع) */
+  /** ط¨ظ†ظˆط¯ ط§ظ„ط£ط¹ظ…ط§ظ„ ط§ظ„ظ…ط·ظ„ظˆط¨ط© ظ…ظ† ط§ظ„ط¹ظ…ظٹظ„ (طھط¸ظ‡ط± ظ„ظ‡ ظپظٹ ط±ط§ط¨ط· ط§ظ„طھظˆظ‚ظٹط¹) */
   workItems?: WorkItem[];
-  /** معرّف العميل الفعلي في customersStore (مرجع موحّد). */
+  /** ظ…ط¹ط±ظ‘ظپ ط§ظ„ط¹ظ…ظٹظ„ ط§ظ„ظپط¹ظ„ظٹ ظپظٹ customersStore (ظ…ط±ط¬ط¹ ظ…ظˆط­ظ‘ط¯). */
   customerId?: string;
+  vehicleOwnerCustomerId?: string;
+  customerRelationshipToVehicle?: string;
+  customerRelationshipNote?: string;
+  receivedFromCustomerId?: string;
   closingReview?: {
     status: string;
     finalCostSource: "Actual Expenses" | "Estimate Only" | "Manual Final Cost";
@@ -141,22 +145,22 @@ export interface WorkItem {
 }
 
 export const STAGE_LABELS: Record<StagePhase, { ar: string; en: string }> = {
-  received: { ar: "استلام", en: "Received" },
-  inspection: { ar: "فحص", en: "Inspection" },
-  in_progress: { ar: "تحت الإصلاح", en: "In Progress" },
-  quality: { ar: "ضبط الجودة", en: "Quality Check" },
-  delivery: { ar: "تسليم", en: "Delivery" },
+  received: { ar: "ط§ط³طھظ„ط§ظ…", en: "Received" },
+  inspection: { ar: "ظپط­طµ", en: "Inspection" },
+  in_progress: { ar: "طھط­طھ ط§ظ„ط¥طµظ„ط§ط­", en: "In Progress" },
+  quality: { ar: "ط¶ط¨ط· ط§ظ„ط¬ظˆط¯ط©", en: "Quality Check" },
+  delivery: { ar: "طھط³ظ„ظٹظ…", en: "Delivery" },
 };
 
 export const WORK_ORDER_STATUSES = [
-  "تحت الفحص",
-  "بانتظار الموافقة",
-  "بانتظار قطع الغيار",
-  "تحت الإصلاح",
-  "ضبط الجودة",
-  "جاهز للتسليم",
-  "تم التسليم",
-  "مغلق",
+  "طھط­طھ ط§ظ„ظپط­طµ",
+  "ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ظ…ظˆط§ظپظ‚ط©",
+  "ط¨ط§ظ†طھط¸ط§ط± ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط±",
+  "طھط­طھ ط§ظ„ط¥طµظ„ط§ط­",
+  "ط¶ط¨ط· ط§ظ„ط¬ظˆط¯ط©",
+  "ط¬ط§ظ‡ط² ظ„ظ„طھط³ظ„ظٹظ…",
+  "طھظ… ط§ظ„طھط³ظ„ظٹظ…",
+  "ظ…ط؛ظ„ظ‚",
 ];
 
 let cache: WorkOrder[] = [];
@@ -175,7 +179,7 @@ function isActiveWorkOrder(order: WorkOrder): boolean {
 }
 
 export function getWorkOrders(options: { includeArchived?: boolean } = {}): WorkOrder[] {
-  // الأحدث أولاً: حسب entryDate ثم الـ id (بصفته يبدأ بالسنة WO-YYYY-####)
+  // ط§ظ„ط£ط­ط¯ط« ط£ظˆظ„ط§ظ‹: ط­ط³ط¨ entryDate ط«ظ… ط§ظ„ظ€ id (ط¨طµظپطھظ‡ ظٹط¨ط¯ط£ ط¨ط§ظ„ط³ظ†ط© WO-YYYY-####)
   return load().filter((order) => (options.includeArchived ? !order.deletedAt : isActiveWorkOrder(order))).sort((a, b) => {
     const da = (a.entryDate || "").localeCompare(b.entryDate || "");
     if (da !== 0) return -da;
@@ -296,7 +300,7 @@ export function restoreWorkOrder(order: WorkOrder) {
   persist();
 }
 
-/** يفرض جلب أحدث أوامر العمل من السحابة الآن (يُستخدم في زر التحديث اليدوي). */
+/** ظٹظپط±ط¶ ط¬ظ„ط¨ ط£ط­ط¯ط« ط£ظˆط§ظ…ط± ط§ظ„ط¹ظ…ظ„ ظ…ظ† ط§ظ„ط³ط­ط§ط¨ط© ط§ظ„ط¢ظ† (ظٹظڈط³طھط®ط¯ظ… ظپظٹ ط²ط± ط§ظ„طھط­ط¯ظٹط« ط§ظ„ظٹط¯ظˆظٹ). */
 
 export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkOrder> {
   const ctx = await tenantContext();
@@ -417,7 +421,7 @@ export function subscribeWorkOrders(cb: () => void): () => void {
 }
 
 // ============================================================
-// ☁️  Cloud source layer — keeps the in-memory view fresh from
+// âکپï¸ڈ  Cloud source layer â€” keeps the in-memory view fresh from
 // Supabase `job_orders` and propagates changes via realtime so
 // every device shows the same data within seconds.
 // ============================================================
@@ -430,28 +434,28 @@ import { sanitizeWorkOrderWritePayload } from "@/lib/supabasePayload";
 
 function cloudStatusToLocal(s: string | null | undefined): string {
   switch (s) {
-    case "delivered": return "تم التسليم";
-    case "completed": return "جاهز للتسليم";
-    case "in_progress": return "تحت الإصلاح";
-    case "waiting_parts": return "بانتظار قطع الغيار";
-    case "inspection": return "تحت الفحص";
+    case "delivered": return "طھظ… ط§ظ„طھط³ظ„ظٹظ…";
+    case "completed": return "ط¬ط§ظ‡ط² ظ„ظ„طھط³ظ„ظٹظ…";
+    case "in_progress": return "طھط­طھ ط§ظ„ط¥طµظ„ط§ط­";
+    case "waiting_parts": return "ط¨ط§ظ†طھط¸ط§ط± ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط±";
+    case "inspection": return "طھط­طھ ط§ظ„ظپط­طµ";
     case "received":
-    default: return "تحت الفحص";
+    default: return "طھط­طھ ط§ظ„ظپط­طµ";
   }
 }
 function localStatusToCloud(s: string | undefined): string {
   const n = (s || "").trim();
-  if (["مغلق", "تم التسليم"].includes(n)) return "delivered";
-  if (["جاهز للتسليم", "ضبط الجودة"].includes(n)) return "completed";
-  if (["تحت الإصلاح"].includes(n)) return "in_progress";
-  if (["بانتظار قطع الغيار", "بانتظار الموافقة"].includes(n)) return "waiting_parts";
-  if (["تحت الفحص"].includes(n)) return "inspection";
+  if (["ظ…ط؛ظ„ظ‚", "طھظ… ط§ظ„طھط³ظ„ظٹظ…"].includes(n)) return "delivered";
+  if (["ط¬ط§ظ‡ط² ظ„ظ„طھط³ظ„ظٹظ…", "ط¶ط¨ط· ط§ظ„ط¬ظˆط¯ط©"].includes(n)) return "completed";
+  if (["طھط­طھ ط§ظ„ط¥طµظ„ط§ط­"].includes(n)) return "in_progress";
+  if (["ط¨ط§ظ†طھط¸ط§ط± ظ‚ط·ط¹ ط§ظ„ط؛ظٹط§ط±", "ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ظ…ظˆط§ظپظ‚ط©"].includes(n)) return "waiting_parts";
+  if (["طھط­طھ ط§ظ„ظپط­طµ"].includes(n)) return "inspection";
   return "received";
 }
 
 function isClosedWorkOrderStatus(status: string | undefined): boolean {
   const local = (status || "").trim();
-  return ["مغلق", "تم التسليم"].includes(local) || localStatusToCloud(local) === "delivered";
+  return ["ظ…ط؛ظ„ظ‚", "طھظ… ط§ظ„طھط³ظ„ظٹظ…"].includes(local) || localStatusToCloud(local) === "delivered";
 }
 
 const LEGACY_METADATA_KEY = "__aaedMetadata";
@@ -503,6 +507,10 @@ function mapCloudRow(
     trackingToken: r.tracking_token || undefined,
     customerId: r.customer_id || undefined,
     vehicleId: r.vehicle_id || undefined,
+    vehicleOwnerCustomerId: r.vehicle_owner_customer_id || metadata?.vehicleOwnerCustomerId || undefined,
+    customerRelationshipToVehicle: r.customer_relationship_to_vehicle || metadata?.customerRelationshipToVehicle || undefined,
+    customerRelationshipNote: r.customer_relationship_note || metadata?.customerRelationshipNote || undefined,
+    receivedFromCustomerId: r.received_from_customer_id || metadata?.receivedFromCustomerId || undefined,
     parentWorkOrderId: r.parent_work_order_id || metadata?.parentWorkOrderId || undefined,
     parentOrderNumber: metadata?.parentOrderNumber || undefined,
     visitNumber: r.visit_number || metadata?.visitNumber || undefined,
@@ -525,7 +533,7 @@ function mapCloudRow(
     claimNumber: r.insurance_claim_number || "-",
     entryDate: (r.entry_date || (r.created_at || "").slice(0, 10)) as string,
     technician: r.technician_name || "",
-    serviceType: r.service_type || "صيانة",
+    serviceType: r.service_type || "طµظٹط§ظ†ط©",
     status: cloudStatusToLocal(r.status),
     totalCost: costs.totalCost,
     description: r.description || undefined,
@@ -613,7 +621,7 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     if (!activeUserId) {
-      if (options.throwOnError) throw new Error("جلسة الدخول غير جاهزة بعد. أعد المحاولة خلال لحظات.");
+      if (options.throwOnError) throw new Error("ط¬ظ„ط³ط© ط§ظ„ط¯ط®ظˆظ„ ط؛ظٹط± ط¬ط§ظ‡ط²ط© ط¨ط¹ط¯. ط£ط¹ط¯ ط§ظ„ظ…ط­ط§ظˆظ„ط© ط®ظ„ط§ظ„ ظ„ط­ط¸ط§طھ.");
       return;
     }
 
@@ -735,7 +743,7 @@ async function migrateLegacyPhotosInBackground(orders: WorkOrder[]) {
     const { migrateOrderPhotos, isLegacyDataUrl } = await import("@/lib/workOrderPhotosStorage");
     const candidates = orders.filter((o) => Array.isArray(o.photos) && o.photos.some(isLegacyDataUrl));
     if (candidates.length === 0) return;
-    console.info(`[workOrdersStore] migrating photos for ${candidates.length} order(s) to Storage…`);
+    console.info(`[workOrdersStore] migrating photos for ${candidates.length} order(s) to Storageâ€¦`);
     for (const o of candidates) {
       const migrated = await migrateOrderPhotos(o.id, o.photos!);
       if (migrated) {
@@ -785,7 +793,7 @@ function ensureCloudSync() {
 if (typeof window !== "undefined") {
   setTimeout(() => ensureCloudSync(), 800);
 
-  // 🔑 When the auth user changes (login / logout / account switch on the same
+  // ًں”‘ When the auth user changes (login / logout / account switch on the same
   // browser or PWA), wipe the local cache so the previous user's data never
   // leaks into the next user's view, then re-fetch immediately.
   let lastUid: string | null = null;
@@ -827,6 +835,7 @@ async function ensureVehicle(tenantId: string, customerId: string, o: WorkOrder)
     const { ensureVehicleForCustomer } = await import("@/lib/vehicleIdentity");
     const resolved = await ensureVehicleForCustomer({
       customerId,
+      allowDifferentCustomer: true,
       plate: o.plate,
       vin: o.vin,
       make: o.vehicleType,
@@ -834,13 +843,10 @@ async function ensureVehicle(tenantId: string, customerId: string, o: WorkOrder)
       year: o.year,
       color: o.color,
     });
-    if (resolved.ownershipConflict) {
-      throw new Error("هذه المركبة موجودة ومرتبطة بعميل آخر. اختر المركبة الموجودة بقرار واضح أو صحح بيانات العميل/المركبة.");
-    }
     return resolved.vehicleId;
   } catch (e) {
     console.warn("[ensureVehicle:identity]", e);
-    throw e instanceof Error ? e : new Error("تعذر التحقق من المركبة في Supabase");
+    throw e instanceof Error ? e : new Error("طھط¹ط°ط± ط§ظ„طھط­ظ‚ظ‚ ظ…ظ† ط§ظ„ظ…ط±ظƒط¨ط© ظپظٹ Supabase");
   }
 }
 
@@ -870,9 +876,6 @@ async function resolveVehicleId(tenantId: string, customerId: string, o: WorkOrd
       .maybeSingle();
     if (error) throw error;
     if (data?.id) {
-      if (data.customer_id && data.customer_id !== customerId) {
-        throw new Error("هذه المركبة مرتبطة بعميل آخر. اختر المركبة الموجودة بقرار واضح أو صحح بيانات العميل/المركبة.");
-      }
       return data.id;
     }
   }
@@ -900,10 +903,10 @@ function hasTemporaryOperationalId(value: unknown): boolean {
 }
 
 function assertNoTemporaryOperationalIds(o: WorkOrder) {
-  if (hasTemporaryOperationalId(o.id)) throw new Error("order_number مؤقت وغير صالح للحفظ");
-  if (hasTemporaryOperationalId(o.customerId)) throw new Error("customer_id مؤقت وغير صالح للحفظ");
-  if (hasTemporaryOperationalId(o.vehicleId)) throw new Error("vehicle_id مؤقت وغير صالح للحفظ");
-  if (hasTemporaryOperationalId(o.cloudId)) throw new Error("work_order_id مؤقت وغير صالح للحفظ");
+  if (hasTemporaryOperationalId(o.id)) throw new Error("order_number ظ…ط¤ظ‚طھ ظˆط؛ظٹط± طµط§ظ„ط­ ظ„ظ„ط­ظپط¸");
+  if (hasTemporaryOperationalId(o.customerId)) throw new Error("customer_id ظ…ط¤ظ‚طھ ظˆط؛ظٹط± طµط§ظ„ط­ ظ„ظ„ط­ظپط¸");
+  if (hasTemporaryOperationalId(o.vehicleId)) throw new Error("vehicle_id ظ…ط¤ظ‚طھ ظˆط؛ظٹط± طµط§ظ„ط­ ظ„ظ„ط­ظپط¸");
+  if (hasTemporaryOperationalId(o.cloudId)) throw new Error("work_order_id ظ…ط¤ظ‚طھ ظˆط؛ظٹط± طµط§ظ„ط­ ظ„ظ„ط­ظپط¸");
 }
 
 function jobOrderMetadata(o: WorkOrder) {
@@ -919,6 +922,10 @@ function jobOrderMetadata(o: WorkOrder) {
     visitNumber: o.visitNumber || null,
     visitType: o.visitType || null,
     returnReason: o.returnReason || null,
+    vehicleOwnerCustomerId: o.vehicleOwnerCustomerId || null,
+    customerRelationshipToVehicle: o.customerRelationshipToVehicle || null,
+    customerRelationshipNote: o.customerRelationshipNote || null,
+    receivedFromCustomerId: o.receivedFromCustomerId || null,
   };
 }
 
@@ -959,6 +966,10 @@ function legacyCompatibleJobOrderPayload(
   delete next.visit_number;
   delete next.visit_type;
   delete next.return_reason;
+  delete next.vehicle_owner_customer_id;
+  delete next.received_from_customer_id;
+  delete next.customer_relationship_to_vehicle;
+  delete next.customer_relationship_note;
   next.vehicle_belongings = belongings;
   return next;
 }
@@ -978,6 +989,10 @@ function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string
     tenant_id: tenantId,
     customer_id: customerId,
     vehicle_id: vehicleId,
+    vehicle_owner_customer_id: o.vehicleOwnerCustomerId && isUuid(o.vehicleOwnerCustomerId) ? o.vehicleOwnerCustomerId : null,
+    received_from_customer_id: o.receivedFromCustomerId && isUuid(o.receivedFromCustomerId) ? o.receivedFromCustomerId : customerId,
+    customer_relationship_to_vehicle: o.customerRelationshipToVehicle || null,
+    customer_relationship_note: o.customerRelationshipNote || null,
     order_number: o.id,
     description: o.description || null,
     diagnosis: o.diagnosis || null,
@@ -1056,11 +1071,11 @@ async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
 export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder> {
   assertNoTemporaryOperationalIds(order);
   const ctx = await tenantContext();
-  if (!ctx) throw new Error("تعذر تحديد الورشة الحالية");
+  if (!ctx) throw new Error("طھط¹ط°ط± طھط­ط¯ظٹط¯ ط§ظ„ظˆط±ط´ط© ط§ظ„ط­ط§ظ„ظٹط©");
   const customerId = await resolveCustomerId(ctx.tenantId, order);
-  if (!customerId || !isUuid(customerId)) throw new Error("لا يمكن حفظ أمر العمل بدون customer_id صالح");
+  if (!customerId || !isUuid(customerId)) throw new Error("ظ„ط§ ظٹظ…ظƒظ† ط­ظپط¸ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ط¨ط¯ظˆظ† customer_id طµط§ظ„ط­");
   const vehicleId = await resolveVehicleId(ctx.tenantId, customerId, order);
-  if (!vehicleId || !isUuid(vehicleId)) throw new Error("لا يمكن حفظ أمر العمل بدون vehicle_id صالح");
+  if (!vehicleId || !isUuid(vehicleId)) throw new Error("ظ„ط§ ظٹظ…ظƒظ† ط­ظپط¸ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ط¨ط¯ظˆظ† vehicle_id طµط§ظ„ط­");
 
   const existingId = order.cloudId && isUuid(order.cloudId)
     ? order.cloudId
@@ -1114,7 +1129,7 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     ({ data, error } = await write);
   }
   if (error) throw error;
-  if (!data?.id || !isUuid(data.id)) throw new Error("تعذر تأكيد حفظ أمر العمل في Supabase");
+  if (!data?.id || !isUuid(data.id)) throw new Error("طھط¹ط°ط± طھط£ظƒظٹط¯ ط­ظپط¸ ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ظپظٹ Supabase");
   const { data: verified, error: verifyError } = await supabase
     .from("job_orders")
     .select("*")
@@ -1123,7 +1138,7 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     .is("deleted_at", null)
     .maybeSingle();
   if (verifyError) throw verifyError;
-  if (!verified?.id) throw new Error("تم الحفظ لكن تعذر قراءة أمر العمل للتأكيد");
+  if (!verified?.id) throw new Error("طھظ… ط§ظ„ط­ظپط¸ ظ„ظƒظ† طھط¹ط°ط± ظ‚ط±ط§ط،ط© ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ظ„ظ„طھط£ظƒظٹط¯");
 
   if (previousOrderNumber && finalOrderNumber.toLowerCase() !== previousOrderNumber.toLowerCase()) {
     await syncRenamedWorkOrderReferences(ctx.tenantId, previousOrderNumber, finalOrderNumber);
@@ -1198,7 +1213,7 @@ async function syncRenamedWorkOrderReferences(tenantId: string, oldNumber: strin
 
 export async function updateWorkOrderInCloud(id: string, patch: Partial<WorkOrder>): Promise<WorkOrder> {
   const current = getWorkOrderById(id);
-  if (!current) throw new Error("أمر العمل غير موجود في القائمة الحالية");
+  if (!current) throw new Error("ط£ظ…ط± ط§ظ„ط¹ظ…ظ„ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ ظپظٹ ط§ظ„ظ‚ط§ط¦ظ…ط© ط§ظ„ط­ط§ظ„ظٹط©");
   return saveWorkOrderToCloud({ ...current, ...patch });
 }
 
@@ -1345,7 +1360,7 @@ async function pushDeleteToCloud(orderNumber: string) {
   } catch (e) { console.warn("[pushDeleteToCloud] exception", e); }
 }
 
-// Cloud-side hooks invoked from a diff listener below — keeps the public API surface unchanged.
+// Cloud-side hooks invoked from a diff listener below â€” keeps the public API surface unchanged.
 function _afterAdd(o: WorkOrder) { pushOrderToCloud(o); }
 function _afterUpdate(id: string, patch: Partial<WorkOrder>) { pushPatchToCloud(id, patch); }
 function _afterDelete(id: string) { pushDeleteToCloud(id); }
@@ -1353,7 +1368,7 @@ function _afterDelete(id: string) { pushDeleteToCloud(id); }
 
 
 // Patch the original implementations to call our cloud hooks.
-// (Implementations above call persist() then return; we wrap by overwriting via Object.assign on module exports won't work in ESM —
+// (Implementations above call persist() then return; we wrap by overwriting via Object.assign on module exports won't work in ESM â€”
 // so we instead re-export wrapped versions below and consumers using the original names get the wrapped behavior because the original
 // functions are defined as `function` declarations and we replace their bodies by hoisting interceptors here.)
 //
