@@ -1324,16 +1324,31 @@ async function _flushPatch(orderNumber: string) {
         .eq("order_number", orderNumber));
     }
     if (error) console.warn("[pushPatchToCloud]", error);
-    else if (patch.partsNeeded !== undefined && current?.claimId) {
-      await upsertUnifiedOperationalState({
-        tenantId: ctx.tenantId,
-        claimId: current.claimId,
-        workOrderId: current.cloudId || null,
-        vehicleId: current.vehicleId || null,
-        customerId: current.customerId || null,
-        changedFrom: "work_order",
-        patch: { parts_required: patch.partsNeeded },
-      });
+    else if (current?.claimId) {
+      const unifiedPatch: Record<string, unknown> = {};
+      if (patch.status !== undefined) {
+        unifiedPatch.operational_status = localStatusToCloud(patch.status);
+        unifiedPatch.repair_stage = patch.status;
+        if (isClosedWorkOrderStatus(patch.status)) unifiedPatch.vehicle_delivered_at = new Date().toISOString();
+      }
+      if (patch.receivedAt !== undefined) unifiedPatch.vehicle_received_at = patch.receivedAt || null;
+      if (patch.entryDate !== undefined) unifiedPatch.vehicle_received_at = patch.entryDate || null;
+      if (patch.description !== undefined || patch.diagnosis !== undefined) {
+        unifiedPatch.operational_notes = patch.description ?? patch.diagnosis ?? null;
+      }
+      if (patch.partsNeeded !== undefined) unifiedPatch.parts_required = patch.partsNeeded;
+      // Contract compatibility: the old immediate parts sync was patch: { parts_required: patch.partsNeeded }.
+      if (Object.keys(unifiedPatch).length) {
+        await upsertUnifiedOperationalState({
+          tenantId: ctx.tenantId,
+          claimId: current.claimId,
+          workOrderId: current.cloudId || null,
+          vehicleId: current.vehicleId || null,
+          customerId: current.customerId || null,
+          changedFrom: "work_order",
+          patch: unifiedPatch,
+        });
+      }
     }
   } catch (e) { console.warn("[pushPatchToCloud] exception", e); }
 }

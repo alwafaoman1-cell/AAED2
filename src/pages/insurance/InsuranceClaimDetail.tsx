@@ -72,6 +72,7 @@ import { resolveClaimVehicleForWorkOrder } from "@/lib/claimVehicleResolver";
 import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { displayCustomerCode } from "@/lib/customerCode";
+import { upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
 
 
 const insuranceCompanies = [
@@ -675,6 +676,41 @@ export default function InsuranceClaimDetail() {
     await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
   };
 
+  const syncClaimOperationalFile = async (params: {
+    claimId?: string | null;
+    tenantId?: string | null;
+    workOrderId?: string | null;
+    patch?: Record<string, any>;
+  } = {}) => {
+    const tenantId = params.tenantId || (existing as any)?.tenant_id;
+    const claimId = params.claimId || id;
+    if (!tenantId || !claimId || !isUuid(claimId)) return;
+    const workOrderId =
+      params.workOrderId ||
+      (linkedWorkOrderId && isUuid(linkedWorkOrderId) ? linkedWorkOrderId : null) ||
+      ((existing as any)?.job_order_id && isUuid((existing as any).job_order_id) ? (existing as any).job_order_id : null) ||
+      ((existing as any)?.auto_job_order_id && isUuid((existing as any).auto_job_order_id) ? (existing as any).auto_job_order_id : null);
+    const { data: auth } = await supabase.auth.getUser();
+    await upsertUnifiedOperationalState({
+      tenantId: String(tenantId),
+      claimId,
+      workOrderId,
+      vehicleId: vehicleId && isUuid(vehicleId) ? vehicleId : null,
+      customerId: customerId && isUuid(customerId) ? customerId : null,
+      changedFrom: "claim",
+      changedBy: auth.user?.id || null,
+      patch: {
+        vehicle_received_at: workshopArrivalDate || undefined,
+        work_started_at: workStartedAt ? new Date(workStartedAt).toISOString() : undefined,
+        work_completed_at: workCompletedAt ? new Date(workCompletedAt).toISOString() : undefined,
+        insurance_approval_status: status || undefined,
+        operational_notes: notes || undefined,
+        parts_required: neededParts.filter((p) => p.name.trim()),
+        ...(params.patch || {}),
+      },
+    });
+  };
+
   const hydrateFromVerifiedClaim = (verified: any) => {
     if (!verified?.id) return;
     setStatus(verified.status ?? status);
@@ -803,7 +839,14 @@ export default function InsuranceClaimDetail() {
 
     if (isNew) {
       createClaim.mutate(payload, {
-        onSuccess: (d: any) => navigate(`/insurance/${d.id}`, { replace: true }),
+        onSuccess: async (d: any) => {
+          await syncClaimOperationalFile({
+            claimId: d.id,
+            tenantId: d.tenant_id || (payload as any).tenant_id,
+            workOrderId: d.job_order_id || null,
+          }).catch((error) => console.warn("[claim operational sync] skipped", error));
+          navigate(`/insurance/${d.id}`, { replace: true });
+        },
       });
     } else {
       try {
@@ -838,6 +881,15 @@ export default function InsuranceClaimDetail() {
           verifiedClaim = lpoVerified;
         }
         hydrateFromVerifiedClaim(verifiedClaim);
+        await syncClaimOperationalFile({
+          claimId: id,
+          tenantId: (payload as any).tenant_id,
+          workOrderId: (verifiedClaim as any)?.job_order_id || linkedWorkOrderId || null,
+          patch: {
+            vehicle_received_at: workflowDates.arrival || null,
+            work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
+          },
+        }).catch((error) => console.warn("[claim operational sync] skipped", error));
         await writeClaimAudit("claim_details_saved", {
           workshop_arrival_date: workflowDates.arrival || null,
           estimate_date: workflowDates.estimate || null,
@@ -924,6 +976,15 @@ export default function InsuranceClaimDetail() {
 
           if (woId) {
             setLinkedWorkOrderId(woId);
+            await syncClaimOperationalFile({
+              claimId: id,
+              workOrderId: woId,
+              patch: {
+                insurance_approval_status: "approved",
+                operational_status: workshopArrivalDate ? "received" : "pending_approval",
+                vehicle_received_at: workshopArrivalDate || undefined,
+              },
+            }).catch((syncError) => console.warn("[claim approve operational sync] skipped", syncError));
             setTab("workorder"); // الانتقال لتبويب أمر العمل (لكن بدون فتح صفحة منفصلة)
             toast.success("تمت الموافقة وتم إنشاء أمر العمل تلقائياً", {
               description: "اختر: عرض هنا، فتح صفحة كاملة، أو الانتقال للتسليم",
@@ -1117,6 +1178,30 @@ export default function InsuranceClaimDetail() {
       if (error) throw error;
 
       hydrateFromVerifiedClaim(verified);
+      const unifiedStagePatch: Record<string, any> = {};
+      if (stageDialog.key === "arrived") {
+        unifiedStagePatch.vehicle_received_at = changedAt;
+        unifiedStagePatch.operational_status = "received";
+        unifiedStagePatch.vehicle_presence_status = "in_workshop";
+      } else if (stageDialog.key === "repairing") {
+        unifiedStagePatch.work_started_at = new Date(changedAt).toISOString();
+        unifiedStagePatch.operational_status = "in_progress";
+        unifiedStagePatch.repair_stage = "repairing";
+      } else if (stageDialog.key === "ready") {
+        unifiedStagePatch.work_completed_at = new Date(changedAt).toISOString();
+        unifiedStagePatch.operational_status = "ready";
+        unifiedStagePatch.repair_stage = "ready";
+      } else if (stageDialog.key === "delivered") {
+        unifiedStagePatch.vehicle_delivered_at = new Date(changedAt).toISOString();
+        unifiedStagePatch.operational_status = "delivered";
+        unifiedStagePatch.vehicle_presence_status = "with_customer";
+        unifiedStagePatch.repair_stage = "delivered";
+      }
+      await syncClaimOperationalFile({
+        claimId: id,
+        workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
+        patch: unifiedStagePatch,
+      }).catch((syncError) => console.warn("[claim stage operational sync] skipped", syncError));
       await writeClaimAudit("claim_vehicle_stage_changed", {
         to_stage: stageDialog.key,
         to_label: stageDialog.label,
@@ -2460,6 +2545,14 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   if (error) throw error;
                   if (!(verified as any)?.id) throw new Error("تعذر تأكيد حفظ تواريخ المطالبة");
                   hydrateFromVerifiedClaim(verified);
+                  await syncClaimOperationalFile({
+                    claimId: id,
+                    workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
+                    patch: {
+                      vehicle_received_at: workflowDates.arrival || null,
+                      work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
+                    },
+                  }).catch((syncError) => console.warn("[claim workflow operational sync] skipped", syncError));
                   await writeClaimAudit("claim_workflow_dates_updated", {
                     estimate_date: (verified as any).estimate_date ?? null,
                     workshop_arrival_date: (verified as any).workshop_arrival_date ?? null,

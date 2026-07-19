@@ -56,6 +56,79 @@ function compactPayload<T extends Record<string, unknown>>(payload: T): T {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined)) as T;
 }
 
+async function mirrorUnifiedOperationalState(params: {
+  tenantId: string;
+  claimId?: string | null;
+  workOrderId?: string | null;
+  patch: UnifiedOperationalPatch;
+}) {
+  const { tenantId, claimId, workOrderId, patch } = params;
+
+  const claimUpdates = compactPayload({
+    vehicle_presence_status: patch.vehicle_presence_status,
+    vehicle_location_section: patch.vehicle_location_section,
+    vehicle_location_bay: patch.vehicle_location_bay,
+    vehicle_location_note: patch.vehicle_location_note,
+    vehicle_location_updated_at: patch.vehicle_location_updated_at,
+    vehicle_location_updated_by: patch.vehicle_location_updated_by,
+    repair_stage: patch.repair_stage,
+    vehicle_received_at: patch.vehicle_received_at,
+    received_at: patch.vehicle_received_at,
+    workshop_arrival_date: patch.vehicle_received_at ? String(patch.vehicle_received_at).slice(0, 10) : undefined,
+    work_started_at: patch.work_started_at,
+    repair_started_at: patch.work_started_at,
+    work_completed_at: patch.work_completed_at,
+    vehicle_delivered_at: patch.vehicle_delivered_at,
+    delivered_at: patch.vehicle_delivered_at,
+    needed_parts: patch.parts_required as any,
+  } as Record<string, unknown>);
+
+  const workOrderUpdates = compactPayload({
+    vehicle_presence_status: patch.vehicle_presence_status,
+    vehicle_location_section: patch.vehicle_location_section,
+    vehicle_location_bay: patch.vehicle_location_bay,
+    vehicle_location_note: patch.vehicle_location_note,
+    status: patch.operational_status,
+    vehicle_received_at: patch.vehicle_received_at,
+    received_at: patch.vehicle_received_at,
+    work_started_at: patch.work_started_at,
+    work_completed_at: patch.work_completed_at,
+    vehicle_delivered_at: patch.vehicle_delivered_at,
+    parts_needed: patch.parts_required as any,
+  } as Record<string, unknown>);
+
+  const writes: Array<PromiseLike<any>> = [];
+  if (claimId && Object.keys(claimUpdates).length) {
+    writes.push(
+      supabase
+        .from("insurance_claims" as any)
+        .update(claimUpdates)
+        .eq("tenant_id", tenantId)
+        .eq("id", claimId),
+    );
+  }
+  if (workOrderId && Object.keys(workOrderUpdates).length) {
+    writes.push(
+      supabase
+        .from("job_orders" as any)
+        .update(workOrderUpdates)
+        .eq("tenant_id", tenantId)
+        .eq("id", workOrderId),
+    );
+  }
+
+  const results = await Promise.allSettled(writes);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("[unified claim/work-order mirror] skipped", result.reason);
+      continue;
+    }
+    if ((result.value as any)?.error && !isMissingUnifiedTable((result.value as any).error)) {
+      console.warn("[unified claim/work-order mirror] skipped", (result.value as any).error);
+    }
+  }
+}
+
 export async function fetchUnifiedOperationalState(params: {
   claimId?: string | null;
   workOrderId?: string | null;
@@ -134,7 +207,14 @@ export async function upsertUnifiedOperationalState(params: {
     if (isMissingUnifiedTable(error)) return null;
     throw error;
   }
-  return data as unknown as UnifiedOperationalRecord;
+  const record = data as unknown as UnifiedOperationalRecord;
+  await mirrorUnifiedOperationalState({
+    tenantId: params.tenantId,
+    claimId: record.claim_id,
+    workOrderId: record.work_order_id,
+    patch: params.patch,
+  });
+  return record;
 }
 
 export async function addUnifiedVehicleMedia(params: {

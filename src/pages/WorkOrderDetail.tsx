@@ -84,7 +84,7 @@ import { archiveWorkOrder } from "@/lib/deletePolicy";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { classifyWorkOrderCosts, splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
-import { listUnifiedVehicleMedia, type UnifiedMediaRecord } from "@/lib/claimWorkOrderUnified";
+import { fetchUnifiedOperationalState, listUnifiedVehicleMedia, type UnifiedMediaRecord } from "@/lib/claimWorkOrderUnified";
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
 
@@ -277,6 +277,13 @@ export default function WorkOrderDetail() {
               .maybeSingle();
             v = vehicleRow || v;
           }
+          const unified = await fetchUnifiedOperationalState({
+            claimId: (data as any).claim_id || null,
+            workOrderId: (data as any).id || null,
+          });
+          const unifiedStatus = unified?.operational_status
+            ? normalizeWorkOrderStatus(SUPA_STATUS_TO_AR[unified.operational_status] || unified.operational_status)
+            : null;
           const adapted: WorkOrder = {
             id: (data as any).order_number || (data as any).id,
             cloudId: (data as any).id,
@@ -297,10 +304,10 @@ export default function WorkOrderDetail() {
             mileage: "",
             insurance: (data as any).insurance_company || ((data as any).insurance_approved ? "تأمين" : "-"),
             claimNumber: (data as any).insurance_claim_number || "-",
-            entryDate: ((data as any).created_at || "").slice(0, 10),
+            entryDate: (unified?.vehicle_received_at || (data as any).received_at || (data as any).created_at || "").slice(0, 10),
             technician: "",
             serviceType: (data as any).insurance_claim_number ? "حادث" : "صيانة",
-            status: normalizeWorkOrderStatus(SUPA_STATUS_TO_AR[(data as any).status] || (data as any).status || "تحت الفحص"),
+            status: unifiedStatus || normalizeWorkOrderStatus(SUPA_STATUS_TO_AR[(data as any).status] || (data as any).status || "تحت الفحص"),
             totalCost: costs.totalCost,
             laborCost: costs.laborCost,
             partsCost: costs.partsCost,
@@ -309,10 +316,11 @@ export default function WorkOrderDetail() {
             lumpSumNotItemized: costs.lumpSumNotItemized,
             paintMaterialsCost: costs.paintMaterialsCost,
             diagnosis: (data as any).diagnosis || (data as any).description || "",
-            description: (data as any).description || "",
+            description: unified?.operational_notes || (data as any).description || "",
             photos: [],
-            partsNeeded: Array.isArray((data as any).parts_needed) ? (data as any).parts_needed : [],
+            partsNeeded: Array.isArray(unified?.parts_required) && unified.parts_required.length ? unified.parts_required as any : Array.isArray((data as any).parts_needed) ? (data as any).parts_needed : [],
             workItems: Array.isArray((data as any).work_items) ? (data as any).work_items : [],
+            receivedAt: unified?.vehicle_received_at || (data as any).received_at || undefined,
           };
           void refreshWorkOrdersFromCloud().catch(() => {});
           setOrder(adapted);
