@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { openSanitizedPdfWindow, openAndPrintWindow } from "@/lib/safePdfWindow";
 import {
   ArrowRight, MinusCircle, Save, Search, FileText, Printer, Mail, Pencil, Trash2,
-  Calendar as CalendarIcon, Download, Plus,
+  Calendar as CalendarIcon, Download, Plus, FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,7 @@ import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import { getPaymentVoucherHtml } from "@/lib/pdfGenerator";
 import { generatePdfFromHtml } from "@/lib/htmlToPdf";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { logActivity } from "@/lib/auditLogStore";
 import BulkExpenseDialog from "@/components/accounting/BulkExpenseDialog";
 import AiExtractButton from "@/components/ai/AiExtractButton";
@@ -84,12 +85,14 @@ export default function ExpenseNew() {
   const [description, setDescription] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [linkedVehiclePlate, setLinkedVehiclePlate] = useState<string>("");
+  const [vehicleLinkSearch, setVehicleLinkSearch] = useState("");
   // حقول ضريبية للمورد (لتقرير الضريبة الرسمي)
   const [supplierCompany, setSupplierCompany] = useState<string>("");
   const [supplierTaxNumber, setSupplierTaxNumber] = useState<string>("");
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState<string>("");
 
   // List filters
+  const [searchInput, setSearchInput] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterCashbox, setFilterCashbox] = useState<string>("all");
@@ -112,6 +115,7 @@ export default function ExpenseNew() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteMultipleOpen, setDeleteMultipleOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
 
   const resetForm = () => {
     setEditingId(null);
@@ -192,6 +196,7 @@ export default function ExpenseNew() {
         toast.success(`تم تحديث سند الصرف ${old.voucherNumber}`);
       }
       resetForm();
+      setExpenseDialogOpen(false);
       return;
     }
 
@@ -229,6 +234,7 @@ export default function ExpenseNew() {
     });
     toast.success(`تم حفظ سند الصرف ${number}`);
     resetForm();
+    setExpenseDialogOpen(false);
   };
 
   const handleEdit = (rec: ExpenseRecord) => {
@@ -246,7 +252,7 @@ export default function ExpenseNew() {
     setSupplierCompany("");
     setSupplierTaxNumber(rec.supplierTaxNumber || "");
     setSupplierInvoiceNumber(rec.supplierInvoiceNumber || "");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setExpenseDialogOpen(true);
   };
 
   const handleDelete = async () => {
@@ -294,6 +300,7 @@ export default function ExpenseNew() {
   };
 
   const resetAdvancedFilters = () => {
+    setSearchInput("");
     setSearchTerm("");
     setFilterCategory("all");
     setFilterCashbox("all");
@@ -417,6 +424,49 @@ export default function ExpenseNew() {
     a.click();
     URL.revokeObjectURL(url);
     toast.success("تم تصدير التقرير");
+  };
+
+  const buildExpenseExportRows = (rows: ExpenseRecord[]) => rows.map((r, index) => ({
+    "#": index + 1,
+    "Voucher Number": r.voucherNumber,
+    "Date": r.date,
+    "Amount OMR": Number(r.amount || 0),
+    "Category": r.categoryName || "",
+    "Cashbox": r.cashboxName || "",
+    "Payment Method": PAYMENT_METHOD_LABELS[r.paymentMethod] || r.paymentMethod,
+    "Supplier / Beneficiary": r.beneficiary || r.supplierName || "",
+    "Supplier ID": r.supplierId || "",
+    "Supplier VAT Number": r.supplierTaxNumber || "",
+    "Supplier Invoice Number": r.supplierInvoiceNumber || "",
+    "Vehicle Plate": r.linkedVehiclePlate || "",
+    "Vehicle Name": r.linkedVehicleName || "",
+    "Work Order ID": r.linkedWorkOrderId || r.sourceWorkOrderId || "",
+    "Claim ID": r.claimId || r.sourceClaimId || "",
+    "Customer ID": r.customerId || "",
+    "Vehicle ID": r.vehicleId || "",
+    "Invoice ID": r.invoiceId || "",
+    "Description": r.description || "",
+    "Created At": r.createdAt || "",
+    "Archived At": r.archivedAt || "",
+    "Deleted At": r.deletedAt || "",
+    "Refunded": r.refunded ? "Yes" : "No",
+    "Refunded At": r.refundedAt || "",
+  }));
+
+  const exportExcel = async (rows: ExpenseRecord[] = filtered, filenamePrefix = "expenses-report") => {
+    const XLSX = await import("xlsx");
+    const exportRows = buildExpenseExportRows(rows);
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws["!cols"] = [
+      { wch: 6 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 24 }, { wch: 22 },
+      { wch: 18 }, { wch: 28 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 14 },
+      { wch: 24 }, { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 22 },
+      { wch: 45 }, { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 10 }, { wch: 22 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Expense Vouchers");
+    XLSX.writeFile(wb, `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success("تم تصدير ملف Excel");
   };
 
   const buildExpenseReportHtml = () => {
@@ -594,6 +644,15 @@ export default function ExpenseNew() {
           <p className="text-sm text-muted-foreground">إنشاء سندات الصرف، البحث، والتقارير المالية</p>
         </div>
         <div className="flex gap-2">
+          <Button
+            onClick={() => {
+              resetForm();
+              setExpenseDialogOpen(true);
+            }}
+            className="gap-2"
+          >
+            <Plus size={16} /> إضافة سند صرف
+          </Button>
           <Button onClick={() => setBulkOpen(true)} className="gap-2">
             <Plus size={16} /> إضافة عدة بنود
           </Button>
@@ -603,8 +662,18 @@ export default function ExpenseNew() {
         </div>
       </div>
 
-      {/* === Form === */}
-      <div className="bg-card border border-border rounded-xl p-6 shadow-card">
+      {/* === Expense form dialog === */}
+      <Dialog
+        open={expenseDialogOpen}
+        onOpenChange={(open) => {
+          setExpenseDialogOpen(open);
+          if (!open) resetForm();
+        }}
+      >
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle>{editingId ? "تعديل سند صرف" : "إضافة سند صرف"}</DialogTitle>
+          </DialogHeader>
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-foreground flex items-center gap-2">
             {editingId ? <><Pencil size={16} /> تعديل سند صرف</> : <><Plus size={16} /> سند صرف جديد</>}
@@ -718,17 +787,30 @@ export default function ExpenseNew() {
             const isParts = !!cat && /قطع غيار/.test(cat.name);
             if (!isParts) return null;
             const allVehicles = vehiclesStore.getAll();
+            const q = vehicleLinkSearch.trim().toLowerCase();
+            const filteredVehicles = q
+              ? allVehicles.filter((v) => `${v.plate} ${v.type} ${v.owner || ""} ${v.ownerPhone || ""} ${v.vin || ""} ${v.color || ""}`.toLowerCase().includes(q))
+              : allVehicles;
             return (
               <div className="space-y-2 md:col-span-2 bg-warning/5 border border-warning/30 rounded-lg p-3">
                 <Label className="flex items-center gap-2">
                   🚗 السيارة المرتبطة بالقطعة
                   <span className="text-xs text-muted-foreground">(لتتبع تكلفة كل سيارة)</span>
                 </Label>
+                <div className="relative">
+                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={14} />
+                  <Input
+                    value={vehicleLinkSearch}
+                    onChange={(e) => setVehicleLinkSearch(e.target.value)}
+                    placeholder="ابحث باللوحة، السيارة، العميل، الهاتف..."
+                    className="h-9 pr-8 bg-card"
+                  />
+                </div>
                 <Select value={linkedVehiclePlate || "__none__"} onValueChange={(v) => setLinkedVehiclePlate(v === "__none__" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="اختر السيارة" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">— بدون ربط —</SelectItem>
-                    {allVehicles.map((v) => (
+                    {filteredVehicles.map((v) => (
                       <SelectItem key={v.id} value={v.plate}>
                         {v.plate} — {v.type} ({v.owner})
                       </SelectItem>
@@ -770,7 +852,8 @@ export default function ExpenseNew() {
             <Save size={16} /> {editingId ? "حفظ التعديلات" : "حفظ سند الصرف"}
           </Button>
         </div>
-      </div>
+        </DialogContent>
+      </Dialog>
 
       {/* === List + Reports === */}
       <Tabs defaultValue="list" dir="rtl" className="space-y-4">
@@ -787,8 +870,11 @@ export default function ExpenseNew() {
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
                 <Input
                   placeholder="ابحث برقم السند / المستفيد / البيان / أمر العمل / المطالبة..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") setSearchTerm(searchInput.trim());
+                  }}
                   className="pr-9"
                 />
               </div>
@@ -800,8 +886,11 @@ export default function ExpenseNew() {
                 </SelectContent>
               </Select>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={exportCsv} className="flex-1 gap-1">
-                  <Download size={14} /> CSV
+                <Button variant="default" onClick={() => setSearchTerm(searchInput.trim())} className="flex-1 gap-1">
+                  <Search size={14} /> بحث
+                </Button>
+                <Button variant="outline" onClick={() => void exportExcel()} className="flex-1 gap-1">
+                  <FileSpreadsheet size={14} /> Excel
                 </Button>
                 <Button variant="outline" onClick={printReport} className="flex-1 gap-1">
                   <Printer size={14} /> طباعة
@@ -952,8 +1041,8 @@ export default function ExpenseNew() {
                   </TableBody>
                 </Table>
                 <BulkActionBar count={bulk.count} onClear={bulk.clear} label="محدد">
-                  <Button variant="outline" size="sm" className="gap-1" onClick={exportSelectedCsv}>
-                    <Download size={14} /> CSV
+                  <Button variant="outline" size="sm" className="gap-1" onClick={() => void exportExcel(bulk.selectedItems, "expenses-selected")}>
+                    <FileSpreadsheet size={14} /> Excel
                   </Button>
                   <Button variant="destructive" size="sm" className="gap-1" onClick={() => setDeleteMultipleOpen(true)}>
                     <Trash2 size={14} /> حذف
@@ -1050,8 +1139,8 @@ export default function ExpenseNew() {
               <Button variant="outline" onClick={() => void downloadExpenseReportPdf()} className="gap-2">
                 <FileText size={16} /> تنزيل PDF
               </Button>
-              <Button variant="outline" onClick={exportCsv} className="gap-2">
-                <Download size={16} /> تصدير CSV
+              <Button variant="outline" onClick={() => void exportExcel()} className="gap-2">
+                <FileSpreadsheet size={16} /> تصدير Excel
               </Button>
               <Button onClick={printTaxReport} className="gap-2 bg-sky-600 hover:bg-sky-700 text-white">
                 🧾 طباعة التقرير الضريبي
