@@ -4,6 +4,7 @@ import { toEnglishDigits } from "./numberUtils";
 import { renderWithCustomTemplate } from "./printTemplates/resolver";
 import type { DocType } from "./printTemplates/schema";
 import QRCode from "qrcode";
+import companyLogoUrl from "../assets/logo.png";
 import { openSanitizedPdfWindow } from "./safePdfWindow";
 import { buildPublicUrl } from "./publicAccessSettingsStore";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
@@ -1720,9 +1721,8 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
   const vehicleName = vehicleNameRaw || data.vehicleInfo || "—";
   const vehicleYear = vehicleYearRaw || "";
   const plateRaw = String(data.vehiclePlate || "—").trim();
-  const logoHtml = s.logoUrl
-    ? `<img src="${invoiceRefEscape(s.logoUrl)}" alt="Alwafa logo"/>`
-    : `<div class="brand-fallback"><span>ALWAFA</span></div>`;
+  const headerLogoUrl = s.logoUrl || companyLogoUrl;
+  const logoHtml = `<img src="${invoiceRefEscape(headerLogoUrl)}" alt="Alwafa logo"/>`;
   const insuranceLogoHtml = custom.insuranceLogoUrl
     ? `<img src="${invoiceRefEscape(custom.insuranceLogoUrl)}" alt="Insurance logo"/>`
     : `<div class="insurance-logo-fallback">${invoiceRefEscape(String(data.insuranceCompany || "INS").slice(0, 2).toUpperCase())}</div>`;
