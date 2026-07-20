@@ -12,6 +12,7 @@ import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import VehicleTracking from "@/components/tracking/VehicleTracking";
 import { deleteVehicleFromCloud, saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import ArchivedVehicleDetails from "@/components/vehicles/ArchivedVehicleDetails";
+import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import PlateInput from "@/components/vehicles/PlateInput";
 import { canDelete, canEdit } from "@/lib/permissions";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
@@ -129,8 +130,14 @@ export default function Vehicles() {
         >
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors bg-secondary group-hover:bg-primary/10">
-                <Car size={20} className="text-primary" />
+              <div onClick={(e) => e.stopPropagation()}>
+                <VehicleAvatar
+                  size="sm"
+                  vehicleId={v.cloudId}
+                  imageUrl={(v as any).vehicle_thumbnail_url || (v as any).vehicle_cover_image_url}
+                  label={`${v.type || ""} ${v.plate || ""}`.trim() || "Vehicle"}
+                  canEdit={allowEdit}
+                />
               </div>
               <div>
                 <p className="text-foreground font-semibold group-hover:text-primary transition-colors">{v.type}</p>
@@ -166,8 +173,14 @@ export default function Vehicles() {
               <div onClick={(e) => e.stopPropagation()} className="pt-1">
                 <Checkbox checked={bulk.isSelected(v.id)} onCheckedChange={() => bulk.toggle(v.id)} />
               </div>
-              <div className="w-12 h-12 rounded-lg flex items-center justify-center bg-muted/40 group-hover:bg-primary/10 transition-colors shrink-0">
-                <Archive size={22} className="text-muted-foreground" />
+              <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                <VehicleAvatar
+                  size="md"
+                  vehicleId={v.cloudId}
+                  imageUrl={(v as any).vehicle_thumbnail_url || (v as any).vehicle_cover_image_url}
+                  label={`${v.type || ""} ${v.plate || ""}`.trim() || "Vehicle"}
+                  canEdit={allowEdit}
+                />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">

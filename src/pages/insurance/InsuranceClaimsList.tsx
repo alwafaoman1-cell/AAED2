@@ -464,6 +464,7 @@ export default function InsuranceClaimsList() {
                             <div className="flex items-center gap-2">
                               <VehicleAvatar
                                 size="sm"
+                                vehicleId={c.vehicle_id}
                                 imageUrl={c.vehicle?.vehicle_thumbnail_url || c.vehicle?.vehicle_cover_image_url}
                                 fallbackPhotos={c.damage_photos}
                                 label={`${make} ${model}`.trim() || plate || c.claim_number}

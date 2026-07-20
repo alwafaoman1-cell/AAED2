@@ -83,7 +83,12 @@ from public.insurance_claims c
 left join public.job_orders jo
   on jo.tenant_id = c.tenant_id
  and (jo.id = c.job_order_id or jo.claim_id = c.id)
-cross join lateral jsonb_array_elements(coalesce(c.documents, '[]'::jsonb)) doc
+cross join lateral jsonb_array_elements(
+  case
+    when jsonb_typeof(coalesce(c.documents, '[]'::jsonb)) = 'array' then coalesce(c.documents, '[]'::jsonb)
+    else '[]'::jsonb
+  end
+) doc
 where coalesce(
   nullif(doc->>'storage_path', ''),
   nullif(doc->>'file_path', ''),

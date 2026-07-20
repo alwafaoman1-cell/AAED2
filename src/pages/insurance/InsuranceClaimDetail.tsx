@@ -2104,6 +2104,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <div className="flex items-start gap-3 min-w-0">
               <VehicleAvatar
                 size="lg"
+                vehicleId={vehicleId || (vehicle as any)?.id || (existing as any)?.vehicle_id}
+                tenantId={(existing as any)?.tenant_id}
+                claimId={id}
+                workOrderId={linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id}
                 imageUrl={(vehicle as any)?.vehicle_thumbnail_url || (vehicle as any)?.vehicle_cover_image_url}
                 fallbackPhotos={damagePhotos}
                 label={`${vehicle?.brand || vehicleMake} ${vehicle?.model || vehicleModel}`.trim() || claimNumber}

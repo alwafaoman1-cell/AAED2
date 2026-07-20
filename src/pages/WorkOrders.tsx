@@ -632,6 +632,7 @@ export default function WorkOrders() {
                     <div className="flex items-center gap-2">
                       <VehicleAvatar
                         size="sm"
+                        vehicleId={order.vehicleId}
                         imageUrl={order.vehicleThumbnailUrl || order.vehicleImageUrl}
                         fallbackPhotos={(order.photos || []).map((photo) => photo.dataUrl)}
                         label={`${order.vehicleType} ${order.model}`.trim() || order.plate}

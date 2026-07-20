@@ -10,6 +10,9 @@ export const queryKeys = {
     all: ["vehicles"] as const,
     byCustomer: (customerId?: string | null) => ["vehicles", customerId ?? ""] as const,
   },
+  vehicleMedia: {
+    avatar: (vehicleId?: string | null) => ["vehicle_media", "avatar", vehicleId ?? ""] as const,
+  },
   jobOrders: {
     all: ["job_orders"] as const,
     inline: (workOrderId?: string | null) => ["job_order_inline", workOrderId ?? ""] as const,

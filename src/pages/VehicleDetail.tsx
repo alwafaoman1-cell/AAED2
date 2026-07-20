@@ -20,6 +20,7 @@ import ShareVehicleDialog from "@/components/vehicles/ShareVehicleDialog";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import PhotoLightbox, { type LightboxPhoto } from "@/components/vehicles/PhotoLightbox";
 import VehicleStatusTimelineDialog from "@/components/vehicles/VehicleStatusTimelineDialog";
+import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { saveVehicleToCloud, vehiclesStore, refreshVehiclesFromCloud, type Vehicle, type VehiclePhotoPair } from "@/lib/vehiclesStore";
 import { getWorkOrders, subscribeWorkOrders, refreshWorkOrdersFromCloud, type WorkOrder, STAGE_LABELS, type StagePhase } from "@/lib/workOrdersStore";
 import { customersStore } from "@/lib/customersStore";
@@ -495,9 +496,14 @@ export default function VehicleDetail() {
 
         <div className="bg-card border border-border rounded-xl p-5 shadow-card">
           <div className="flex flex-col lg:flex-row lg:items-start gap-5">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center shrink-0">
-              <Car size={36} className="text-primary" />
-            </div>
+            <VehicleAvatar
+              size="lg"
+              vehicleId={vehicle.cloudId}
+              imageUrl={(vehicle as any).vehicle_thumbnail_url || (vehicle as any).vehicle_cover_image_url}
+              fallbackPhotos={orders.flatMap((order) => (order.photos || []).map((photo) => photo.dataUrl))}
+              label={`${vehicle.type || ""} ${vehicle.plate || ""}`.trim() || "Vehicle"}
+              canEdit={allowEdit}
+            />
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-baseline gap-2 mb-1">
                 <h1 className="text-2xl font-bold text-foreground">{vehicle.type}</h1>
