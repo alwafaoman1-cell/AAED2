@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload } from "@/lib/supabasePayload";
+import { queryKeys } from "@/lib/queryKeys";
 
 export interface InsuranceInvoice {
   id: string;
@@ -66,7 +67,7 @@ export function useInsuranceInvoices() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "insurance_invoices" },
-        () => qc.invalidateQueries({ queryKey: ["insurance_invoices"] })
+        () => qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all })
       )
       .subscribe();
     return () => {
@@ -75,7 +76,7 @@ export function useInsuranceInvoices() {
   }, [qc]);
 
   return useQuery({
-    queryKey: ["insurance_invoices"],
+    queryKey: queryKeys.insuranceInvoices.all,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("insurance_invoices" as any)
@@ -160,8 +161,8 @@ export function useCreateInsuranceInvoice() {
     },
 
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_invoices"] });
-      qc.invalidateQueries({ queryKey: ["insurance_claims"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
       toast.success("تم إصدار الفاتورة");
     },
     onError: (e: any) => toast.error(e.message),
@@ -186,7 +187,7 @@ export function useUpdateInsuranceInvoice() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_invoices"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
       toast.success("تم تحديث الفاتورة");
     },
     onError: (e: any) => toast.error(e.message),
@@ -201,7 +202,7 @@ export function useDeleteInsuranceInvoice() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_invoices"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
       toast.success("تم حذف الفاتورة");
     },
     onError: (e: any) => toast.error(e.message),

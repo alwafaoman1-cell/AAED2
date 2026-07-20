@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { queryKeys } from "@/lib/queryKeys";
 
 export interface UplItem {
   description: string;
@@ -40,7 +41,7 @@ export interface IndependentEstimate {
 
 export function useInsuranceEstimates() {
   return useQuery({
-    queryKey: ["insurance_estimates"],
+    queryKey: queryKeys.insuranceEstimates.all,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("insurance_estimates" as any)
@@ -66,7 +67,7 @@ export function useCreateInsuranceEstimate() {
       return data as unknown as IndependentEstimate;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_estimates"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceEstimates.all });
       toast.success("تم حفظ التقدير");
     },
     onError: (e: any) => toast.error(e.message || "فشل الحفظ"),
@@ -83,7 +84,7 @@ export function useUpdateInsuranceEstimate() {
         .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["insurance_estimates"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.insuranceEstimates.all }),
   });
 }
 
@@ -95,7 +96,7 @@ export function useDeleteInsuranceEstimate() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_estimates"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceEstimates.all });
       toast.success("تم الحذف");
     },
   });
@@ -189,8 +190,8 @@ export function useConvertEstimateToClaim() {
       return claim;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_estimates"] });
-      qc.invalidateQueries({ queryKey: ["insurance_claims"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceEstimates.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
       toast.success("تم تحويل التقدير إلى مطالبة");
     },
     onError: (e: any) => toast.error(e.message || "فشل التحويل"),

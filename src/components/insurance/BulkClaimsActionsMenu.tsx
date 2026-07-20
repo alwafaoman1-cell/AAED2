@@ -30,6 +30,7 @@ import {
 import { useDeleteClaim, type InsuranceClaim } from "@/hooks/useInsuranceClaims";
 import { useQueryClient } from "@tanstack/react-query";
 import Can from "@/components/Can";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface Props {
   selected: InsuranceClaim[];
@@ -72,8 +73,8 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
         ? await bulkCreateGroupedInvoices(targets, profile.tenant_id)
         : await bulkCreateSeparateInvoices(targets, profile.tenant_id);
       reportInvoicingResult(report);
-      qc.invalidateQueries({ queryKey: ["insurance_invoices"] });
-      qc.invalidateQueries({ queryKey: ["insurance_claims"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
       if (report.created > 0) onClear();
     } finally {
       setBusy(false);
@@ -87,7 +88,7 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
       const res = await bulkUpdateStatus(selected.map((c) => c.id), status);
       if (res.updated) {
         toast.success(`تم تحديث ${res.updated} مطالبة إلى "${labelOf(status)}"`);
-        qc.invalidateQueries({ queryKey: ["insurance_claims"] });
+        qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
         onClear();
       }
     } finally {

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, Wrench, Car, User, Calendar, FileText, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface Props {
   workOrderId: string;
@@ -39,7 +40,7 @@ export default function InlineWorkOrderSummary({ workOrderId }: Props) {
   const navigate = useNavigate();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["job_order_inline", workOrderId],
+    queryKey: queryKeys.jobOrders.inline(workOrderId),
     enabled: !!workOrderId,
     queryFn: async () => {
       const { data, error } = await supabase

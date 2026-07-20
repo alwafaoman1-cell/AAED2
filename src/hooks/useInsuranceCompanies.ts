@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { queryKeys } from "@/lib/queryKeys";
 
 export interface InsuranceCompany {
   id: string;
@@ -33,7 +34,7 @@ export type InsuranceCompanyInsert = Omit<
 
 export function useInsuranceCompanies() {
   return useQuery({
-    queryKey: ["insurance_companies"],
+    queryKey: queryKeys.insuranceCompanies.all,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("insurance_companies" as any)
@@ -47,7 +48,7 @@ export function useInsuranceCompanies() {
 
 export function useInsuranceCompany(id: string | undefined) {
   return useQuery({
-    queryKey: ["insurance_companies", id],
+    queryKey: queryKeys.insuranceCompanies.detail(id),
     enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -74,7 +75,7 @@ export function useCreateInsuranceCompany() {
       return data as unknown as InsuranceCompany;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_companies"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceCompanies.all });
       toast.success("تمت إضافة شركة التأمين");
     },
     onError: (e: any) => toast.error(e.message),
@@ -92,7 +93,7 @@ export function useUpdateInsuranceCompany() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_companies"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceCompanies.all });
       toast.success("تم حفظ التعديلات");
     },
     onError: (e: any) => toast.error(e.message),
@@ -110,7 +111,7 @@ export function useDeleteInsuranceCompany() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["insurance_companies"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceCompanies.all });
       toast.success("تم حذف الشركة");
     },
     onError: (e: any) => toast.error(e.message),

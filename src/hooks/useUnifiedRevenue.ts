@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useMemo } from "react";
 import { buildSalesReport, type ReportFilters } from "@/lib/reportsEngine";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface InsInvoiceRow {
   id: string;
@@ -24,7 +25,7 @@ const inRange = (d: string, from: string, to: string) => {
 
 export function useUnifiedRevenue(filters: ReportFilters) {
   const { data: insInvoices = [], isLoading } = useQuery({
-    queryKey: ["unified_revenue_ins_invoices"],
+    queryKey: queryKeys.unifiedRevenueInsuranceInvoices,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("insurance_invoices" as any)

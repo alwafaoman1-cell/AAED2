@@ -28,7 +28,7 @@ const COLOR_MAP: Record<ClaimDocCategory, string> = {
 };
 
 export default function ClaimDocumentsPanel({ claimId }: { claimId: string }) {
-  const { data: docs = [], isLoading } = useClaimDocuments(claimId);
+  const { data: docs = [], isLoading, isError, error } = useClaimDocuments(claimId);
   const [previewDoc, setPreviewDoc] = useState<ClaimGeneratedDoc | null>(null);
   const [zipping, setZipping] = useState(false);
 
@@ -85,9 +85,18 @@ export default function ClaimDocumentsPanel({ claimId }: { claimId: string }) {
   const allCategories: ClaimDocCategory[] = ["claim_estimate", "tax_invoice", "delivery_proof", "inspection", "claim_summary"];
 
   if (isLoading) {
-    return <div className="text-center py-8 text-muted-foreground text-sm">جارٍ تحميل المستندات…</div>;
+    return <div className="text-center py-8 text-muted-foreground text-sm">جاري تحميل المستندات...</div>;
   }
 
+  if (isError) {
+    return (
+      <Card className="bg-card border-border p-4">
+        <div className="text-center py-8 text-destructive text-sm">
+          تعذر تحميل مستندات المطالبة: {(error as any)?.message || "خطأ غير معروف"}
+        </div>
+      </Card>
+    );
+  }
   return (
     <Card className="bg-card border-border p-4 space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">

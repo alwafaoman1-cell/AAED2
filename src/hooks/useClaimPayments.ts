@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { postInsurancePayment, removeInsurancePaymentJournal } from "@/lib/insuranceAccounting";
+import { queryKeys } from "@/lib/queryKeys";
 
 export type PaymentMethod = "bank_transfer" | "cheque" | "offset" | "cash";
 export type PaymentStatus = "pending" | "cleared" | "bounced";
@@ -50,7 +51,7 @@ export interface ClaimPaymentInsert {
 /** كل دفعات المؤسسة */
 export function useClaimPayments() {
   return useQuery({
-    queryKey: ["claim_payments"],
+    queryKey: queryKeys.claimPayments.all,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("claim_payments" as any)
@@ -65,7 +66,7 @@ export function useClaimPayments() {
 /** دفعات مطالبة معينة */
 export function usePaymentsByClaim(claimId: string | undefined) {
   return useQuery({
-    queryKey: ["claim_payments", "by_claim", claimId],
+    queryKey: queryKeys.claimPayments.byClaim(claimId),
     enabled: !!claimId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -82,7 +83,7 @@ export function usePaymentsByClaim(claimId: string | undefined) {
 /** دفعات شركة تأمين معينة */
 export function usePaymentsByCompany(companyId: string | undefined) {
   return useQuery({
-    queryKey: ["claim_payments", "by_company", companyId],
+    queryKey: queryKeys.claimPayments.byCompany(companyId),
     enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -137,13 +138,13 @@ export function useCreateClaimPayment() {
       return created;
     },
     onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["claim_payments"] });
-      qc.invalidateQueries({ queryKey: ["claim_payments", "by_claim", vars.claim_id] });
-      qc.invalidateQueries({ queryKey: ["claim_payments", "by_company"] });
-      qc.invalidateQueries({ queryKey: ["insurance_claims"] });
-      qc.invalidateQueries({ queryKey: ["insurance_invoices"] });
-      qc.invalidateQueries({ queryKey: ["claim_active_invoice"] });
-      qc.invalidateQueries({ queryKey: ["unified_revenue_ins_invoices"] });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.byClaim(vars.claim_id) });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.byCompany() });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimActiveInvoice() });
+      qc.invalidateQueries({ queryKey: queryKeys.unifiedRevenueInsuranceInvoices });
       toast.success("تم تسجيل الدفعة");
     },
     onError: (e: any) => toast.error(e.message),
@@ -184,11 +185,11 @@ export function useUpdateClaimPayment() {
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["claim_payments"] });
-      qc.invalidateQueries({ queryKey: ["insurance_claims"] });
-      qc.invalidateQueries({ queryKey: ["insurance_invoices"] });
-      qc.invalidateQueries({ queryKey: ["claim_active_invoice"] });
-      qc.invalidateQueries({ queryKey: ["unified_revenue_ins_invoices"] });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimActiveInvoice() });
+      qc.invalidateQueries({ queryKey: queryKeys.unifiedRevenueInsuranceInvoices });
       toast.success("تم حفظ التعديلات");
     },
     onError: (e: any) => toast.error(e.message),
@@ -207,11 +208,11 @@ export function useDeleteClaimPayment() {
       removeInsurancePaymentJournal(id);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["claim_payments"] });
-      qc.invalidateQueries({ queryKey: ["insurance_claims"] });
-      qc.invalidateQueries({ queryKey: ["insurance_invoices"] });
-      qc.invalidateQueries({ queryKey: ["claim_active_invoice"] });
-      qc.invalidateQueries({ queryKey: ["unified_revenue_ins_invoices"] });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimActiveInvoice() });
+      qc.invalidateQueries({ queryKey: queryKeys.unifiedRevenueInsuranceInvoices });
       toast.success("تم حذف الدفعة");
     },
     onError: (e: any) => toast.error(e.message),

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { ClaimDocCategory } from "@/lib/uploadHtmlAsPdf";
 import { refreshSignedUrls } from "@/lib/refreshSignedUrls";
+import { queryKeys } from "@/lib/queryKeys";
 
 export interface ClaimGeneratedDoc {
   id: string;
@@ -15,7 +16,7 @@ export interface ClaimGeneratedDoc {
 
 export function useClaimDocuments(claimId?: string) {
   return useQuery<ClaimGeneratedDoc[]>({
-    queryKey: ["claim_documents", claimId],
+    queryKey: queryKeys.claimDocuments(claimId),
     enabled: !!claimId,
     queryFn: async () => {
       const { data, error } = await supabase

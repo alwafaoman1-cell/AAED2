@@ -68,6 +68,7 @@ import Can from "@/components/Can";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { expensesStore } from "@/lib/expensesStore";
 import { isUuid } from "@/lib/uuid";
+import { queryKeys } from "@/lib/queryKeys";
 import { resolveClaimVehicleForWorkOrder } from "@/lib/claimVehicleResolver";
 import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
@@ -398,7 +399,7 @@ export default function InsuranceClaimDetail() {
           id,
           updates: { damage_photos: mergedPhotos as any },
         });
-        await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
         toast.success("تم رفع الصور وحفظها في المطالبة");
       } catch (e: any) {
         toast.error(e?.message || "تعذر حفظ صور المطالبة");
@@ -422,8 +423,8 @@ export default function InsuranceClaimDetail() {
           id,
           updates: { documents: mergedDocs as any },
         });
-        await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
-        await queryClient.invalidateQueries({ queryKey: ["insurance-claim-documents", id] });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
       } catch (e: any) {
         toast.error(e?.message || "تعذر حفظ مستندات المطالبة");
         return;
@@ -522,7 +523,7 @@ export default function InsuranceClaimDetail() {
       toast.error("تعذّر إنشاء العميل: " + error.message);
       return null;
     }
-    queryClient.invalidateQueries({ queryKey: ["customers"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.customers.all });
     toast.success(`تم إضافة "${trimmed}" إلى قائمة العملاء`);
     return data.id;
   };
@@ -577,7 +578,7 @@ export default function InsuranceClaimDetail() {
       .update({ customer_id: targetCustomerId } as any)
       .eq("tenant_id", tenantId)
       .eq("id", targetVehicleId);
-    queryClient.invalidateQueries({ queryKey: ["vehicles"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.vehicles.all });
   };
 
   // Computed UPL total
@@ -594,7 +595,7 @@ export default function InsuranceClaimDetail() {
   }, [estimationType, uplItems.length]);
 
   const { data: claimEstimateNumber } = useQuery({
-    queryKey: ["claim-estimate-number", (existing as any)?.tenant_id, id],
+    queryKey: queryKeys.claimEstimateNumber((existing as any)?.tenant_id, id),
     enabled: !!id && !isNew && !!(existing as any)?.tenant_id,
     queryFn: async () => {
       const tenantId = String((existing as any).tenant_id);
@@ -673,7 +674,7 @@ export default function InsuranceClaimDetail() {
       category,
       details: details as any,
     });
-    await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(id) });
   };
 
   const syncClaimOperationalFile = async (params: {
@@ -880,6 +881,7 @@ export default function InsuranceClaimDetail() {
           if (lpoError) throw lpoError;
           verifiedClaim = lpoVerified;
         }
+        queryClient.setQueryData(queryKeys.insuranceClaims.detail(id), verifiedClaim);
         hydrateFromVerifiedClaim(verifiedClaim);
         await syncClaimOperationalFile({
           claimId: id,
@@ -946,8 +948,8 @@ export default function InsuranceClaimDetail() {
       {
         onSuccess: async (verified: any) => {
           hydrateFromVerifiedClaim(verified);
-          await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
-          await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
+          await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(id) });
+          await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
           // اقرأ المطالبة المحدّثة من DB لمعرفة WO المُنشأ
           const { data: refreshed } = await supabase
             .from("insurance_claims" as any)
@@ -1209,8 +1211,8 @@ export default function InsuranceClaimDetail() {
         note: stageNote.trim() || null,
         updates,
       });
-      await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
-      await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(id) });
       setStageDialog(null);
       toast.success("تم حفظ مرحلة المركبة والتأكد منها");
     } catch (e: any) {
@@ -1377,7 +1379,7 @@ export default function InsuranceClaimDetail() {
   const { data: claimPayments = [] } = usePaymentsByClaim(id);
   const { data: claimDocs = [] } = useClaimDocuments(isNew ? undefined : id);
   const { data: claimAudit = [] } = useQuery({
-    queryKey: ["claim_audit_logs", id],
+    queryKey: queryKeys.claimAudit(id),
     enabled: !isNew && !!id,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -1582,7 +1584,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
   // فاتورة نشطة مرتبطة بهذه المطالبة (Single Source of Truth)
   const { data: activeInvoice } = useQuery({
-    queryKey: ["claim_active_invoice", existing?.id],
+    queryKey: queryKeys.claimActiveInvoice(existing?.id),
     enabled: !!existing?.id,
     queryFn: async () => {
       const { data } = await supabase
@@ -1765,7 +1767,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             items: persistedItems,
           } as any).select("id,invoice_number").single();
           if (insErr) throw insErr;
-          queryClient.invalidateQueries({ queryKey: ["insurance_invoices"] });
+          queryClient.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
           toast.success("تم حفظ الفاتورة في محاسبة المطالبات");
           if ((insertedInvoice as any)?.id) {
             navigate(`/insurance/accounting?invoice=${(insertedInvoice as any).id}`);
@@ -2560,8 +2562,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                     insurance_employee_id: (verified as any).insurance_employee_id ?? null,
                     requested_workshop_arrival_date: workflowDates.arrival || null,
                   });
-                  await queryClient.invalidateQueries({ queryKey: ["insurance_claims", id] });
-                  await queryClient.invalidateQueries({ queryKey: ["insurance_claims"] });
+                  await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
+                  await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
                   toast.success("تم الحفظ");
                 } catch (e: any) {
                   toast.error(e.message || "تعذر الحفظ");
@@ -3022,7 +3024,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 delivered_at: (existing as any)?.delivered_at ?? null,
                 delivery_notes: (existing as any)?.delivery_notes ?? null,
               }}
-              onSaved={() => queryClient.invalidateQueries({ queryKey: ["insurance_claim", id] })}
+              onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) })}
             />
           )}
         </TabsContent>
@@ -3107,7 +3109,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               htmlContent: html,
               meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber },
             })}
-            onSaved={() => queryClient.invalidateQueries({ queryKey: ["claim_documents", id] })}
+            onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) })}
           />
         );
       })()}
@@ -3129,7 +3131,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               htmlContent: html,
               meta: { claim_number: claimNumber },
             })}
-            onSaved={() => queryClient.invalidateQueries({ queryKey: ["claim_documents", id] })}
+            onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) })}
           />
         );
       })()}
@@ -3149,7 +3151,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             htmlContent: taxInvoiceHtml,
             meta: { invoice_number: taxInvoiceNumber },
           })}
-          onSaved={() => queryClient.invalidateQueries({ queryKey: ["claim_documents", id] })}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) })}
         />
       )}
 
@@ -3170,7 +3172,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               htmlContent: html,
               meta: { inspection_id: linkedInspection.id },
             })}
-            onSaved={() => queryClient.invalidateQueries({ queryKey: ["claim_documents", id] })}
+            onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) })}
           />
         );
       })()}
@@ -3254,7 +3256,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               fileBaseName: `Estimate-${claimEstimateNumber || claimNumber}`,
               htmlContent: html, meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber, sent_via: "email" },
             });
-            queryClient.invalidateQueries({ queryKey: ["claim_documents", id] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
             return res?.url ?? null;
           }}
           buildAndSaveSummaryPdf={async () => {
@@ -3264,7 +3266,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               fileBaseName: `Claim-Summary-${claimNumber}`,
               htmlContent: html, meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber, sent_via: "email" },
             });
-            queryClient.invalidateQueries({ queryKey: ["claim_documents", id] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
             return res?.url ?? null;
           }}
         />
@@ -3503,7 +3505,7 @@ function PaymentsSection({
   // ── المصدر المالي الموحّد: نقرأ من الفاتورة المرتبطة (إن وُجدت) ──
   // وإلا نحسب من المطالبة (المعتمد/المُقدّر + VAT) للحفاظ على التوافق.
   const { data: linkedInvoice } = useQuery({
-    queryKey: ["claim_active_invoice", claimId],
+    queryKey: queryKeys.claimActiveInvoice(claimId),
     enabled: !!claimId,
     queryFn: async () => {
       const { data } = await supabase
