@@ -30,13 +30,14 @@ const AuthContext = createContext<AuthCtx | undefined>(undefined);
 
 const AUTH_BOOT_TIMEOUT_MS = 8_000;
 const PROFILE_TIMEOUT_MS = 20_000;
+const PROFILE_QUERY_TIMEOUT_MS = 10_000;
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(label)), timeoutMs);
   });
-  return Promise.race([promise, timeout]).finally(() => {
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => {
     if (timer) clearTimeout(timer);
   }) as Promise<T>;
 }
@@ -48,12 +49,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function fetchProfile(uid: string): Promise<UserProfile | null> {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("user_id", uid)
-      .maybeSingle();
-    return (data as UserProfile) || null;
+    try {
+      const { data, error } = await withTimeout(
+        supabase
+          .from("profiles")
+          .select("*")
+          .eq("user_id", uid)
+          .maybeSingle(),
+        PROFILE_QUERY_TIMEOUT_MS,
+        "profile query timeout",
+      );
+      if (!error) return (data as UserProfile) || null;
+      console.warn("[auth] profile SDK query failed", error);
+    } catch (error) {
+      console.warn("[auth] profile SDK query delayed or failed", error);
+    }
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      if (!accessToken || !supabaseUrl || !anonKey) return null;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PROFILE_QUERY_TIMEOUT_MS);
+      const response = await fetch(
+        `${supabaseUrl}/rest/v1/profiles?select=*&user_id=eq.${encodeURIComponent(uid)}&limit=1`,
+        {
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${accessToken}`,
+          },
+          signal: controller.signal,
+        },
+      ).finally(() => clearTimeout(timer));
+      if (!response.ok) {
+        console.warn("[auth] profile REST query failed", response.status);
+        return null;
+      }
+      const rows = await response.json();
+      return (Array.isArray(rows) ? rows[0] : null) as UserProfile | null;
+    } catch (error) {
+      console.warn("[auth] profile REST query delayed or failed", error);
+      return null;
+    }
   }
 
   function applyProfile(p: UserProfile | null) {
