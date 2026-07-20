@@ -29,7 +29,7 @@ interface AuthCtx {
 const AuthContext = createContext<AuthCtx | undefined>(undefined);
 
 const AUTH_BOOT_TIMEOUT_MS = 8_000;
-const PROFILE_TIMEOUT_MS = 8_000;
+const PROFILE_TIMEOUT_MS = 20_000;
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -63,6 +63,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     import("@/lib/pdfGenerator").then((m) => m.loadTemplateSettingsFromCloud()).catch(() => {});
   }
 
+  function loadProfileWithLateApply(uid: string, activeRef: () => boolean) {
+    const profilePromise = fetchProfile(uid);
+    profilePromise
+      .then((p) => {
+        if (activeRef()) applyProfile(p);
+      })
+      .catch((error) => {
+        console.warn("[auth] profile load failed", error);
+        if (activeRef()) applyProfile(null);
+      });
+    return withTimeout(profilePromise, PROFILE_TIMEOUT_MS, "profile load timeout");
+  }
+
 
   useEffect(() => {
     let active = true;
@@ -73,13 +86,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (sess?.user) {
         setLoading(true);
         setTimeout(() => {
-          void withTimeout(fetchProfile(sess.user.id), PROFILE_TIMEOUT_MS, "profile load timeout")
-            .then((p) => {
-              if (active) applyProfile(p);
-            })
+          void loadProfileWithLateApply(sess.user.id, () => active)
             .catch((error) => {
               console.warn("[auth] profile load delayed or failed", error);
-              if (active) applyProfile(null);
             })
             .finally(() => {
               if (active) setLoading(false);
@@ -98,11 +107,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(sess?.user ?? null);
         if (sess?.user) {
           try {
-            const p = await withTimeout(fetchProfile(sess.user.id), PROFILE_TIMEOUT_MS, "profile load timeout");
-            if (active) applyProfile(p);
+            await loadProfileWithLateApply(sess.user.id, () => active);
           } catch (error) {
             console.warn("[auth] initial profile load delayed or failed", error);
-            if (active) applyProfile(null);
           }
         } else {
           applyProfile(null);
