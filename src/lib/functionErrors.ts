@@ -32,6 +32,7 @@ const FUNCTION_ERROR_MESSAGES: Record<string, string> = {
 
 export function getFunctionErrorMessage(error: unknown, data?: any): string {
   const raw = String(data?.message || data?.code || data?.error || (error as any)?.message || error || "").trim();
+  if (raw === "{}" || raw === "[object Object]") return "تعذر تنفيذ العملية من الخادم. حاول مرة أخرى.";
   if (!raw) return "تعذّر تنفيذ العملية من الخادم.";
   if (/edge function returned a non-2xx status code/i.test(raw)) {
     return "تعذّر تنفيذ العملية من الخادم. الدالة لم تُرجع نتيجة صالحة.";

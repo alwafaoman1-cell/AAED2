@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, LogIn, Wrench, Mail } from "lucide-react";
+import { Loader2, LogIn, Wrench, Mail, RefreshCcw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { getFunctionErrorMessage } from "@/lib/functionErrors";
 
@@ -22,12 +22,38 @@ function functionErrorCode(error: unknown, data?: any): string {
   return String(data?.code || data?.error || (error as any)?.code || (error as any)?.message || "").trim();
 }
 
+const AUTH_STEP_TIMEOUT_MS = 12_000;
+
+function withAuthStepTimeout<T>(promise: PromiseLike<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label)), AUTH_STEP_TIMEOUT_MS);
+  });
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  }) as Promise<T>;
+}
+
+function cleanLoginError(error: unknown, fallback = "تعذر تسجيل الدخول. تحقق من الاتصال وحاول مرة أخرى."): string {
+  const raw =
+    typeof error === "string"
+      ? error
+      : String((error as any)?.message || (error as any)?.error_description || (error as any)?.error || error || "");
+  const message = raw.trim();
+  if (!message || message === "{}" || message === "[object Object]") return fallback;
+  if (/profile load timeout|otp settings timeout|otp request timeout/i.test(message)) {
+    return "تسجيل الدخول نجح، لكن تحميل إعدادات الحساب تأخر. اضغط إعادة المحاولة أو سجّل الخروج ثم ادخل مرة أخرى.";
+  }
+  return message;
+}
+
 export default function AuthPage() {
-  const { session, profile, signIn, loading } = useAuth();
+  const { session, profile, signIn, signOut, refreshProfile, loading } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [loginStatus, setLoginStatus] = useState("");
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [sendingReset, setSendingReset] = useState(false);
@@ -44,18 +70,24 @@ export default function AuthPage() {
         setCheckingOtpSetting(true);
         void (async () => {
           try {
-            const { data } = await supabase
-              .from("tenant_security_settings" as any)
-              .select("login_otp_enabled")
-              .eq("tenant_id", profile.tenant_id)
-              .maybeSingle();
+            const { data } = await withAuthStepTimeout(
+              supabase
+                .from("tenant_security_settings" as any)
+                .select("login_otp_enabled")
+                .eq("tenant_id", profile.tenant_id)
+                .maybeSingle(),
+              "otp settings timeout",
+            );
             if ((data as any)?.login_otp_enabled) {
-              const { data: otpData, error: otpError } = await supabase.functions.invoke("request-security-otp", {
-                body: { action: "login_otp" },
-              });
+              const { data: otpData, error: otpError } = await withAuthStepTimeout(
+                supabase.functions.invoke("request-security-otp", {
+                  body: { action: "login_otp" },
+                }),
+                "otp request timeout",
+              );
               if (otpError || otpData?.error || otpData?.ok === false) {
                 const code = functionErrorCode(otpError, otpData);
-                const message = getFunctionErrorMessage(otpError, otpData);
+                const message = cleanLoginError(getFunctionErrorMessage(otpError, otpData), "تعذر إرسال رمز التحقق. حاول مرة أخرى.");
                 if (code === "otp_rate_limited") {
                   setLoginOtpNotice("تم طلب رموز كثيرة. إذا كان لديك رمز حديث أدخله هنا، أو انتظر قليلًا ثم حاول طلب رمز جديد.");
                   setLoginOtpOpen(true);
@@ -74,11 +106,18 @@ export default function AuthPage() {
               }
               setLoginOtpNotice("");
               setLoginOtpOpen(true);
+              setSubmitting(false);
+              setLoginStatus("");
               toast.info("تم إرسال رمز تحقق إلى بريدك");
               return;
             }
             setOtpVerified(true);
             navigate(homeForRole(profile.role), { replace: true });
+          } catch (error) {
+            toast.error(cleanLoginError(error, "تعذر إكمال تسجيل الدخول. تحقق من الاتصال ثم حاول مرة أخرى."));
+            setSubmitting(false);
+            setLoginStatus("");
+            await supabase.auth.signOut();
           } finally {
             setCheckingOtpSetting(false);
           }
@@ -89,7 +128,44 @@ export default function AuthPage() {
     }
   }, [session, profile, loading, navigate, otpVerified, loginOtpOpen, checkingOtpSetting]);
 
+  useEffect(() => {
+    if (session && profile) {
+      setLoginStatus("تم تحميل بيانات الحساب، جاري فتح النظام...");
+    }
+    if (!session) {
+      setSubmitting(false);
+      setLoginStatus("");
+    }
+  }, [session, profile]);
+
   if (session && profile && otpVerified) return <Navigate to={homeForRole(profile.role)} replace />;
+
+  if (session && !loading && !profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4" dir="rtl">
+        <Card className="w-full max-w-lg border-border/60 shadow-xl">
+          <CardHeader className="text-center space-y-3">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center">
+              <ShieldAlert className="w-7 h-7 text-amber-600" />
+            </div>
+            <CardTitle className="text-2xl">تعذر تحميل بيانات الحساب</CardTitle>
+            <CardDescription>
+              تم تسجيل الدخول، لكن ملف المستخدم أو بيانات الورشة لم تصل من Supabase. تم إيقاف فتح النظام حتى لا يظهر فارغًا.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button className="w-full" onClick={() => void refreshProfile()}>
+              <RefreshCcw className="w-4 h-4 ml-2" />
+              إعادة تحميل بيانات الحساب
+            </Button>
+            <Button className="w-full" variant="outline" onClick={() => void signOut()}>
+              تسجيل الخروج
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -98,13 +174,17 @@ export default function AuthPage() {
       return;
     }
     setSubmitting(true);
+    setLoginStatus("جاري التحقق من بيانات الدخول...");
     const { error } = await signIn(email.trim(), password);
-    setSubmitting(false);
     if (error) {
-      toast.error(error.includes("Invalid") ? "بيانات الدخول غير صحيحة" : error);
+      setSubmitting(false);
+      setLoginStatus("");
+      const message = cleanLoginError(error);
+      toast.error(message.includes("Invalid") ? "بيانات الدخول غير صحيحة" : message);
       return;
     }
-    toast.success("مرحباً بك");
+    setLoginStatus("تم تسجيل الدخول، جاري تحميل بيانات الورشة...");
+    toast.success("تم تسجيل الدخول");
     // navigation happens via useEffect once profile is loaded
   }
 
@@ -192,7 +272,13 @@ export default function AuthPage() {
                 required
               />
             </div>
-            <Button type="submit" className="w-full" disabled={submitting}>
+            {loginStatus && (
+              <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">
+                <Loader2 className="inline-block w-4 h-4 animate-spin ml-2" />
+                {loginStatus}
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={submitting || loading || checkingOtpSetting}>
               {submitting ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <LogIn className="w-4 h-4 ml-2" />}
               {submitting ? "جارٍ الدخول..." : "تسجيل الدخول"}
             </Button>
