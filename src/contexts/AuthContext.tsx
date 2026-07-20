@@ -28,19 +28,35 @@ interface AuthCtx {
 
 const AuthContext = createContext<AuthCtx | undefined>(undefined);
 
+const AUTH_BOOT_TIMEOUT_MS = 8_000;
+const PROFILE_TIMEOUT_MS = 8_000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  }) as Promise<T>;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function loadProfile(uid: string) {
+  async function fetchProfile(uid: string): Promise<UserProfile | null> {
     const { data } = await supabase
       .from("profiles")
       .select("*")
       .eq("user_id", uid)
       .maybeSingle();
-    const p = (data as UserProfile) || null;
+    return (data as UserProfile) || null;
+  }
+
+  function applyProfile(p: UserProfile | null) {
     setProfile(p);
     setPermissionsRole((p?.role as any) ?? null);
     // Pull company/template settings from the cloud so they survive cache clears.
@@ -49,25 +65,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 
   useEffect(() => {
+    let active = true;
+
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
       setSession(sess);
       setUser(sess?.user ?? null);
       if (sess?.user) {
-        setTimeout(() => loadProfile(sess.user.id), 0);
+        setTimeout(() => {
+          void withTimeout(fetchProfile(sess.user.id), PROFILE_TIMEOUT_MS, "profile load timeout")
+            .then((p) => {
+              if (active) applyProfile(p);
+            })
+            .catch((error) => {
+              console.error("[auth] profile load failed", error);
+              if (active) applyProfile(null);
+            });
+        }, 0);
       } else {
-        setProfile(null);
-        setPermissionsRole(null);
+        applyProfile(null);
       }
     });
 
-    supabase.auth.getSession().then(({ data: { session: sess } }) => {
-      setSession(sess);
-      setUser(sess?.user ?? null);
-      if (sess?.user) loadProfile(sess.user.id).finally(() => setLoading(false));
-      else setLoading(false);
-    });
+    void withTimeout(supabase.auth.getSession(), AUTH_BOOT_TIMEOUT_MS, "auth session timeout")
+      .then(async ({ data: { session: sess } }) => {
+        if (!active) return;
+        setSession(sess);
+        setUser(sess?.user ?? null);
+        if (sess?.user) {
+          try {
+            const p = await withTimeout(fetchProfile(sess.user.id), PROFILE_TIMEOUT_MS, "profile load timeout");
+            if (active) applyProfile(p);
+          } catch (error) {
+            console.error("[auth] initial profile load failed", error);
+            if (active) applyProfile(null);
+          }
+        } else {
+          applyProfile(null);
+        }
+      })
+      .catch((error) => {
+        console.error("[auth] initial session load failed", error);
+        if (!active) return;
+        setSession(null);
+        setUser(null);
+        applyProfile(null);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   async function signIn(email: string, password: string) {
@@ -78,12 +128,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     await supabase.auth.signOut();
-    setProfile(null);
-    setPermissionsRole(null);
+    applyProfile(null);
   }
 
   async function refreshProfile() {
-    if (user) await loadProfile(user.id);
+    if (user) applyProfile(await withTimeout(fetchProfile(user.id), PROFILE_TIMEOUT_MS, "profile refresh timeout"));
   }
 
   function hasRole(...roles: AppRole[]) {
