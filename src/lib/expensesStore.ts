@@ -257,6 +257,12 @@ function isMissingAccountingColumnError(error: any): boolean {
 
 async function hydrateFromCloud() {
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) {
+      hydrated = true;
+      notify();
+      return;
+    }
     const { data, error } = await supabase
       .from("expenses")
       .select("*")

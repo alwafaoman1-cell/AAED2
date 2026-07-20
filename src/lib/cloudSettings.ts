@@ -2,6 +2,10 @@ import { supabase } from "@/integrations/supabase/client";
 
 const memoryCache = new Map<string, unknown>();
 
+function isAuthPage(): boolean {
+  return typeof window !== "undefined" && /^\/(auth|reset-password)(\/|$)/.test(window.location.pathname);
+}
+
 export interface CloudSettingRecord<T = unknown> {
   key: string;
   value: T;
@@ -11,7 +15,10 @@ export interface CloudSettingRecord<T = unknown> {
 
 /** Read a tenant setting from Supabase. Falls back only to in-memory session cache. */
 export async function readCloudSetting<T>(key: string, fallback: T): Promise<T> {
+  if (isAuthPage()) return memoryCache.has(key) ? (memoryCache.get(key) as T) : fallback;
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) return memoryCache.has(key) ? (memoryCache.get(key) as T) : fallback;
     const { data, error } = await supabase
       .from("tenant_settings")
       .select("value")
@@ -59,6 +66,7 @@ export function subscribeCloudSetting<T>(
   key: string,
   cb: (value: T) => void,
 ): () => void {
+  if (isAuthPage()) return () => {};
   const channel = supabase
     .channel(`tenant_setting:${key}:${Math.random().toString(36).slice(2, 7)}`)
     .on(
