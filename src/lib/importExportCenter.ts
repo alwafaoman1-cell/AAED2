@@ -211,9 +211,9 @@ function parseImportDate(value: unknown): string {
 
 function parseImportPaymentMethod(value: unknown): ExpenseRecord["paymentMethod"] {
   const text = String(value || "").trim().toLowerCase();
-  if (/bank|transfer|تحويل|طھط­ظˆظٹظ„/.test(text)) return "bank_transfer";
-  if (/cheque|check|شيك|ط´ظٹظƒ/.test(text)) return "cheque";
-  if (/card|بطاقة|ط¨ط·ط§ظ‚ط©/.test(text)) return "card";
+  if (/bank|transfer|تحويل|تحويل/.test(text)) return "bank_transfer";
+  if (/cheque|check|شيك|شيك/.test(text)) return "cheque";
+  if (/card|بطاقة|بطاقة/.test(text)) return "card";
   return "cash";
 }
 

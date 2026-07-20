@@ -179,7 +179,7 @@ export default function Vehicles() {
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   <span className="text-xs px-2 py-0.5 rounded-md bg-secondary text-foreground font-mono border border-border">{v.plate}</span>
                   {v.year && <span className="text-[11px] text-muted-foreground">{v.year}</span>}
-                  {v.color && <span className="text-[11px] text-muted-foreground">â€¢ {v.color}</span>}
+                  {v.color && <span className="text-[11px] text-muted-foreground">• {v.color}</span>}
                 </div>
               </div>
             </div>
