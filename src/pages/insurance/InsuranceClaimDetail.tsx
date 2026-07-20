@@ -63,6 +63,8 @@ import { XCircle } from "lucide-react";
 import QuickEmailButton from "@/components/QuickEmailButton";
 import SendInsuranceEmailDialog from "@/components/insurance/SendInsuranceEmailDialog";
 import { useClaimDocuments } from "@/hooks/useClaimDocuments";
+import { useClaimMedia, useDeleteClaimMedia, useUploadClaimMedia } from "@/hooks/useClaimMedia";
+import { mediaToLegacyDocuments, mediaToLegacyPhotoUrls } from "@/lib/insurance/claimMediaService";
 import { Mail, Send } from "lucide-react";
 import Can from "@/components/Can";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
@@ -132,6 +134,9 @@ export default function InsuranceClaimDetail() {
   const updateClaim = useUpdateClaim();
   const deleteClaim = useDeleteClaim();
   const updateStatus = useUpdateClaimStatus();
+  const { data: claimMedia = [], isLoading: claimMediaLoading } = useClaimMedia(isNew ? undefined : id);
+  const uploadClaimMedia = useUploadClaimMedia();
+  const deleteClaimMedia = useDeleteClaimMedia();
 
   // ── Core state ──
   const [tab, setTab] = useState<string>("inspect");
@@ -211,6 +216,15 @@ export default function InsuranceClaimDetail() {
   const [stageDialog, setStageDialog] = useState<{ key: string; label: string } | null>(null);
   const [stageDate, setStageDate] = useState<string>(dateOnly(new Date().toISOString()));
   const [stageNote, setStageNote] = useState("");
+
+  const findMediaByUrl = (url: string) =>
+    claimMedia.find((item) => [item.url, item.public_url, item.storage_path].filter(Boolean).includes(url));
+
+  const refreshClaimMedia = () => {
+    if (!id) return;
+    queryClient.invalidateQueries({ queryKey: queryKeys.claimMedia.list(id) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
+  };
   const [savingStage, setSavingStage] = useState(false);
   const [insuranceSectionOpen, setInsuranceSectionOpen] = useState(false);
   const [ownerSectionOpen, setOwnerSectionOpen] = useState(false);
@@ -301,6 +315,12 @@ export default function InsuranceClaimDetail() {
     setWorkCompletedAt(wc ? String(wc).slice(0, 10) : "");
   }, [existing]);
 
+  useEffect(() => {
+    if (isNew || claimMediaLoading) return;
+    setDamagePhotos(mediaToLegacyPhotoUrls(claimMedia));
+    setDocuments(mediaToLegacyDocuments(claimMedia));
+  }, [claimMedia, claimMediaLoading, isNew]);
+
   const customer = customers?.find((c) => c.id === customerId);
   const vehicle = vehicles?.find((v) => v.id === vehicleId);
 
@@ -343,40 +363,35 @@ export default function InsuranceClaimDetail() {
   // ── Upload helpers ──
   // Files are scoped to claims/{claim_id}/{category}/ so storage RLS can verify
   // they belong to a real claim in the same tenant. We also write to claim_audit_logs.
+
+  /*
+   * Claim media single source of truth:
+   * insurance_claims.damage_photos and insurance_claims.documents are deprecated
+   * for operational writes. New files are stored in vehicle_media only.
+   */
   const uploadFile = async (
     file: File,
     category: "photos" | "docs" | "delivery" | "satisfaction" | "receiver_id",
   ): Promise<string | null> => {
     if (isNew || !id) {
-      toast.error("احفظ المطالبة أولاً قبل رفع الملفات");
+      toast.error("احفظ المطالبة أولًا قبل رفع الملفات");
       return null;
     }
     setUploading(true);
     try {
-      const { convertImageToWebp } = await import("@/lib/imageToWebp");
-      const optimized = await convertImageToWebp(file);
-      const ext = optimized.name.split(".").pop() || "bin";
-      const path = `claims/${id}/${category}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error } = await supabase.storage.from("insurance-docs").upload(path, optimized, { contentType: optimized.type });
-      if (error) throw error;
-      const { data } = await supabase.storage.from("insurance-docs").createSignedUrl(path, 60 * 60 * 24 * 7);
-
-      // audit log (best-effort)
-      const { data: tenant } = await supabase.rpc("get_user_tenant_id");
-      if (tenant) {
-        await insertClaimAuditWithVehicle({
-          tenant_id: tenant as string,
-          claim_id: id,
-          vehicle_id: vehicleId && isUuid(vehicleId) ? vehicleId : null,
-          action: "upload_photo",
-          category,
-          file_path: path,
-          details: { name: file.name, size: file.size, type: file.type },
-        });
-      }
-      return data?.signedUrl ?? null;
-    } catch (e: any) {
-      toast.error("فشل رفع الملف: " + e.message);
+      const media = await uploadClaimMedia.mutateAsync({
+        claimId: id,
+        tenantId: (existing as any)?.tenant_id,
+        workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
+        vehicleId: vehicleId || (existing as any)?.vehicle_id || null,
+        file,
+        mediaType: category === "docs" ? "document" : "image",
+        category: category === "photos" ? "damage_photo" : category,
+        source: "claim_detail",
+      });
+      return media.url || media.public_url || media.storage_path;
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر رفع الملف");
       return null;
     } finally {
       setUploading(false);
@@ -385,55 +400,73 @@ export default function InsuranceClaimDetail() {
 
   const handlePhotoUpload = async (files: FileList | null) => {
     if (!files?.length) return;
-    const uploaded: string[] = [];
+    if (isNew || !id) {
+      toast.error("احفظ المطالبة أولًا قبل رفع الصور");
+      return;
+    }
     for (const f of Array.from(files)) {
-      const url = await uploadFile(f, "photos");
-      if (url) uploaded.push(url);
+      await uploadClaimMedia.mutateAsync({
+        claimId: id,
+        tenantId: (existing as any)?.tenant_id,
+        workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
+        vehicleId: vehicleId || (existing as any)?.vehicle_id || null,
+        file: f,
+        mediaType: "image",
+        category: "damage_photo",
+        source: "claim_detail",
+      });
     }
-    if (!uploaded.length) return;
-    const mergedPhotos = [...damagePhotos, ...uploaded];
-    setDamagePhotos(mergedPhotos);
-    if (!isNew && id) {
-      try {
-        await updateClaim.mutateAsync({
-          id,
-          updates: { damage_photos: mergedPhotos as any },
-        });
-        await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
-        toast.success("تم رفع الصور وحفظها في المطالبة");
-      } catch (e: any) {
-        toast.error(e?.message || "تعذر حفظ صور المطالبة");
-      }
-    }
+    await writeClaimAudit("claim_media_uploaded", {
+      media_type: "image",
+      count: files.length,
+      category: "damage_photo",
+    }, "media");
   };
 
   const handleDocUpload = async (files: FileList | null, type: string) => {
     if (!files?.length) return;
-    const newDocs: ClaimDocument[] = [];
+    if (isNew || !id) {
+      toast.error("احفظ المطالبة أولًا قبل رفع المستندات");
+      return;
+    }
     for (const f of Array.from(files)) {
-      const url = await uploadFile(f, "docs");
-      if (url) newDocs.push({ url, name: f.name, type });
+      await uploadClaimMedia.mutateAsync({
+        claimId: id,
+        tenantId: (existing as any)?.tenant_id,
+        workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
+        vehicleId: vehicleId || (existing as any)?.vehicle_id || null,
+        file: f,
+        mediaType: "document",
+        category: type || "other",
+        source: "claim_detail",
+      });
     }
-    if (!newDocs.length) return;
-    const mergedDocs = [...documents, ...newDocs];
-    setDocuments(mergedDocs);
-    if (!isNew && id) {
-      try {
-        await updateClaim.mutateAsync({
-          id,
-          updates: { documents: mergedDocs as any },
-        });
-        await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
-        await queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
-      } catch (e: any) {
-        toast.error(e?.message || "تعذر حفظ مستندات المطالبة");
-        return;
-      }
+    await writeClaimAudit("claim_media_uploaded", {
+      media_type: "document",
+      count: files.length,
+      category: type || "other",
+    }, "media");
+    if (type === "lpo") {
+      toast.success("تم رفع أمر الشراء (LPO). يمكن إصدار فاتورة التأمين لاحقًا من قسم الفاتورة والدفع.");
     }
+  };
 
-    // LPO is only registered here. Insurance invoice issuance remains a separate explicit action.
-    if (type === "lpo" && newDocs.length > 0) {
-      toast.success("تم رفع أمر الشراء (LPO). يمكن إصدار فاتورة التأمين لاحقاً من قسم الفاتورة والدفع.");
+  const handleDeleteMediaByUrl = async (url: string, fallback: "image" | "document", index: number) => {
+    if (!id) return;
+    const media = findMediaByUrl(url);
+    if (media?.id && isUuid(media.id)) {
+      await deleteClaimMedia.mutateAsync({ id: media.id, claimId: id });
+      await writeClaimAudit("claim_media_deleted", {
+        media_id: media.id,
+        media_type: media.media_type,
+        category: media.category,
+      }, "media");
+      return;
+    }
+    if (fallback === "image") {
+      setDamagePhotos((photos) => photos.filter((_, idx) => idx !== index));
+    } else {
+      setDocuments((docs) => docs.filter((_, idx) => idx !== index));
     }
   };
 
@@ -656,8 +689,6 @@ export default function InsuranceClaimDetail() {
       estimation_type: estimationType,
       upl_items: estimationType === "upl" ? uplItems : [],
       notes: buildNotesWithLpo(),
-      damage_photos: damagePhotos,
-      documents,
       needed_parts: neededParts.filter((p) => p.name.trim()),
     };
   };
@@ -830,8 +861,6 @@ export default function InsuranceClaimDetail() {
       estimation_type: estimationType,
       upl_items: estimationType === "upl" ? uplItems : [],
       notes: buildNotesWithLpo(),
-      damage_photos: damagePhotos,
-      documents,
       needed_parts: neededParts.filter((p) => p.name.trim()),
       estimate_date: estimateDate || null,
       workshop_arrival_date: workshopArrivalDate || null,
@@ -2676,7 +2705,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 </Button>
               </label>
             </div>
-            {damagePhotos.length === 0 ? (
+            {claimMediaLoading ? (
+              <div className="text-center py-8 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
+                Loading claim photos...
+              </div>
+            ) : damagePhotos.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
                 لا توجد صور بعد. ارفع صور الأضرار لتوثيق حالة السيارة.
               </div>
@@ -2701,7 +2734,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                       <span>صورة مفقودة</span>
                     </div>
                     <button
-                      onClick={() => setDamagePhotos((p) => p.filter((_, idx) => idx !== i))}
+                      onClick={() => handleDeleteMediaByUrl(url, "image", i)}
                       className="absolute top-1 left-1 w-6 h-6 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                     >
                       <X size={12} />
@@ -2730,7 +2763,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 ))}
               </div>
             </div>
-            {documents.length === 0 ? (
+            {claimMediaLoading ? (
+              <div className="text-center py-6 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
+                Loading claim documents...
+              </div>
+            ) : documents.length === 0 ? (
               <div className="text-center py-6 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
                 ارفع تقرير الفحص الفني أو أي مستندات مساندة.
               </div>
@@ -2747,7 +2784,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                         <Badge variant="secondary" className="text-[10px] mt-0.5">{docTypeLabels[doc.type] ?? doc.type}</Badge>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDocuments((d) => d.filter((_, idx) => idx !== i))}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteMediaByUrl(doc.url, "document", i)}>
                       <Trash2 size={12} />
                     </Button>
                   </div>
@@ -3109,7 +3146,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               htmlContent: html,
               meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber },
             })}
-            onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) })}
+            onSaved={refreshClaimMedia}
           />
         );
       })()}
@@ -3131,7 +3168,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               htmlContent: html,
               meta: { claim_number: claimNumber },
             })}
-            onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) })}
+            onSaved={refreshClaimMedia}
           />
         );
       })()}
@@ -3151,7 +3188,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             htmlContent: taxInvoiceHtml,
             meta: { invoice_number: taxInvoiceNumber },
           })}
-          onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) })}
+          onSaved={refreshClaimMedia}
         />
       )}
 
@@ -3172,7 +3209,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               htmlContent: html,
               meta: { inspection_id: linkedInspection.id },
             })}
-            onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) })}
+            onSaved={refreshClaimMedia}
           />
         );
       })()}
@@ -3256,7 +3293,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               fileBaseName: `Estimate-${claimEstimateNumber || claimNumber}`,
               htmlContent: html, meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber, sent_via: "email" },
             });
-            queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
+            refreshClaimMedia();
             return res?.url ?? null;
           }}
           buildAndSaveSummaryPdf={async () => {
@@ -3266,7 +3303,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               fileBaseName: `Claim-Summary-${claimNumber}`,
               htmlContent: html, meta: { claim_number: claimNumber, estimate_number: claimEstimateNumber, sent_via: "email" },
             });
-            queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
+            refreshClaimMedia();
             return res?.url ?? null;
           }}
         />

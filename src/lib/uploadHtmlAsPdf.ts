@@ -21,6 +21,45 @@ export interface SaveClaimDocOpts {
   meta?: Record<string, any>;    // إضافات تُحفظ في details
 }
 
+async function recordGeneratedClaimMedia(params: {
+  tenantId: string;
+  claimId: string;
+  path: string;
+  url: string;
+  category: ClaimDocCategory;
+  fileName: string;
+  mimeType: string;
+  userId?: string | null;
+}) {
+  try {
+    const { data: claim } = await supabase
+      .from("insurance_claims" as any)
+      .select("id,vehicle_id,job_order_id,auto_job_order_id")
+      .eq("id", params.claimId)
+      .eq("tenant_id", params.tenantId)
+      .maybeSingle();
+    const c = claim as any;
+    await supabase.from("vehicle_media" as any).upsert({
+      tenant_id: params.tenantId,
+      claim_id: params.claimId,
+      vehicle_id: c?.vehicle_id || null,
+      work_order_id: c?.job_order_id || c?.auto_job_order_id || null,
+      storage_bucket: "insurance-docs",
+      storage_path: params.path,
+      public_url: params.url || null,
+      media_type: "document",
+      category: params.category,
+      file_name: params.fileName,
+      mime_type: params.mimeType,
+      source: "generated_claim_document",
+      uploaded_by: params.userId || null,
+      uploaded_at: new Date().toISOString(),
+    } as any, { onConflict: "tenant_id,storage_bucket,storage_path" });
+  } catch (error) {
+    console.warn("record generated claim media failed", error);
+  }
+}
+
 /**
  * يحوّل HTML المستند إلى PDF حقيقي عبر html2canvas، يرفعه إلى bucket: insurance-docs
  * يُنشئ سجل في claim_audit_logs مع category + file_path + details + mime_type
@@ -78,6 +117,16 @@ export async function saveClaimDocument(opts: SaveClaimDocOpts): Promise<{
           ...(opts.meta || {}),
         },
       } as any);
+      await recordGeneratedClaimMedia({
+        tenantId: tenantId as string,
+        claimId: opts.claimId,
+        path: fallbackPath,
+        url,
+        category: opts.category,
+        fileName: `${safeName}.html`,
+        mimeType: "text/html",
+        userId: userRes?.user?.id ?? null,
+      });
       return { url, path: fallbackPath };
     }
 
@@ -110,6 +159,16 @@ export async function saveClaimDocument(opts: SaveClaimDocOpts): Promise<{
         ...(opts.meta || {}),
       },
     } as any);
+    await recordGeneratedClaimMedia({
+      tenantId: tenantId as string,
+      claimId: opts.claimId,
+      path,
+      url,
+      category: opts.category,
+      fileName: `${safeName}.pdf`,
+      mimeType: "application/pdf",
+      userId: userRes?.user?.id ?? null,
+    });
 
     return { url, path };
   } catch (e) {

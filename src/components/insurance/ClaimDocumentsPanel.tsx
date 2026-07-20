@@ -12,14 +12,14 @@ import JSZip from "jszip";
 import { toast } from "sonner";
 import { openWhatsAppShareLink } from "@/lib/whatsappShare";
 
-const ICON_MAP: Record<ClaimDocCategory, JSX.Element> = {
+const ICON_MAP: Partial<Record<ClaimDocCategory, JSX.Element>> = {
   claim_estimate: <Calculator size={16} />,
   tax_invoice: <Receipt size={16} />,
   delivery_proof: <Truck size={16} />,
   inspection: <ClipboardCheck size={16} />,
   claim_summary: <FileBarChart2 size={16} />,
 };
-const COLOR_MAP: Record<ClaimDocCategory, string> = {
+const COLOR_MAP: Partial<Record<ClaimDocCategory, string>> = {
   claim_estimate: "bg-blue-500/15 text-blue-400 border-blue-500/30",
   tax_invoice: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
   delivery_proof: "bg-amber-500/15 text-amber-400 border-amber-500/30",
@@ -77,12 +77,13 @@ export default function ClaimDocumentsPanel({ claimId }: { claimId: string }) {
   };
 
   // مجموعة بحسب التصنيف لإظهار الأحدث في كل فئة
-  const grouped = docs.reduce<Record<ClaimDocCategory, ClaimGeneratedDoc[]>>((acc, d) => {
+  const grouped = docs.reduce<Record<string, ClaimGeneratedDoc[]>>((acc, d) => {
     (acc[d.category] = acc[d.category] || []).push(d);
     return acc;
   }, {} as any);
 
-  const allCategories: ClaimDocCategory[] = ["claim_estimate", "tax_invoice", "delivery_proof", "inspection", "claim_summary"];
+  const baseCategories = ["claim_estimate", "tax_invoice", "delivery_proof", "inspection", "claim_summary"];
+  const allCategories = Array.from(new Set([...baseCategories, ...docs.map((doc) => doc.category)])) as ClaimDocCategory[];
 
   if (isLoading) {
     return <div className="text-center py-8 text-muted-foreground text-sm">جاري تحميل المستندات...</div>;
@@ -130,10 +131,10 @@ export default function ClaimDocumentsPanel({ claimId }: { claimId: string }) {
               const list = grouped[cat];
               const latest = list[0];
               return (
-                <div key={cat} className={`border rounded-lg p-3 ${COLOR_MAP[cat]}`}>
+                <div key={cat} className={`border rounded-lg p-3 ${COLOR_MAP[cat] || "bg-slate-500/15 text-slate-400 border-slate-500/30"}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2 text-xs font-semibold">
-                      {ICON_MAP[cat]}
+                      {ICON_MAP[cat] || <FileText size={16} />}
                       {claimDocLabel(cat, "ar")}
                     </div>
                     <Badge variant="outline" className="text-[10px] bg-background/40 border-current">

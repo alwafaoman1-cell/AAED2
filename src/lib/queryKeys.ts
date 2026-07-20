@@ -32,6 +32,11 @@ export const queryKeys = {
     byCompany: (companyId?: string | null) => ["claim_payments", "by_company", companyId ?? ""] as const,
   },
   claimActiveInvoice: (claimId?: string | null) => ["claim_active_invoice", claimId ?? ""] as const,
+  claimMedia: {
+    all: ["claim_media"] as const,
+    list: (claimId?: string | null) => ["claim_media", "list", claimId ?? ""] as const,
+    detail: (mediaId?: string | null) => ["claim_media", "detail", mediaId ?? ""] as const,
+  },
   unifiedRevenueInsuranceInvoices: ["unified_revenue_ins_invoices"] as const,
   claimEstimateNumber: (tenantId?: string | null, claimId?: string | null) =>
     ["claim-estimate-number", tenantId ?? "", claimId ?? ""] as const,
