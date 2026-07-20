@@ -77,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (active) applyProfile(p);
             })
             .catch((error) => {
-              console.error("[auth] profile load failed", error);
+              console.warn("[auth] profile load delayed or failed", error);
               if (active) applyProfile(null);
             });
         }, 0);
@@ -87,18 +87,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     void withTimeout(supabase.auth.getSession(), AUTH_BOOT_TIMEOUT_MS, "auth session timeout")
-      .then(async ({ data: { session: sess } }) => {
+      .then(({ data: { session: sess } }) => {
         if (!active) return;
         setSession(sess);
         setUser(sess?.user ?? null);
         if (sess?.user) {
-          try {
-            const p = await withTimeout(fetchProfile(sess.user.id), PROFILE_TIMEOUT_MS, "profile load timeout");
-            if (active) applyProfile(p);
-          } catch (error) {
-            console.error("[auth] initial profile load failed", error);
-            if (active) applyProfile(null);
-          }
+          void withTimeout(fetchProfile(sess.user.id), PROFILE_TIMEOUT_MS, "profile load timeout")
+            .then((p) => {
+              if (active) applyProfile(p);
+            })
+            .catch((error) => {
+              console.warn("[auth] initial profile load delayed or failed", error);
+              if (active) applyProfile(null);
+            });
         } else {
           applyProfile(null);
         }
