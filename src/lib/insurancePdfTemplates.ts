@@ -6,7 +6,11 @@
 // تستخدم القوالب نفس إعدادات الفروع/الشعار/الختم/التوقيع من pdfGenerator.ts
 // لضمان توحيد الهوية البصرية مع باقي مستندات النظام.
 
-import { getTemplateSettings, type PdfTemplateSettings } from "./pdfGenerator";
+import {
+  getInsuranceTaxInvoiceHtml,
+  getTemplateSettings,
+  type PdfTemplateSettings,
+} from "./pdfGenerator";
 import { buildZatcaQrDataUrl } from "./zatcaQr";
 import { renderWithCustomTemplate } from "./printTemplates/resolver";
 import { vehicleColorToEn } from "./vehicleColors";
@@ -758,13 +762,46 @@ export async function getClaimTaxInvoiceHtml(p: ClaimTaxInvoicePayload): Promise
         vat: vatAmount,
       });
 
-  return renderReferenceInsuranceInvoice(
-    {
-      ...p,
-      qrDataUrl,
-    },
-    s,
-  );
+  return getInsuranceTaxInvoiceHtml({
+    docType: "invoice",
+    template: "default",
+    number: p.invoiceNumber,
+    invoiceNumber: p.invoiceNumber,
+    issueDate: p.invoiceDate,
+    dueDate: p.dueDate || undefined,
+    paymentDueDate: p.dueDate || undefined,
+    customerName: p.insuranceCompany,
+    insuranceCompany: p.insuranceCompany,
+    claimNumber: p.claimNumber,
+    insuranceCommercialRegistration: p.insuranceCompanyCR || undefined,
+    insuranceTaxNumber: p.insuranceCompanyVat || undefined,
+    insuranceAddress: p.insuranceCompanyAddress || undefined,
+    insurancePhone: p.insuranceCompanyPhone || undefined,
+    lpoNumber: p.lpoNumber || undefined,
+    vehiclePlate: p.vehicle.plate || undefined,
+    vehicleInfo: [
+      [p.vehicle.make, p.vehicle.model].filter(Boolean).join(" "),
+      p.vehicle.year ? String(p.vehicle.year) : "",
+    ].filter(Boolean).join(" - "),
+    customFields: [
+      { label: "color", value: p.vehicle.color || "" },
+      { label: "vin", value: p.vehicle.vin || "" },
+      { label: "insurance logo", value: p.insuranceCompanyLogoUrl || "" },
+    ],
+    items: p.items.map((item) => ({
+      description: item.description,
+      quantity: Number(item.quantity) || 0,
+      unitPrice: Number(item.unit_price) || 0,
+      discount: 0,
+      tax: Number(p.vatRate ?? s.vatRate ?? 5),
+    })),
+    subtotal,
+    discountTotal: 0,
+    taxTotal: vatAmount,
+    total,
+    notes: p.notes || undefined,
+    qrDataUrl,
+  });
 
   const logoBlock = s.logoUrl
     ? `<img src="${s.logoUrl}" alt="logo" class="logo" />`
@@ -1026,7 +1063,9 @@ export function getClaimDeliveryHtml(p: ClaimDeliveryPayload): string {
   try {
     const custom = renderWithCustomTemplate("delivery_proof", { ...p, ...getTemplateSettings() }, `Delivery ${p.claimNumber}`);
     if (custom) return custom;
-  } catch {}
+  } catch (_error) {
+    void _error;
+  }
   const s = getTemplateSettings();
   const styles = `${baseStyles(s)}
     .delivery-page{padding:8mm 10mm 12mm!important;font-size:8.4px!important;line-height:1.26!important}
