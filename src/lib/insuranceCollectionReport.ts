@@ -319,7 +319,12 @@ async function freezeHeaderRow(workbookArray: ArrayBuffer): Promise<Blob> {
     return fallback();
   }
 
-  if (/<sheetView\b[^>]*>/.test(xml)) {
+  if (/<sheetView\b[^>]*\/>/.test(xml)) {
+    xml = xml.replace(
+      /<sheetView\b([^>]*)\/>/,
+      `<sheetView$1>${pane}</sheetView>`,
+    );
+  } else if (/<sheetView\b[^>]*>/.test(xml)) {
     xml = xml.replace(
       /(<sheetView\b[^>]*>)([\s\S]*?)(<\/sheetView>)/,
       (_match, open, content, close) => {
