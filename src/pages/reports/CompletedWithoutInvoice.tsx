@@ -44,9 +44,9 @@ export default function CompletedWithoutInvoice() {
     remaining: acc.remaining + row.remainingAmount,
   }), { subtotal: 0, vat: 0, total: 0, paid: 0, remaining: 0 }), [rows]);
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
     try {
-      exportInsuranceCollectionRowsToXlsx(
+      await exportInsuranceCollectionRowsToXlsx(
         rows,
         `Completed_Claims_Pending_Collection_${new Date().toISOString().slice(0, 10)}.xlsx`,
       );

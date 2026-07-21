@@ -347,14 +347,14 @@ export default function InsuranceCompanyDetail() {
   }, [company, workshopOpen, reportClaims, accountingPayments, periodFrom, periodTo, claimInvoiceMap, vatRate, reportColumns]);
 
 
-  const handleExportClaimsExcel = () => {
+  const handleExportClaimsExcel = async () => {
     if (!company) return;
     try {
       const dateTag = [
         periodFrom || "start",
         periodTo || new Date().toISOString().slice(0, 10),
       ].join("_to_");
-      exportInsuranceCollectionRowsToXlsx(
+      await exportInsuranceCollectionRowsToXlsx(
         collectionExportRows,
         `Insurance_Claims_${company.name}_${dateTag}.xlsx`,
       );

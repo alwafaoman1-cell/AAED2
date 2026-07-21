@@ -1,3 +1,4 @@
+import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
 import type { InsuranceInvoice } from "@/hooks/useInsuranceInvoices";
@@ -291,10 +292,61 @@ export function formatOmr3(value: number): string {
   }));
 }
 
-export function exportInsuranceCollectionRowsToXlsx(
+function downloadXlsxBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function freezeHeaderRow(workbookArray: ArrayBuffer): Promise<Blob> {
+  const zip = await JSZip.loadAsync(workbookArray);
+  const sheet = zip.file("xl/worksheets/sheet1.xml");
+  const fallback = () => new Blob([workbookArray], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  if (!sheet) return fallback();
+
+  let xml = await sheet.async("string");
+  const pane = '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>';
+
+  if (xml.includes('state="frozen"')) {
+    return fallback();
+  }
+
+  if (/<sheetView\b[^>]*>/.test(xml)) {
+    xml = xml.replace(
+      /(<sheetView\b[^>]*>)([\s\S]*?)(<\/sheetView>)/,
+      (_match, open, content, close) => {
+        const cleaned = String(content)
+          .replace(/<pane\b[\s\S]*?\/>/g, "")
+          .replace(/<selection\b[^>]*\/>/g, "");
+        return `${open}${pane}${cleaned}${close}`;
+      },
+    );
+  } else {
+    xml = xml.replace(
+      /(<sheetFormatPr\b)/,
+      `<sheetViews><sheetView workbookViewId="0">${pane}</sheetView></sheetViews>$1`,
+    );
+  }
+
+  zip.file("xl/worksheets/sheet1.xml", xml);
+  return zip.generateAsync({
+    type: "blob",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
+export async function exportInsuranceCollectionRowsToXlsx(
   rows: InsuranceCollectionRow[],
   filename: string,
-): void {
+): Promise<void> {
   if (!rows.length) {
     throw new Error("لا توجد سجلات مطابقة للتصدير");
   }
@@ -323,5 +375,7 @@ export function exportInsuranceCollectionRowsToXlsx(
   }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Claims Collection");
-  XLSX.writeFile(wb, filename);
+  const workbookArray = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+  const blob = await freezeHeaderRow(workbookArray);
+  downloadXlsxBlob(blob, filename);
 }
