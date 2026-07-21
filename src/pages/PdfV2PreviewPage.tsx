@@ -9,6 +9,7 @@ import {
   buildTrackingQrDataUrl,
   getInsuranceTaxInvoiceHtml,
   getInvoiceHtml,
+  getTemplateSettingsAsync,
   getVehicleDeliveryReceiptHtml,
   getWorkOrderHtml,
 } from "@/lib/pdfGenerator";
@@ -62,7 +63,7 @@ async function loadSalesInvoice(id: string): Promise<LoadedPdf> {
     .select("id,date,amount,method,reference")
     .eq("sales_document_id", doc.id)
     .order("date", { ascending: false });
-  const tpl = await import("@/lib/pdfGenerator").then((m) => m.getTemplateSettings());
+  const tpl = await getTemplateSettingsAsync();
   let qrDataUrl = "";
   try {
     qrDataUrl = await buildZatcaQrDataUrl({
@@ -199,7 +200,7 @@ async function loadInsuranceInvoice(id: string): Promise<LoadedPdf> {
   ]);
   let qrDataUrl = "";
   try {
-    const tpl = await import("@/lib/pdfGenerator").then((m) => m.getTemplateSettings());
+    const tpl = await getTemplateSettingsAsync();
     qrDataUrl = await buildZatcaQrDataUrl({
       sellerName: tpl.companyName,
       vatNumber: tpl.vatNumber,
@@ -211,6 +212,7 @@ async function loadInsuranceInvoice(id: string): Promise<LoadedPdf> {
     qrDataUrl = "";
   }
   const subtotal = Number(inv.subtotal || Math.max(0, Number(inv.total || 0) - Number(inv.vat || 0)));
+  await getTemplateSettingsAsync();
   const html = getInsuranceTaxInvoiceHtml({
     docType: "invoice",
     template: "default",

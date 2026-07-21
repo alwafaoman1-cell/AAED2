@@ -4,7 +4,6 @@ import { toEnglishDigits } from "./numberUtils";
 import { renderWithCustomTemplate } from "./printTemplates/resolver";
 import type { DocType } from "./printTemplates/schema";
 import QRCode from "qrcode";
-import companyLogoDataUrl from "../assets/logo.png?inline";
 import { openSanitizedPdfWindow } from "./safePdfWindow";
 import { buildPublicUrl } from "./publicAccessSettingsStore";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
@@ -224,6 +223,11 @@ export function getTemplateSettings(): PdfTemplateSettings {
   templateCache = { ...DEFAULT_SETTINGS };
   void loadTemplateSettingsFromCloud();
   return templateCache;
+}
+
+export async function getTemplateSettingsAsync(): Promise<PdfTemplateSettings> {
+  await loadTemplateSettingsFromCloud();
+  return getTemplateSettings();
 }
 
 export function subscribeTemplateSettings(cb: () => void): () => void {
@@ -1721,8 +1725,10 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
   const vehicleName = vehicleNameRaw || data.vehicleInfo || "—";
   const vehicleYear = vehicleYearRaw || "";
   const plateRaw = String(data.vehiclePlate || "—").trim();
-  const headerLogoUrl = s.logoUrl || companyLogoDataUrl;
-  const logoHtml = `<img src="${invoiceRefEscape(headerLogoUrl)}" alt="Alwafa logo"/>`;
+  const headerLogoUrl = String(s.logoUrl || "").trim();
+  const logoHtml = headerLogoUrl
+    ? `<img src="${invoiceRefEscape(headerLogoUrl)}" alt="Company logo"/>`
+    : `<div class="brand-fallback">ALWAFA</div>`;
   const insuranceLogoHtml = custom.insuranceLogoUrl
     ? `<img src="${invoiceRefEscape(custom.insuranceLogoUrl)}" alt="Insurance logo"/>`
     : `<div class="insurance-logo-fallback">${invoiceRefEscape(String(data.insuranceCompany || "INS").slice(0, 2).toUpperCase())}</div>`;
@@ -1755,12 +1761,13 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;font-size:10.8px}
     .page{width:210mm;min-height:297mm;margin:0 auto;padding:8mm 7.5mm 13mm;background:#fff;position:relative;overflow:visible}
     .mono,.money{font-family:'Inter','Noto Sans Arabic',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:embed}
-    .top{display:grid;grid-template-columns:56mm 1fr;gap:11mm;align-items:start;direction:ltr;margin-bottom:8mm;position:relative}
+    .top{display:grid;grid-template-columns:56mm 1fr;gap:10mm;align-items:start;direction:ltr;margin-bottom:8mm;position:relative}
     .invoice-card{width:55mm;background:linear-gradient(135deg,#061a32,#082b4b);color:#fff;border-radius:1.5mm;text-align:center;padding:7mm 4mm 5mm;box-shadow:0 2px 7px rgba(5,24,45,.18)}
     .invoice-card .ar{font-size:14px;font-weight:800;margin-bottom:2mm}.invoice-card .en{font-family:'Inter',sans-serif;font-size:10px;font-weight:800;letter-spacing:.5px;margin-bottom:3mm}.invoice-card .no{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;line-height:1;letter-spacing:1px}
     .invoice-date{width:55mm;text-align:center;margin-top:3.5mm;color:#10213c;font-family:'Inter',sans-serif;font-size:11px}
-    .company{grid-column:2;text-align:right;padding-top:1mm;padding-right:34mm;min-height:36mm;direction:rtl}.company h1{font-size:17px;line-height:1.18;margin:0 0 1.2mm;font-weight:800;color:#071b39;text-align:right}.company .en{font-family:'Inter',sans-serif;font-size:12px;font-weight:800;margin-bottom:2.5mm;color:#071b39;text-align:right;direction:ltr}.company .meta{display:grid;gap:1.1mm;align-items:center;max-width:78mm;margin:0 0 0 auto;text-align:left;direction:ltr;font-family:'Inter','Noto Sans Arabic',sans-serif;color:#10213c;font-size:9.7px;line-height:1.35}
-    .logo-box{position:absolute;right:0;top:0;width:28mm;height:36mm;display:flex;align-items:flex-start;justify-content:center}.logo-box img{max-width:28mm;max-height:36mm;object-fit:contain}.brand-fallback{width:27mm;height:36mm;background:#071b39;border:1.5mm solid #d8a01d;color:#d8a01d;display:flex;align-items:end;justify-content:center;padding-bottom:3mm;font-family:'Inter',sans-serif;font-size:12px;font-weight:800}
+    .company-wrap{grid-column:2;display:flex;flex-direction:row-reverse;align-items:flex-start;justify-content:flex-start;gap:5mm;min-height:37mm;direction:rtl}
+    .logo-box{width:30mm;height:36mm;display:flex;align-items:flex-start;justify-content:center;flex:0 0 30mm}.logo-box img{max-width:30mm;max-height:36mm;object-fit:contain}.brand-fallback{width:27mm;height:34mm;background:#071b39;border:1.2mm solid #d8a01d;color:#d8a01d;display:flex;align-items:end;justify-content:center;padding-bottom:3mm;font-family:'Inter',sans-serif;font-size:12px;font-weight:800}
+    .company{text-align:right;padding-top:1mm;direction:rtl;max-width:92mm;flex:1}.company h1{font-size:16.5px;line-height:1.16;margin:0 0 1mm;font-weight:800;color:#071b39;text-align:right}.company .en{font-family:'Inter',sans-serif;font-size:11.5px;font-weight:800;margin-bottom:2mm;color:#071b39;text-align:right;direction:ltr}.company .meta{display:grid;gap:.7mm;align-items:center;text-align:right;direction:rtl;font-family:'Inter','Noto Sans Arabic',sans-serif;color:#10213c;font-size:9.2px;line-height:1.28}.company .meta span{display:block}.company .meta .ltr{direction:ltr;text-align:right;unicode-bidi:embed}
     .card{border:1px solid #112b50;border-radius:1.5mm;margin-bottom:5mm;break-inside:avoid;page-break-inside:avoid;background:#fff}
     .claim-card{min-height:33mm;display:grid;grid-template-columns:1fr 26mm 1.25fr;align-items:center;padding:5mm 5mm;direction:ltr}.claim-left{text-align:left}.claim-mid{text-align:center}.claim-right{text-align:center;direction:rtl}
     .label-ar{font-weight:700;color:#071b39;font-size:10px}.label-en{font-family:'Inter',sans-serif;text-transform:uppercase;font-size:8.8px;color:#071b39;font-weight:800;letter-spacing:.25px}.big{font-size:13px;font-weight:800;color:#071b39;line-height:1.55}.insurance-logo{width:22mm;height:22mm;margin:auto;border:1px solid #cdd6e3;border-radius:50%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fff}.insurance-logo img{max-width:20mm;max-height:20mm;object-fit:contain}.insurance-logo-fallback{font-family:'Inter',sans-serif;font-size:10px;font-weight:800;color:#071b39}
@@ -1775,11 +1782,20 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
   `;
   const dueDate = data.paymentDueDate || (data as any).dueDate || "—";
   const billToAddress = data.insuranceAddress || [data.insurancePoBox, data.insuranceBranchCity].filter(Boolean).join("، ") || "—";
+  const companyNameAr = s.companyName || "شركة الوفاء للأعمال المتكاملة";
+  const companyNameEn = s.companyNameEn || "Alwafa Integrated Services";
+  const companyMetaHtml = [
+    s.commercialReg ? `<span class="ltr">CR: ${invoiceRefEscape(s.commercialReg)}</span>` : "",
+    s.vatNumber ? `<span class="ltr">VAT: ${invoiceRefEscape(s.vatNumber)}</span>` : "",
+    s.phone ? `<span class="ltr">${invoiceRefEscape(s.phone)}</span>` : "",
+    s.email ? `<span class="ltr">${invoiceRefEscape(s.email)}</span>` : "",
+    (s as any).website ? `<span class="ltr">${invoiceRefEscape((s as any).website)}</span>` : "",
+    s.address ? `<span>${invoiceRefEscape(s.address)}</span>` : "",
+  ].filter(Boolean).join("");
   const body = `<div class="page">
     <header class="top">
       <div><div class="invoice-card"><div class="ar">فاتورة ضريبية</div><div class="en">TAX INVOICE</div><div class="no">${invoiceRefEscape(data.invoiceNumber)}</div></div><div class="invoice-date">${invoiceRefEscape(data.issueDate)}</div></div>
-      <div class="company"><h1>${invoiceRefEscape(s.companyName || "شركة الوفاء للأعمال المتكاملة")}</h1><div class="en">${invoiceRefEscape(s.companyNameEn || "Alwafa Integrated Services")}</div><div class="meta"><span>${invoiceRefEscape(s.phone || "+968 9205 9707")}</span><span>${invoiceRefEscape(s.email || "info@alwafa.om")}</span><span>${invoiceRefEscape((s as any).website || "www.alwafa.om")}</span><span>${invoiceRefEscape(s.address || "سلطنة عمان - مسقط")}</span></div></div>
-      <div class="logo-box">${logoHtml}</div>
+      <div class="company-wrap"><div class="logo-box">${logoHtml}</div><div class="company"><h1>${invoiceRefEscape(companyNameAr)}</h1><div class="en">${invoiceRefEscape(companyNameEn)}</div><div class="meta">${companyMetaHtml}</div></div></div>
     </header>
     <section class="card claim-card">
       <div class="claim-left"><div class="label-ar">رقم المطالبة</div><div class="label-en">CLAIM</div><div class="big mono">${invoiceRefEscape(data.claimNumber || "—")}</div></div>

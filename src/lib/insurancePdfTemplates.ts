@@ -8,6 +8,7 @@
 
 import {
   getInsuranceTaxInvoiceHtml,
+  getTemplateSettingsAsync,
   getTemplateSettings,
   type PdfTemplateSettings,
 } from "./pdfGenerator";
@@ -726,7 +727,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
 //    أنماط الفاتورة معزولة في كتلة CSS خاصة بها ولا تعتمد على baseStyles.
 // ─────────────────────────────────────────────────────────────────
 export async function getClaimTaxInvoiceHtml(p: ClaimTaxInvoicePayload): Promise<string> {
-  const s = getTemplateSettings();
+  const s = await getTemplateSettingsAsync();
   const vatRate = (p.vatRate ?? s.vatRate ?? 5) / 100;
 
   let subtotal = 0;
