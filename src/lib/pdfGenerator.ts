@@ -1761,14 +1761,14 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;font-size:10.8px}
     .page{width:210mm;min-height:297mm;margin:0 auto;padding:8mm 7.5mm 13mm;background:#fff;position:relative;overflow:visible}
     .mono,.money{font-family:'Inter','Noto Sans Arabic',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:embed}
-    .top{display:grid;grid-template-columns:56mm 1fr 58mm;gap:8mm;align-items:start;direction:ltr;margin-bottom:8mm;position:relative}
+    .top{display:grid;grid-template-columns:56mm minmax(56mm,1fr) 58mm;gap:5mm;align-items:start;direction:ltr;margin-bottom:8mm;position:relative}
     .invoice-card{width:55mm;background:linear-gradient(135deg,#061a32,#082b4b);color:#fff;border-radius:1.5mm;text-align:center;padding:7mm 4mm 5mm;box-shadow:0 2px 7px rgba(5,24,45,.18)}
     .invoice-card .ar{font-size:14px;font-weight:800;margin-bottom:2mm}.invoice-card .en{font-family:'Inter',sans-serif;font-size:10px;font-weight:800;letter-spacing:.5px;margin-bottom:3mm}.invoice-card .no{font-family:'Inter',sans-serif;font-size:25px;font-weight:800;line-height:1;letter-spacing:1px}
     .invoice-date{width:55mm;text-align:center;margin-top:3.5mm;color:#10213c;font-family:'Inter',sans-serif;font-size:11px}
-    .brand-center{grid-column:2;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;min-height:37mm;direction:rtl;padding-top:0}
+    .brand-center{grid-column:2;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;min-height:37mm;direction:rtl;padding-top:0;min-width:0}
     .logo-box{width:28mm;height:18mm;display:flex;align-items:flex-start;justify-content:center;margin-bottom:2mm}.logo-box img{max-width:28mm;max-height:18mm;object-fit:contain}.brand-fallback{width:16mm;height:18mm;background:#071b39;border:.8mm solid #d8a01d;color:#d8a01d;display:flex;align-items:end;justify-content:center;padding-bottom:1.5mm;font-family:'Inter',sans-serif;font-size:8px;font-weight:800}
-    .brand-name-ar{font-size:8.8px;font-weight:800;line-height:1.15;color:#071b39;max-width:30mm;margin-bottom:1mm}
-    .brand-name-en{font-family:'Inter',sans-serif;font-size:8.8px;font-weight:800;line-height:1.15;color:#071b39;max-width:32mm;direction:ltr}
+    .brand-name-ar{font-size:8.2px;font-weight:800;line-height:1.15;color:#071b39;width:100%;max-width:58mm;margin-bottom:1mm;white-space:nowrap;overflow:hidden;text-overflow:clip}
+    .brand-name-en{font-family:'Inter',sans-serif;font-size:8.2px;font-weight:800;line-height:1.15;color:#071b39;width:100%;max-width:58mm;direction:ltr;white-space:nowrap;overflow:hidden;text-overflow:clip}
     .company{grid-column:3;text-align:right;padding-top:1mm;direction:rtl;max-width:58mm}.company .meta{display:grid;gap:.7mm;align-items:center;text-align:right;direction:rtl;font-family:'Inter','Noto Sans Arabic',sans-serif;color:#10213c;font-size:9.2px;line-height:1.28}.company .meta span{display:block}.company .meta .ltr{direction:ltr;text-align:right;unicode-bidi:embed}
     .card{border:1px solid #112b50;border-radius:1.5mm;margin-bottom:5mm;break-inside:avoid;page-break-inside:avoid;background:#fff}
     .claim-card{min-height:33mm;display:grid;grid-template-columns:1fr 26mm 1.25fr;align-items:center;padding:5mm 5mm;direction:ltr}.claim-left{text-align:left}.claim-mid{text-align:center}.claim-right{text-align:center;direction:rtl}
