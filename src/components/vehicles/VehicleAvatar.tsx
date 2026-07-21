@@ -30,6 +30,7 @@ interface VehicleAvatarProps {
   size?: VehicleAvatarSize;
   className?: string;
   canEdit?: boolean;
+  deferAvatarFetch?: boolean;
 }
 
 export default function VehicleAvatar({
@@ -43,12 +44,14 @@ export default function VehicleAvatar({
   size = "md",
   className = "",
   canEdit = true,
+  deferAvatarFetch = size === "sm",
 }: VehicleAvatarProps) {
   const [failed, setFailed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const { data: avatar, isLoading } = useVehicleAvatar(vehicleId);
+  const shouldFetchAvatar = !!vehicleId && (!deferAvatarFetch || dialogOpen);
+  const { data: avatar, isLoading } = useVehicleAvatar(shouldFetchAvatar ? vehicleId : null);
   const uploadAvatar = useUploadVehicleAvatar();
   const deleteAvatar = useDeleteVehicleAvatar();
 
