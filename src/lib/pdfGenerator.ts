@@ -1557,12 +1557,17 @@ function invoiceRefEscape(value: unknown): string {
 }
 
 function invoiceRefEnglishLine(value: unknown): string {
-  return invoiceRefEscape(
-    String(value ?? "")
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
+  const raw = String(value ?? "").replace(/\s+/g, " ").trim();
+  const fixed = raw
+    .replace(/Al\s*Wafa/gi, "Al Wafa ")
+    .replace(/Integrated?/gi, "Integrated ")
+    .replace(/Business/gi, "Business ")
+    .replace(/Company/gi, "Company ")
+    .replace(/LLC/gi, "LLC")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+  return invoiceRefEscape(fixed);
 }
 
 function invoiceRefMoney(value: number): string {
@@ -1777,17 +1782,18 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     .brand-center{grid-column:2;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;min-height:27mm;direction:rtl;padding-top:0;min-width:0;overflow:visible}
     .logo-box{width:22mm;height:14mm;display:flex;align-items:flex-start;justify-content:center;margin-bottom:1mm}.logo-box img{max-width:22mm;max-height:14mm;object-fit:contain}.brand-fallback{width:15mm;height:14mm;background:#071b39;border:.8mm solid #d8a01d;color:#d8a01d;display:flex;align-items:end;justify-content:center;padding-bottom:1.2mm;font-family:'Inter',sans-serif;font-size:7px;font-weight:800}
     .brand-name-ar{font-size:7.2px;font-weight:800;line-height:1.35;color:#071b39;width:100%;max-width:64mm;margin:0 0 .4mm;white-space:nowrap;overflow:visible;text-overflow:clip}
-    .brand-name-en{font-family:'Inter',sans-serif;font-size:7.1px;font-weight:800;line-height:1.42;color:#071b39;width:100%;max-width:64mm;direction:ltr;white-space:nowrap;overflow:visible;text-overflow:clip;word-spacing:1.1px;letter-spacing:-.05px}
+    .brand-name-en{font-family:'Inter',sans-serif;font-size:6.9px;font-weight:800;line-height:1.42;color:#071b39;width:100%;max-width:64mm;direction:ltr;white-space:nowrap;overflow:visible;text-overflow:clip;word-spacing:1.6px;letter-spacing:0}
     .company{grid-column:3;text-align:right;padding-top:.5mm;direction:rtl;max-width:58mm}.company .meta{display:grid;gap:.45mm;align-items:center;text-align:right;direction:rtl;font-family:'Inter','Noto Sans Arabic',sans-serif;color:#10213c;font-size:8.4px;line-height:1.18}.company .meta span{display:block}.company .meta .ltr{direction:ltr;text-align:right;unicode-bidi:embed}
     .card{border:1px solid #112b50;border-radius:1.5mm;margin-bottom:3mm;break-inside:avoid;page-break-inside:avoid;background:#fff}
     .claim-card{height:27mm;display:grid;grid-template-columns:1fr 22mm 1.25fr;align-items:center;padding:3mm 4mm;direction:ltr}.claim-left{text-align:left}.claim-mid{text-align:center}.claim-right{text-align:center;direction:rtl}
     .label-ar{font-weight:700;color:#071b39;font-size:9px}.label-en{font-family:'Inter',sans-serif;text-transform:uppercase;font-size:7.5px;color:#071b39;font-weight:800;letter-spacing:.12px;word-spacing:1.4px;white-space:nowrap}.big{font-size:11.5px;font-weight:800;color:#071b39;line-height:1.35}.insurance-logo{width:18mm;height:18mm;margin:auto;border:1px solid #cdd6e3;border-radius:50%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fff}.insurance-logo img{max-width:16mm;max-height:16mm;object-fit:contain}.insurance-logo-fallback{font-family:'Inter',sans-serif;font-size:9px;font-weight:800;color:#071b39}
-    .vehicle-card{height:24mm;display:grid;grid-template-columns:1.05fr 1.35fr 1fr 1fr;align-items:center;text-align:center;direction:ltr;overflow:hidden}.vehicle-cell{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.8mm 2mm;border-inline-start:1px solid #cfd8e6}.vehicle-cell:first-child{border-inline-start:0}.vehicle-cell .value{font-size:10px;font-weight:800;margin-top:1.3mm}.vehicle-cell .lpo{font-family:'Inter',sans-serif;font-size:7.8px;margin-top:1.5mm}.vehicle-cell .dash{font-size:11px;font-weight:800}
+    .lpo-under-claim{font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:8px;font-weight:700;margin-top:1.2mm;color:#10213c;direction:ltr}
+    .vehicle-card{height:24mm;display:grid;grid-template-columns:1.05fr 1.35fr 1fr 1fr;align-items:center;text-align:center;direction:ltr;overflow:hidden}.vehicle-cell{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.8mm 2mm;border-inline-start:1px solid #cfd8e6}.vehicle-cell:first-child{border-inline-start:0}.vehicle-cell .value{font-size:10px;font-weight:800;margin-top:1.3mm}.vehicle-cell .dash{font-size:11px;font-weight:800}
     .bill-card{height:31mm;display:grid;grid-template-columns:1fr 1.12fr 1.12fr 1.55fr;align-items:stretch;text-align:center;direction:ltr;overflow:hidden}.bill-cell{display:flex;flex-direction:column;justify-content:center;align-items:center;padding:2mm 2mm;border-inline-start:1px solid #cfd8e6}.bill-cell:first-child{border-inline-start:0}.bill-cell .value{font-size:9.8px;font-weight:800;margin-top:1.8mm;line-height:1.35}.bill-cell.bill-to{align-items:center;direction:rtl}
     table.items{width:100%;border-collapse:collapse;margin-bottom:4mm;font-size:9.5px;border:1px solid #112b50;break-inside:avoid;page-break-inside:avoid}.items th{background:#071b39;color:#fff;padding:2.4mm 2mm;text-align:center;font-weight:800;border-left:1px solid rgba(255,255,255,.35)}.items td{padding:3.2mm 2mm;text-align:center;vertical-align:middle;border-top:1px solid #cfd8e6;border-left:1px solid #cfd8e6;color:#071b39}.items .desc{font-size:10.5px;font-weight:700;line-height:1.42;direction:rtl}.items .desc strong{font-family:'Inter',sans-serif;font-size:9.5px;direction:ltr;unicode-bidi:embed}
     .summary-row{display:grid;grid-template-columns:94mm 1fr;gap:12mm;align-items:center;margin-bottom:3.5mm;break-inside:avoid;page-break-inside:avoid;direction:ltr}.totals{border:1px solid #112b50;border-radius:1.5mm;padding:2.5mm 4mm}.total-line{display:grid;grid-template-columns:17mm 25mm 1fr;gap:2mm;align-items:center;padding:1.3mm 0}.total-line .cur{font-family:'Inter',sans-serif;font-weight:800;font-size:8px}.total-line .amount{font-family:'Inter',sans-serif;font-weight:800;font-size:10.5px}.total-line .lbl{text-align:right;font-weight:700;line-height:1.22;font-size:9px}.separator{height:1px;background:#071b39;margin:1.3mm 0 2mm}.payable{background:linear-gradient(135deg,#061a32,#082b4b);color:#fff!important;border-radius:1.4mm;padding:3mm 4mm;display:grid;grid-template-columns:1fr 39mm;align-items:center}.payable .amount{font-family:'Inter',sans-serif;font-size:18px;font-weight:800;text-align:left;color:#fff!important}.payable .label{text-align:right;font-weight:800;font-size:10.5px;line-height:1.35;color:#fff!important}.payable .label .label-en{color:#fff!important;word-spacing:1.8px;letter-spacing:.12px}.payable .currency{font-size:8px;margin-inline-start:2mm;color:#fff!important}
     .qr-wrap{text-align:center}.qr-frame{width:27mm;height:27mm;border:1px solid #cbd5e1;padding:1.5mm;margin:0 auto 2mm;display:flex;align-items:center;justify-content:center;background:#fff}.qr-frame img{width:23mm;height:23mm;object-fit:contain}.qr-caption{font-family:'Inter',sans-serif;font-size:8px;color:#071b39}
-    .signature-row{display:grid;grid-template-columns:1fr 1fr;gap:17mm;align-items:end;margin:0 8mm 3mm;direction:ltr;break-inside:avoid;page-break-inside:avoid}.sig-box{text-align:left}.stamp-box{text-align:center}.sig-title,.stamp-title{font-size:8.7px;font-weight:700;color:#071b39;margin-bottom:2mm;line-height:1.25}.sig-line{height:12mm;border-bottom:1px solid #071b39;display:flex;align-items:end;justify-content:center}.sig-line img{max-width:42mm;max-height:10mm;object-fit:contain}.stamp-frame{height:12mm;border:1px dashed #9db0c8;border-radius:1.5mm;display:flex;align-items:center;justify-content:center;max-width:39mm;margin:0 auto}.stamp-frame img{max-width:37mm;max-height:10mm;object-fit:contain}
+    .signature-row{display:grid;grid-template-columns:1fr 1fr;gap:17mm;align-items:end;margin:0 8mm 3mm;direction:ltr;break-inside:avoid;page-break-inside:avoid}.sig-box{text-align:left}.stamp-box{text-align:center}.sig-title,.stamp-title{font-size:8.7px;font-weight:700;color:#071b39;margin-bottom:2mm;line-height:1.25}.sig-line{height:12mm;border-bottom:1px solid #071b39;display:flex;align-items:end;justify-content:center}.sig-line img{max-width:42mm;max-height:10mm;object-fit:contain}.stamp-frame{min-height:12mm;border:1px dashed #9db0c8;border-radius:1.5mm;display:flex;align-items:center;justify-content:center;max-width:46mm;margin:0 auto;padding:.8mm}.stamp-frame img{width:auto;height:auto;max-width:44mm;max-height:18mm;object-fit:contain}
     .footer{border-top:1.2px solid #d8a01d;text-align:center;padding-top:1.5mm;font-size:8.2px;font-family:'Inter','Noto Sans Arabic',sans-serif;letter-spacing:.3px;color:#071b39;break-inside:avoid;page-break-inside:avoid;margin-bottom:0}.thanks{display:inline-flex;gap:9mm;align-items:center;justify-content:center}
     @media print{html,body{background:#fff}.page{margin:0;box-shadow:none;height:297mm;max-height:297mm;overflow:hidden}.card,.items,.summary-row,.signature-row,.footer{break-inside:avoid;page-break-inside:avoid}}
   `;
@@ -1810,12 +1816,12 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
       <div class="company"><div class="meta">${companyMetaHtml}</div></div>
     </header>
     <section class="card claim-card">
-      <div class="claim-left"><div class="label-ar">رقم المطالبة</div><div class="label-en">CLAIM</div><div class="big mono">${invoiceRefEscape(data.claimNumber || "—")}</div></div>
+      <div class="claim-left"><div class="label-ar">رقم المطالبة</div><div class="label-en">CLAIM</div><div class="big mono">${invoiceRefEscape(data.claimNumber || "—")}</div>${data.lpoNumber ? `<div class="lpo-under-claim">LPO - ${invoiceRefEscape(data.lpoNumber)}</div>` : ""}</div>
       <div class="claim-mid"><div class="insurance-logo">${insuranceLogoHtml}</div></div>
       <div class="claim-right"><div class="label-ar">شركة التأمين</div><div class="label-en">INSURANCE PROVIDER</div><div class="big">${invoiceRefEscape(data.insuranceCompany || "—")}</div></div>
     </section>
     <section class="card vehicle-card">
-      <div class="vehicle-cell"><div class="label-ar">اللون</div><div class="label-en">COLOR</div><div class="value">${invoiceRefEscape(custom.color || "—")}</div><div class="lpo mono">${invoiceRefEscape(data.lpoNumber || "")}</div></div>
+      <div class="vehicle-cell"><div class="label-ar">اللون</div><div class="label-en">COLOR</div><div class="value">${invoiceRefEscape(custom.color || "—")}</div></div>
       <div class="vehicle-cell"><div class="label-ar">المركبة</div><div class="label-en">VEHICLE</div><div class="value">${invoiceRefEscape([vehicleName, vehicleYear].filter(Boolean).join(" - "))}</div></div>
       <div class="vehicle-cell"><div class="label-ar">رقم اللوحة</div><div class="label-en">PLATE NO.</div><div class="value mono">${invoiceRefEscape(plateRaw)}</div></div>
       <div class="vehicle-cell"><div class="label-ar">رقم الهيكل</div><div class="label-en">VIN</div><div class="dash mono">${invoiceRefEscape(custom.vin || "---")}</div></div>
