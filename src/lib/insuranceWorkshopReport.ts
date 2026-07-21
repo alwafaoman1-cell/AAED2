@@ -4,7 +4,7 @@
 import { getTemplateSettings, type PdfTemplateSettings } from "./pdfGenerator";
 import { formatDateLatin } from "./numberUtils";
 import { durationLevel, durationHex } from "./claimDurationStatus";
-import { splitVatInclusiveAmount } from "./workOrderCosting";
+import { calculateVatExclusive } from "./money";
 
 export type CollectionStatus = "paid" | "partial" | "pending" | "overdue" | "n/a";
 
@@ -109,7 +109,7 @@ export function getInsuranceWorkshopReportHtml(data: WorkshopReportData): string
 
   const totalEstimated = rows.reduce((a, r) => a + (r.estimatedAmount || 0), 0);
   const totalBreakdown = rows.reduce((a, r) => {
-    const breakdown = splitVatInclusiveAmount(r.approvedAmount || 0, vatRate);
+    const breakdown = calculateVatExclusive(r.approvedAmount || 0, vatRate);
     return {
       subtotal: a.subtotal + breakdown.subtotalBeforeVat,
       vat: a.vat + breakdown.vatAmount,
@@ -133,7 +133,7 @@ export function getInsuranceWorkshopReportHtml(data: WorkshopReportData): string
   };
 
   const renderCell = (k: WorkshopColumnKey, r: WorkshopReportRow): string => {
-    const breakdown = splitVatInclusiveAmount(r.approvedAmount || 0, vatRate);
+    const breakdown = calculateVatExclusive(r.approvedAmount || 0, vatRate);
     const approved = breakdown.subtotalBeforeVat;
     const vat = breakdown.vatAmount;
     const gross = breakdown.totalIncludingVat;

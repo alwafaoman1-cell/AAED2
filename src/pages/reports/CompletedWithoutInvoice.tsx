@@ -1,77 +1,59 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Download, FileWarning, PlusCircle } from "lucide-react";
+import { ArrowRight, Download, FileWarning } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { buildWorkOrderAccountingRows, formatOMR } from "@/lib/accounting/core";
-import { getWorkOrderById } from "@/lib/workOrdersStore";
 import { smartBack } from "@/lib/smartBack";
-import { isInsuranceWorkOrder } from "@/lib/workOrderType";
-
-function csvCell(value: unknown) {
-  return `"${String(value ?? "").replace(/"/g, '""')}"`;
-}
-
-function isCompletedStatus(status: string) {
-  const value = String(status || "").toLowerCase();
-  return [
-    "ready",
-    "completed",
-    "delivered",
-    "closed",
-    "جاهز",
-    "مكتمل",
-    "تم التسليم",
-    "مغلق",
-  ].some((token) => value.includes(token));
-}
+import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
+import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
+import { useClaimPayments } from "@/hooks/useClaimPayments";
+import {
+  buildInsuranceCollectionRows,
+  exportInsuranceCollectionRowsToXlsx,
+  formatOmr3,
+  INSURANCE_COLLECTION_HEADERS,
+} from "@/lib/insuranceCollectionReport";
 
 export default function CompletedWithoutInvoice() {
   const navigate = useNavigate();
+  const { data: claims = [], isLoading: claimsLoading, error: claimsError } = useInsuranceClaims();
+  const { data: invoices = [], isLoading: invoicesLoading, error: invoicesError } = useInsuranceInvoices();
+  const { data: payments = [], isLoading: paymentsLoading, error: paymentsError } = useClaimPayments();
 
-  const rows = useMemo(() => {
-    return buildWorkOrderAccountingRows()
-      .filter((row) => isCompletedStatus(row.status) && !row.hasInvoice)
-      .map((row) => {
-        const order = getWorkOrderById(row.workOrderNumber);
-        const insuranceOrder = order ? isInsuranceWorkOrder(order) : String(row.orderType || "").toLowerCase().includes("insurance");
-        return {
-          ...row,
-          order,
-          insuranceOrder,
-          financialWorkflow: insuranceOrder ? "Delivered - Waiting LPO / Insurance Invoice" : "Cash invoice required",
-          skipReason: order?.closingReview?.skipInvoiceReason || "",
-          closedByRole: order?.closingReview?.approvedByRole || "",
-        };
-      })
-      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  }, []);
+  const loading = claimsLoading || invoicesLoading || paymentsLoading;
+  const error = claimsError || invoicesError || paymentsError;
 
-  const totalRevenue = rows.reduce((sum, row) => sum + Number(row.revenueExVat || 0), 0);
-  const totalProfit = rows.reduce((sum, row) => sum + Number(row.netProfit || 0), 0);
+  const rows = useMemo(
+    () => buildInsuranceCollectionRows({
+      claims,
+      invoices,
+      payments,
+      pendingCollectionOnly: true,
+    }),
+    [claims, invoices, payments],
+  );
 
-  const exportCsv = () => {
-    const headers = ["Work Order", "Date", "Customer", "Vehicle", "Status", "Workflow", "Revenue", "Net Profit", "Skip Reason"];
-    const lines = rows.map((row) => [
-      row.workOrderNumber,
-      row.date,
-      row.customerName,
-      row.vehiclePlate,
-      row.status,
-      row.financialWorkflow,
-      row.revenueExVat,
-      row.netProfit,
-      row.skipReason,
-    ].map(csvCell).join(","));
-    const blob = new Blob(["\ufeff" + [headers.join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "completed-work-orders-without-invoice.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+  const totals = useMemo(() => rows.reduce((acc, row) => ({
+    subtotal: acc.subtotal + row.approvedBeforeVat,
+    vat: acc.vat + row.vatAmount,
+    total: acc.total + row.totalIncludingVat,
+    paid: acc.paid + row.paidAmount,
+    remaining: acc.remaining + row.remainingAmount,
+  }), { subtotal: 0, vat: 0, total: 0, paid: 0, remaining: 0 }), [rows]);
+
+  const exportExcel = () => {
+    try {
+      exportInsuranceCollectionRowsToXlsx(
+        rows,
+        `Completed_Claims_Pending_Collection_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      toast.success("تم تصدير Excel");
+    } catch (err: any) {
+      toast.error(err?.message || "تعذر تصدير التقرير");
+    }
   };
 
   return (
@@ -82,82 +64,93 @@ export default function CompletedWithoutInvoice() {
             <ArrowRight size={16} /> رجوع
           </Button>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <FileWarning className="text-warning" /> أوامر مكتملة بدون فاتورة
+            <FileWarning className="text-warning" /> مطالبات مكتملة وبانتظار التحصيل
           </h1>
           <p className="text-sm text-muted-foreground">
-            يوضح أوامر العمل التي وصلت إلى حالة إغلاق أو تسليم ولم يتم ربطها بفاتورة.
+            يعرض فقط المطالبات المسلّمة فعليًا والتي لها فاتورة نهائية ورصيد متبقٍ غير محصل.
           </p>
         </div>
-        <Button variant="outline" className="gap-2" onClick={exportCsv}>
-          <Download size={16} /> تصدير CSV
+        <Button variant="outline" className="gap-2" onClick={exportExcel} disabled={loading || !!error || rows.length === 0}>
+          <Download size={16} /> تصدير Excel
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {error && (
+        <Card className="p-4 border-destructive/40 text-destructive text-sm">
+          تعذر تحميل بيانات التقرير. لا يتم إنشاء ملف Excel فارغ عند فشل الاستعلام.
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         <Card className="p-4">
-          <p className="text-xs text-muted-foreground">عدد الأوامر</p>
+          <p className="text-xs text-muted-foreground">عدد المطالبات</p>
           <p className="text-2xl font-bold">{rows.length}</p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-muted-foreground">إيرادات غير مفوترة</p>
-          <p className="text-2xl font-bold">{formatOMR(totalRevenue)}</p>
+          <p className="text-xs text-muted-foreground">المعتمد قبل الضريبة</p>
+          <p className="text-xl font-bold">{formatOmr3(totals.subtotal)} OMR</p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-muted-foreground">صافي ربح مرتبط</p>
-          <p className="text-2xl font-bold">{formatOMR(totalProfit)}</p>
+          <p className="text-xs text-muted-foreground">الضريبة 5%</p>
+          <p className="text-xl font-bold">{formatOmr3(totals.vat)} OMR</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground">الإجمالي شامل الضريبة</p>
+          <p className="text-xl font-bold">{formatOmr3(totals.total)} OMR</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground">الرصيد المتبقي</p>
+          <p className="text-xl font-bold text-warning">{formatOmr3(totals.remaining)} OMR</p>
         </Card>
       </div>
 
       <Card className="overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>أمر العمل</TableHead>
-              <TableHead>التاريخ</TableHead>
-              <TableHead>العميل</TableHead>
-              <TableHead>المركبة</TableHead>
-              <TableHead>الحالة</TableHead>
-              <TableHead>المسار المالي</TableHead>
-              <TableHead>الإيراد</TableHead>
-              <TableHead>قرار التجاوز</TableHead>
-              <TableHead>إجراء</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.workOrderNumber}>
-                <TableCell className="font-mono">{row.workOrderNumber}</TableCell>
-                <TableCell dir="ltr">{row.date}</TableCell>
-                <TableCell>{row.customerName}</TableCell>
-                <TableCell>{row.vehiclePlate || row.vehicleName}</TableCell>
-                <TableCell><Badge variant="outline">{row.status}</Badge></TableCell>
-                <TableCell>
-                  <Badge variant={row.insuranceOrder ? "secondary" : "outline"}>{row.financialWorkflow}</Badge>
-                </TableCell>
-                <TableCell>{formatOMR(row.revenueExVat)}</TableCell>
-                <TableCell className="max-w-[220px] truncate">{row.skipReason || "لا يوجد"}</TableCell>
-                <TableCell>
-                  {row.insuranceOrder ? (
-                    <Button size="sm" variant="outline" className="gap-1" onClick={() => navigate(row.order?.claimId ? `/insurance/${row.order.claimId}` : "/insurance/claims")}>
-                      <PlusCircle size={14} /> فتح المطالبة / LPO
-                    </Button>
-                  ) : (
-                    <Button size="sm" className="gap-1" onClick={() => navigate(`/sales/invoices/new?fromWorkOrder=${encodeURIComponent(row.workOrderNumber)}`)}>
-                      <PlusCircle size={14} /> إنشاء فاتورة
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-            {!rows.length && (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
-                  لا توجد أوامر مكتملة بدون فاتورة حالياً.
-                </TableCell>
+                {INSURANCE_COLLECTION_HEADERS.map((header) => (
+                  <TableHead key={header} className="whitespace-nowrap">{header}</TableHead>
+                ))}
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={INSURANCE_COLLECTION_HEADERS.length} className="py-10 text-center text-muted-foreground">
+                    جاري تحميل التقرير...
+                  </TableCell>
+                </TableRow>
+              ) : rows.length ? rows.map((row) => (
+                <TableRow key={`${row.claimId}-${row.invoiceId}`}>
+                  <TableCell className="font-mono text-xs">{row.claimNumber}</TableCell>
+                  <TableCell className="font-mono text-xs">{row.vehicleNumber}</TableCell>
+                  <TableCell>{row.vehicleMakeModel}</TableCell>
+                  <TableCell>{row.customerName}</TableCell>
+                  <TableCell dir="ltr">{row.estimateDate}</TableCell>
+                  <TableCell dir="ltr">{row.workshopArrivalDate}</TableCell>
+                  <TableCell dir="ltr">{row.workStartedAt}</TableCell>
+                  <TableCell dir="ltr">{row.workCompletedAt}</TableCell>
+                  <TableCell dir="ltr">{row.deliveredAt}</TableCell>
+                  <TableCell className="font-mono text-xs whitespace-pre-line">{row.invoiceDateNumber}</TableCell>
+                  <TableCell>{row.workshopDays}</TableCell>
+                  <TableCell><Badge variant="outline">{row.status}</Badge></TableCell>
+                  <TableCell dir="ltr">{formatOmr3(row.approvedBeforeVat)}</TableCell>
+                  <TableCell dir="ltr">{formatOmr3(row.vatAmount)}</TableCell>
+                  <TableCell dir="ltr" className="font-semibold">{formatOmr3(row.totalIncludingVat)}</TableCell>
+                  <TableCell dir="ltr" className="text-success">{formatOmr3(row.paidAmount)}</TableCell>
+                  <TableCell><Badge variant={row.collectionStatus === "مدفوع جزئيًا" ? "secondary" : "outline"}>{row.collectionStatus}</Badge></TableCell>
+                </TableRow>
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={INSURANCE_COLLECTION_HEADERS.length} className="py-10 text-center text-muted-foreground">
+                    لا توجد مطالبات مسلّمة ذات فاتورة ورصيد متبقٍ حاليًا.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
     </div>
   );

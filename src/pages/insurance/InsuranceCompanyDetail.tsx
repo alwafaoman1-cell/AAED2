@@ -12,20 +12,21 @@ import StatCard from "@/components/StatCard";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import { useInsuranceCompany, useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
-import { usePaymentsByCompany, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS } from "@/hooks/useClaimPayments";
+import { useClaimPayments, usePaymentsByCompany, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS } from "@/hooks/useClaimPayments";
 import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
 import { getInsuranceStatementHtml } from "@/lib/insuranceStatementPdf";
 import { getInsuranceWorkshopReportHtml, type WorkshopReportRow, type WorkshopColumnKey, DEFAULT_WORKSHOP_COLUMNS, WORKSHOP_COLUMN_LABELS } from "@/lib/insuranceWorkshopReport";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { formatDateLatin } from "@/lib/numberUtils";
-import { exportPaymentsToCsv } from "@/lib/insurancePaymentExport";
 import { computeAging, summarizeAging, DEFAULT_BUCKETS, type AgingBasis, type AgingBucket } from "@/lib/insuranceAging";
 import { journalStore } from "@/lib/journalStore";
 import JournalPreview, { entryToPreviewLine } from "@/components/accounting/JournalPreview";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import InsuranceEmployeesManager from "@/components/insurance/InsuranceEmployeesManager";
-import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
+import { calculateVatExclusive } from "@/lib/money";
+import { buildInsuranceCollectionRows, exportInsuranceCollectionRowsToXlsx } from "@/lib/insuranceCollectionReport";
+import { toast } from "sonner";
 
 const CLAIM_STATUS_AR: Record<string, string> = {
   pending: "بانتظار الاعتماد",
@@ -70,6 +71,7 @@ export default function InsuranceCompanyDetail() {
   const { data: allClaims } = useInsuranceClaims();
   const { data: companies } = useInsuranceCompanies();
   const { data: payments } = usePaymentsByCompany(id);
+  const { data: allClaimPayments } = useClaimPayments();
   const { data: allInvoices } = useInsuranceInvoices();
 
   const claims = useMemo(() => {
@@ -78,6 +80,13 @@ export default function InsuranceCompanyDetail() {
       (c) => (c as any).insurance_company_id === company.id || c.insurance_company === company.name,
     );
   }, [allClaims, company]);
+
+  const companyClaimIds = useMemo(() => new Set(claims.map((claim) => claim.id)), [claims]);
+  const accountingPayments = useMemo(
+    () => ((allClaimPayments?.length ? allClaimPayments : payments) ?? [])
+      .filter((payment) => companyClaimIds.has(payment.claim_id)),
+    [allClaimPayments, payments, companyClaimIds],
+  );
 
   // ── المصدر المالي الموحّد ──
   // الدين الفعلي على شركة التأمين = إجمالي فواتيرها النشطة (شامل VAT)،
@@ -109,14 +118,14 @@ export default function InsuranceCompanyDetail() {
   const claimReceivable = (c: any): number => {
     const inv = claimInvoiceMap.get(c.id);
     if (inv) return Number(inv.total) || 0;
-    return splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate).totalIncludingVat;
+    return calculateVatExclusive(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate).totalIncludingVat;
   };
 
   const claimApprovalBreakdown = (c: any) =>
-    splitVatInclusiveAmount(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate);
+    calculateVatExclusive(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate);
 
   const totalApproved = claims.reduce((s, c) => s + claimReceivable(c), 0);
-  const totalPaid = (payments ?? [])
+  const totalPaid = accountingPayments
     .filter((p) => p.status !== "bounced")
     .reduce((s, p) => s + Number(p.amount), 0);
   const remaining = +(totalApproved - totalPaid).toFixed(3);
@@ -133,13 +142,13 @@ export default function InsuranceCompanyDetail() {
   );
 
   const agingRows = useMemo(
-    () => computeAging(claimsForAging as any, payments ?? [], companies, {
+    () => computeAging(claimsForAging as any, accountingPayments, companies, {
       basis: agingBasis,
       buckets,
       defaultTermsDays: company?.payment_terms_days ?? 90,
       invoiceByClaim: claimInvoiceMap as any,
     }),
-    [claimsForAging, payments, companies, agingBasis, buckets, company, claimInvoiceMap],
+    [claimsForAging, accountingPayments, companies, agingBasis, buckets, company, claimInvoiceMap],
   );
 
   const aging = useMemo(() => summarizeAging(agingRows, buckets), [agingRows, buckets]);
@@ -161,15 +170,15 @@ export default function InsuranceCompanyDetail() {
   };
 
   const filteredPayments = useMemo(
-    () => (payments ?? []).filter((p) => inRange(p.payment_date)),
-    [payments, periodFrom, periodTo],
+    () => accountingPayments.filter((p) => inRange(p.payment_date)),
+    [accountingPayments, periodFrom, periodTo],
   );
 
   // ── القيود المحاسبية للشركة (من journalStore) ──
   const [showJournal, setShowJournal] = useState(false);
   const journalLines = useMemo(() => {
     const claimIds = new Set(claims.map((c) => c.id));
-    const paymentIds = new Set((payments ?? []).map((p) => p.id));
+    const paymentIds = new Set(accountingPayments.map((p) => p.id));
     return journalStore.getAll()
       .filter((e) => {
         if (e.source === "insurance_claim" && claimIds.has(e.sourceId)) return true;
@@ -179,7 +188,7 @@ export default function InsuranceCompanyDetail() {
       .filter((e) => inRange(e.date))
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(entryToPreviewLine);
-  }, [claims, payments, periodFrom, periodTo, showJournal]);
+  }, [claims, accountingPayments, periodFrom, periodTo, showJournal]);
 
   // ── Preview dialogs ──
   const [statementOpen, setStatementOpen] = useState(false);
@@ -196,7 +205,7 @@ export default function InsuranceCompanyDetail() {
   const reportClaims = useMemo(() => {
     return filteredClaims.filter((c) => {
       const delivered = (c as any).delivered_at ?? null;
-      const cPays = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
+      const cPays = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
       const paid = cPays.reduce((s, p) => s + Number(p.amount), 0);
       const approved = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
       const remaining = approved - paid;
@@ -212,7 +221,18 @@ export default function InsuranceCompanyDetail() {
         default: return true;
       }
     });
-  }, [filteredClaims, payments, reportFilter]);
+  }, [filteredClaims, accountingPayments, reportFilter]);
+
+  const collectionExportRows = useMemo(() => buildInsuranceCollectionRows({
+    claims: reportClaims,
+    invoices: companyInvoices,
+    payments: accountingPayments,
+    companyId: company?.id,
+    companyName: company?.name,
+    periodFrom: periodFrom || undefined,
+    periodTo: periodTo || undefined,
+    pendingCollectionOnly: reportFilter === "pending_collection",
+  }), [reportClaims, companyInvoices, accountingPayments, company, periodFrom, periodTo, reportFilter]);
 
   const statementHtml = useMemo(() => {
     if (!company || !statementOpen) return "";
@@ -270,7 +290,7 @@ export default function InsuranceCompanyDetail() {
   const workshopHtml = useMemo(() => {
     if (!company || !workshopOpen) return "";
     const rows: WorkshopReportRow[] = reportClaims.map((c) => {
-      const cPayments = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
+      const cPayments = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
       const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
       const approved = Number(c.approved_amount) || 0;
       const estimated = Number(c.estimated_amount) || 0;
@@ -324,17 +344,24 @@ export default function InsuranceCompanyDetail() {
       vatRate,
       columns: reportColumns,
     });
-  }, [company, workshopOpen, reportClaims, payments, periodFrom, periodTo, claimInvoiceMap, vatRate, reportColumns]);
+  }, [company, workshopOpen, reportClaims, accountingPayments, periodFrom, periodTo, claimInvoiceMap, vatRate, reportColumns]);
 
 
-  const handleExportCsv = () => {
+  const handleExportClaimsExcel = () => {
     if (!company) return;
-    exportPaymentsToCsv({
-      payments: payments ?? [],
-      companyName: company.name,
-      periodFrom: periodFrom || undefined,
-      periodTo: periodTo || undefined,
-    });
+    try {
+      const dateTag = [
+        periodFrom || "start",
+        periodTo || new Date().toISOString().slice(0, 10),
+      ].join("_to_");
+      exportInsuranceCollectionRowsToXlsx(
+        collectionExportRows,
+        `Insurance_Claims_${company.name}_${dateTag}.xlsx`,
+      );
+      toast.success("تم تصدير ملف Excel");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تصدير ملف Excel");
+    }
   };
 
   if (!company) return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
@@ -419,8 +446,8 @@ export default function InsuranceCompanyDetail() {
             <Button variant="outline" onClick={() => { setPeriodFrom(""); setPeriodTo(""); setReportFilter("all"); }}>
               مسح الفلاتر
             </Button>
-            <Button variant="outline" onClick={handleExportCsv} className="gap-2">
-              <FileSpreadsheet size={16} /> Excel/CSV
+            <Button variant="outline" onClick={handleExportClaimsExcel} className="gap-2">
+              <FileSpreadsheet size={16} /> Excel
             </Button>
             <Button variant="outline" onClick={() => setWorkshopPickerOpen(true)} className="gap-2">
               <ClipboardList size={16} /> تقرير عمليات الورشة ({reportClaims.length})
@@ -510,7 +537,7 @@ export default function InsuranceCompanyDetail() {
       <AuditPanel
         claims={claims as any}
         invoices={companyInvoices}
-        payments={payments ?? []}
+        payments={accountingPayments}
         vatRate={vatRate}
         claimReceivable={claimReceivable}
         totalReceivable={totalApproved}
@@ -528,7 +555,7 @@ export default function InsuranceCompanyDetail() {
             className="gap-2"
             onClick={() => {
               const rows = claims.map((c) => {
-                const cPays = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
+                const cPays = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
                 const paid = cPays.reduce((s, p) => s + Number(p.amount), 0);
                 const inv = claimInvoiceMap.get(c.id);
                 const fallback = claimApprovalBreakdown(c);
@@ -584,7 +611,7 @@ export default function InsuranceCompanyDetail() {
               {claims.length === 0 ? (
                 <tr><td colSpan={13} className="py-6 text-center text-muted-foreground">لا توجد مطالبات</td></tr>
               ) : claims.map((c) => {
-                const cPayments = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
+                const cPayments = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
                 const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
                 const inv = claimInvoiceMap.get(c.id);
                 const fallback = claimApprovalBreakdown(c);
@@ -636,7 +663,7 @@ export default function InsuranceCompanyDetail() {
             </tbody>
             {claims.length > 0 && (() => {
               const sums = claims.reduce((a, c) => {
-                const cPays = (payments ?? []).filter((p) => p.claim_id === c.id && p.status !== "bounced");
+                const cPays = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
                 const paid = cPays.reduce((s, p) => s + Number(p.amount), 0);
                 const inv = claimInvoiceMap.get(c.id);
                 const fallback = claimApprovalBreakdown(c);
