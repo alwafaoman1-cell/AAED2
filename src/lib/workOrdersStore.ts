@@ -813,14 +813,9 @@ function ensureCloudSync() {
   } catch (e) {
     console.warn("[workOrdersStore] realtime subscribe failed:", e);
   }
-  // pull again when tab regains focus / regains connectivity
-  if (typeof window !== "undefined") {
-    window.addEventListener("focus", () => scheduleCloudFetch(50));
-    window.addEventListener("online", () => scheduleCloudFetch(50));
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") scheduleCloudFetch(50);
-    });
-  }
+  // Focus/visibility refresh is handled by React Query and page-scoped
+  // realtime. Keeping legacy store listeners here caused request storms when
+  // returning to the tab.
 }
 
 // Kick off cloud sync as soon as this module is imported (after auth bootstraps).

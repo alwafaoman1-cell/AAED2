@@ -164,15 +164,24 @@ import SystemPreferencesBoot from "@/components/SystemPreferencesBoot";
 
 // كاش حيّ — يعيد الجلب فور الدخول للصفحة لمنع عرض بيانات قديمة بين التنقّلات.
 // المستخدم كان يضطر لـ Ctrl+Shift+R لأن staleTime كان 30s.
+const shouldRetryQuery = (failureCount: number, error: unknown) => {
+  if (failureCount >= 2) return false;
+  const status = Number((error as { status?: number })?.status || (error as { code?: number })?.code || 0);
+  const message = String((error as { message?: string })?.message || "");
+  if ([400, 401, 403, 404, 409].includes(status)) return false;
+  if (/row-level security|permission denied|schema cache|column .* does not exist|not found/i.test(message)) return false;
+  return true;
+};
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 0,
-      gcTime: 5 * 60_000,
-      refetchOnMount: "always",
-      refetchOnWindowFocus: true,
+      staleTime: 3 * 60_000,
+      gcTime: 20 * 60_000,
+      refetchOnMount: true,
+      refetchOnWindowFocus: false,
       refetchOnReconnect: true,
-      retry: 1,
+      retry: shouldRetryQuery,
     },
     mutations: { retry: 0 },
   },

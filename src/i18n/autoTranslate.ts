@@ -58,6 +58,7 @@ function translateNode(node: Node) {
 let observer: MutationObserver | null = null;
 
 export function startAutoTranslate() {
+  if (!import.meta.env.DEV) return;
   if (observer) return;
   // Initial pass
   if (document.body) translateNode(document.body);
@@ -105,6 +106,10 @@ export function stopAutoTranslate(restore = false) {
  */
 export function useAutoTranslate() {
   useEffect(() => {
+    if (!import.meta.env.DEV) {
+      stopAutoTranslate(true);
+      return;
+    }
     const apply = (lng: string) => {
       if (lng === "en") {
         startAutoTranslate();

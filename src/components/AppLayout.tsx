@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import AppSidebar from "./AppSidebar";
 import NotificationsBell from "./NotificationsBell";
@@ -12,7 +12,6 @@ import NavHistoryButtons from "./NavHistoryButtons";
 import { HideAmountsToggle, RefreshDataButton } from "./TopBarActions";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { useDailyTasksReminder } from "@/hooks/useDailyTasksReminder";
-import { startAccountingBridge } from "@/lib/accountingBridge";
 import PortalNotesRealtimeListener from "./PortalNotesRealtimeListener";
 import UpdateNotice from "./UpdateNotice";
 import FeatureGate from "./FeatureGate";
@@ -21,8 +20,16 @@ export default function AppLayout() {
   // مزامنة فورية مع جميع الجداول الحرجة (المطالبات/الفواتير/أوامر العمل/الدفعات)
   useRealtimeSync();
   useDailyTasksReminder();
+  const { pathname } = useLocation();
   // ربط محاسبي تلقائي للمصاريف ↔ دفتر اليومية
-  useEffect(() => { startAccountingBridge(); }, []);
+  useEffect(() => {
+    if (!pathname.startsWith("/accounting") && !pathname.startsWith("/reports")) return;
+    let cancelled = false;
+    void import("@/lib/accountingBridge").then((m) => {
+      if (!cancelled) m.startAccountingBridge();
+    });
+    return () => { cancelled = true; };
+  }, [pathname]);
 
   const { i18n } = useTranslation();
   const isRtl = i18n.dir() === "rtl";

@@ -64,13 +64,8 @@ export function startUpdateWatcher(): () => void {
     )
     .subscribe();
 
-  // also re-check when tab regains focus
-  const onFocus = () => fetchLatest();
-  window.addEventListener("focus", onFocus);
-
   return () => {
     supabase.removeChannel(channel);
-    window.removeEventListener("focus", onFocus);
     started = false;
   };
 }

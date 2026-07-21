@@ -37,7 +37,6 @@ export function RefreshDataButton() {
   const handle = async () => {
     setSpinning(true);
     try {
-      await qc.invalidateQueries();
       await qc.refetchQueries({ type: "active" });
       toast({ title: "تم تحديث البيانات" });
     } catch {

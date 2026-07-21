@@ -31,6 +31,8 @@ const AuthContext = createContext<AuthCtx | undefined>(undefined);
 const AUTH_BOOT_TIMEOUT_MS = 8_000;
 const PROFILE_TIMEOUT_MS = 20_000;
 const PROFILE_QUERY_TIMEOUT_MS = 10_000;
+const profileCache = new Map<string, UserProfile | null>();
+const inFlightProfileRequests = new Map<string, Promise<UserProfile | null>>();
 
 function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -49,6 +51,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function fetchProfile(uid: string): Promise<UserProfile | null> {
+    if (profileCache.has(uid)) return profileCache.get(uid) ?? null;
+    const inFlight = inFlightProfileRequests.get(uid);
+    if (inFlight) return inFlight;
+
+    const request = (async (): Promise<UserProfile | null> => {
     try {
       const { data, error } = await withTimeout(
         supabase
@@ -93,6 +100,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.warn("[auth] profile REST query delayed or failed", error);
       return null;
+    }
+    })();
+
+    inFlightProfileRequests.set(uid, request);
+    try {
+      const result = await request;
+      profileCache.set(uid, result);
+      return result;
+    } finally {
+      inFlightProfileRequests.delete(uid);
     }
   }
 
@@ -180,6 +197,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     await supabase.auth.signOut();
+    profileCache.clear();
+    inFlightProfileRequests.clear();
     applyProfile(null);
   }
 

@@ -599,13 +599,9 @@ function ensureVehiclesCloudSync() {
   } catch (e) {
     console.warn("[vehiclesStore] realtime subscribe failed:", e);
   }
-  if (typeof window !== "undefined") {
-    window.addEventListener("focus", () => scheduleVehiclesFetch(50));
-    window.addEventListener("online", () => scheduleVehiclesFetch(50));
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") scheduleVehiclesFetch(50);
-    });
-  }
+  // Focus/visibility refresh is handled by React Query and page-scoped
+  // realtime. Keeping legacy store listeners here caused request storms when
+  // returning to the tab.
 }
 
 // ---------- push archive state to cloud ----------

@@ -31,22 +31,6 @@ function normalizeEditableValue(el: HTMLInputElement | HTMLTextAreaElement) {
   }
 }
 
-function normalizeTextNode(node: Node) {
-  if (node.nodeType !== Node.TEXT_NODE) return;
-  const value = node.nodeValue || "";
-  const normalized = toEnglishDigits(value);
-  if (value !== normalized) node.nodeValue = normalized;
-}
-
-function normalizeDomTree(root: ParentNode) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode();
-  while (node) {
-    normalizeTextNode(node);
-    node = walker.nextNode();
-  }
-}
-
 export function installEnglishDigitGuards() {
   if (installed || typeof window === "undefined" || typeof document === "undefined") return;
   installed = true;
@@ -88,16 +72,7 @@ export function installEnglishDigitGuards() {
     if (isEditable(event.target)) normalizeEditableValue(event.target);
   }, true);
 
-  normalizeDomTree(document.body);
-  const observer = new MutationObserver((records) => {
-    for (const record of records) {
-      record.addedNodes.forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) normalizeTextNode(node);
-        else if (node instanceof Element) normalizeDomTree(node);
-      });
-      if (record.type === "characterData") normalizeTextNode(record.target);
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  // Do not mutate rendered text nodes globally. Display components and PDFs must
+  // use the shared formatters; this guard only normalizes user input plus
+  // Number/Date locale output.
 }
-

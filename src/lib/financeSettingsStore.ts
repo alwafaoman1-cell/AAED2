@@ -168,8 +168,8 @@ if (typeof window !== "undefined") {
     } catch (e) {
       console.warn("[expenseCategories] realtime failed", e);
     }
-    window.addEventListener("focus", () => scheduleECFetch(50));
-    window.addEventListener("online", () => scheduleECFetch(50));
+    // Initial fetch + realtime are enough. Avoid tab-focus fetch storms from
+    // this legacy store; users can still force refresh from the top bar.
   }
   setTimeout(startECCloudSync, 800);
 
