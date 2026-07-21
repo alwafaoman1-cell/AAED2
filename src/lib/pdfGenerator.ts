@@ -1570,6 +1570,13 @@ function invoiceRefEnglishLine(value: unknown): string {
   return invoiceRefEscape(fixed);
 }
 
+function invoiceRefEnglishWordSpans(value: unknown): string {
+  const words = invoiceRefEnglishLine(value)
+    .split(/\s+/)
+    .filter(Boolean);
+  return words.map((word) => `<span>${word}</span>`).join("");
+}
+
 function invoiceRefMoney(value: number): string {
   return (Number(value) || 0).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
@@ -1782,7 +1789,8 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     .brand-center{grid-column:2;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;min-height:27mm;direction:rtl;padding-top:0;min-width:0;overflow:visible}
     .logo-box{width:22mm;height:14mm;display:flex;align-items:flex-start;justify-content:center;margin-bottom:1mm}.logo-box img{max-width:22mm;max-height:14mm;object-fit:contain}.brand-fallback{width:15mm;height:14mm;background:#071b39;border:.8mm solid #d8a01d;color:#d8a01d;display:flex;align-items:end;justify-content:center;padding-bottom:1.2mm;font-family:'Inter',sans-serif;font-size:7px;font-weight:800}
     .brand-name-ar{font-size:7.2px;font-weight:800;line-height:1.35;color:#071b39;width:100%;max-width:64mm;margin:0 0 .4mm;white-space:nowrap;overflow:visible;text-overflow:clip}
-    .brand-name-en{font-family:'Inter',sans-serif;font-size:6.9px;font-weight:800;line-height:1.42;color:#071b39;width:100%;max-width:64mm;direction:ltr;white-space:nowrap;overflow:visible;text-overflow:clip;word-spacing:1.6px;letter-spacing:0}
+    .brand-name-en{font-family:Arial,'Inter',sans-serif;font-size:6.6px;font-weight:700;line-height:1.35;color:#071b39;width:100%;max-width:66mm;direction:ltr;white-space:nowrap;overflow:visible;text-overflow:clip;letter-spacing:0;display:flex;align-items:center;justify-content:center;gap:1.15mm}
+    .brand-name-en span{display:inline-block;white-space:nowrap}
     .company{grid-column:3;text-align:right;padding-top:.5mm;direction:rtl;max-width:58mm}.company .meta{display:grid;gap:.45mm;align-items:center;text-align:right;direction:rtl;font-family:'Inter','Noto Sans Arabic',sans-serif;color:#10213c;font-size:8.4px;line-height:1.18}.company .meta span{display:block}.company .meta .ltr{direction:ltr;text-align:right;unicode-bidi:embed}
     .card{border:1px solid #112b50;border-radius:1.5mm;margin-bottom:3mm;break-inside:avoid;page-break-inside:avoid;background:#fff}
     .claim-card{height:27mm;display:grid;grid-template-columns:1fr 22mm 1.25fr;align-items:center;padding:3mm 4mm;direction:ltr}.claim-left{text-align:left}.claim-mid{text-align:center}.claim-right{text-align:center;direction:rtl}
@@ -1812,7 +1820,7 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
   const body = `<div class="page">
     <header class="top">
       <div><div class="invoice-card"><div class="ar">فاتورة ضريبية</div><div class="en">TAX INVOICE</div><div class="no">${invoiceRefEscape(data.invoiceNumber)}</div></div><div class="invoice-date">${invoiceRefEscape(data.issueDate)}</div></div>
-      <div class="brand-center"><div class="logo-box">${logoHtml}</div><div class="brand-name-ar">${invoiceRefEscape(companyNameAr)}</div><div class="brand-name-en">${invoiceRefEnglishLine(companyNameEn)}</div></div>
+      <div class="brand-center"><div class="logo-box">${logoHtml}</div><div class="brand-name-ar">${invoiceRefEscape(companyNameAr)}</div><div class="brand-name-en">${invoiceRefEnglishWordSpans(companyNameEn)}</div></div>
       <div class="company"><div class="meta">${companyMetaHtml}</div></div>
     </header>
     <section class="card claim-card">
