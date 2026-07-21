@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Check, ChevronLeft, Camera, Image as ImageIcon, Send, Save, Trash2, Loader2 } from "lucide-react";
 import { WORK_ORDER_STATUSES, normalizeWorkOrderStatus, updateWorkOrderInCloud, type WorkOrder, type StagePhase, type StagePhoto } from "@/lib/workOrdersStore";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import WorkOrderClosingReview, { isClosingStatus } from "@/components/workorders/WorkOrderClosingReview";
+import { buildCustomerPortalUrl, ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 
 interface Props {
   order: WorkOrder | null;
@@ -116,14 +116,10 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     if (!open || !cloudJobOrderId) { setPortalToken(null); setIsSigned(false); return; }
     let mounted = true;
     (async () => {
-      const { data } = await supabase
-        .from("customer_portal_tokens")
-        .select("token, signed_at")
-        .eq("job_order_id", cloudJobOrderId)
-        .maybeSingle();
+      const data = await ensureCustomerPortalToken(cloudJobOrderId);
       if (!mounted) return;
-      setPortalToken((data as any)?.token || null);
-      setIsSigned(!!(data as any)?.signed_at);
+      setPortalToken(data?.token || null);
+      setIsSigned(!!data?.signed_at);
     })();
     return () => { mounted = false; };
   }, [open, cloudJobOrderId]);
@@ -228,9 +224,8 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
       const saved = await persist();
       if (!saved) return;
       let text = message.trim();
-      if (portalToken) {
-        text += `\n\n🔗 تابع حالة الإصلاح: ${window.location.origin}/p/${portalToken}`;
-      }
+      const portalUrl = buildCustomerPortalUrl(portalToken);
+      if (portalUrl) text += `\n\n🔗 تابع حالة الإصلاح: ${portalUrl}`;
       await sendWhatsAppMessage({
         message: text,
         phone,

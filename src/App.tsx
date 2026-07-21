@@ -156,6 +156,7 @@ const VehicleStayAlertsSettingsPage = lazy(() => import("./pages/settings/Vehicl
 const AdminNotifications = lazy(() => import("./pages/AdminNotifications"));
 const SaasAdminConsole = lazy(() => import("./pages/admin/SaasAdminConsole"));
 const TenantFiles = lazy(() => import("./pages/admin/TenantFiles"));
+const WorkOrderSignPage = lazy(() => import("./pages/public/WorkOrderSignPage"));
 
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
@@ -221,7 +222,7 @@ const App = () => (
             <Route path="/p/:token" element={<CustomerPortal />} />
             <Route path="/v/:plate" element={<LegacyPortalRedirect param="plate" />} />
             <Route path="/c/approve/:token" element={<SupplementApprovalPage />} />
-            <Route path="/sign/:token" element={<LegacyPortalRedirect param="token" />} />
+            <Route path="/sign/:token" element={<WorkOrderSignPage />} />
             <Route path="/pdf/:documentType/:id" element={<ProtectedRoute><PdfV2PreviewPage /></ProtectedRoute>} />
             <Route path="/pdf-preview/:documentType/:id" element={<ProtectedRoute><PdfV2PreviewPage /></ProtectedRoute>} />
             <Route path="/technician" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechnicianApp /></ProtectedRoute>} />

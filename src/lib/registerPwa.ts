@@ -1,9 +1,7 @@
 // Register the PWA service worker safely.
 // Guards against Lovable preview iframes (which break SW caching),
-// auto-updates to new deploys without a manual reload,
-// and forces a fresh data fetch when the tab regains focus.
-
-import { hasUnsavedWork } from "@/lib/unsavedWork";
+// keeps deploy updates safe: the service worker may detect a new shell while
+// the user is editing, so never auto-reload from this low-level hook.
 
 export function registerTechPwa() {
   if (typeof window === "undefined") return;
@@ -33,12 +31,14 @@ export function registerTechPwa() {
 
   import("virtual:pwa-register")
     .then(({ registerSW }) => {
-      const updateSW = registerSW({
+      registerSW({
         immediate: true,
-        // Apply new app shell immediately when it is safe. If the user has
-        // unsaved form work, leave the update notice to handle it instead.
+        // Do not call updateSW(true) here. On Chromium, SW update checks can
+        // happen when returning to a browser tab; forcing skipWaiting reloads
+        // the app and drops unsaved form data. The explicit update notice flow
+        // is the only place allowed to reload the app shell.
         onNeedRefresh() {
-          if (!hasUnsavedWork()) updateSW(true);
+          // Intentionally no-op.
         },
         onOfflineReady() { /* noop */ },
       });

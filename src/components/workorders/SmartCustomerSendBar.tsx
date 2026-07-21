@@ -2,9 +2,9 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Image as ImgIcon, Bell, Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
+import { buildCustomerPortalUrl, ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 
 interface Props {
   jobOrderId: string;          // cloud uuid
@@ -21,19 +21,14 @@ export default function SmartCustomerSendBar({ jobOrderId, orderNumber, status, 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { data } = await supabase
-        .from("customer_portal_tokens")
-        .select("token")
-        .eq("job_order_id", jobOrderId)
-        .maybeSingle();
-      if (mounted) setToken((data as any)?.token || null);
+      const data = await ensureCustomerPortalToken(jobOrderId);
+      if (mounted) setToken(data?.token || null);
     })();
     return () => { mounted = false; };
   }, [jobOrderId]);
 
   function trackUrl() {
-    if (!token) return "";
-    return `${window.location.origin}/p/${token}`;
+    return buildCustomerPortalUrl(token);
   }
 
   async function send(kind: "status" | "photo" | "both") {

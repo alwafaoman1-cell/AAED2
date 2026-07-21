@@ -30,6 +30,7 @@ import {
 import { useFeatures } from "@/contexts/FeatureContext";
 import { toE164 } from "@/lib/phoneUtils";
 import { useSystemPreferences } from "@/lib/systemPreferences";
+import { buildCustomerPortalUrl, buildWorkOrderSignatureUrl } from "@/lib/customerPortalTokens";
 
 interface Props {
   order: WorkOrder | null;
@@ -54,7 +55,7 @@ function appOrigin() {
 }
 
 function buildTrackingLinkMessage(o: WorkOrder) {
-  const link = o.trackingToken ? `${appOrigin()}/p/${o.trackingToken}` : "";
+  const link = o.trackingToken ? buildCustomerPortalUrl(o.trackingToken) : "";
   return [
     `مرحباً ${o.customer || ""}`,
     `يمكنك متابعة حالة السيارة ${o.plate || ""} من الرابط التالي:`,
@@ -64,7 +65,7 @@ function buildTrackingLinkMessage(o: WorkOrder) {
 }
 
 function buildSignatureLinkMessage(o: WorkOrder) {
-  const link = o.trackingToken ? `${appOrigin()}/p/${o.trackingToken}` : "";
+  const link = o.trackingToken ? buildWorkOrderSignatureUrl(o.trackingToken) : "";
   return [
     `مرحباً ${o.customer || ""}`,
     "يرجى مراجعة الأعمال المطلوبة واعتمادها بالتوقيع من الرابط التالي:",

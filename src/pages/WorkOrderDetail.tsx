@@ -68,6 +68,7 @@ import SupplementsSection from "@/components/workorders/SupplementsSection";
 import ApprovalHistoryTab from "@/components/workorders/ApprovalHistoryTab";
 import CustomerPortalLink from "@/components/workorders/CustomerPortalLink";
 import SendStageNotificationButton from "@/components/workorders/SendStageNotificationButton";
+import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 import SmartCustomerSendBar from "@/components/workorders/SmartCustomerSendBar";
 import { isUuid } from "@/lib/uuid";
 // PortalNotesPending moved to /messages
@@ -485,13 +486,14 @@ export default function WorkOrderDetail() {
     let customerSignatureName: string | undefined;
     let customerSignatureDate: string | undefined;
     if (cloudJobOrderId) {
+      const ensuredToken = await ensureCustomerPortalToken(cloudJobOrderId);
       const { data: tok } = await supabase
         .from("customer_portal_tokens")
         .select("token, signature_data_url, signer_name, signed_at")
         .eq("job_order_id", cloudJobOrderId)
         .maybeSingle();
       const t: any = tok;
-      if (t?.token) effectiveTrackingToken = t.token;
+      if (t?.token || ensuredToken?.token) effectiveTrackingToken = t?.token || ensuredToken?.token;
       if (t?.signature_data_url) {
         customerSignatureDataUrl = t.signature_data_url;
         customerSignatureName = t.signer_name || undefined;

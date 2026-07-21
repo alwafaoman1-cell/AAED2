@@ -1385,7 +1385,7 @@ async function pushDeleteToCloud(orderNumber: string) {
     const ctx = await tenantContext(); if (!ctx) return;
     const archivedAt = new Date().toISOString();
     let { data, error } = await supabase.from("job_orders")
-      .update({ archived_at: archivedAt, deleted_at: null, deleted_by: null } as any)
+      .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: null } as any)
       .eq("tenant_id", ctx.tenantId)
       .eq("order_number", orderNumber)
       .select("id")

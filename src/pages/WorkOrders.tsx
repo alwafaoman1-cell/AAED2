@@ -61,6 +61,7 @@ import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { isInsuranceWorkOrder, resolveWorkOrderType } from "@/lib/workOrderType";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { isUuid } from "@/lib/uuid";
+import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 
 const DURATION_BAR_HEX: Record<string, string> = {
   red: "#ef4444",
@@ -253,6 +254,47 @@ export default function WorkOrders() {
     navigate(`/inspection?wo=${encodeURIComponent(order.id)}`);
   };
 
+  const closeDeleteDialog = () => {
+    setDeleteOrder(null);
+    setDeleteMode("archive_only");
+    setDeleteReason("");
+  };
+
+  const runWorkOrderDelete = async (order: WorkOrder, mode: DeleteMode, reason: string) => {
+    const finalReason = reason.trim() || "Delete work order from Work Orders page";
+    if (mode === "delete_with_related") {
+      await deleteWorkOrderWithRelated(order, finalReason);
+    } else if (mode === "delete_keep_financial") {
+      await deleteWorkOrderKeepFinancial(order, finalReason);
+    } else {
+      await archiveWorkOrder(order, finalReason);
+    }
+
+    const removed = deleteWorkOrder(order.id) || order;
+    await refreshWorkOrdersFromCloud().catch(() => {});
+    deleteWorkOrder(order.id);
+
+    const cloudEntityId = removed.cloudId && isUuid(removed.cloudId) ? removed.cloudId : removed.id;
+    moveToTrash({
+      type: "work_order",
+      entityId: cloudEntityId,
+      label: `${removed.displayNumber || removed.id} - ${removed.customer} - ${removed.plate}`,
+      payload: { ...removed, cloudId: cloudEntityId },
+    });
+    logActivity({
+      action: "delete",
+      entity: "work_order",
+      entityId: removed.id,
+      label: `أمر عمل ${removed.customer} - ${removed.plate}`,
+      description: mode === "delete_with_related"
+        ? "حذف أمر العمل مع أرشفة المصروفات وإلغاء الفواتير المرتبطة"
+        : "نقل أمر العمل لسلة المهملات مع حفظ السجلات المالية",
+      amount: removed.totalCost,
+    });
+
+    return removed;
+  };
+
   const filtered = orders.filter((o) => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
     const matchesSearch = !normalizedSearch || [
@@ -295,8 +337,10 @@ export default function WorkOrders() {
 
   async function handlePreview(order: WorkOrder) {
     const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
-    await buildTrackingQrDataUrl(order.trackingToken);
-    setPreviewHtml(buildWorkOrderHtml(order));
+    const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
+    const printableOrder = { ...order, trackingToken: portal?.token || order.trackingToken };
+    await buildTrackingQrDataUrl(printableOrder.trackingToken);
+    setPreviewHtml(buildWorkOrderHtml(printableOrder));
     setPreviewTitle(`أمر عمل ${order.id}`);
     setShowPreview(true);
   }
@@ -307,17 +351,21 @@ export default function WorkOrders() {
       return;
     }
     const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
+    const printableOrders = await Promise.all(filtered.map(async (order) => {
+      const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
+      return { ...order, trackingToken: portal?.token || order.trackingToken };
+    }));
     // Pre-build QR for every order in the batch
-    await Promise.all(filtered.map(o => buildTrackingQrDataUrl(o.trackingToken)));
+    await Promise.all(printableOrders.map(o => buildTrackingQrDataUrl(o.trackingToken)));
     // Print stack: each order on its own page
-    const combined = filtered.map(o => {
+    const combined = printableOrders.map(o => {
       const html = buildWorkOrderHtml(o);
       // Extract body content only
       const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
       return match ? match[1] : html;
     }).join('<div style="page-break-after:always"></div>');
     const wrapper = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>طباعة جماعية</title>${
-      buildWorkOrderHtml(filtered[0]).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
+      buildWorkOrderHtml(printableOrders[0]).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
     }</head><body>${combined}</body></html>`;
     setPreviewHtml(wrapper);
     setPreviewTitle(`طباعة ${filtered.length} أمر عمل`);
@@ -932,42 +980,48 @@ export default function WorkOrders() {
       {/* Delete confirm */}
       <ConfirmDeleteDialog
         open={!!deleteOrder}
-        onOpenChange={(o) => !o && setDeleteOrder(null)}
+        onOpenChange={(o) => !o && closeDeleteDialog()}
         title={`حذف أمر العمل ${deleteOrder?.id || ""}`}
-        description={`سيتم نقل أمر العمل الخاص بـ "${deleteOrder?.customer || ""}" إلى سلة المهملات. يمكنك استرجاعه لاحقاً.`}
+        description={(
+          <div className="space-y-3 text-sm">
+            <p>
+              سيتم نقل أمر العمل الخاص بـ "{deleteOrder?.customer || ""}" إلى سلة المهملات وإخفاؤه من القائمة الحالية.
+            </p>
+            {deleteImpact && (
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-xs">
+                <div className="font-semibold mb-1">السجلات المرتبطة:</div>
+                <div>الفواتير: {deleteImpact.invoices}</div>
+                <div>المصروفات: {deleteImpact.expenses}</div>
+              </div>
+            )}
+            <label className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-right">
+              <Checkbox
+                checked={deleteMode === "delete_with_related"}
+                onCheckedChange={(checked) => setDeleteMode(checked ? "delete_with_related" : "archive_only")}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-semibold text-destructive">
+                  حذف/إلغاء الفواتير والمصروفات المرتبطة بهذا الأمر
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  إذا لم تحدد هذا الخيار سيتم حذف أمر العمل فقط مع بقاء الفواتير والمصروفات محفوظة.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
         onConfirm={async () => {
           if (!deleteOrder) return;
           try {
-            await archiveWorkOrder(deleteOrder, "Archive Work Order Only");
+            const removed = await runWorkOrderDelete(deleteOrder, deleteMode, deleteReason);
+            toast.success(`تم حذف ${removed.displayNumber || removed.id}`);
           } catch (error: any) {
             toast.error(error?.message || "فشل حذف/أرشفة أمر العمل في Supabase");
             return;
           }
-          let removed = deleteWorkOrder(deleteOrder.id);
-          await refreshWorkOrdersFromCloud().catch(() => {});
-          deleteWorkOrder(deleteOrder.id);
-          const trashed = removed || deleteOrder;
-          if (trashed) {
-            removed = trashed;
-            const cloudEntityId = trashed.cloudId && isUuid(trashed.cloudId) ? trashed.cloudId : trashed.id;
-            moveToTrash({
-              type: "work_order",
-              entityId: cloudEntityId,
-              label: `${trashed.displayNumber || trashed.id} - ${trashed.customer} - ${trashed.plate}`,
-              payload: { ...trashed, cloudId: cloudEntityId },
-            });
-            logActivity({
-              action: "delete",
-              entity: "work_order",
-              entityId: trashed.id,
-              label: `أمر عمل ${removed.customer} - ${removed.plate}`,
-              description: `نقل لسلة المهملات`,
-              amount: trashed.totalCost,
-            });
-            toast.success(`تم نقل ${removed.id} للمهملات`);
-          }
           setOrders([...getWorkOrdersForAdminList()]);
-          setDeleteOrder(null);
+          closeDeleteDialog();
         }}
       />
 
@@ -1042,14 +1096,18 @@ export default function WorkOrders() {
             const ords = orders.filter(o => ids.includes(o.id));
             if (ords.length === 0) return;
             const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
-            await Promise.all(ords.map(o => buildTrackingQrDataUrl(o.trackingToken)));
-            const combined = ords.map(o => {
+            const printableOrders = await Promise.all(ords.map(async (order) => {
+              const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
+              return { ...order, trackingToken: portal?.token || order.trackingToken };
+            }));
+            await Promise.all(printableOrders.map(o => buildTrackingQrDataUrl(o.trackingToken)));
+            const combined = printableOrders.map(o => {
               const html = buildWorkOrderHtml(o);
               const m = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
               return m ? m[1] : html;
             }).join('<div style="page-break-after:always"></div>');
             const wrapper = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>طباعة جماعية</title>${
-              buildWorkOrderHtml(ords[0]).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
+              buildWorkOrderHtml(printableOrders[0]).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
             }</head><body>${combined}</body></html>`;
             setPreviewHtml(wrapper);
             setPreviewTitle(`طباعة ${ords.length} أمر عمل`);
@@ -1092,39 +1150,53 @@ export default function WorkOrders() {
       </BulkActionBar>
       <ConfirmDeleteDialog
         open={showBulkDelete}
-        onOpenChange={setShowBulkDelete}
+        onOpenChange={(open) => {
+          setShowBulkDelete(open);
+          if (!open) {
+            setDeleteMode("archive_only");
+            setDeleteReason("");
+          }
+        }}
         title={`حذف ${selectedIds.size} أمر عمل`}
-        description="سيتم نقل جميع أوامر العمل المحددة إلى سلة المهملات."
+        description={(
+          <div className="space-y-3 text-sm">
+            <p>سيتم نقل جميع أوامر العمل المحددة إلى سلة المهملات وإخفاؤها من القائمة الحالية.</p>
+            <label className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-right">
+              <Checkbox
+                checked={deleteMode === "delete_with_related"}
+                onCheckedChange={(checked) => setDeleteMode(checked ? "delete_with_related" : "archive_only")}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-semibold text-destructive">
+                  حذف/إلغاء الفواتير والمصروفات المرتبطة بالأوامر المحددة
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  بدون هذا الخيار سيتم حذف أوامر العمل فقط مع حفظ السجلات المالية.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
         onConfirm={async () => {
           let n = 0;
           for (const id of Array.from(selectedIds)) {
             const order = orders.find((o) => o.id === id);
             if (!order) continue;
             try {
-              await archiveWorkOrder(order, "Bulk Archive Work Order Only");
+              await runWorkOrderDelete(order, deleteMode, deleteReason || "Bulk delete work orders");
             } catch (error: any) {
               toast.error(error?.message || `فشل حذف/أرشفة أمر العمل ${id} في Supabase`);
               return;
             }
-            const removed = deleteWorkOrder(id);
-            await refreshWorkOrdersFromCloud().catch(() => {});
-            deleteWorkOrder(id);
-            const trashed = removed || order;
-            if (trashed) {
-              const cloudEntityId = trashed.cloudId && isUuid(trashed.cloudId) ? trashed.cloudId : trashed.id;
-              moveToTrash({
-                type: "work_order",
-                entityId: cloudEntityId,
-                label: `${trashed.displayNumber || trashed.id} - ${trashed.customer} - ${trashed.plate}`,
-                payload: { ...trashed, cloudId: cloudEntityId },
-              });
-              n++;
-            }
+            n++;
           }
-          toast.success(`تم نقل ${n} أمر للمهملات`);
+          toast.success(`تم حذف ${n} أمر عمل`);
           setOrders([...getWorkOrdersForAdminList()]);
           setSelectedIds(new Set());
           setShowBulkDelete(false);
+          setDeleteMode("archive_only");
+          setDeleteReason("");
         }}
       />
     </div>

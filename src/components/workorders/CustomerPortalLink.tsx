@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Copy, Link2, MessageCircle, Loader2, ShieldCheck, PenLine, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { getWorkOrderById, type WorkItem } from "@/lib/workOrdersStore";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
+import { buildCustomerPortalUrl, buildWorkOrderSignatureUrl, ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 
 interface Props {
   jobOrderId: string;
@@ -20,23 +20,28 @@ export default function CustomerPortalLink({ jobOrderId, customerPhone, orderNum
   const [loading, setLoading] = useState(true);
   const [signed, setSigned] = useState<boolean>(false);
 
-  async function loadToken() {
+  const loadToken = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("customer_portal_tokens")
-      .select("token, signed_at")
-      .eq("job_order_id", jobOrderId)
-      .maybeSingle();
-    if (data?.token) {
-      setToken(data.token);
-      setSigned(!!data.signed_at);
+    try {
+      const data = await ensureCustomerPortalToken(jobOrderId);
+      if (data?.token) {
+        setToken(data.token);
+        setSigned(!!data.signed_at);
+      } else {
+        setToken(null);
+        setSigned(false);
+      }
+    } catch (error) {
+      setToken(null);
+      setSigned(false);
+      toast.error(error instanceof Error ? error.message : "تعذر تجهيز رابط العميل");
     }
     setLoading(false);
-  }
-  useEffect(() => { loadToken(); }, [jobOrderId]);
+  }, [jobOrderId]);
+  useEffect(() => { loadToken(); }, [loadToken]);
 
-  const trackUrl = token ? `${window.location.origin}/p/${token}` : "";
-  const signUrl = trackUrl;
+  const trackUrl = buildCustomerPortalUrl(token);
+  const signUrl = buildWorkOrderSignatureUrl(token);
 
   function copy(text: string, label: string) {
     if (!text) return;

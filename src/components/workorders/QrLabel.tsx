@@ -8,7 +8,7 @@ import { openAndPrintWindow } from "@/lib/safePdfWindow";
 import { getTrackingUrl } from "@/lib/pdfGenerator";
 import { resolveWorkOrderType, workOrderTypeLabel } from "@/lib/workOrderType";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 
 interface Props {
   order: WorkOrder | null;
@@ -24,12 +24,8 @@ export default function QrLabel({ order, open, onClose }: Props) {
     async function loadPortalToken() {
       setPortalToken(null);
       if (!order?.cloudId || !open) return;
-      const { data } = await supabase
-        .from("customer_portal_tokens")
-        .select("token")
-        .eq("job_order_id", order.cloudId)
-        .maybeSingle();
-      if (!cancelled) setPortalToken((data as any)?.token || null);
+      const data = await ensureCustomerPortalToken(order.cloudId);
+      if (!cancelled) setPortalToken(data?.token || null);
     }
     loadPortalToken();
     return () => { cancelled = true; };
