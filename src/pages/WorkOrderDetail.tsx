@@ -41,6 +41,7 @@ import {
   type NeededPart,
   type StagePhase,
   refreshWorkOrdersFromCloud,
+  upsertWorkOrderInCache,
   isPartStillNeeded,
   normalizeWorkOrderStatus,
 } from "@/lib/workOrdersStore";
@@ -323,6 +324,7 @@ export default function WorkOrderDetail() {
             workItems: Array.isArray((data as any).work_items) ? (data as any).work_items : [],
             receivedAt: unified?.vehicle_received_at || (data as any).received_at || undefined,
           };
+          upsertWorkOrderInCache(adapted);
           void refreshWorkOrdersFromCloud().catch(() => {});
           setOrder(adapted);
         }

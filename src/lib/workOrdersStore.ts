@@ -251,9 +251,48 @@ export function getWorkOrderById(id: string): WorkOrder | undefined {
   return undefined;
 }
 
+function findWorkOrderIndex(id: string): number {
+  if (!id) return -1;
+  const raw = String(id).trim();
+  if (!raw) return -1;
+  const lower = raw.toLowerCase();
+  const list = load();
+  let idx = list.findIndex(o => o.id === raw || o.cloudId === raw || o.displayNumber === raw);
+  if (idx >= 0) return idx;
+  idx = list.findIndex(o =>
+    o.id?.toLowerCase() === lower ||
+    o.cloudId?.toLowerCase() === lower ||
+    o.displayNumber?.toLowerCase() === lower
+  );
+  if (idx >= 0) return idx;
+  const m = raw.match(/WO-\d{4}-\d+/i);
+  if (m) {
+    const code = m[0].toUpperCase();
+    idx = list.findIndex(o => o.id?.toUpperCase() === code || o.displayNumber?.toUpperCase() === code);
+    if (idx >= 0) return idx;
+  }
+  const seg = raw.split(/[/?#]/).filter(Boolean).pop();
+  if (seg && seg !== raw) return findWorkOrderIndex(seg);
+  return -1;
+}
+
+export function upsertWorkOrderInCache(order: WorkOrder): WorkOrder {
+  const list = load();
+  const idx = list.findIndex((o) =>
+    (order.cloudId && o.cloudId === order.cloudId) ||
+    (order.id && o.id === order.id) ||
+    (order.displayNumber && o.displayNumber === order.displayNumber)
+  );
+  if (idx >= 0) list[idx] = { ...list[idx], ...order };
+  else list.unshift(order);
+  KNOWN_CLOUD_NUMBERS.add(order.id);
+  persist();
+  return idx >= 0 ? list[idx] : order;
+}
+
 export function updateWorkOrder(id: string, patch: Partial<WorkOrder>) {
   const list = load();
-  const idx = list.findIndex(o => o.id === id);
+  const idx = findWorkOrderIndex(id);
   if (idx >= 0) {
     const normalizedPatch = { ...patch };
     if (patch.status !== undefined) normalizedPatch.status = normalizeWorkOrderStatus(patch.status);
@@ -268,7 +307,7 @@ export function updateWorkOrder(id: string, patch: Partial<WorkOrder>) {
 // ===== Needed Parts direct helpers (independent additions/edits) =====
 export function addNeededPartToOrder(orderId: string, part: Omit<NeededPart, "id"> & { id?: string }): NeededPart | null {
   const list = load();
-  const idx = list.findIndex(o => o.id === orderId);
+  const idx = findWorkOrderIndex(orderId);
   if (idx < 0) return null;
   const newPart: NeededPart = {
     id: part.id || `NP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -297,7 +336,7 @@ export async function addNeededPartsBulkToOrder(
   names: string[],
 ): Promise<{ added: NeededPart[]; skipped: string[]; order: WorkOrder }> {
   const list = load();
-  const idx = list.findIndex(o => o.id === orderId);
+  const idx = findWorkOrderIndex(orderId);
   if (idx < 0) throw new Error("أمر العمل غير موجود");
 
   const existing = new Set(
@@ -343,7 +382,7 @@ export async function addNeededPartsBulkToOrder(
       return { added, skipped, order: saved };
     } catch (error) {
       const rollbackList = load();
-      const rollbackIdx = rollbackList.findIndex(o => o.id === orderId);
+      const rollbackIdx = findWorkOrderIndex(orderId);
       if (rollbackIdx >= 0) {
         rollbackList[rollbackIdx] = originalOrder;
         cache = rollbackList;
@@ -358,7 +397,7 @@ export async function addNeededPartsBulkToOrder(
 
 export function updateNeededPartInOrder(orderId: string, partId: string, patch: Partial<NeededPart>) {
   const list = load();
-  const idx = list.findIndex(o => o.id === orderId);
+  const idx = findWorkOrderIndex(orderId);
   if (idx < 0) return;
   const parts = (list[idx].partsNeeded || []).map(p => {
     if (p.id !== partId) return p;
@@ -375,7 +414,7 @@ export function updateNeededPartInOrder(orderId: string, partId: string, patch: 
 
 export function removeNeededPartFromOrder(orderId: string, partId: string) {
   const list = load();
-  const idx = list.findIndex(o => o.id === orderId);
+  const idx = findWorkOrderIndex(orderId);
   if (idx < 0) return;
   const partsNeeded = (list[idx].partsNeeded || []).filter(p => p.id !== partId);
   list[idx] = { ...list[idx], partsNeeded };
