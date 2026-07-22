@@ -299,7 +299,7 @@ export default function WorkOrders() {
   const filtered = orders.filter((o) => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
     const matchesSearch = !normalizedSearch || [
-      o.customer, o.plate, o.id, o.phone, o.claimNumber, o.insurance, o.technician,
+      o.customer, o.plate, o.id, o.displayNumber, o.cloudId, o.phone, o.claimNumber, o.insurance, o.technician,
     ].some((value) => (value || "").toLowerCase().includes(normalizedSearch));
     const normalizedStatus = normalizeWorkOrderStatus(o.status);
     const statusGroup = NORMALIZED_STATUS_GROUPS[statusFilter] || STATUS_GROUPS[statusFilter];

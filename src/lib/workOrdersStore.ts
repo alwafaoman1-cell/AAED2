@@ -336,7 +336,11 @@ export async function addNeededPartsBulkToOrder(
   names: string[],
 ): Promise<{ added: NeededPart[]; skipped: string[]; order: WorkOrder }> {
   const list = load();
-  const idx = findWorkOrderIndex(orderId);
+  let idx = findWorkOrderIndex(orderId);
+  if (idx < 0) {
+    await fetchWorkOrderFromCloudByIdentifier(orderId).catch(() => null);
+    idx = findWorkOrderIndex(orderId);
+  }
   if (idx < 0) throw new Error("أمر العمل غير موجود");
 
   const existing = new Set(
@@ -1205,6 +1209,36 @@ async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
     });
   }
   return mapCloudRow(row, custMap, vehMap, claimMap);
+}
+
+export async function fetchWorkOrderFromCloudByIdentifier(identifier: string): Promise<WorkOrder | null> {
+  const raw = String(identifier || "").trim();
+  if (!raw) return null;
+  const ctx = await tenantContext();
+  if (!ctx) return null;
+
+  const segment = raw.split(/[/?#]/).filter(Boolean).pop() || raw;
+  const woMatch = segment.match(/WO-\d{4}-\d+/i);
+  const lookup = woMatch?.[0] || segment;
+  const lookupIsUuid = isUuid(lookup);
+
+  let query = supabase
+    .from("job_orders")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .limit(1);
+
+  query = lookupIsUuid
+    ? query.eq("id", lookup)
+    : query.ilike("order_number", lookup);
+
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  if (!data?.id) return null;
+
+  const saved = await mapSavedJobOrder(data);
+  upsertWorkOrderInCache(saved);
+  return saved;
 }
 
 export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder> {

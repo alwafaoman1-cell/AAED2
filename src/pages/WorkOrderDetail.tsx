@@ -42,6 +42,7 @@ import {
   type StagePhase,
   refreshWorkOrdersFromCloud,
   upsertWorkOrderInCache,
+  fetchWorkOrderFromCloudByIdentifier,
   isPartStillNeeded,
   normalizeWorkOrderStatus,
 } from "@/lib/workOrdersStore";
@@ -324,12 +325,15 @@ export default function WorkOrderDetail() {
             workItems: Array.isArray((data as any).work_items) ? (data as any).work_items : [],
             receivedAt: unified?.vehicle_received_at || (data as any).received_at || undefined,
           };
-          upsertWorkOrderInCache(adapted);
-          void refreshWorkOrdersFromCloud().catch(() => {});
-          setOrder(adapted);
+          const cached = upsertWorkOrderInCache(adapted);
+          setOrder(cached);
         }
         setLoadingRemote(false);
       })();
+    } else if (id && (isUuid || woMatch)) {
+      void fetchWorkOrderFromCloudByIdentifier(id).then((fresh) => {
+        if (fresh) setOrder(fresh);
+      }).catch(() => {});
     }
     return () => unsub();
   }, [id]);
