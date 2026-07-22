@@ -285,6 +285,77 @@ export function addNeededPartToOrder(orderId: string, part: Omit<NeededPart, "id
   return newPart;
 }
 
+export function normalizeNeededPartNameForMatch(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase();
+}
+
+export async function addNeededPartsBulkToOrder(
+  orderId: string,
+  names: string[],
+): Promise<{ added: NeededPart[]; skipped: string[]; order: WorkOrder }> {
+  const list = load();
+  const idx = list.findIndex(o => o.id === orderId);
+  if (idx < 0) throw new Error("أمر العمل غير موجود");
+
+  const existing = new Set(
+    (list[idx].partsNeeded || [])
+      .map((p) => normalizeNeededPartNameForMatch(p.name))
+      .filter(Boolean),
+  );
+  const seenInInput = new Set<string>();
+  const added: NeededPart[] = [];
+  const skipped: string[] = [];
+
+  for (const rawName of names) {
+    const name = String(rawName ?? "").trim().replace(/\s+/g, " ");
+    if (!name) continue;
+    const key = normalizeNeededPartNameForMatch(name);
+    if (!key || existing.has(key) || seenInInput.has(key)) {
+      skipped.push(name);
+      continue;
+    }
+    seenInInput.add(key);
+    added.push({
+      id: `NP-${Date.now()}-${added.length}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      quantity: 1,
+      status: "pending",
+      fulfilled: false,
+    });
+  }
+
+  if (!added.length) {
+    return { added, skipped, order: list[idx] };
+  }
+
+  const originalOrder = list[idx];
+  const partsNeeded = [...(list[idx].partsNeeded || []), ...added];
+  const updatedOrder = { ...list[idx], partsNeeded };
+  list[idx] = updatedOrder;
+  persist();
+
+  if (KNOWN_CLOUD_NUMBERS.has(updatedOrder.id)) {
+    try {
+      const saved = await saveWorkOrderToCloud(updatedOrder);
+      return { added, skipped, order: saved };
+    } catch (error) {
+      const rollbackList = load();
+      const rollbackIdx = rollbackList.findIndex(o => o.id === orderId);
+      if (rollbackIdx >= 0) {
+        rollbackList[rollbackIdx] = originalOrder;
+        cache = rollbackList;
+        persist();
+      }
+      throw error;
+    }
+  }
+
+  return { added, skipped, order: updatedOrder };
+}
+
 export function updateNeededPartInOrder(orderId: string, partId: string, patch: Partial<NeededPart>) {
   const list = load();
   const idx = list.findIndex(o => o.id === orderId);

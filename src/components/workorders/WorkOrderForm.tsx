@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import PlateInput from "@/components/vehicles/PlateInput";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getWorkOrders, saveWorkOrderToCloud, WORK_ORDER_STATUSES, NEEDED_PART_STATUS_LABELS, type WorkOrder, type ExtraExpense, type NeededPart, type NeededPartStatus, type WorkItem } from "@/lib/workOrdersStore";
+import { getWorkOrders, saveWorkOrderToCloud, WORK_ORDER_STATUSES, NEEDED_PART_STATUS_LABELS, normalizeNeededPartNameForMatch, type WorkOrder, type ExtraExpense, type NeededPart, type NeededPartStatus, type WorkItem } from "@/lib/workOrdersStore";
 import { nextWorkOrderNumber } from "@/lib/numbering";
 import { customersStore } from "@/lib/customersStore";
 import CustomerPhoneLookup from "@/components/customers/CustomerPhoneLookup";
@@ -139,6 +139,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   const [vehicleLookupLoading, setVehicleLookupLoading] = useState(false);
   const [useExistingVehicle, setUseExistingVehicle] = useState(false);
   const [wizardStep, setWizardStep] = useState<0 | 1 | 2>(0);
+  const [bulkNeededPartsText, setBulkNeededPartsText] = useState("");
   const role = getCurrentRole();
   const canChooseInsurance = role === "admin" || role === "manager" || role === "supervisor";
   const isWizard = !isEdit;
@@ -289,6 +290,37 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   function addNeededPart() {
     const item: NeededPart = { id: `NP-${Date.now()}`, name: "", quantity: 1, status: "pending", fulfilled: false };
     setForm(prev => ({ ...prev, partsNeeded: [...(prev.partsNeeded || []), item] }));
+  }
+  function addNeededPartsBulk() {
+    const lines = bulkNeededPartsText.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, " ")).filter(Boolean);
+    if (!lines.length) {
+      toast.error("الصق قائمة قطع الغيار أولاً، كل قطعة في سطر مستقل");
+      return;
+    }
+    setForm(prev => {
+      const existingKeys = new Set((prev.partsNeeded || []).map((p) => normalizeNeededPartNameForMatch(p.name)).filter(Boolean));
+      const seen = new Set<string>();
+      const additions: NeededPart[] = [];
+      for (const name of lines) {
+        const key = normalizeNeededPartNameForMatch(name);
+        if (!key || existingKeys.has(key) || seen.has(key)) continue;
+        seen.add(key);
+        additions.push({
+          id: `NP-${Date.now()}-${additions.length}-${Math.random().toString(36).slice(2, 6)}`,
+          name,
+          quantity: 1,
+          status: "pending",
+          fulfilled: false,
+        });
+      }
+      if (!additions.length) {
+        toast.error("لم تتم إضافة أي قطعة: كل الأسماء موجودة مسبقًا أو مكررة");
+        return prev;
+      }
+      toast.success(`تمت إضافة ${additions.length} قطعة. اضغط حفظ لتثبيت التعديل.`);
+      setBulkNeededPartsText("");
+      return { ...prev, partsNeeded: [...(prev.partsNeeded || []), ...additions] };
+    });
   }
   function updateNeededPart(id: string, patch: Partial<NeededPart>) {
     setForm(prev => ({
@@ -1044,6 +1076,29 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           <Button type="button" size="sm" variant="outline" onClick={addNeededPart} className="gap-1 h-7 text-xs">
             <Plus size={12} /> إضافة قطعة
           </Button>
+        </div>
+        <div className="mb-3 rounded-lg border border-dashed border-info/40 bg-card/70 p-2">
+          <Textarea
+            value={bulkNeededPartsText}
+            onChange={(e) => setBulkNeededPartsText(e.target.value)}
+            placeholder={"لصق قائمة قطع الغيار دفعة واحدة — كل سطر قطعة مستقلة\nمتجار أمامي يمين\nبنفر أمامي كامل\nلايت أمامي يمين"}
+            className="min-h-24 bg-background text-sm"
+          />
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-muted-foreground">
+              سيتم تحويل كل سطر إلى بند مستقل، مع تجاهل الأسطر الفارغة والقطع المكررة. الكمية الافتراضية: 1.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={addNeededPartsBulk}
+              disabled={!bulkNeededPartsText.trim()}
+              className="gap-1"
+            >
+              <Plus size={13} /> إضافة القائمة
+            </Button>
+          </div>
         </div>
         {(form.partsNeeded || []).length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-2">لا توجد قطع غيار مطلوبة</p>

@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { Plus, Trash2, Package, MessageCircle, Printer, Truck, Receipt } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   addNeededPartToOrder,
+  addNeededPartsBulkToOrder,
   updateNeededPartInOrder,
   removeNeededPartFromOrder,
+  normalizeNeededPartNameForMatch,
   isPartStillNeeded,
   NEEDED_PART_STATUS_LABELS,
   type NeededPart,
@@ -36,6 +39,8 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
   const [draftName, setDraftName] = useState("");
   const [draftQty, setDraftQty] = useState(1);
   const [draftNotes, setDraftNotes] = useState("");
+  const [bulkText, setBulkText] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const parts = order.partsNeeded || [];
 
@@ -64,6 +69,40 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
   function handleRemove(partId: string) {
     removeNeededPartFromOrder(order.id, partId);
     toast.success("تم حذف القطعة");
+  }
+
+  async function handleBulkAdd() {
+    const names = bulkText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (!names.length) {
+      toast.error("الصق قائمة قطع الغيار أولاً، كل قطعة في سطر مستقل");
+      return;
+    }
+
+    const existing = new Set(parts.map((p) => normalizeNeededPartNameForMatch(p.name)).filter(Boolean));
+    const uniqueIncoming = names.filter((name, index, arr) => {
+      const key = normalizeNeededPartNameForMatch(name);
+      return key && !existing.has(key) && arr.findIndex((x) => normalizeNeededPartNameForMatch(x) === key) === index;
+    });
+    if (!uniqueIncoming.length) {
+      toast.error("لم تتم إضافة أي قطعة: كل الأسماء موجودة مسبقًا أو مكررة");
+      return;
+    }
+
+    setBulkSaving(true);
+    try {
+      const result = await addNeededPartsBulkToOrder(order.id, names);
+      if (!result.added.length) {
+        toast.error("لم تتم إضافة أي قطعة جديدة");
+        return;
+      }
+      setBulkText("");
+      const skippedText = result.skipped.length ? ` — تم تجاهل ${result.skipped.length} مكرر` : "";
+      toast.success(`تمت إضافة ${result.added.length} قطعة بنجاح${skippedText}`);
+    } catch (error: any) {
+      toast.error(error?.message || "فشل حفظ قائمة قطع الغيار");
+    } finally {
+      setBulkSaving(false);
+    }
   }
 
   return (
@@ -112,7 +151,8 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
 
       {/* Quick add row */}
       {allowEdit && (
-        <div className="grid grid-cols-12 gap-2 items-center bg-secondary/30 border border-border rounded-lg p-2 mb-3">
+        <div className="space-y-2 mb-3">
+        <div className="grid grid-cols-12 gap-2 items-center bg-secondary/30 border border-border rounded-lg p-2">
           <Input
             value={draftName}
             onChange={(e) => setDraftName(e.target.value)}
@@ -142,6 +182,30 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
           >
             <Plus size={14} /> إضافة
           </Button>
+        </div>
+        <div className="rounded-lg border border-dashed border-info/40 bg-info/5 p-2">
+          <Textarea
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            placeholder={"لصق قائمة قطع الغيار دفعة واحدة — كل سطر قطعة مستقلة\nمثال:\nمتجار أمامي يمين\nبنفر أمامي كامل\nلايت أمامي يمين"}
+            className="min-h-24 bg-card text-sm"
+          />
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-muted-foreground">
+              سيتم تجاهل الأسطر الفارغة والقطع المكررة داخل أمر العمل. الكمية الافتراضية لكل قطعة: 1.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleBulkAdd}
+              disabled={bulkSaving || !bulkText.trim()}
+              className="gap-1"
+            >
+              <Plus size={13} /> {bulkSaving ? "جاري الحفظ..." : "إضافة القائمة"}
+            </Button>
+          </div>
+        </div>
         </div>
       )}
 
