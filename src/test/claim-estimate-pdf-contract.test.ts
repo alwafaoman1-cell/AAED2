@@ -47,6 +47,19 @@ describe("claim estimate PDF template", () => {
     expect(lumpHtml).toContain("Workshop Stamp");
   });
 
+  it("can hide UPL and Lump Sum badges from printed estimates without changing the estimate type", () => {
+    const html = getClaimEstimateHtml({
+      ...basePayload,
+      estimationType: "upl",
+      showEstimateBadge: false,
+      uplItems: [{ description: "Labour", quantity: 1, unit_price: 100 }],
+    });
+
+    expect(html).not.toContain('<div class="estimation-badge"><span>UPL</span></div>');
+    expect(html).not.toContain('<div class="estimation-badge"><span>LUMP SUM</span></div>');
+    expect(html).not.toContain("Workshop Stamp");
+  });
+
   it("uses the compact one-page claim estimate print layout", () => {
     const html = getClaimEstimateHtml({
       ...basePayload,
@@ -57,6 +70,6 @@ describe("claim estimate PDF template", () => {
     expect(html).toContain("claim-estimate-page");
     expect(html).toContain("grid-template-columns:repeat(3,minmax(0,1fr))");
     expect(html).toContain(".claim-estimate-page .footer{margin-top:auto");
-    expect(html).toContain(".claim-estimate-page .estimation-badge span{padding:4px 20px");
+    expect(html).toContain(".claim-estimate-page .estimation-badge span{padding:4px 18px");
   });
 });

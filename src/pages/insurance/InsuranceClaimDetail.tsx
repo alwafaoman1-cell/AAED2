@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -206,6 +207,7 @@ export default function InsuranceClaimDetail() {
 
   const [uploading, setUploading] = useState(false);
   const [showPdf, setShowPdf] = useState(false);
+  const [showEstimateBadgeInPdf, setShowEstimateBadgeInPdf] = useState(true);
   const [showSummary, setShowSummary] = useState(false);
   const [showInspectionPdf, setShowInspectionPdf] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
@@ -1387,9 +1389,10 @@ export default function InsuranceClaimDetail() {
       deductibleAmount: Number(ex.deductible_amount) || 0,
       notes: [cleanEstimateText(estimateTerms), cleanEstimateText(notes)].filter(Boolean).join("\n\n") || null,
       damagePhotos: damagePhotos || [],
+      showEstimateBadge: showEstimateBadgeInPdf,
     });
     return html;
-  }, [existing, vehicle, claimEstimateNumber, claimNumber, company, ownerName, ownerPhone, vehicleMake, vehicleModel, vehiclePlate, vehicleYear, vehicleColor, estimatedCost, approvedAmount, estimationType, uplItems, notes, estimateTerms, damagePhotos, estimateDate]);
+  }, [existing, vehicle, claimEstimateNumber, claimNumber, company, ownerName, ownerPhone, vehicleMake, vehicleModel, vehiclePlate, vehicleYear, vehicleColor, vehicleVin, estimatedCost, approvedAmount, estimationType, uplItems, notes, estimateTerms, damagePhotos, estimateDate, showEstimateBadgeInPdf]);
 
   async function handleDownloadEstimatePdf() {
     try {
@@ -2197,6 +2200,16 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <PackageCheck size={14} /> تسليم المركبة
                 </Button>
               )}
+              <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs">
+                <Switch
+                  id="claim-estimate-badge-toggle"
+                  checked={showEstimateBadgeInPdf}
+                  onCheckedChange={setShowEstimateBadgeInPdf}
+                />
+                <Label htmlFor="claim-estimate-badge-toggle" className="cursor-pointer whitespace-nowrap text-xs">
+                  إظهار شعار UPL / Lump Sum
+                </Label>
+              </div>
               <Button variant="outline" size="sm" onClick={() => setShowPdf(true)} className="gap-1.5">
                 <Printer size={14} /> طباعة تقدير الإصلاح
               </Button>
