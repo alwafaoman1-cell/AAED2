@@ -1121,8 +1121,8 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
       .maybeSingle();
     if (existingError) throw existingError;
     if (!existing?.id) throw new Error("Work order was not found in Supabase");
-    if ((existing as any).deleted_at || (existing as any).archived_at) {
-      throw new Error("Work order is archived/deleted in Supabase and cannot be updated from this form");
+    if ((existing as any).deleted_at) {
+      throw new Error("Work order is deleted in Supabase and cannot be updated from this form");
     }
     previousOrderNumber = (existing as any).order_number || order.id;
     finalOrderNumber = String(order.id || previousOrderNumber || "").trim().toUpperCase();
@@ -1144,7 +1144,14 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     finalOrderNumber = await allocateVisibleOrderNumber(ctx.tenantId, order.id);
   }
 
-  const normalizedOrder = { ...order, id: finalOrderNumber, customerId, vehicleId };
+  const normalizedStatus = normalizeWorkOrderStatus(order.status);
+  const normalizedOrder = {
+    ...order,
+    id: finalOrderNumber,
+    customerId,
+    vehicleId,
+    archivedAt: isClosedWorkOrderStatus(normalizedStatus) ? (order.archivedAt || undefined) : undefined,
+  };
   const payload = buildJobOrderPayload(normalizedOrder, ctx.tenantId, customerId, vehicleId);
   let write = targetId
     ? (supabase.from("job_orders") as any).update(payload).eq("tenant_id", ctx.tenantId).eq("id", targetId).select("*").single()
