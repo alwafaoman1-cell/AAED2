@@ -37,11 +37,17 @@ type ProviderStatus = {
 
 const DEFAULT_MODELS: Record<AiProvider, string> = {
   openai: "gpt-4o-mini",
-  gemini: "gemini-2.0-flash",
+  gemini: "gemini-3-flash-preview",
   anthropic: "claude-3-5-haiku-latest",
   custom: "",
   ollama: "llama3.2-vision",
 };
+
+const GEMINI_MODEL_OPTIONS = [
+  { value: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview — active free-tier vision/PDF extraction" },
+  { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash — stronger, verify free quota first" },
+  { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash — legacy, may have zero free quota" },
+];
 
 const PROVIDER_META: Record<AiProvider, { name: string; url: string; note: string; keyHint: string }> = {
   openai: {
@@ -96,6 +102,7 @@ export default function AiKeysSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testingVision, setTestingVision] = useState(false);
   const [selected, setSelected] = useState<AiProvider>("openai");
   const [form, setForm] = useState({
     enabled: false,
@@ -153,7 +160,7 @@ export default function AiKeysSettingsPage() {
       model: current.model || DEFAULT_MODELS[selected],
       baseUrl: current.baseUrl || "",
       connectionType: current.connectionType || "cloud",
-      useForImageExtraction: !!current.useForImageExtraction,
+      useForImageExtraction: selected === "gemini" ? true : !!current.useForImageExtraction,
       requestTimeoutMs: current.requestTimeoutMs || 45000,
     });
   }, [selected, status]);
@@ -177,7 +184,7 @@ export default function AiKeysSettingsPage() {
           model: form.model.trim() || DEFAULT_MODELS[selected],
           baseUrl: form.baseUrl.trim(),
           connectionType: form.connectionType,
-          useForImageExtraction: form.useForImageExtraction,
+          useForImageExtraction: selected === "gemini" ? true : form.useForImageExtraction,
           requestTimeoutMs: Number(form.requestTimeoutMs || 45000),
         },
       });
@@ -208,6 +215,30 @@ export default function AiKeysSettingsPage() {
       await load();
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function testVisionProvider() {
+    if (!canManage) return toast.error("ليست لديك صلاحية اختبار مفاتيح AI");
+    setTestingVision(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("test-ai-provider", {
+        body: { provider: selected, testType: "vision" },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.message || data?.error || "Vision test failed");
+      toast.success("Vision test passed");
+      await load();
+    } catch (e: any) {
+      const msg = String(e?.message || "Vision test failed");
+      if (msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("rate")) {
+        toast.error("تعذر التحليل باستخدام الحصة المجانية لـ Gemini. يرجى المحاولة لاحقًا أو إدخال البيانات يدويًا.");
+      } else {
+        toast.error(msg);
+      }
+      await load();
+    } finally {
+      setTestingVision(false);
     }
   }
 
@@ -330,12 +361,23 @@ export default function AiKeysSettingsPage() {
           </div>
           <div className="space-y-2">
             <Label>Model</Label>
-            <Input
-              value={form.model}
-              placeholder={DEFAULT_MODELS[selected] || "model-name"}
-              dir="ltr"
-              onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-            />
+            {selected === "gemini" ? (
+              <Select value={form.model || DEFAULT_MODELS.gemini} onValueChange={(model) => setForm((f) => ({ ...f, model }))}>
+                <SelectTrigger dir="ltr"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {GEMINI_MODEL_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                value={form.model}
+                placeholder={DEFAULT_MODELS[selected] || "model-name"}
+                dir="ltr"
+                onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
+              />
+            )}
           </div>
           {selected === "ollama" && (
             <>
@@ -382,13 +424,21 @@ export default function AiKeysSettingsPage() {
           )}
         </div>
 
-        {selected === "ollama" && (
+        {(selected === "ollama" || selected === "gemini") && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3">
             <div>
               <div className="text-sm font-medium">Use for Image Data Extraction</div>
-              <div className="text-xs text-muted-foreground">Ollama will be selected only for image/document extraction; text writing providers remain separate.</div>
+              <div className="text-xs text-muted-foreground">
+                {selected === "gemini"
+                  ? "Gemini is the default free-tier provider for insurance claim document extraction. No paid fallback is used for this flow."
+                  : "Ollama will be selected only for image/document extraction; text writing providers remain separate."}
+              </div>
             </div>
-            <Switch checked={form.useForImageExtraction} onCheckedChange={(useForImageExtraction) => setForm((f) => ({ ...f, useForImageExtraction }))} />
+            <Switch
+              checked={selected === "gemini" ? true : form.useForImageExtraction}
+              disabled={selected === "gemini"}
+              onCheckedChange={(useForImageExtraction) => setForm((f) => ({ ...f, useForImageExtraction }))}
+            />
           </div>
         )}
 
@@ -414,6 +464,9 @@ export default function AiKeysSettingsPage() {
           </Button>
           <Button onClick={testProvider} disabled={testing || !providerState.configured} variant="outline" className="gap-2">
             <Send size={14} /> {testing ? "جارِ الاختبار…" : "Test Connection"}
+          </Button>
+          <Button onClick={testVisionProvider} disabled={testingVision || !providerState.configured} variant="outline" className="gap-2">
+            <Send size={14} /> {testingVision ? "Testing Vision…" : "Test Vision"}
           </Button>
         </div>
       </Card>

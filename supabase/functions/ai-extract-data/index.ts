@@ -16,6 +16,10 @@ function json(payload: Record<string, unknown>, status = 200) {
   });
 }
 
+const GEMINI_FREE_VISION_MODEL = "gemini-3-flash-preview";
+const FREE_GEMINI_DAILY_EXTRACTION_LIMIT = 50;
+const GEMINI_FREE_TIER_MESSAGE = "تعذر التحليل باستخدام الحصة المجانية لـ Gemini. يرجى المحاولة لاحقًا أو إدخال البيانات يدويًا.";
+
 function extractJsonObject(raw: string): Record<string, unknown> {
   const cleaned = String(raw || "").replace(/```json|```/g, "").trim();
   try {
@@ -34,6 +38,20 @@ function extractJsonObject(raw: string): Record<string, unknown> {
   }
 }
 
+function sanitizeExtracted(schema: string, extracted: Record<string, unknown>, allowedKeys: string[]) {
+  if (!extracted || typeof extracted !== "object" || Array.isArray(extracted)) return null;
+  const out: Record<string, string> = {};
+  for (const key of allowedKeys) {
+    const value = extracted[key];
+    out[key] = value === null || value === undefined ? "" : String(value).trim();
+  }
+  if (schema === "insurance_claim") {
+    const hasUsefulValue = allowedKeys.some((key) => out[key]);
+    return hasUsefulValue ? out : null;
+  }
+  return out;
+}
+
 // ───────── Provider resolver ─────────
 function fallbackProvider() {
   const lovable = Deno.env.get("LOVABLE_API_KEY");
@@ -41,7 +59,7 @@ function fallbackProvider() {
   const openai = Deno.env.get("OPENAI_API_KEY");
   if (openai) return { type: "openai", url: "https://api.openai.com/v1/chat/completions", key: openai, model: "gpt-4o-mini" };
   const gemini = Deno.env.get("GEMINI_API_KEY");
-  if (gemini) return { type: "gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: gemini, model: "gemini-2.0-flash" };
+  if (gemini) return { type: "gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: gemini, model: GEMINI_FREE_VISION_MODEL };
   const anthropic = Deno.env.get("ANTHROPIC_API_KEY");
   if (anthropic) return { type: "anthropic", url: "https://api.anthropic.com/v1/messages", key: anthropic, model: "claude-3-5-haiku-latest" };
   return null;
@@ -64,7 +82,7 @@ async function resolveProvider(admin: any, tenantId: string | null) {
     const apiKey = rowData?.secrets?.api_key;
     if (rowData?.enabled && apiKey) {
       if (provider === "openai") return { type: provider, url: "https://api.openai.com/v1/chat/completions", key: apiKey, model: config.model || "gpt-4o-mini" };
-      if (provider === "gemini") return { type: provider, url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: apiKey, model: config.model || "gemini-2.0-flash" };
+      if (provider === "gemini") return { type: provider, url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: apiKey, model: config.model || GEMINI_FREE_VISION_MODEL };
       if (provider === "anthropic") return { type: provider, url: "https://api.anthropic.com/v1/messages", key: apiKey, model: config.model || "claude-3-5-haiku-latest" };
       if (provider === "custom" && config.base_url) return { type: provider, url: config.base_url, key: apiKey, model: config.model };
       if (provider === "ollama") {
@@ -81,6 +99,62 @@ async function resolveProvider(admin: any, tenantId: string | null) {
     }
   }
   return fallbackProvider();
+}
+
+async function resolveFreeGeminiProvider(admin: any, tenantId: string | null) {
+  if (tenantId) {
+    const { data: rows } = await admin
+      .from("tenant_integrations")
+      .select("provider,config,secrets,enabled")
+      .eq("tenant_id", tenantId)
+      .eq("provider", "ai_gemini")
+      .eq("enabled", true)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    const apiKey = row?.secrets?.api_key;
+    if (row?.enabled && apiKey) {
+      const config = row.config || {};
+      return {
+        type: "gemini",
+        url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        key: apiKey,
+        model: config.model || GEMINI_FREE_VISION_MODEL,
+        freeTierOnly: true,
+      };
+    }
+  }
+
+  const envKey = Deno.env.get("GEMINI_API_KEY");
+  if (envKey) {
+    return {
+      type: "gemini",
+      url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      key: envKey,
+      model: GEMINI_FREE_VISION_MODEL,
+      freeTierOnly: true,
+    };
+  }
+
+  return null;
+}
+
+async function getDailyGeminiExtractionCount(admin: any, tenantId: string | null) {
+  if (!tenantId) return 0;
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count, error } = await admin
+      .from("ai_usage_logs")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .eq("provider", "gemini")
+      .eq("document_type", "insurance_claim")
+      .gte("created_at", since);
+    if (error) return 0;
+    return Number(count || 0);
+  } catch {
+    return 0;
+  }
 }
 
 async function logUsage(admin: any, payload: Record<string, unknown>) {
@@ -124,7 +198,10 @@ const SCHEMAS: Record<string, { description: string; system: string; parameters:
         claim_number: { type: "string", description: "رقم المطالبة/البلاغ" },
         owner_name: { type: "string", description: "اسم صاحب السيارة" },
         owner_phone: { type: "string", description: "رقم جوال المالك" },
-        plate: { type: "string" },
+        plate: { type: "string", description: "Full visible registration/plate text, for backwards compatibility" },
+        plate_number: { type: "string", description: "Plate digits/number only, e.g. 47782" },
+        plate_letters: { type: "string", description: "Plate letters/code only, e.g. B" },
+        plate_country: { type: "string", description: "Registration country if visible; use Oman if clearly Omani" },
         make: { type: "string" },
         model: { type: "string" },
         year: { type: "string" },
@@ -357,9 +434,32 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "Pages too large in total (max ~24MB)" });
     }
 
-    const provider = await resolveProvider(admin, tenantId);
+    const provider = schema === "insurance_claim"
+      ? await resolveFreeGeminiProvider(admin, tenantId)
+      : await resolveProvider(admin, tenantId);
     if (!provider) {
-      return json({ ok: false, error: "AI provider is not configured" });
+      return json({
+        ok: false,
+        error: schema === "insurance_claim" ? "gemini_free_tier_unavailable" : "AI provider is not configured",
+        message: schema === "insurance_claim" ? GEMINI_FREE_TIER_MESSAGE : undefined,
+      });
+    }
+
+    if (schema === "insurance_claim") {
+      const usedToday = await getDailyGeminiExtractionCount(admin, tenantId);
+      if (usedToday >= FREE_GEMINI_DAILY_EXTRACTION_LIMIT) {
+        await logUsage(admin, {
+          tenant_id: tenantId,
+          user_id: userId,
+          provider: "gemini",
+          document_type: schema,
+          model: provider.model,
+          status: "failed",
+          duration_ms: 0,
+          error_message: "daily_free_limit_exceeded",
+        });
+        return json({ ok: false, error: "gemini_free_tier_unavailable", message: GEMINI_FREE_TIER_MESSAGE }, 429);
+      }
     }
     const startedAt = Date.now();
 
@@ -428,6 +528,20 @@ Deno.serve(async (req) => {
         const parsed = extractJsonObject(text);
         const content = String((parsed as any)?.message?.content || (parsed as any)?.response || text || "");
         const extracted = extractJsonObject(content);
+        const sanitized = sanitizeExtracted(schema, extracted, fieldNames);
+        if (!sanitized) {
+          await logUsage(admin, {
+            tenant_id: tenantId,
+            user_id: userId,
+            provider: "ollama",
+            document_type: schema,
+            model: provider.model,
+            status: "failed",
+            duration_ms: Date.now() - startedAt,
+            error_message: "invalid_ai_json",
+          });
+          return json({ ok: false, error: "invalid_ai_json", message: "استجابة الذكاء الاصطناعي غير صالحة. لم يتم حفظ أي بيانات." });
+        }
         await logUsage(admin, {
           tenant_id: tenantId,
           user_id: userId,
@@ -437,7 +551,7 @@ Deno.serve(async (req) => {
           status: "success",
           duration_ms: Date.now() - startedAt,
         });
-        return json({ ok: true, data: extracted, provider: "ollama" });
+        return json({ ok: true, data: sanitized, provider: "ollama" });
       } catch (e) {
         const msg = String(e?.message || e || "ollama_request_failed").toLowerCase().includes("abort") ? "Request timeout" : "Ollama server unavailable";
         await logUsage(admin, {
@@ -503,6 +617,32 @@ Deno.serve(async (req) => {
     if (!resp.ok) {
       const txt = await resp.text();
       console.error("ai-extract-data error:", resp.status, txt);
+      if (provider.type === "gemini" && schema === "insurance_claim") {
+        const lowerTxt = txt.toLowerCase();
+        const freeTierError =
+          resp.status === 400 ||
+          resp.status === 401 ||
+          resp.status === 403 ||
+          resp.status === 404 ||
+          resp.status === 429 ||
+          resp.status === 402 ||
+          lowerTxt.includes("quota") ||
+          lowerTxt.includes("rate") ||
+          lowerTxt.includes("billing") ||
+          lowerTxt.includes("vision") ||
+          lowerTxt.includes("model");
+        await logUsage(admin, {
+          tenant_id: tenantId,
+          user_id: userId,
+          provider: "gemini",
+          document_type: schema,
+          model: provider.model,
+          status: "failed",
+          duration_ms: Date.now() - startedAt,
+          error_message: freeTierError ? "gemini_free_tier_unavailable" : "gemini_request_failed",
+        });
+        return json({ ok: false, error: "gemini_free_tier_unavailable", message: GEMINI_FREE_TIER_MESSAGE }, resp.status === 429 ? 429 : 200);
+      }
       if (resp.status === 429) {
         await logUsage(admin, { tenant_id: tenantId, user_id: userId, provider: provider.type, document_type: schema, model: provider.model, status: "failed", duration_ms: Date.now() - startedAt, error_message: "Rate limit exceeded" });
         return json({ ok: false, error: "Rate limit exceeded, try again shortly" });
@@ -537,6 +677,22 @@ Deno.serve(async (req) => {
       } catch { /* ignore */ }
     }
 
+    const allowedKeys = Object.keys(preset.parameters?.properties || {});
+    const sanitized = sanitizeExtracted(schema, extracted, allowedKeys);
+    if (!sanitized) {
+      await logUsage(admin, {
+        tenant_id: tenantId,
+        user_id: userId,
+        provider: provider.type,
+        document_type: schema,
+        model: provider.model,
+        status: "failed",
+        duration_ms: Date.now() - startedAt,
+        error_message: "invalid_ai_json",
+      });
+      return json({ ok: false, error: "invalid_ai_json", message: "استجابة الذكاء الاصطناعي غير صالحة. لم يتم حفظ أي بيانات." });
+    }
+
     await logUsage(admin, {
       tenant_id: tenantId,
       user_id: userId,
@@ -546,7 +702,7 @@ Deno.serve(async (req) => {
       status: "success",
       duration_ms: Date.now() - startedAt,
     });
-    return json({ ok: true, data: extracted });
+    return json({ ok: true, data: sanitized });
   } catch (e) {
     console.error("ai-extract-data exception:", e);
     return json({ ok: false, error: e instanceof Error ? e.message : "Unknown error" });

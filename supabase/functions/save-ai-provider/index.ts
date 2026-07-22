@@ -9,6 +9,7 @@ const corsHeaders = {
 
 const PROVIDERS = ["openai", "gemini", "anthropic", "custom", "ollama"] as const;
 const PROVIDER_KEYS = PROVIDERS.map((p) => `ai_${p}`);
+const GEMINI_FREE_VISION_MODEL = "gemini-3-flash-preview";
 
 function json(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -167,10 +168,10 @@ Deno.serve(async (req) => {
     const enabled = !!body.enabled;
     const apiKey = String(body.apiKey || "").trim();
     const config = {
-      model: String(body.model || "").trim(),
+      model: String(body.model || (provider === "gemini" ? GEMINI_FREE_VISION_MODEL : "")).trim(),
       base_url: String(body.baseUrl || "").trim(),
       connection_type: String(body.connectionType || "cloud"),
-      use_for_image_extraction: !!body.useForImageExtraction,
+      use_for_image_extraction: provider === "gemini" ? true : !!body.useForImageExtraction,
       request_timeout_ms: Math.max(5000, Math.min(180000, Number(body.requestTimeoutMs || 45000))),
     };
     if (provider === "ollama" && !config.base_url) {

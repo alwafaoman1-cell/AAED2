@@ -653,7 +653,9 @@ export default function NewInsuranceClaim() {
               if (d.claim_number) patch.claimNumber = d.claim_number;
               if (d.owner_name) patch.ownerName = d.owner_name;
               if (d.owner_phone) patch.ownerPhone = d.owner_phone;
-              if (d.plate) patch.vehiclePlate = d.plate;
+              const plateFromParts = [d.plate_letters, d.plate_number].filter(Boolean).join(" ").trim();
+              if (plateFromParts) patch.vehiclePlate = plateFromParts;
+              if (!plateFromParts && d.plate) patch.vehiclePlate = d.plate;
               if (d.make) patch.vehicleMake = d.make;
               if (d.model) patch.vehicleModel = d.model;
               if (d.year) patch.vehicleYear = d.year;

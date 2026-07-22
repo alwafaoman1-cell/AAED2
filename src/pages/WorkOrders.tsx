@@ -270,29 +270,30 @@ export default function WorkOrders() {
       await archiveWorkOrder(order, finalReason);
     }
 
-    const removed = deleteWorkOrder(order.id) || order;
+    const removed = deleteWorkOrder(order.id);
     await refreshWorkOrdersFromCloud().catch(() => {});
     deleteWorkOrder(order.id);
 
-    const cloudEntityId = removed.cloudId && isUuid(removed.cloudId) ? removed.cloudId : removed.id;
+    const trashed = removed || deleteOrder;
+    const cloudEntityId = trashed.cloudId && isUuid(trashed.cloudId) ? trashed.cloudId : trashed.id;
     moveToTrash({
       type: "work_order",
       entityId: cloudEntityId,
-      label: `${removed.displayNumber || removed.id} - ${removed.customer} - ${removed.plate}`,
-      payload: { ...removed, cloudId: cloudEntityId },
+      label: `${trashed.displayNumber || trashed.id} - ${trashed.customer} - ${trashed.plate}`,
+      payload: { ...trashed, cloudId: cloudEntityId },
     });
     logActivity({
       action: "delete",
       entity: "work_order",
-      entityId: removed.id,
-      label: `أمر عمل ${removed.customer} - ${removed.plate}`,
+      entityId: trashed.id,
+      label: `أمر عمل ${trashed.customer} - ${trashed.plate}`,
       description: mode === "delete_with_related"
         ? "حذف أمر العمل مع أرشفة المصروفات وإلغاء الفواتير المرتبطة"
         : "نقل أمر العمل لسلة المهملات مع حفظ السجلات المالية",
-      amount: removed.totalCost,
+      amount: trashed.totalCost,
     });
 
-    return removed;
+    return trashed;
   };
 
   const filtered = orders.filter((o) => {

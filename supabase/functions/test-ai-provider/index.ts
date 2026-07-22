@@ -8,6 +8,8 @@ const corsHeaders = {
 };
 
 const PROVIDERS = ["openai", "gemini", "anthropic", "custom", "ollama"] as const;
+const GEMINI_FREE_VISION_MODEL = "gemini-3-flash-preview";
+const TEST_IMAGE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function json(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -22,7 +24,7 @@ function isAdmin(profile: any) {
 
 function endpoint(provider: string, config: any) {
   if (provider === "openai") return { url: "https://api.openai.com/v1/chat/completions", model: config.model || "gpt-4o-mini" };
-  if (provider === "gemini") return { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: config.model || "gemini-2.0-flash" };
+  if (provider === "gemini") return { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: config.model || GEMINI_FREE_VISION_MODEL };
   if (provider === "anthropic") return { url: "https://api.anthropic.com/v1/messages", model: config.model || "claude-3-5-haiku-latest" };
   if (provider === "ollama") {
     const base = String(config.base_url || (config.connection_type === "local" ? "http://localhost:11434" : "https://ollama.com")).replace(/\/+$/, "");
@@ -30,6 +32,80 @@ function endpoint(provider: string, config: any) {
     return { url: `${apiBase}/chat`, model: config.model || "llama3.2-vision" };
   }
   return { url: config.base_url, model: config.model };
+}
+
+async function testVisionProvider(provider: string, apiKey: string, config: any) {
+  const ep = endpoint(provider, config);
+  if (!ep.url || !ep.model) throw new Error("ai_provider_not_configured");
+
+  if (provider === "ollama") {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    const r = await fetch(ep.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: ep.model,
+        stream: false,
+        format: "json",
+        messages: [{
+          role: "user",
+          content: "This is a tiny test image. Return JSON only: {\"vision_ok\":\"yes\"}.",
+          images: [TEST_IMAGE_DATA_URL.split(",")[1]],
+        }],
+      }),
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(text.slice(0, 500) || `vision_test_failed_${r.status}`);
+    if (!text.toLowerCase().includes("vision_ok") && !text.toLowerCase().includes("yes")) throw new Error("vision_test_invalid_response");
+    return;
+  }
+
+  if (provider === "anthropic") {
+    const r = await fetch(ep.url, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: ep.model,
+        max_tokens: 64,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: "This is a tiny test image. Return JSON only: {\"vision_ok\":\"yes\"}." },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: TEST_IMAGE_DATA_URL.split(",")[1] } },
+          ],
+        }],
+      }),
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(text.slice(0, 500) || `vision_test_failed_${r.status}`);
+    if (!text.toLowerCase().includes("vision_ok") && !text.toLowerCase().includes("yes")) throw new Error("vision_test_invalid_response");
+    return;
+  }
+
+  const r = await fetch(ep.url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: ep.model,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "This is a tiny test image. Return JSON only: {\"vision_ok\":\"yes\"}." },
+          { type: "image_url", image_url: { url: TEST_IMAGE_DATA_URL } },
+        ],
+      }],
+      max_tokens: 64,
+      temperature: 0,
+    }),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(text.slice(0, 500) || `vision_test_failed_${r.status}`);
+  if (!text.toLowerCase().includes("vision_ok") && !text.toLowerCase().includes("yes")) throw new Error("vision_test_invalid_response");
 }
 
 async function testProvider(provider: string, apiKey: string, config: any) {
@@ -142,6 +218,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const provider = String(body.provider || "");
+    const testType = String(body.testType || "connection");
     if (!PROVIDERS.includes(provider as any)) return json({ ok: false, status: "Failed", error: "unsupported_ai_provider" }, 200);
 
     const { data: row } = await admin
@@ -154,9 +231,13 @@ Deno.serve(async (req) => {
     if (!row || !apiKey) return json({ ok: false, status: "Not Configured", error: "ai_provider_not_configured" }, 200);
 
     try {
-      await testProvider(provider, apiKey, row.config || {});
+      if (testType === "vision") {
+        await testVisionProvider(provider, apiKey, row.config || {});
+      } else {
+        await testProvider(provider, apiKey, row.config || {});
+      }
       await updateTestStatus(admin, row.id, {
-        last_test_status: "connected",
+        last_test_status: testType === "vision" ? "vision_connected" : "connected",
         last_test_at: new Date().toISOString(),
         last_test_error: null,
       });
@@ -166,9 +247,9 @@ Deno.serve(async (req) => {
         action: "ai_provider_test",
         event: "ai provider tested",
         status: "success",
-        details: { provider },
+        details: { provider, testType },
       });
-      return json({ ok: true, status: "Connected" });
+      return json({ ok: true, status: testType === "vision" ? "Vision Connected" : "Connected" });
     } catch (error) {
       const message = String(error?.message || error || "ai_test_failed");
       await updateTestStatus(admin, row.id, {
@@ -182,7 +263,7 @@ Deno.serve(async (req) => {
         action: "ai_provider_test",
         event: "ai provider tested",
         last_test_status: "failed",
-        details: { provider, error: message },
+        details: { provider, testType, error: message },
       });
       return json({ ok: false, status: "Failed", error: message, message });
     }
