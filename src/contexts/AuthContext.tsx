@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { setCurrentRole as setPermissionsRole } from "@/lib/permissions";
@@ -49,6 +49,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const currentUserIdRef = useRef<string | null>(null);
+  const profileRef = useRef<UserProfile | null>(null);
 
   async function fetchProfile(uid: string): Promise<UserProfile | null> {
     if (profileCache.has(uid)) return profileCache.get(uid) ?? null;
@@ -114,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function applyProfile(p: UserProfile | null) {
+    profileRef.current = p;
     setProfile(p);
     setPermissionsRole((p?.role as any) ?? null);
     // Pull company/template settings from the cloud so they survive cache clears.
@@ -138,12 +141,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      const nextUser = sess?.user ?? null;
+      const nextUserId = nextUser?.id ?? null;
+      const sameUser = !!nextUserId && currentUserIdRef.current === nextUserId;
+
       setSession(sess);
-      setUser(sess?.user ?? null);
-      if (sess?.user) {
+      setUser(nextUser);
+      currentUserIdRef.current = nextUserId;
+
+      // Supabase can emit TOKEN_REFRESHED / SIGNED_IN again when a hidden tab
+      // becomes active. The previous implementation set loading=true for every
+      // auth event, which caused ProtectedRoute to unmount the current page and
+      // discard unsaved form state. If the same user is already loaded, keep the
+      // page mounted and only refresh the session object.
+      if (sameUser && profileRef.current) {
+        setLoading(false);
+        return;
+      }
+
+      if (nextUser) {
         setLoading(true);
         setTimeout(() => {
-          void loadProfileWithLateApply(sess.user.id, () => active)
+          void loadProfileWithLateApply(nextUser.id, () => active)
             .catch((error) => {
               console.warn("[auth] profile load delayed or failed", error);
             })
@@ -152,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
         }, 0);
       } else {
+        currentUserIdRef.current = null;
         applyProfile(null);
         setLoading(false);
       }
@@ -162,6 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!active) return;
         setSession(sess);
         setUser(sess?.user ?? null);
+        currentUserIdRef.current = sess?.user?.id ?? null;
         if (sess?.user) {
           try {
             await loadProfileWithLateApply(sess.user.id, () => active);
