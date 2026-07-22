@@ -755,14 +755,14 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
     let vehicleQuery: any = vehicleIds.length
       ? await supabase
         .from("vehicles")
-        .select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url")
+        .select("id,plate_number,plate_letters,brand,model,year,vin,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url")
         .in("id", vehicleIds)
         .limit(10000)
       : { data: [], error: null };
     if (vehicleIds.length && vehicleQuery.error && isMissingOptionalColumnError(vehicleQuery.error)) {
       vehicleQuery = await supabase
         .from("vehicles")
-        .select("id,plate_number,plate_letters,brand,model,year,vin_number,color")
+        .select("id,plate_number,plate_letters,brand,model,year,vin,vin_number,color")
         .in("id", vehicleIds)
         .limit(10000);
     }
@@ -809,7 +809,7 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       brand: v.brand,
       model: v.model,
       year: v.year,
-      vin: v.vin_number,
+      vin: v.vin_number || v.vin,
       color: v.color,
       imageUrl: v.vehicle_cover_image_url,
       thumbnailUrl: v.vehicle_thumbnail_url,
@@ -1134,7 +1134,7 @@ async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
       ? supabase.from("customers").select("id,name,phone").eq("id", row.customer_id).maybeSingle()
       : Promise.resolve({ data: null } as any),
     row.vehicle_id
-      ? supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url").eq("id", row.vehicle_id).maybeSingle()
+      ? supabase.from("vehicles").select("id,plate_number,plate_letters,brand,model,year,vin,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url").eq("id", row.vehicle_id).maybeSingle()
       : Promise.resolve({ data: null } as any),
     row.claim_id
       ? supabase.from("insurance_claims").select("id,approved_amount,estimated_amount,estimation_type").eq("id", row.claim_id).maybeSingle()
@@ -1150,7 +1150,7 @@ async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
       brand: v.brand,
       model: v.model,
       year: v.year,
-      vin: v.vin_number,
+      vin: v.vin_number || v.vin,
       color: v.color,
       imageUrl: v.vehicle_cover_image_url,
       thumbnailUrl: v.vehicle_thumbnail_url,

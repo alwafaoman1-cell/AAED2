@@ -73,6 +73,47 @@ function mapVehicle(row: any, source: VehicleIdentityMatch["source"]): VehicleId
   };
 }
 
+async function updateExistingVehicleFromInput(
+  tenantId: string,
+  existing: VehicleIdentityMatch,
+  input: VehicleIdentityInput,
+): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  const plate = normalizeVehiclePlate(input);
+  const vin = normalizeVin(input.vin);
+  const make = String(input.make || "").trim();
+  const model = String(input.model || "").trim();
+  const color = String(input.color || "").trim();
+  const year = input.year ? Number(input.year) || null : null;
+
+  if (plate.digits && plate.digits !== existing.plate_number) patch.plate_number = plate.digits;
+  if (plate.letters && plate.letters !== existing.plate_letters) patch.plate_letters = plate.letters;
+  if (plate.country && plate.country !== existing.plate_country) patch.plate_country = plate.country;
+  if (vin && vin !== normalizeVin(existing.vin_number || existing.vin)) {
+    patch.vin = vin;
+    patch.vin_number = vin;
+  }
+  if (make && make !== (existing.brand || "")) patch.brand = make;
+  if (model && model !== (existing.model || "")) patch.model = model;
+  if (year && year !== existing.year) patch.year = year;
+  if (color && color !== (existing.color || "")) patch.color = color;
+
+  if (Object.keys(patch).length === 0) return;
+
+  const { error } = await supabase
+    .from("vehicles")
+    .update(patch as any)
+    .eq("tenant_id", tenantId)
+    .eq("id", existing.id);
+
+  if (error) {
+    if (isVehicleAlreadyExistsError(error)) {
+      throw new Error(vehicleSelectionRequiredMessage());
+    }
+    throw error;
+  }
+}
+
 export async function findExistingVehicle(input: VehicleIdentityInput): Promise<VehicleIdentityMatch | null> {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return null;
@@ -151,6 +192,7 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
     if (!confirmedVinCandidate) {
       throw new Error("vin_candidate_requires_user_confirmation");
     }
+    await updateExistingVehicleFromInput(tenantId, existing, input);
     return {
       vehicleId: existing.id,
       existing,

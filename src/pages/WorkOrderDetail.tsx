@@ -214,7 +214,7 @@ export default function WorkOrderDetail() {
             work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at,
             parts_needed, work_items,
             customer:customers(name, phone),
-            vehicle:vehicles(brand, model, plate_number, year, color, vin_number)
+            vehicle:vehicles(brand, model, plate_number, year, color, vin, vin_number)
           `);
         let { data, error } = isUuid
           ? await q.eq("id", id).maybeSingle()
@@ -273,7 +273,7 @@ export default function WorkOrderDetail() {
           if (!v.plate_number && (data as any).vehicle_id) {
             const { data: vehicleRow } = await supabase
               .from("vehicles")
-              .select("brand, model, plate_number, year, color, vin_number")
+              .select("brand, model, plate_number, year, color, vin, vin_number")
               .eq("id", (data as any).vehicle_id)
               .maybeSingle();
             v = vehicleRow || v;
@@ -300,7 +300,7 @@ export default function WorkOrderDetail() {
             vehicleType: v.brand || "",
             model: v.model || "",
             year: v.year ? String(v.year) : "",
-            vin: v.vin_number || "",
+            vin: v.vin_number || v.vin || "",
             color: v.color || "",
             mileage: "",
             insurance: (data as any).insurance_company || ((data as any).insurance_approved ? "تأمين" : "-"),

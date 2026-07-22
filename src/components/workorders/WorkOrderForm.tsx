@@ -487,9 +487,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           customerRelationshipToVehicle: prev.customerRelationshipToVehicle || 'delivered_by',
         }));
       }
-      if (resolved.created) {
-        void import("@/lib/vehiclesStore").then((m) => m.refreshVehiclesFromCloud()).catch(() => {});
-      }
+      void import("@/lib/vehiclesStore").then((m) => m.refreshVehiclesFromCloud()).catch(() => {});
     } catch (error: any) {
       if (String(error?.message || "").includes("vin_candidate_requires_user_confirmation")) {
         toast.error("تم العثور على مركبة محتملة عبر VIN فقط. يجب تأكيد استخدام المركبة الموجودة قبل الحفظ.");
