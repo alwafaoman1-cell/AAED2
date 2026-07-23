@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { setCachedTenantId } from "@/lib/cloud/createCloudStore";
 import { setCurrentRole as setPermissionsRole } from "@/lib/permissions";
 
 export type AppRole = "admin" | "manager" | "supervisor" | "technician" | "insurance" | "accountant";
@@ -31,8 +32,67 @@ const AuthContext = createContext<AuthCtx | undefined>(undefined);
 const AUTH_BOOT_TIMEOUT_MS = 8_000;
 const PROFILE_TIMEOUT_MS = 35_000;
 const PROFILE_QUERY_TIMEOUT_MS = 20_000;
+const PROFILE_STORAGE_PREFIX = "alwafa.auth.profile.";
+const PROFILE_STORAGE_TTL_MS = 12 * 60 * 60_000;
 const profileCache = new Map<string, UserProfile | null>();
 const inFlightProfileRequests = new Map<string, Promise<UserProfile | null>>();
+
+type StoredUserProfile = {
+  cached_at: number;
+  profile: UserProfile;
+};
+
+function profileStorageKey(uid: string) {
+  return `${PROFILE_STORAGE_PREFIX}${uid}`;
+}
+
+function readStoredProfile(uid: string): UserProfile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(profileStorageKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredUserProfile>;
+    const storedProfile = parsed.profile;
+    if (!storedProfile || storedProfile.user_id !== uid || !storedProfile.tenant_id) {
+      window.sessionStorage.removeItem(profileStorageKey(uid));
+      return null;
+    }
+    if (!parsed.cached_at || Date.now() - parsed.cached_at > PROFILE_STORAGE_TTL_MS) {
+      window.sessionStorage.removeItem(profileStorageKey(uid));
+      return null;
+    }
+    return storedProfile;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredProfile(uid: string, profile: UserProfile | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!profile) {
+      window.sessionStorage.removeItem(profileStorageKey(uid));
+      return;
+    }
+    window.sessionStorage.setItem(
+      profileStorageKey(uid),
+      JSON.stringify({ cached_at: Date.now(), profile } satisfies StoredUserProfile),
+    );
+  } catch {
+    // Storage cache is best-effort only; Supabase remains the source of truth.
+  }
+}
+
+function clearStoredProfiles() {
+  if (typeof window === "undefined") return;
+  try {
+    for (const key of Object.keys(window.sessionStorage)) {
+      if (key.startsWith(PROFILE_STORAGE_PREFIX)) window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+}
 
 function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -54,6 +114,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function fetchProfile(uid: string): Promise<UserProfile | null> {
     if (profileCache.has(uid)) return profileCache.get(uid) ?? null;
+    const stored = readStoredProfile(uid);
+    if (stored) {
+      profileCache.set(uid, stored);
+      setCachedTenantId(stored.tenant_id);
+      return stored;
+    }
     const inFlight = inFlightProfileRequests.get(uid);
     if (inFlight) return inFlight;
 
@@ -108,8 +174,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     inFlightProfileRequests.set(uid, request);
     try {
       const result = await request;
-      if (result) profileCache.set(uid, result);
-      else profileCache.delete(uid);
+      if (result) {
+        profileCache.set(uid, result);
+        writeStoredProfile(uid, result);
+        setCachedTenantId(result.tenant_id);
+      } else {
+        profileCache.delete(uid);
+        writeStoredProfile(uid, null);
+      }
       return result;
     } finally {
       inFlightProfileRequests.delete(uid);
@@ -119,6 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function applyProfile(p: UserProfile | null) {
     profileRef.current = p;
     setProfile(p);
+    if (p?.tenant_id) setCachedTenantId(p.tenant_id);
     setPermissionsRole((p?.role as any) ?? null);
     // Pull company/template settings from the cloud so they survive cache clears.
     import("@/lib/pdfGenerator").then((m) => m.loadTemplateSettingsFromCloud()).catch(() => {});
@@ -220,6 +293,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signIn(email: string, password: string) {
     profileCache.clear();
     inFlightProfileRequests.clear();
+    clearStoredProfiles();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
     return {};
@@ -229,12 +303,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     profileCache.clear();
     inFlightProfileRequests.clear();
+    clearStoredProfiles();
+    setCachedTenantId(null);
     applyProfile(null);
   }
 
   async function refreshProfile() {
     if (user) {
       profileCache.delete(user.id);
+      writeStoredProfile(user.id, null);
       applyProfile(await withTimeout(fetchProfile(user.id), PROFILE_TIMEOUT_MS, "profile refresh timeout"));
     }
   }

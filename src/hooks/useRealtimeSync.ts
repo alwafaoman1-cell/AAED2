@@ -46,7 +46,7 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   },
   {
     scope: "claims",
-    test: (path) => path.startsWith("/insurance/claims") || path.startsWith("/insurance/"),
+    test: (path) => path.startsWith("/insurance/claims"),
     tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicles", "customers", "vehicle_media"],
   },
   {
@@ -96,8 +96,9 @@ export function useRealtimeSync() {
     };
 
     const schedule = (keys: string[]) => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       for (const key of keys) pending.add(key);
-      if (!timer) timer = setTimeout(flush, 750);
+      if (!timer) timer = setTimeout(flush, 1_500);
     };
 
     let channel = supabase.channel(`rt_${realtimeScope.scope}`);

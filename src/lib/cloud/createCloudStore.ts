@@ -47,6 +47,16 @@ interface CloudStoreOpts<T> {
 let cachedTenantId: string | null = null;
 let cachedTenantPromise: Promise<string | null> | null = null;
 
+/** Seed tenant cache from AuthContext when the profile is already loaded. */
+export function setCachedTenantId(tenantId: string | null | undefined) {
+  if (tenantId) {
+    cachedTenantId = tenantId;
+    cachedTenantPromise = null;
+    return;
+  }
+  clearTenantCache();
+}
+
 /** Resolve the current user's tenant_id once and cache it for the session. */
 export async function getCurrentTenantId(): Promise<string | null> {
   if (cachedTenantId) return cachedTenantId;
