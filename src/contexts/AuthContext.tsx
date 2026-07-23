@@ -174,7 +174,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const sessionData = await withTimeout(supabase.auth.getSession(), 3_000, "auth session query timeout")
         .then(({ data }) => data)
         .catch(() => null);
-      const sessionUser = sessionData?.session?.user ?? null;
+      const verifiedUser = await withTimeout(supabase.auth.getUser(), 5_000, "auth user verification timeout")
+        .then(({ data }) => data.user ?? null)
+        .catch(() => null);
+      if (!verifiedUser || verifiedUser.id !== uid) {
+        console.warn("[auth] persisted session is not valid; clearing local session");
+        await (supabase.auth.signOut as any)({ scope: "local" }).catch(() => {});
+        return null;
+      }
+      const sessionUser = verifiedUser ?? sessionData?.session?.user ?? null;
       const accessToken = sessionData?.session?.access_token;
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
