@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { generatePdfFromHtml } from "@/lib/htmlToPdf";
 import { buildHtmlWithPageMarginStyle } from "@/lib/pdfLayoutSettings";
+import { queryKeys } from "@/lib/queryKeys";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthsAgoISO = (n: number) => {
@@ -46,7 +47,7 @@ interface InvoiceReportRow {
 
 function useCloudData(f: Filters) {
   return useQuery({
-    queryKey: ["cloud_reports", f.from, f.to],
+    queryKey: queryKeys.reports.cloud(f),
     queryFn: async () => {
       const [sales, insInv, exp, payments, purchases] = await Promise.all([
         supabase.from("sales_documents").select("id,doc_type,doc_number,date,due_date,subtotal,tax_total,total,paid_amount,balance_due,status,customer_name").gte("date", f.from).lte("date", f.to),

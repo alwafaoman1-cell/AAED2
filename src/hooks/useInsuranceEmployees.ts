@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { toast } from "sonner";
+import { queryKeys } from "@/lib/queryKeys";
 
 export interface InsuranceEmployee {
   id: string;
@@ -29,7 +30,7 @@ export type InsuranceEmployeeInput = {
 
 export function useInsuranceEmployees(companyId?: string | null, includeInactive = false) {
   return useQuery({
-    queryKey: ["insurance_company_employees", companyId || "all", includeInactive],
+    queryKey: queryKeys.insuranceEmployees.list(companyId, includeInactive),
     enabled: companyId !== undefined,
     queryFn: async () => {
       let query = (supabase.from("insurance_company_employees" as any) as any)
@@ -47,7 +48,7 @@ export function useInsuranceEmployees(companyId?: string | null, includeInactive
 export function useInsuranceEmployeesByIds(ids: string[]) {
   const unique = Array.from(new Set(ids.filter(Boolean)));
   return useQuery({
-    queryKey: ["insurance_company_employees_by_ids", unique.join(",")],
+    queryKey: queryKeys.insuranceEmployees.byIds(unique),
     enabled: unique.length > 0,
     queryFn: async () => {
       const { data, error } = await (supabase.from("insurance_company_employees" as any) as any)
@@ -82,8 +83,7 @@ export function useCreateInsuranceEmployee() {
       return data as InsuranceEmployee;
     },
     onSuccess: (row) => {
-      qc.invalidateQueries({ queryKey: ["insurance_company_employees"] });
-      qc.invalidateQueries({ queryKey: ["insurance_company_employees", row.insurance_company_id] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceEmployees.all });
       toast.success("تمت إضافة موظف التأمين");
     },
     onError: (e: any) => toast.error(e?.message || "تعذر حفظ موظف التأمين"),
@@ -112,9 +112,8 @@ export function useUpdateInsuranceEmployee() {
       return data as InsuranceEmployee;
     },
     onSuccess: (row) => {
-      qc.invalidateQueries({ queryKey: ["insurance_company_employees"] });
-      qc.invalidateQueries({ queryKey: ["insurance_company_employees", row.insurance_company_id] });
-      qc.invalidateQueries({ queryKey: ["insurance_claims"] });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceEmployees.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
       toast.success("تم تحديث موظف التأمين");
     },
     onError: (e: any) => toast.error(e?.message || "تعذر تحديث موظف التأمين"),

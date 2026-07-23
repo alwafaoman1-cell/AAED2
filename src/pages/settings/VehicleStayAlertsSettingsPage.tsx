@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { queryKeys } from "@/lib/queryKeys";
 
 const DEFAULT_TEMPLATE_AR = `عزيزي العميل،
 نود إفادتكم بأن مركبتكم موجودة لدى الورشة منذ {days} يومًا. يرجى التواصل معنا لمراجعة حالة المركبة والإجراءات المطلوبة، أو لتنسيق الاستلام عند جاهزيتها.
@@ -30,7 +31,7 @@ Al Wafa Integrated Business Company LLC.`;
 export default function VehicleStayAlertsSettingsPage() {
   const qc = useQueryClient();
   const { data } = useQuery({
-    queryKey: ["vehicle-stay-alert-rule"],
+    queryKey: queryKeys.settings.vehicleStayAlerts,
     queryFn: async () => {
       const { data: tenantId, error: tenantError } = await supabase.rpc("get_user_tenant_id");
       if (tenantError) throw tenantError;
@@ -67,7 +68,7 @@ export default function VehicleStayAlertsSettingsPage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vehicle-stay-alert-rule"] });
+      qc.invalidateQueries({ queryKey: queryKeys.settings.vehicleStayAlerts });
       toast.success("تم حفظ إعدادات تنبيهات بقاء المركبة");
     },
     onError: (error: any) => toast.error(error?.message || "فشل الحفظ"),
@@ -132,4 +133,3 @@ export default function VehicleStayAlertsSettingsPage() {
     </div>
   );
 }
-

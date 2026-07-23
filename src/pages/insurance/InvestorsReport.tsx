@@ -18,6 +18,7 @@ import {
   exportReportToPdf, exportReportToXlsx, printReport,
   type ReportExportPayload, type ReportColumn,
 } from "@/lib/reportExporters";
+import { queryKeys } from "@/lib/queryKeys";
 
 type Preset = "custom" | "this_month" | "last_month" | "this_year" | "last_year" | "month_year";
 
@@ -53,7 +54,7 @@ export default function InvestorsReport() {
   const { data: claims = [], isLoading } = useInsuranceClaims();
 
   const { data: payments = [] } = useQuery({
-    queryKey: ["claim_payments", "all"],
+    queryKey: queryKeys.claimPayments.all,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("claim_payments" as any)

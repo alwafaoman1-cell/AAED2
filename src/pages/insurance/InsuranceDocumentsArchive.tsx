@@ -11,6 +11,7 @@ import { Search, FileText, Eye, Download, ExternalLink, Archive } from "lucide-r
 import { claimDocLabel, type ClaimDocCategory } from "@/lib/uploadHtmlAsPdf";
 import ArchivedPdfPreviewDialog from "@/components/ArchivedPdfPreviewDialog";
 import { refreshSignedUrls } from "@/lib/refreshSignedUrls";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface ArchiveDoc {
   id: string;
@@ -30,7 +31,7 @@ export default function InsuranceDocumentsArchive() {
   const [preview, setPreview] = useState<ArchiveDoc | null>(null);
 
   const { data: docs = [], isLoading } = useQuery<ArchiveDoc[]>({
-    queryKey: ["insurance_documents_archive"],
+    queryKey: queryKeys.insuranceDocumentsArchive,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("claim_audit_logs")

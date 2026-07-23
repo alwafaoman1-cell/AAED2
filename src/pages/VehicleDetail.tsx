@@ -32,6 +32,7 @@ import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import PlateInput from "@/components/vehicles/PlateInput";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDateLatin } from "@/lib/numberUtils";
+import { queryKeys } from "@/lib/queryKeys";
 
 export default function VehicleDetail() {
   const { plate } = useParams<{ plate: string }>();
@@ -45,7 +46,7 @@ export default function VehicleDetail() {
 
   const vehicle = useMemo(() => vehiclesStore.getById(decodedPlate), [decodedPlate, tick]);
   const { data: vehicleAuditLogs = [] } = useQuery({
-    queryKey: ["vehicle_claim_audit_logs", vehicle?.cloudId],
+    queryKey: queryKeys.vehicleClaimAudit(vehicle?.cloudId),
     enabled: !!vehicle?.cloudId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -62,7 +63,7 @@ export default function VehicleDetail() {
     },
   });
   const { data: vehicleClaims = [] } = useQuery({
-    queryKey: ["vehicle_claim_visits", vehicle?.cloudId],
+    queryKey: queryKeys.vehicleClaimVisits(vehicle?.cloudId),
     enabled: !!vehicle?.cloudId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -79,7 +80,7 @@ export default function VehicleDetail() {
     },
   });
   const { data: trackingStats } = useQuery({
-    queryKey: ["vehicle_public_tracking_logs", vehicle?.cloudId],
+    queryKey: queryKeys.vehiclePublicTracking(vehicle?.cloudId),
     enabled: !!vehicle?.cloudId,
     queryFn: async () => {
       const { count, error: countError } = await supabase

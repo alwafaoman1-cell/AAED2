@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { queryKeys } from "@/lib/queryKeys";
 
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 export type TaskStatus = "pending" | "in_progress" | "done";
@@ -21,7 +22,7 @@ export interface DailyTask {
 
 export function useDailyTasks(filter?: { date?: string; status?: TaskStatus | "all" }) {
   return useQuery({
-    queryKey: ["daily_tasks", filter?.date ?? "all", filter?.status ?? "all"],
+    queryKey: queryKeys.dailyTasks.list(filter),
     queryFn: async () => {
       let q = supabase.from("daily_tasks" as any).select("*").order("priority", { ascending: false }).order("created_at");
       if (filter?.date) q = q.eq("due_date", filter.date);
@@ -57,7 +58,7 @@ export function useCreateTask() {
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["daily_tasks"] });
+      qc.invalidateQueries({ queryKey: queryKeys.dailyTasks.all });
       toast.success("تم إضافة المهمة");
     },
     onError: (e: any) => toast.error(e?.message ?? "تعذر الحفظ"),
@@ -74,7 +75,7 @@ export function useUpdateTask() {
       const { error } = await supabase.from("daily_tasks" as any).update(updates).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["daily_tasks"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.dailyTasks.all }),
     onError: (e: any) => toast.error(e?.message ?? "تعذر التحديث"),
   });
 }
@@ -87,7 +88,7 @@ export function useDeleteTask() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["daily_tasks"] });
+      qc.invalidateQueries({ queryKey: queryKeys.dailyTasks.all });
       toast.success("تم الحذف");
     },
   });

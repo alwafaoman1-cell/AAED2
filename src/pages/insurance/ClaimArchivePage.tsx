@@ -22,6 +22,7 @@ import { claimDocLabel, type ClaimDocCategory } from "@/lib/uploadHtmlAsPdf";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import { buildClaimArchiveHtml, type ArchiveSectionFile } from "@/lib/claimArchivePdf";
 import { refreshSignedUrls } from "@/lib/refreshSignedUrls";
+import { queryKeys } from "@/lib/queryKeys";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
@@ -139,7 +140,7 @@ export default function ClaimArchivePage() {
 
   // ── جلب المطالبة + كل المصادر بالتوازي (READ ONLY) ──
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["claim_archive", id],
+    queryKey: queryKeys.claimArchive(id),
     enabled: !!id,
     queryFn: async () => {
       // 1) المطالبة نفسها

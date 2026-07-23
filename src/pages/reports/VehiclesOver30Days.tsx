@@ -15,6 +15,7 @@ import {
   markVehicleStayContacted,
   type VehicleStayAlertRow,
 } from "@/lib/vehicleStayAlerts";
+import { queryKeys } from "@/lib/queryKeys";
 
 type AgeFilter = "25" | "30" | "45" | "60";
 
@@ -26,14 +27,14 @@ export default function VehiclesOver30Days() {
   const [statusFilter, setStatusFilter] = useState<"all" | "sent" | "not_sent" | "excluded">("all");
 
   const { data = [], isLoading, error } = useQuery({
-    queryKey: ["vehicles-over-stay", age],
+    queryKey: queryKeys.reports.vehiclesOverStay(age),
     queryFn: () => getVehiclesOverStayAlerts(Number(age)),
   });
 
   const contactedMut = useMutation({
     mutationFn: (row: VehicleStayAlertRow) => markVehicleStayContacted(row, row.delay_reason || undefined),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vehicles-over-stay"] });
+      qc.invalidateQueries({ queryKey: queryKeys.reports.vehiclesOverStayAll });
       toast.success("تم تسجيل التواصل");
     },
     onError: (e: any) => toast.error(e?.message || "فشل تسجيل التواصل"),
@@ -42,7 +43,7 @@ export default function VehiclesOver30Days() {
   const excludeMut = useMutation({
     mutationFn: excludeVehicleStayAlert,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vehicles-over-stay"] });
+      qc.invalidateQueries({ queryKey: queryKeys.reports.vehiclesOverStayAll });
       toast.success("تم استثناء المركبة من التنبيه");
     },
     onError: (e: any) => toast.error(e?.message || "فشل الاستثناء"),
@@ -168,4 +169,3 @@ export default function VehiclesOver30Days() {
     </div>
   );
 }
-

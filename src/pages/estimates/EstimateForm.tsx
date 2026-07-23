@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, FileUp, Loader2, Plus, Save, Search, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
+import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -135,12 +136,12 @@ export default function EstimateForm() {
   const defaultType = (searchParams.get("type") as EstimateType | null) || "independent";
 
   const { data: existing } = useQuery({
-    queryKey: ["unified-estimate", id],
+    queryKey: queryKeys.estimates.detail(id),
     queryFn: () => getUnifiedEstimate(id!),
     enabled: isEdit,
   });
   const { data: lookups } = useQuery({
-    queryKey: ["estimate-lookups"],
+    queryKey: queryKeys.estimates.lookups,
     queryFn: async () => {
       const [customers, vehicles, claims, workOrders, estimates] = await Promise.all([
         supabase.from("customers" as any).select("id,name,phone,email,customer_code").order("created_at", { ascending: false }).limit(200),
@@ -361,7 +362,7 @@ export default function EstimateForm() {
       return createUnifiedEstimate({ estimate: estimatePayload, items });
     },
     onSuccess: (estimate: any) => {
-      qc.invalidateQueries({ queryKey: ["unified-estimates"] });
+      qc.invalidateQueries({ queryKey: queryKeys.estimates.all });
       toast.success("تم حفظ التقدير");
       navigate(`/estimates/${estimate.id}`);
     },

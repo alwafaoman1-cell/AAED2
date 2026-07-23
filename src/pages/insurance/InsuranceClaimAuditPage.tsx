@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDateLatin } from "@/lib/numberUtils";
+import { queryKeys } from "@/lib/queryKeys";
 
 type AuditRow = {
   id: string;
@@ -25,7 +26,7 @@ export default function InsuranceClaimAuditPage() {
   const navigate = useNavigate();
 
   const { data: claim, isLoading: claimLoading } = useQuery({
-    queryKey: ["insurance_claim_audit_header", id],
+    queryKey: queryKeys.claimAuditHeader(id),
     enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -43,7 +44,7 @@ export default function InsuranceClaimAuditPage() {
   });
 
   const { data: rows = [], isLoading: auditLoading } = useQuery({
-    queryKey: ["claim_audit_logs_full", id],
+    queryKey: queryKeys.claimAuditFull(id),
     enabled: !!id,
     queryFn: async () => {
       const result = await supabase

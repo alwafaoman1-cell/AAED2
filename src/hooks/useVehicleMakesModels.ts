@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { queryKeys } from "@/lib/queryKeys";
 
 export interface VehicleMake {
   id: string;
@@ -21,7 +22,7 @@ export interface VehicleModel {
 
 export const useVehicleMakes = () =>
   useQuery({
-    queryKey: ["vehicle_makes"],
+    queryKey: queryKeys.vehicleCatalog.makes,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("vehicle_makes")
@@ -34,7 +35,7 @@ export const useVehicleMakes = () =>
 
 export const useVehicleModels = (makeId: string | string[] | null) =>
   useQuery({
-    queryKey: ["vehicle_models", makeId],
+    queryKey: queryKeys.vehicleCatalog.models(Array.isArray(makeId) ? makeId.join(",") : makeId),
     enabled: Array.isArray(makeId) ? makeId.length > 0 : !!makeId,
     queryFn: async () => {
       let query = supabase
@@ -68,7 +69,7 @@ export const useCreateMake = () => {
       return data as VehicleMake;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vehicle_makes"] });
+      qc.invalidateQueries({ queryKey: queryKeys.vehicleCatalog.makes });
       toast.success("تمت إضافة الماركة");
     },
     onError: (e: any) => toast.error("فشل إضافة الماركة: " + e.message),
@@ -89,7 +90,7 @@ export const useCreateModel = () => {
       return data as VehicleModel;
     },
     onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["vehicle_models", vars.makeId] });
+      qc.invalidateQueries({ queryKey: queryKeys.vehicleCatalog.models(vars.makeId) });
       toast.success("تمت إضافة الموديل");
     },
     onError: (e: any) => toast.error("فشل إضافة الموديل: " + e.message),

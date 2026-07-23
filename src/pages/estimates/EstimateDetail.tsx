@@ -13,6 +13,7 @@ import { generatePdfFromHtml } from "@/lib/htmlToPdf";
 import { openAndPrintWindow } from "@/lib/safePdfWindow";
 import { buildEstimatePdfHtml } from "@/lib/estimatePdf";
 import { formatOMR } from "@/lib/money";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   ESTIMATE_CATEGORY_LABEL,
   ESTIMATE_STATUS_LABEL,
@@ -32,7 +33,7 @@ export default function EstimateDetail() {
   const [conversionTarget, setConversionTarget] = useState<EstimateConversionTarget | null>(null);
 
   const { data: estimate, isLoading, error } = useQuery({
-    queryKey: ["unified-estimate", id],
+    queryKey: queryKeys.estimates.detail(id),
     queryFn: () => getUnifiedEstimate(id!),
     enabled: Boolean(id),
   });
@@ -40,8 +41,8 @@ export default function EstimateDetail() {
   const issueMut = useMutation({
     mutationFn: () => issueUnifiedEstimate(id!),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["unified-estimate", id] });
-      qc.invalidateQueries({ queryKey: ["unified-estimates"] });
+      qc.invalidateQueries({ queryKey: queryKeys.estimates.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.estimates.all });
       toast.success("تم إصدار التقدير");
     },
     onError: (e: any) => toast.error(e?.message || "فشل إصدار التقدير"),
@@ -59,10 +60,18 @@ export default function EstimateDetail() {
   const conversionMut = useMutation({
     mutationFn: (target: EstimateConversionTarget) => convertUnifiedEstimate(id!, target),
     onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ["unified-estimate", id] });
-      qc.invalidateQueries({ queryKey: ["unified-estimates"] });
-      qc.invalidateQueries({ queryKey: ["insurance_claims"] });
-      qc.invalidateQueries({ queryKey: ["work-orders"] });
+      qc.invalidateQueries({ queryKey: queryKeys.estimates.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.estimates.all });
+      if (result.target_entity_type === "insurance_claim") {
+        qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+      }
+      if (result.target_entity_type === "work_order") {
+        qc.invalidateQueries({ queryKey: queryKeys.jobOrders.all });
+      }
+      if (result.target === "insurance_work_order") {
+        qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+        qc.invalidateQueries({ queryKey: queryKeys.jobOrders.all });
+      }
       setConversionTarget(null);
       toast.success(result.message);
       if (result.target_entity_type === "work_order" && result.target_number) {

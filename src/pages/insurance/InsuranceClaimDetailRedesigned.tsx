@@ -54,6 +54,7 @@ import {
   mergeUnifiedOperationalState,
   upsertUnifiedOperationalState,
 } from "@/lib/claimWorkOrderUnified";
+import { queryKeys } from "@/lib/queryKeys";
 
 const PRIMARY = "#0f2f57";
 const GOLD = "#c69b43";
@@ -316,7 +317,7 @@ export default function InsuranceClaimDetailRedesigned() {
   });
 
   const { data: unifiedOperationalState = null } = useQuery({
-    queryKey: ["claim-work-order-operation", currentId],
+    queryKey: queryKeys.claimOperation(currentId),
     enabled: !!currentId,
     queryFn: () => fetchUnifiedOperationalState({ claimId: currentId }),
   });
@@ -327,7 +328,7 @@ export default function InsuranceClaimDetailRedesigned() {
   );
 
   const { data: unifiedMedia = [] } = useQuery({
-    queryKey: ["vehicle_media", "claim", currentId, (claim as any)?.job_order_id, (claim as any)?.vehicle_id],
+    queryKey: queryKeys.vehicleMedia.claim(currentId, (claim as any)?.job_order_id, (claim as any)?.vehicle_id),
     enabled: !!currentId,
     queryFn: () => listUnifiedVehicleMedia({
       claimId: currentId,
@@ -337,7 +338,7 @@ export default function InsuranceClaimDetailRedesigned() {
   });
 
   const { data: timeline = [] } = useQuery({
-    queryKey: ["claim_audit_logs", currentId],
+    queryKey: queryKeys.claimAudit(currentId),
     enabled: !!currentId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -360,7 +361,7 @@ export default function InsuranceClaimDetailRedesigned() {
   const vehicle = (claim as any)?.vehicle || null;
   const embeddedWorkOrder = (claim as any)?.job_order || null;
   const { data: resolvedWorkOrder } = useQuery({
-    queryKey: ["claim-linked-work-order", currentId, claim?.claim_number, (claim as any)?.job_order_id],
+    queryKey: queryKeys.claimLinkedWorkOrder(currentId),
     enabled: !!claim,
     queryFn: () => findLinkedWorkOrder(claim),
   });
@@ -428,12 +429,12 @@ export default function InsuranceClaimDetailRedesigned() {
   const emailSubject = `Claim ${safe(claim?.claim_number)} | ${safe(workOrder?.order_number)} | Plate ${safe(plate)} | ${safe(vehicleName)}`;
 
   const refreshClaim = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["insurance_claims", currentId] });
-    await queryClient.invalidateQueries({ queryKey: ["insurance_claims"] });
-    await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", currentId] });
-    await queryClient.invalidateQueries({ queryKey: ["claim-linked-work-order", currentId] });
-    await queryClient.invalidateQueries({ queryKey: ["claim-work-order-operation", currentId] });
-    await queryClient.invalidateQueries({ queryKey: ["vehicle_media", "claim"] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(currentId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(currentId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.claimLinkedWorkOrder(currentId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.claimOperation(currentId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.vehicleMedia.claimAll });
   };
 
   const operationalDates = {
@@ -908,7 +909,7 @@ export default function InsuranceClaimDetailRedesigned() {
       cc: emailCc,
       subject: emailSubject,
     });
-    await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", currentId] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(currentId) });
     setEmailOpen(false);
     toast.success("تم حفظ مسودة البريد في سجل المطالبة");
   };
@@ -1420,7 +1421,7 @@ export default function InsuranceClaimDetailRedesigned() {
             <Button variant="outline" onClick={() => setInspectionOpen(false)}>إلغاء</Button>
             <Button onClick={async () => {
               await insertTimeline(claim, "inspection_report_link_requested", { search: inspectionSearch || claim.claim_number });
-              await queryClient.invalidateQueries({ queryKey: ["claim_audit_logs", currentId] });
+              await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(currentId) });
               setInspectionOpen(false);
               toast.success("تم تسجيل طلب ربط/إنشاء نموذج الفحص في السجل");
             }} style={{ background: PRIMARY, color: "white" }}>حفظ وربط بالمطالبة</Button>

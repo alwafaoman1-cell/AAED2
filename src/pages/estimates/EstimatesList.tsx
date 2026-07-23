@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatOMR } from "@/lib/money";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   ESTIMATE_STATUS_LABEL,
   ESTIMATE_TYPE_LABEL,
@@ -34,7 +35,7 @@ export default function EstimatesList() {
   const [type, setType] = useState<"all" | EstimateType>(initialType);
   const [status, setStatus] = useState<"all" | EstimateStatus>("all");
   const { data = [], isLoading, error } = useQuery({
-    queryKey: ["unified-estimates"],
+    queryKey: queryKeys.estimates.all,
     queryFn: listUnifiedEstimates,
   });
 
