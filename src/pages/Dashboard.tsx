@@ -23,11 +23,11 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import { inventoryStore, type Part } from "@/lib/inventoryStore";
-import { getWorkOrders, subscribeWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
+import { getWorkOrders, refreshWorkOrdersFromCloud, subscribeWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
 import { salesStore, type SalesDoc } from "@/lib/salesStore";
 import { staffStore, type Technician } from "@/lib/staffStore";
-import { vehiclesStore } from "@/lib/vehiclesStore";
-import { customersStore, type Customer } from "@/lib/customersStore";
+import { refreshVehiclesFromCloud, vehiclesStore } from "@/lib/vehiclesStore";
+import { customersStore, refreshCustomersFromCloud, type Customer } from "@/lib/customersStore";
 import { suppliersStore } from "@/lib/suppliersStore";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
 import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
@@ -118,6 +118,24 @@ export default function Dashboard() {
   useEffect(() => { const u = salesStore.subscribe(() => setDocs([...salesStore.list()])); return () => { u(); }; }, []);
   useEffect(() => { const u = staffStore.subscribe(() => setTechs([...staffStore.getAll()])); return () => { u(); }; }, []);
   useEffect(() => { const u = customersStore.subscribe(() => setCustomers([...customersStore.getAll()])); return () => { u(); }; }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const syncDashboardStores = async () => {
+      await Promise.allSettled([
+        refreshWorkOrdersFromCloud(),
+        refreshCustomersFromCloud(),
+        refreshVehiclesFromCloud(),
+      ]);
+      if (!cancelled) {
+        setOrders([...getWorkOrders()]);
+        setCustomers([...customersStore.getAll()]);
+      }
+    };
+    void syncDashboardStores();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ===== Filters =====
   const [period, setPeriod] = useState<PeriodKey>("month");

@@ -253,23 +253,13 @@ export default function MediaStudio() {
   const [confirmEmpty, setConfirmEmpty] = useState(false);
   const [tenantId, setTenantId] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const canDestroy = profile?.role === "admin" || profile?.role === "manager";
 
   useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      const uid = data.user?.id;
-      if (!uid) return;
-      setUserId(uid);
-      const { data: p } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("user_id", uid)
-        .maybeSingle();
-      if (p?.tenant_id) setTenantId(p.tenant_id as string);
-    })();
-  }, []);
+    setUserId(user?.id || "");
+    setTenantId(profile?.tenant_id || "");
+  }, [profile?.tenant_id, user?.id]);
 
   const isTrashTab = tab === "__trash__";
   const isLocalTab = tab === "local-photos";

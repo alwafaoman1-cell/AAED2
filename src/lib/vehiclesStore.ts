@@ -47,7 +47,7 @@ export interface Vehicle {
 
 /** أرشفة سيارة بشكل تلقائي مع سبب */
 export function archiveVehicleByPlate(plate: string, reason = "إغلاق ملف السيارة") {
-  const all = vehiclesStore.getAll();
+const all = vehiclesStore.getAll();
   const v = all.find((x) => x.plate === plate || x.id === plate);
   if (!v || v.archived) return;
   vehiclesStore.update(v.id, {
@@ -497,7 +497,7 @@ async function fetchVehiclesFromCloud(): Promise<void> {
       .from("vehicles")
       .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,mileage,vin,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,deleted_at,customer_id")
       .eq("tenant_id", tenantId)
-      .limit(5000);
+      .limit(500);
     if (error || !rows) return;
 
     const custIds = Array.from(new Set(rows.map((r: any) => r.customer_id).filter(Boolean)));
@@ -591,14 +591,6 @@ function ensureVehiclesCloudSync() {
   if (cloudBootstrapped) return;
   cloudBootstrapped = true;
   scheduleVehiclesFetch(0);
-  try {
-    supabase
-      .channel(`vehicles_cloud_${Math.random().toString(36).slice(2, 8)}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "vehicles" }, () => scheduleVehiclesFetch(200))
-      .subscribe();
-  } catch (e) {
-    console.warn("[vehiclesStore] realtime subscribe failed:", e);
-  }
   // Focus/visibility refresh is handled by React Query and page-scoped
   // realtime. Keeping legacy store listeners here caused request storms when
   // returning to the tab.
@@ -653,14 +645,12 @@ vehiclesStore.subscribe(() => {
 });
 
 if (typeof window !== "undefined") {
-  setTimeout(() => ensureVehiclesCloudSync(), 800);
   let lastUid: string | null = null;
   supabase.auth.onAuthStateChange((_event, session) => {
     const uid = session?.user?.id ?? null;
     if (uid !== lastUid) {
       lastUid = uid;
       KNOWN_CLOUD.clear();
-      if (uid) scheduleVehiclesFetch(100);
     }
   });
 }

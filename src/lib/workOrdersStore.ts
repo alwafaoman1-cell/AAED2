@@ -785,13 +785,13 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       .select("*")
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
-      .limit(5000);
+      .limit(500);
     if (ordersResult.error && isMissingJobOrderColumnError(ordersResult.error)) {
       ordersResult = await supabase
         .from("job_orders")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(5000);
+        .limit(500);
     }
     if (ordersResult.error) throw ordersResult.error;
     const rows = ordersResult.data || [];
@@ -937,10 +937,7 @@ function ensureCloudSync() {
   // and when returning to the tab.
 }
 
-// Kick off cloud sync as soon as this module is imported (after auth bootstraps).
 if (typeof window !== "undefined") {
-  setTimeout(() => ensureCloudSync(), 800);
-
   // ًں”‘ When the auth user changes (login / logout / account switch on the same
   // browser or PWA), wipe the local cache so the previous user's data never
   // leaks into the next user's view, then re-fetch immediately.
@@ -952,7 +949,6 @@ if (typeof window !== "undefined") {
       cache = [];
       KNOWN_CLOUD_NUMBERS.clear();
       listeners.forEach((l) => l());
-      if (uid) scheduleCloudFetch(50);
     }
   });
 }

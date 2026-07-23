@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import VehicleTracking from "@/components/tracking/VehicleTracking";
-import { deleteVehicleFromCloud, saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
+import { deleteVehicleFromCloud, refreshVehiclesFromCloud, saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import ArchivedVehicleDetails from "@/components/vehicles/ArchivedVehicleDetails";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import PlateInput from "@/components/vehicles/PlateInput";
@@ -43,6 +43,9 @@ export default function Vehicles() {
   const allowDelete = canDelete();
 
   useEffect(() => vehiclesStore.subscribe(() => setList([...vehiclesStore.getAll()])), []);
+  useEffect(() => {
+    void refreshVehiclesFromCloud();
+  }, []);
 
   const { active, archiveVehicles } = useMemo(() => {
     const matches = (v: Vehicle) =>

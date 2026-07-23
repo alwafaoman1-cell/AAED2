@@ -44,6 +44,9 @@ export default function Customers() {
 
   useEffect(() => customersStore.subscribe(() => setTick((t) => t + 1)), []);
   useEffect(() => {
+    void refreshCustomersFromCloud();
+  }, []);
+  useEffect(() => {
     registerRestoreHandler("customer", (p) => customersStore.restore(p as Customer));
   }, []);
 

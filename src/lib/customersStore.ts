@@ -457,11 +457,10 @@ export const customersStore = {
 };
 
 if (typeof window !== "undefined") {
-  scheduleCustomersRefresh(0);
   supabase.auth.onAuthStateChange((_event, session) => {
     cache = [];
     persist();
-    if (session?.user) scheduleCustomersRefresh(500);
+    void session;
   });
   // Realtime invalidation is centralized in useRealtimeSync. Avoid duplicate
   // store-level subscriptions that refetch the full customer list repeatedly.

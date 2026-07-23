@@ -1,57 +1,54 @@
-// مستمع Realtime عام للملاحظات الجديدة من العملاء — صوت + توست
+// Global realtime listener for new customer portal notes.
 import { useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
-import { notificationSound } from "@/lib/notificationSound";
-import { MessageSquare } from "lucide-react";
 import React from "react";
+import { MessageSquare } from "lucide-react";
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { notificationSound } from "@/lib/notificationSound";
 
 export default function PortalNotesRealtimeListener() {
+  const { profile } = useAuth();
+  const tenantId = profile?.tenant_id || null;
+
   useEffect(() => {
-    let tenantId: string | null = null;
-    let channel: any;
+    if (!tenantId) return;
 
-    (async () => {
-      const { data: u } = await supabase.auth.getUser();
-      if (!u.user) return;
-      const { data: prof } = await supabase.from("profiles").select("tenant_id").eq("user_id", u.user.id).maybeSingle();
-      tenantId = (prof as any)?.tenant_id || null;
-      if (!tenantId) return;
-
-      channel = supabase
-        .channel("portal-notes-global")
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "customer_portal_notes", filter: `tenant_id=eq.${tenantId}` },
-          (payload) => {
-            const row: any = payload.new;
-            if (!row || row.status !== "pending") return;
-            notificationSound.play();
-            toast(
+    const channel = supabase
+      .channel(`portal-notes-global-${tenantId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "customer_portal_notes", filter: `tenant_id=eq.${tenantId}` },
+        (payload) => {
+          const row: any = payload.new;
+          if (!row || row.status !== "pending") return;
+          notificationSound.play();
+          toast(
+            React.createElement(
+              "div",
+              { className: "flex items-start gap-2" },
+              React.createElement(MessageSquare, { size: 16, className: "text-primary mt-0.5" }),
               React.createElement(
                 "div",
-                { className: "flex items-start gap-2" },
-                React.createElement(MessageSquare, { size: 16, className: "text-primary mt-0.5" }),
+                null,
+                React.createElement("div", { className: "font-bold text-sm" }, "ملاحظة عميل جديدة"),
                 React.createElement(
                   "div",
-                  null,
-                  React.createElement("div", { className: "font-bold text-sm" }, "ملاحظة عميل جديدة"),
-                  React.createElement(
-                    "div",
-                    { className: "text-xs text-muted-foreground line-clamp-2" },
-                    `${row.customer_name || "عميل"}: ${row.note}`
-                  )
-                )
+                  { className: "text-xs text-muted-foreground line-clamp-2" },
+                  `${row.customer_name || "عميل"}: ${row.note}`,
+                ),
               ),
-              { duration: 8000 }
-            );
-          }
-        )
-        .subscribe();
-    })();
+            ),
+            { duration: 8000 },
+          );
+        },
+      )
+      .subscribe();
 
-    return () => { if (channel) supabase.removeChannel(channel); };
-  }, []);
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [tenantId]);
 
   return null;
 }
