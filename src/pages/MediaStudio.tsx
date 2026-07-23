@@ -29,6 +29,10 @@ interface MediaItem {
   contentType: string;
   updatedAt: string;
   url?: string;
+  vehicleId?: string | null;
+  claimId?: string | null;
+  vehiclePlate?: string;
+  vehicleLabel?: string;
 }
 
 const REAL_BUCKETS = [
@@ -149,6 +153,65 @@ async function listBucketRecursive(bucket: string): Promise<MediaItem[]> {
   return out;
 }
 
+async function listVehicleMediaIndex(): Promise<Record<string, MediaItem[]>> {
+  const byBucket: Record<string, MediaItem[]> = {};
+  const { data, error } = await supabase
+    .from("vehicle_media" as any)
+    .select("id,storage_bucket,storage_path,file_name,file_size,mime_type,uploaded_at,media_type,vehicle_id,claim_id,public_url")
+    .is("deleted_at", null)
+    .order("uploaded_at", { ascending: false })
+    .limit(500);
+  if (error) throw error;
+
+  const rows = (data || []) as any[];
+  const vehicleIds = Array.from(new Set(rows.map((row) => row.vehicle_id).filter(Boolean)));
+  const claimIds = Array.from(new Set(rows.map((row) => row.claim_id).filter(Boolean)));
+
+  const [vehiclesResult, claimsResult] = await Promise.all([
+    vehicleIds.length
+      ? supabase.from("vehicles" as any).select("id,plate_number,plate_letters,brand,model,year").in("id", vehicleIds as any)
+      : Promise.resolve({ data: [], error: null } as any),
+    claimIds.length
+      ? supabase.from("insurance_claims" as any).select("id,vehicle_plate,vehicle_make,vehicle_model,vehicle_year").in("id", claimIds as any)
+      : Promise.resolve({ data: [], error: null } as any),
+  ]);
+
+  const vehicles = new Map<string, any>((vehiclesResult.data || []).map((vehicle: any) => [vehicle.id, vehicle]));
+  const claims = new Map<string, any>((claimsResult.data || []).map((claim: any) => [claim.id, claim]));
+
+  rows.forEach((row) => {
+    const bucket = row.storage_bucket || "insurance-docs";
+    const vehicle = row.vehicle_id ? vehicles.get(row.vehicle_id) : null;
+    const claim = row.claim_id ? claims.get(row.claim_id) : null;
+    const vehiclePlate = [
+      vehicle?.plate_letters || "",
+      vehicle?.plate_number || claim?.vehicle_plate || "",
+    ].filter(Boolean).join(" ").trim() || "—";
+    const vehicleLabel = [
+      vehicle?.brand || claim?.vehicle_make || "",
+      vehicle?.model || claim?.vehicle_model || "",
+      vehicle?.year || claim?.vehicle_year || "",
+    ].filter(Boolean).join(" ").trim() || vehiclePlate;
+    const item: MediaItem = {
+      bucket,
+      path: row.storage_path,
+      name: row.file_name || String(row.storage_path || "").split("/").pop() || "file",
+      size: Number(row.file_size || 0),
+      contentType: String(row.mime_type || (row.media_type === "image" ? "image/*" : "")),
+      updatedAt: row.uploaded_at || "",
+      url: row.public_url || undefined,
+      vehicleId: row.vehicle_id || null,
+      claimId: row.claim_id || null,
+      vehiclePlate,
+      vehicleLabel,
+    };
+    if (!byBucket[bucket]) byBucket[bucket] = [];
+    byBucket[bucket].push(item);
+  });
+
+  return byBucket;
+}
+
 const isImage = (it: MediaItem) =>
   it.contentType?.startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp|svg|heic)$/i.test(it.name);
 const isPdf = (it: MediaItem) =>
@@ -173,7 +236,7 @@ function genId() {
 }
 
 export default function MediaStudio() {
-  const [tab, setTab] = useState<string>(REAL_BUCKETS[0].id);
+  const [tab, setTab] = useState<string>("__vehicles__");
   const [items, setItems] = useState<Record<string, MediaItem[]>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
@@ -295,6 +358,26 @@ export default function MediaStudio() {
     await Promise.all(REAL_BUCKETS.map((b) => loadBucket(b.id, force, skipSign)));
   }
 
+  async function loadVehicleMediaIndex(force = false) {
+    if (!force && REAL_BUCKETS.some((bucket) => items[bucket.id])) return;
+    setVehiclesLoading(true);
+    try {
+      const indexed = await listVehicleMediaIndex();
+      setItems((current) => {
+        const next = { ...current };
+        REAL_BUCKETS.forEach((bucket) => {
+          next[bucket.id] = indexed[bucket.id] || [];
+        });
+        return next;
+      });
+    } catch (error) {
+      console.warn("[MediaStudio] vehicle_media index failed; falling back to Storage listing", error);
+      await loadAllRealBuckets(force, true);
+    } finally {
+      setVehiclesLoading(false);
+    }
+  }
+
   // توقيع URLs لمجموعة عناصر متى ما لزم (Lazy)
   const signingRef = useRef<Set<string>>(new Set());
   async function ensureSignedFor(list: MediaItem[]) {
@@ -329,7 +412,7 @@ export default function MediaStudio() {
     else if (isVehiclesTab) {
       // تبويب السيارات: حمّل القوائم بدون توقيع — يوقَّع لاحقاً عند فتح السيارة
       loadBucket("local-photos");
-      loadAllRealBuckets(false, true);
+      loadVehicleMediaIndex();
       loadVehicleMaps();
     } else loadBucket(tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -353,9 +436,15 @@ export default function MediaStudio() {
     };
     for (const it of allActiveItems) {
       let mapped: { plate: string; label: string } | null = null;
+      if (it.vehiclePlate || it.vehicleLabel) {
+        mapped = {
+          plate: it.vehiclePlate || "—",
+          label: it.vehicleLabel || it.vehiclePlate || "—",
+        };
+      }
       // claims/<claimId>/...
       const cm = it.path.match(/(?:^|\/)claims\/([0-9a-f-]{8,})\//i);
-      if (cm && claimToVehicle[cm[1]]) mapped = claimToVehicle[cm[1]];
+      if (!mapped && cm && claimToVehicle[cm[1]]) mapped = claimToVehicle[cm[1]];
       // inspections/<id>/...
       if (!mapped) {
         const im = it.path.match(/(?:^|\/)inspections\/([0-9a-zA-Z_-]+)\//);
@@ -388,7 +477,7 @@ export default function MediaStudio() {
   useEffect(() => {
     if (isVehiclesTab && !openVehicle && vehicleGroups.length) {
       const covers: MediaItem[] = [];
-      for (const g of vehicleGroups) {
+      for (const g of vehicleGroups.slice(0, 20)) {
         const firstImg = g.items.find((it) => isImage(it) && !it.url);
         if (firstImg) covers.push(firstImg);
       }
@@ -623,7 +712,7 @@ export default function MediaStudio() {
         <Button
           variant="outline"
           onClick={() => {
-            if (isVehiclesTab) { loadAllRealBuckets(true, true); loadBucket("local-photos", true); loadVehicleMaps(); }
+            if (isVehiclesTab) { loadVehicleMediaIndex(true); loadBucket("local-photos", true); loadVehicleMaps(); }
             else if (isTrashTab) loadAllRealBuckets(true);
             else loadBucket(tab, true);
           }}

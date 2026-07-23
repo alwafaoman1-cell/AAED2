@@ -5,12 +5,12 @@ const memoryCache = new Map<string, unknown>();
 const memoryCacheMeta = new Map<string, number>();
 const pendingReads = new Map<string, Promise<unknown>>();
 const CACHE_TTL_MS = 30_000;
+let allSettingsLoadedAt = 0;
+let pendingAllSettings: Promise<void> | null = null;
 
 type SettingListener = (value: unknown) => void;
-const subscriptions = new Map<string, {
-  channel: ReturnType<typeof supabase.channel>;
-  listeners: Set<SettingListener>;
-}>();
+const settingListeners = new Map<string, Set<SettingListener>>();
+let tenantSettingsChannel: ReturnType<typeof supabase.channel> | null = null;
 
 function isAuthPage(): boolean {
   return typeof window !== "undefined" && /^\/(auth|reset-password)(\/|$)/.test(window.location.pathname);
@@ -21,6 +21,34 @@ export interface CloudSettingRecord<T = unknown> {
   value: T;
   version: number;
   updated_at: string;
+}
+
+async function loadAllCloudSettings(): Promise<void> {
+  if (isAuthPage()) return;
+  if (Date.now() - allSettingsLoadedAt < CACHE_TTL_MS) return;
+  if (pendingAllSettings) return pendingAllSettings;
+
+  pendingAllSettings = (async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) return;
+    const { data, error } = await supabase
+      .from("tenant_settings")
+      .select("key,value");
+    if (error) throw error;
+    const now = Date.now();
+    (data || []).forEach((row) => {
+      if (!row?.key) return;
+      memoryCache.set(row.key, row.value);
+      memoryCacheMeta.set(row.key, now);
+    });
+    allSettingsLoadedAt = now;
+  })();
+
+  try {
+    await pendingAllSettings;
+  } finally {
+    pendingAllSettings = null;
+  }
 }
 
 /** Read a tenant setting from Supabase. Falls back only to in-memory session cache. */
@@ -42,21 +70,26 @@ export async function readCloudSetting<T>(key: string, fallback: T): Promise<T> 
   }
 
   const readPromise = (async () => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData.session) {
+    try {
+      await loadAllCloudSettings();
       if (memoryCache.has(key)) return memoryCache.get(key);
-      return fallback;
-    }
-    const { data, error } = await supabase
-      .from("tenant_settings")
-      .select("value")
-      .eq("key", key)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) {
-      memoryCache.set(key, data.value);
-      memoryCacheMeta.set(key, Date.now());
-      return data.value;
+    } catch {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        if (memoryCache.has(key)) return memoryCache.get(key);
+        return fallback;
+      }
+      const { data, error } = await supabase
+        .from("tenant_settings")
+        .select("value")
+        .eq("key", key)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) {
+        memoryCache.set(key, data.value);
+        memoryCacheMeta.set(key, Date.now());
+        return data.value;
+      }
     }
     return fallback;
   })();
@@ -100,39 +133,46 @@ export function subscribeCloudSetting<T>(
   cb: (value: T) => void,
 ): () => void {
   if (isAuthPage()) return () => {};
-  let entry = subscriptions.get(key);
-  if (!entry) {
-    const listeners = new Set<SettingListener>();
-    const channel = supabase
-      .channel(`tenant_setting:${key}`)
+
+  if (!tenantSettingsChannel) {
+    tenantSettingsChannel = supabase
+      .channel("tenant_settings")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "tenant_settings", filter: `key=eq.${key}` },
+        { event: "*", schema: "public", table: "tenant_settings" },
         (payload) => {
-          const row = (payload.new ?? payload.old) as { value?: unknown } | null;
-          if (row?.value !== undefined) {
-            memoryCache.set(key, row.value);
-            memoryCacheMeta.set(key, Date.now());
-            listeners.forEach((listener) => {
+          const row = (payload.new ?? payload.old) as { key?: string; value?: unknown } | null;
+          if (row?.key && row.value !== undefined) {
+            memoryCache.set(row.key, row.value);
+            memoryCacheMeta.set(row.key, Date.now());
+            const listeners = settingListeners.get(row.key);
+            listeners?.forEach((listener) => {
               try { listener(row.value); } catch {}
             });
           }
         },
       )
       .subscribe();
-    entry = { channel, listeners };
-    subscriptions.set(key, entry);
   }
 
+  let listeners = settingListeners.get(key);
+  if (!listeners) {
+    listeners = new Set<SettingListener>();
+    settingListeners.set(key, listeners);
+  }
   const listener: SettingListener = (value) => cb(value as T);
-  entry.listeners.add(listener);
+  listeners.add(listener);
   return () => {
-    const current = subscriptions.get(key);
+    const current = settingListeners.get(key);
     if (!current) return;
-    current.listeners.delete(listener);
-    if (current.listeners.size === 0) {
-      subscriptions.delete(key);
-      void supabase.removeChannel(current.channel);
+    current.delete(listener);
+    if (current.size === 0) {
+      settingListeners.delete(key);
+    }
+    if (settingListeners.size === 0 && tenantSettingsChannel) {
+      const channel = tenantSettingsChannel;
+      tenantSettingsChannel = null;
+      void supabase.removeChannel(channel);
     }
   };
 }
