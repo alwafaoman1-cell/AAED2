@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { CURRENT_APP_VERSION, compareVersions } from "./appVersion";
+import { clearApplicationShellCaches } from "./chunkRecovery";
 
 export interface AppVersionRow {
   id: string;
@@ -25,7 +26,13 @@ let latest: AppVersionRow | null = null;
 let started = false;
 
 function emit() {
-  listeners.forEach((cb) => { try { cb(latest); } catch { /* noop */ } });
+  listeners.forEach((cb) => {
+    try {
+      cb(latest);
+    } catch (error) {
+      if (import.meta.env.DEV) console.warn("[updateStore] listener failed", error);
+    }
+  });
 }
 
 function isNewer(row: AppVersionRow | null): boolean {
@@ -40,7 +47,10 @@ async function fetchLatest() {
     .order("released_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) return;
+  if (error) {
+    if (import.meta.env.DEV) console.warn("[updateStore] latest version fetch failed", error.message);
+    return;
+  }
   if (data && isNewer(data as AppVersionRow)) {
     latest = data as AppVersionRow;
   } else {
@@ -100,18 +110,15 @@ export function isSnoozed(): boolean {
 /** Clear caches + unregister SW, then reload exactly once. */
 export async function applyUpdateNow(): Promise<void> {
   try {
-    if ("serviceWorker" in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-    }
-  } catch { /* noop */ }
+    await clearApplicationShellCaches();
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn("[updateStore] cache cleanup failed", error);
+  }
   try {
-    if (typeof caches !== "undefined") {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
-  } catch { /* noop */ }
-  try { sessionStorage.setItem("post_update_toast", "1"); } catch { /* noop */ }
+    sessionStorage.setItem("post_update_toast", "1");
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn("[updateStore] post-update marker failed", error);
+  }
   // Hard reload to fetch fresh shell
   window.location.reload();
 }

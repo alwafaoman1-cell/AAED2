@@ -67,7 +67,7 @@ export default function UpdateNotice() {
     setOpen(true);
     // single toast announcement
     toast.info(`يوجد تحديث جديد للنظام: الإصدار ${latest.version}`);
-  }, [latest?.id]);
+  }, [latest]);
 
   // grace countdown ticker for mandatory updates
   useEffect(() => {

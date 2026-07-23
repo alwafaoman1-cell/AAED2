@@ -6,14 +6,13 @@ import "./i18n";
 import { registerTechPwa } from "./lib/registerPwa";
 import { ensureCacheVersion } from "./lib/cacheVersion";
 import { installEnglishDigitGuards } from "./lib/formatters/englishDigitsRuntime";
+import { installChunkLoadErrorRecovery, isChunkLoadError, recoverFromChunkLoadError } from "./lib/chunkRecovery";
+import { CURRENT_APP_VERSION } from "./lib/appVersion";
 
 ensureCacheVersion();
 installEnglishDigitGuards();
 registerTechPwa();
-
-const CHUNK_RELOAD_KEY = "__chunk_reload_at";
-const isChunkLoadError = (msg: string) =>
-  /Importing a module script failed|Failed to fetch dynamically imported module|Loading chunk \d+ failed|ChunkLoadError/i.test(msg);
+installChunkLoadErrorRecovery();
 
 const categorizeError = (error: Error) => {
   const msg = error.message || "";
@@ -24,25 +23,6 @@ const categorizeError = (error: Error) => {
   if (/mutationobserver|dom/i.test(msg)) return "DOMMutationError";
   return "RuntimeError";
 };
-
-async function recoverFromStaleChunk() {
-  const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0);
-  if (Date.now() - last < 10_000) return;
-  sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
-  try {
-    if ("serviceWorker" in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-    }
-    if (typeof caches !== "undefined") {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
-  } catch {
-    /* noop: reload still gives the browser a chance to fetch the fresh shell */
-  }
-  window.location.reload();
-}
 
 class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null; errorId: string | null; category: string | null }> {
   state = { error: null as Error | null, errorId: null as string | null, category: null as string | null };
@@ -64,7 +44,7 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
       componentStack: errorInfo.componentStack,
     });
     if (isChunkLoadError(error.message || "")) {
-      void recoverFromStaleChunk();
+      void recoverFromChunkLoadError(error);
     }
   }
 
@@ -84,6 +64,8 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
               <dd>{window.location.pathname}</dd>
               <dt>Category</dt>
               <dd>{this.state.category}</dd>
+              <dt>Build</dt>
+              <dd>{CURRENT_APP_VERSION}</dd>
               <dt>Time</dt>
               <dd>{new Date().toISOString()}</dd>
             </dl>
@@ -94,6 +76,12 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
               <button className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground" onClick={() => window.location.reload()}>
                 إعادة المحاولة
               </button>
+              <button
+                className="rounded border border-border px-4 py-2 text-sm"
+                onClick={() => { void recoverFromChunkLoadError(this.state.error, { force: true }); }}
+              >
+                تنظيف Cache وإعادة التحميل
+              </button>
               <button className="rounded border border-border px-4 py-2 text-sm" onClick={() => { window.location.href = "/dashboard"; }}>
                 العودة للوحة التحكم
               </button>
@@ -103,6 +91,7 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
                   errorId: this.state.errorId,
                   route: window.location.pathname,
                   category: this.state.category,
+                  build: CURRENT_APP_VERSION,
                   message: this.state.error?.message,
                 }, null, 2))}
               >
@@ -116,19 +105,6 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
     return this.props.children;
   }
 }
-
-// Recovery for stale PWA chunks after a new deploy.
-// When a dynamic import fails ("Importing a module script failed" /
-// "Failed to fetch dynamically imported module"), clear caches + SW and reload once.
-(function installChunkErrorRecovery() {
-  window.addEventListener("error", (e) => {
-    if (e?.message && isChunkLoadError(e.message)) void recoverFromStaleChunk();
-  });
-  window.addEventListener("unhandledrejection", (e) => {
-    const msg = String((e as PromiseRejectionEvent).reason?.message || (e as PromiseRejectionEvent).reason || "");
-    if (isChunkLoadError(msg)) void recoverFromStaleChunk();
-  });
-})();
 
 createRoot(document.getElementById("root")!).render(
   <RootErrorBoundary>

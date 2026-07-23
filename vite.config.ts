@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => ({
     react(),
     mode === "development" && componentTagger(),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
       injectRegister: null, // we register manually with iframe guard in main.tsx
       devOptions: { enabled: false },
       includeAssets: ["icon-192.png", "icon-512.png"],
@@ -26,8 +26,8 @@ export default defineConfig(({ mode }) => ({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/~oauth/, /^\/api/, /^\/functions/, /^\/auth/],
         cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
+        clientsClaim: false,
+        skipWaiting: false,
         // Do not precache index.html. The app shell must be fetched from the
         // network on deploy so aaed-2.vercel.app cannot stay pinned to an old
         // hashed bundle through the Service Worker.

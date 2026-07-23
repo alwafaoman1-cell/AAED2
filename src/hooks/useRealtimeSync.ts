@@ -37,32 +37,52 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   {
     scope: "dashboard",
     test: (path) => path === "/" || path.startsWith("/dashboard"),
-    tables: ["job_orders", "insurance_claims", "insurance_invoices", "claim_payments", "expenses", "sales_documents"],
+    tables: [],
   },
   {
-    scope: "work_orders",
-    test: (path) => path.startsWith("/work-orders"),
-    tables: ["job_orders", "job_order_parts", "job_order_logs", "vehicles", "customers", "insurance_claims"],
+    scope: "work_order_detail",
+    test: (path) => /^\/work-orders\/[^/]+/.test(path),
+    tables: ["job_orders", "job_order_parts", "job_order_logs"],
   },
   {
-    scope: "claims",
-    test: (path) => path.startsWith("/insurance/claims"),
-    tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicles", "customers", "vehicle_media"],
+    scope: "work_orders_list",
+    test: (path) => path === "/work-orders",
+    tables: ["job_orders"],
+  },
+  {
+    scope: "claim_detail",
+    test: (path) =>
+      /^\/insurance\/claims\/[^/]+/.test(path) ||
+      (
+        /^\/insurance\/[^/]+/.test(path) &&
+        !path.startsWith("/insurance/accounting") &&
+        !path.startsWith("/insurance/companies") &&
+        !path.startsWith("/insurance/new") &&
+        !path.startsWith("/insurance/pipeline") &&
+        !path.startsWith("/insurance/estimates") &&
+        !path.startsWith("/insurance/documents")
+      ),
+    tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicle_media"],
+  },
+  {
+    scope: "claims_list",
+    test: (path) => path === "/insurance/claims" || path.startsWith("/insurance/pipeline"),
+    tables: ["insurance_claims"],
   },
   {
     scope: "vehicles",
     test: (path) => path.startsWith("/vehicles"),
-    tables: ["vehicles", "vehicle_media", "job_orders"],
+    tables: ["vehicles", "vehicle_media"],
   },
   {
     scope: "accounting",
     test: (path) => path.startsWith("/accounting") || path.startsWith("/insurance/accounting"),
-    tables: ["insurance_invoices", "claim_payments", "expenses", "sales_documents", "sales_payments", "journal_entries"],
+    tables: ["insurance_invoices", "claim_payments", "expenses", "sales_documents", "sales_payments"],
   },
   {
     scope: "reports",
     test: (path) => path.startsWith("/reports"),
-    tables: ["job_orders", "insurance_claims", "insurance_invoices", "claim_payments", "expenses", "sales_documents"],
+    tables: [],
   },
   {
     scope: "settings",
