@@ -224,9 +224,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         "role query timeout",
       ).then(({ data, error }: any) => (!error ? profileFromPartial(data, uid, sessionUser) : null)).catch(() => null);
 
+      const rpcProfile = (async (): Promise<UserProfile | null> => {
+        const [tenantResult, roleResult] = await Promise.all([
+          withTimeout((supabase as any).rpc("get_user_tenant_id"), PROFILE_QUERY_TIMEOUT_MS, "tenant rpc timeout")
+            .catch(() => null),
+          withTimeout((supabase as any).rpc("get_user_role"), PROFILE_QUERY_TIMEOUT_MS, "role rpc timeout")
+            .catch(() => null),
+        ]);
+        const tenantId = (tenantResult as any)?.data;
+        if (!tenantId || (tenantResult as any)?.error) return null;
+        return profileFromPartial(
+          {
+            id: uid,
+            user_id: uid,
+            tenant_id: tenantId,
+            role: (roleResult as any)?.data || sessionUser?.user_metadata?.role || "admin",
+          },
+          uid,
+          sessionUser,
+        );
+      })();
+
       const metadataProfile = Promise.resolve(profileFromPartial(null, uid, sessionUser));
 
-      const profile = await firstValidProfile([sdkProfile, restProfile, roleProfile, metadataProfile]);
+      const profile = await firstValidProfile([rpcProfile, sdkProfile, restProfile, roleProfile, metadataProfile]);
       if (!profile) console.warn("[auth] profile load failed: no valid profile/role/tenant found");
       return profile;
     })();
