@@ -29,8 +29,8 @@ interface AuthCtx {
 const AuthContext = createContext<AuthCtx | undefined>(undefined);
 
 const AUTH_BOOT_TIMEOUT_MS = 8_000;
-const PROFILE_TIMEOUT_MS = 20_000;
-const PROFILE_QUERY_TIMEOUT_MS = 10_000;
+const PROFILE_TIMEOUT_MS = 35_000;
+const PROFILE_QUERY_TIMEOUT_MS = 20_000;
 const profileCache = new Map<string, UserProfile | null>();
 const inFlightProfileRequests = new Map<string, Promise<UserProfile | null>>();
 
@@ -108,7 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     inFlightProfileRequests.set(uid, request);
     try {
       const result = await request;
-      profileCache.set(uid, result);
+      if (result) profileCache.set(uid, result);
+      else profileCache.delete(uid);
       return result;
     } finally {
       inFlightProfileRequests.delete(uid);
@@ -124,7 +125,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function loadProfileWithLateApply(uid: string, activeRef: () => boolean) {
-    const profilePromise = fetchProfile(uid);
+    const profilePromise = (async () => {
+      const first = await fetchProfile(uid);
+      if (first) return first;
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      if (!activeRef()) return null;
+      return fetchProfile(uid);
+    })();
     profilePromise
       .then((p) => {
         if (activeRef()) applyProfile(p);
@@ -211,6 +218,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function signIn(email: string, password: string) {
+    profileCache.clear();
+    inFlightProfileRequests.clear();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
     return {};
@@ -224,7 +233,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function refreshProfile() {
-    if (user) applyProfile(await withTimeout(fetchProfile(user.id), PROFILE_TIMEOUT_MS, "profile refresh timeout"));
+    if (user) {
+      profileCache.delete(user.id);
+      applyProfile(await withTimeout(fetchProfile(user.id), PROFILE_TIMEOUT_MS, "profile refresh timeout"));
+    }
   }
 
   function hasRole(...roles: AppRole[]) {

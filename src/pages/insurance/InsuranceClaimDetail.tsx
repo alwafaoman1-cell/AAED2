@@ -211,6 +211,7 @@ export default function InsuranceClaimDetail() {
   const [showSummary, setShowSummary] = useState(false);
   const [showInspectionPdf, setShowInspectionPdf] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [showTaxInvoice, setShowTaxInvoice] = useState(false);
   const [taxInvoiceHtml, setTaxInvoiceHtml] = useState<string>("");
   const [taxInvoiceNumber, setTaxInvoiceNumber] = useState<string>("");
@@ -944,6 +945,19 @@ export default function InsuranceClaimDetail() {
   // عند الموافقة: trigger في DB ينشئ أمر العمل تلقائياً ويربطه بـ auto_job_order_id.
   // بعدها: (1) نزامن بيانات السيارة المُدخلة في المطالبة على سجل vehicles
   // (2) لا ننتقل تلقائياً — نترك المستخدم يختار "عرض هنا" أو "فتح في الصفحة" أو "متابعة للتسليم".
+  const openApproveDialog = () => {
+    if (!id || isNew) {
+      toast.error("احفظ المطالبة أولاً");
+      return;
+    }
+    const current = parseMoneyInput(approvedAmount);
+    if (!current) {
+      const fallback = parseMoneyInput(estimatedCost);
+      if (fallback) setApprovedAmount(fallback.toFixed(3));
+    }
+    setShowApproveDialog(true);
+  };
+
   const handleApprove = async () => {
     if (!id || isNew) {
       toast.error("احفظ المطالبة أولاً");
@@ -978,6 +992,7 @@ export default function InsuranceClaimDetail() {
       { id, status: "approved", approved_amount: parseMoneyInput(approvedAmount) },
       {
         onSuccess: async (verified: any) => {
+          setShowApproveDialog(false);
           hydrateFromVerifiedClaim(verified);
           await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(id) });
           await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
@@ -1027,6 +1042,9 @@ export default function InsuranceClaimDetail() {
             toast.success("تمت الموافقة على المطالبة");
             setTab("workorder");
           }
+        },
+        onError: (error: any) => {
+          toast.error(error?.message || "تعذر اعتماد المطالبة");
         },
       }
     );
@@ -2181,7 +2199,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 </Button>
               )}
               {isAwaitingApproval && (
-                <Button size="sm" onClick={handleApprove} disabled={updateStatus.isPending} className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground">
+                <Button size="sm" onClick={openApproveDialog} disabled={updateStatus.isPending} className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground">
                   <CheckCircle2 size={14} /> اعتماد المطالبة
                 </Button>
               )}
@@ -3285,6 +3303,53 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </Button>
               <Button onClick={handleConfirmStageChange} disabled={savingStage || !stageDate}>
                 {savingStage ? "جاري الحفظ..." : "تأكيد"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>اعتماد المطالبة</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-success/25 bg-success/5 p-3 text-sm">
+              <div className="font-semibold text-success">المبلغ الموافق عليه من شركة التأمين</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                سيتم حفظ هذا المبلغ كقيمة الاعتماد الحالية. يمكن تعديله لاحقاً من قسم الصور والتقدير أسفل الصفحة قبل إصدار الفاتورة.
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="claim-approved-amount-dialog">المبلغ الموافق عليه (OMR)</Label>
+              <Input
+                id="claim-approved-amount-dialog"
+                type="text"
+                inputMode="decimal"
+                value={approvedAmount}
+                onChange={(e) => setApprovedAmount(e.target.value)}
+                placeholder="0.000"
+                className="text-lg font-semibold text-success"
+                data-amount="true"
+              />
+              {!!parseMoneyInput(estimatedCost) && (
+                <p className="text-xs text-muted-foreground">
+                  المبلغ التقديري الحالي: {parseMoneyInput(estimatedCost).toFixed(3)} OMR
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowApproveDialog(false)} disabled={updateStatus.isPending}>
+                إلغاء
+              </Button>
+              <Button
+                onClick={handleApprove}
+                disabled={updateStatus.isPending || parseMoneyInput(approvedAmount) <= 0}
+                className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground"
+              >
+                <CheckCircle2 size={14} />
+                {updateStatus.isPending ? "جاري الاعتماد..." : "اعتماد المطالبة"}
               </Button>
             </div>
           </div>

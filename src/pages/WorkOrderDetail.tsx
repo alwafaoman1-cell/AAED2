@@ -102,6 +102,17 @@ const statusColors: Record<string, string> = {
   "مغلق": "bg-muted text-muted-foreground",
 };
 
+Object.assign(statusColors, {
+  "تحت الفحص": "bg-primary/15 text-primary",
+  "بانتظار الموافقة": "bg-info/15 text-info",
+  "بانتظار قطع الغيار": "bg-warning/15 text-warning",
+  "تحت الإصلاح": "bg-warning/15 text-warning",
+  "ضبط الجودة": "bg-info/15 text-info",
+  "جاهز للتسليم": "bg-success/15 text-success",
+  "تم التسليم": "bg-success/25 text-success",
+  "مغلق": "bg-muted text-muted-foreground",
+});
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function workOrderStatusColor(status: string): string {
@@ -129,6 +140,19 @@ const SUPA_STATUS_TO_AR: Record<string, string> = {
   delivered: "تم التسليم",
   closed: "مغلق",
 };
+
+Object.assign(SUPA_STATUS_TO_AR, {
+  received: "تحت الفحص",
+  diagnosing: "تحت الفحص",
+  awaiting_parts: "بانتظار قطع الغيار",
+  waiting_parts: "بانتظار قطع الغيار",
+  in_progress: "تحت الإصلاح",
+  quality_check: "ضبط الجودة",
+  ready: "جاهز للتسليم",
+  completed: "جاهز للتسليم",
+  delivered: "تم التسليم",
+  closed: "مغلق",
+});
 
 export default function WorkOrderDetail() {
   const { id = "" } = useParams<{ id: string }>();
@@ -381,8 +405,16 @@ export default function WorkOrderDetail() {
     (async () => {
       try {
         let row: any = null;
+        if (order.claimId && UUID_RE.test(order.claimId)) {
+          const { data } = await supabase
+            .from("insurance_claims")
+            .select("id, claim_number")
+            .eq("id", order.claimId)
+            .maybeSingle();
+          row = data;
+        }
         const cn = (order.claimNumber || "").trim();
-        if (cn && cn !== "-") {
+        if (!row && cn && cn !== "-") {
           const { data } = await supabase
             .from("insurance_claims")
             .select("id, claim_number")
@@ -390,19 +422,29 @@ export default function WorkOrderDetail() {
             .maybeSingle();
           row = data;
         }
-        if (!row && UUID_RE.test(order.id)) {
-          const { data } = await supabase
-            .from("insurance_claims")
-            .select("id, claim_number")
-            .or(`auto_job_order_id.eq.${order.id},job_order_id.eq.${order.id}`)
-            .maybeSingle();
-          row = data;
+        if (!row) {
+          const candidateJobOrderIds = Array.from(new Set([
+            order.cloudId,
+            cloudJobOrderId,
+            UUID_RE.test(order.id) ? order.id : null,
+          ].filter(Boolean))) as string[];
+          for (const jobOrderId of candidateJobOrderIds) {
+            const { data } = await supabase
+              .from("insurance_claims")
+              .select("id, claim_number")
+              .or(`auto_job_order_id.eq.${jobOrderId},job_order_id.eq.${jobOrderId}`)
+              .maybeSingle();
+            if (data) {
+              row = data;
+              break;
+            }
+          }
         }
         if (!cancelled && row) setLinkedClaim(row);
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
-  }, [order?.id, order?.claimNumber]);
+  }, [order?.id, order?.cloudId, order?.claimId, order?.claimNumber, cloudJobOrderId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -471,6 +513,9 @@ export default function WorkOrderDetail() {
   })();
   // رقم العرض الاحترافي للأمر (WO-YYYY-NNNNN). يُستخدم في كل الواجهات والـPDF بدل الـUUID.
   const displayNo = order.displayNumber || (UUID_RE.test(order.id) ? `WO-${order.id.slice(0, 8).toUpperCase()}` : order.id);
+  const effectiveLinkedClaim = linkedClaim || (order.claimId && UUID_RE.test(order.claimId)
+    ? { id: order.claimId, claim_number: order.claimNumber && order.claimNumber !== "-" ? order.claimNumber : "مطالبة مرتبطة" }
+    : null);
   const insuranceApprovedBreakdown = splitVatInclusiveAmount(order.insuranceApprovedAmount || 0, 0.05);
   const hasInsuranceApprovedAmount = insuranceApprovedBreakdown.totalIncludingVat > 0;
   const displayedClaimTotal =
@@ -685,19 +730,18 @@ export default function WorkOrderDetail() {
           </div>
 
           {/* المطالبة المرتبطة */}
-          {linkedClaim && (
+          {effectiveLinkedClaim && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => navigate(`/insurance/${linkedClaim.id}`)}
+              onClick={() => navigate(`/insurance/${effectiveLinkedClaim.id}`)}
               className="h-9 gap-1.5 border-info/40 text-info hover:bg-info/10"
-              title="فتح مطالبة التأمين المرتبطة"
+              title="فتح المطالبة التأمينية المرتبطة"
             >
               <ShieldCheck size={14} />
-              المطالبة <span className="font-mono text-[11px]">{linkedClaim.claim_number}</span>
+              فتح المطالبة <span className="font-mono text-[11px]">{effectiveLinkedClaim.claim_number}</span>
             </Button>
           )}
-
           {/* المجموعة 3: الفواتير والطباعة */}
           <div className="flex items-center gap-1.5">
             <DropdownMenu>
