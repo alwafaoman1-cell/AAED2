@@ -49,6 +49,8 @@ export function createStore<T extends BaseEntity>({ key }: StoreOptions<T>) {
     if (!cache) return;
     notify();
     void writeCloudSetting<T[]>(key, cache).catch((error) => {
+      const message = String((error as Error)?.message || error || "");
+      if (message === "no_tenant" || message === "not_authenticated") return;
       console.warn(`[createStore:${key}] Supabase setting write failed`, error);
     });
   }

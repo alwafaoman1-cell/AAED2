@@ -127,6 +127,10 @@ export interface SalesDoc {
 
 let cache: SalesDoc[] = [];
 const subscribers = new Set<() => void>();
+let cloudRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let cloudRefreshInFlight: Promise<void> | null = null;
+let lastCloudRefreshFailureAt = 0;
+const CLOUD_REFRESH_FAILURE_COOLDOWN_MS = 15_000;
 
 function read(): SalesDoc[] {
   return cache;
@@ -193,11 +197,16 @@ function rowToSalesDoc(r: any): SalesDoc {
 }
 
 async function refreshSalesFromCloud() {
+  if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) return;
+  if (cloudRefreshInFlight) return cloudRefreshInFlight;
+
+  cloudRefreshInFlight = (async () => {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return;
   const { data, error } = await (supabase.from("sales_documents") as any)
     .select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
   if (error) {
+    lastCloudRefreshFailureAt = Date.now();
     console.warn("[salesStore] cloud fetch failed", error);
     return;
   }
@@ -233,7 +242,22 @@ async function refreshSalesFromCloud() {
     const cloudPayments = paymentsByDocument.get(doc.id);
     return cloudPayments ? { ...doc, payments: cloudPayments } : doc;
   });
+  lastCloudRefreshFailureAt = 0;
   notify();
+  })().finally(() => {
+    cloudRefreshInFlight = null;
+  });
+  return cloudRefreshInFlight;
+}
+
+function scheduleSalesRefresh(delay = 250) {
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+  if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) return;
+  if (cloudRefreshTimer) clearTimeout(cloudRefreshTimer);
+  cloudRefreshTimer = setTimeout(() => {
+    cloudRefreshTimer = null;
+    void refreshSalesFromCloud();
+  }, delay);
 }
 
 async function upsertSalesCloud(doc: SalesDoc) {
@@ -629,17 +653,14 @@ export const salesStore = {
 };
 
 if (typeof window !== "undefined") {
-  setTimeout(() => void refreshSalesFromCloud(), 0);
+  scheduleSalesRefresh(0);
   supabase.auth.onAuthStateChange((_event, session) => {
     cache = [];
     notify();
-    if (session?.user) void refreshSalesFromCloud();
+    if (session?.user) scheduleSalesRefresh(500);
   });
-  supabase.channel("sales_documents_store_sync")
-    .on("postgres_changes", { event: "*", schema: "public", table: "sales_documents" }, () => {
-      void refreshSalesFromCloud();
-    })
-    .subscribe();
+  // Realtime invalidation is centralized in useRealtimeSync. Avoid duplicate
+  // store-level subscriptions that refetch all sales documents repeatedly.
 }
 
 export function numberPrefix(type: SalesDocType): string {

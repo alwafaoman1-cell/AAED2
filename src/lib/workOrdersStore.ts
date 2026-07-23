@@ -717,7 +717,10 @@ function mapCloudRow(
 
 let cloudBootstrapped = false;
 let cloudFetchTimer: ReturnType<typeof setTimeout> | null = null;
+let cloudFetchInFlight: Promise<void> | null = null;
+let lastCloudFetchFailureAt = 0;
 const KNOWN_CLOUD_NUMBERS = new Set<string>();
+const CLOUD_FETCH_FAILURE_COOLDOWN_MS = 15_000;
 
 function parseWorkOrderNumber(value: string) {
   const m = String(value || "").trim().match(/^([A-Z]+)-(\d{4})-(\d+)$/i);
@@ -759,6 +762,10 @@ async function allocateVisibleOrderNumber(tenantId: string, requested: string): 
 }
 
 async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise<void> {
+  if (!options.throwOnError && Date.now() - lastCloudFetchFailureAt < CLOUD_FETCH_FAILURE_COOLDOWN_MS) return;
+  if (cloudFetchInFlight) return cloudFetchInFlight;
+
+  cloudFetchInFlight = (async () => {
   try {
     let activeUserId: string | undefined;
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -874,13 +881,19 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
 
     cache = cloudOrders;
     listeners.forEach((l) => l());
+    lastCloudFetchFailureAt = 0;
 
     // Kick off background migration of legacy base64 photos to Storage (non-blocking).
     setTimeout(() => migrateLegacyPhotosInBackground(cache), 1000);
   } catch (e) {
+    lastCloudFetchFailureAt = Date.now();
     console.warn("[workOrdersStore] cloud fetch failed:", e);
     if (options.throwOnError) throw e;
+  } finally {
+    cloudFetchInFlight = null;
   }
+  })();
+  return cloudFetchInFlight;
 }
 
 let _photoMigrationRunning = false;
@@ -908,6 +921,8 @@ async function migrateLegacyPhotosInBackground(orders: WorkOrder[]) {
 }
 
 function scheduleCloudFetch(delay = 200) {
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+  if (Date.now() - lastCloudFetchFailureAt < CLOUD_FETCH_FAILURE_COOLDOWN_MS) return;
   if (cloudFetchTimer) clearTimeout(cloudFetchTimer);
   cloudFetchTimer = setTimeout(() => { cloudFetchTimer = null; fetchFromCloud(); }, delay);
 }
@@ -917,19 +932,9 @@ function ensureCloudSync() {
   cloudBootstrapped = true;
   // initial fetch + realtime subscription
   scheduleCloudFetch(0);
-  try {
-    supabase
-      .channel(`work_orders_cloud_${Math.random().toString(36).slice(2, 8)}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "job_orders" }, () => scheduleCloudFetch(150))
-      .on("postgres_changes", { event: "*", schema: "public", table: "customers" }, () => scheduleCloudFetch(400))
-      .on("postgres_changes", { event: "*", schema: "public", table: "vehicles" }, () => scheduleCloudFetch(400))
-      .subscribe();
-  } catch (e) {
-    console.warn("[workOrdersStore] realtime subscribe failed:", e);
-  }
-  // Focus/visibility refresh is handled by React Query and page-scoped
-  // realtime. Keeping legacy store listeners here caused request storms when
-  // returning to the tab.
+  // Realtime/focus refresh is handled centrally by useRealtimeSync. Keeping an
+  // extra legacy subscription here caused duplicate request storms on dashboard
+  // and when returning to the tab.
 }
 
 // Kick off cloud sync as soon as this module is imported (after auth bootstraps).

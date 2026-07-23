@@ -48,6 +48,10 @@ export interface CustomerStats {
 
 let cache: Customer[] = [];
 const listeners = new Set<() => void>();
+let cloudRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let cloudRefreshInFlight: Promise<void> | null = null;
+let lastCloudRefreshFailureAt = 0;
+const CLOUD_REFRESH_FAILURE_COOLDOWN_MS = 15_000;
 
 function normalize(s: string): string {
   return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -91,6 +95,10 @@ function rowToCustomer(r: any): Customer {
 }
 
 export async function refreshCustomersFromCloud() {
+  if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) return;
+  if (cloudRefreshInFlight) return cloudRefreshInFlight;
+
+  cloudRefreshInFlight = (async () => {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return;
   const { data, error } = await supabase.from("customers").select("*")
@@ -99,11 +107,27 @@ export async function refreshCustomersFromCloud() {
     .or("archived.is.null,archived.eq.false")
     .order("created_at", { ascending: false });
   if (error) {
+    lastCloudRefreshFailureAt = Date.now();
     console.warn("[customersStore] cloud fetch failed", error);
     return;
   }
   cache = (data || []).map(rowToCustomer);
+  lastCloudRefreshFailureAt = 0;
   persist();
+  })().finally(() => {
+    cloudRefreshInFlight = null;
+  });
+  return cloudRefreshInFlight;
+}
+
+function scheduleCustomersRefresh(delay = 250) {
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+  if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) return;
+  if (cloudRefreshTimer) clearTimeout(cloudRefreshTimer);
+  cloudRefreshTimer = setTimeout(() => {
+    cloudRefreshTimer = null;
+    void refreshCustomersFromCloud();
+  }, delay);
 }
 
 async function findExistingCustomerCloud(
@@ -433,15 +457,12 @@ export const customersStore = {
 };
 
 if (typeof window !== "undefined") {
-  setTimeout(() => void refreshCustomersFromCloud(), 0);
+  scheduleCustomersRefresh(0);
   supabase.auth.onAuthStateChange((_event, session) => {
     cache = [];
     persist();
-    if (session?.user) void refreshCustomersFromCloud();
+    if (session?.user) scheduleCustomersRefresh(500);
   });
-  supabase.channel("customers_store_sync")
-    .on("postgres_changes", { event: "*", schema: "public", table: "customers" }, () => {
-      void refreshCustomersFromCloud();
-    })
-    .subscribe();
+  // Realtime invalidation is centralized in useRealtimeSync. Avoid duplicate
+  // store-level subscriptions that refetch the full customer list repeatedly.
 }
