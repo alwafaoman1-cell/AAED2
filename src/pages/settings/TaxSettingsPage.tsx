@@ -16,8 +16,13 @@ export default function TaxSettingsPage() {
   const update = <K extends keyof PdfTemplateSettings>(k: K, v: PdfTemplateSettings[K]) =>
     setS((p) => ({ ...p, [k]: v }));
 
-  const save = () => {
-    saveTemplateSettings(s);
+  const save = async () => {
+    try {
+      await saveTemplateSettings(s);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ إعدادات الضريبة");
+      return;
+    }
     toast.success("تم حفظ إعدادات الضريبة");
   };
   const reset = () => {

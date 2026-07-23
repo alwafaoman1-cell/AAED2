@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 const memoryCache = new Map<string, unknown>();
 
@@ -41,12 +42,7 @@ export async function writeCloudSetting<T>(key: string, value: T): Promise<void>
   const userId = userRow.user?.id;
   if (!userId) throw new Error("not_authenticated");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("tenant_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-  const tenantId = profile?.tenant_id;
+  const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("no_tenant");
 
   const { error } = await supabase

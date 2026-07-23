@@ -162,7 +162,7 @@ export default function PdfLayoutPage() {
     const next = { ...templateSettings, stampUrl: undefined };
     setTemplateSettings(next);
     try {
-      await saveTemplateSettings(next);
+      await saveTemplateSettings(next, { clearAssetFields: ["stampUrl"] });
       const { removeCompanyStampFromStorage } = await import("@/lib/pdfStampStorage");
       await removeCompanyStampFromStorage(previousStampUrl);
       toast.success("تم حذف ختم الشركة من إعدادات PDF");
@@ -176,7 +176,12 @@ export default function PdfLayoutPage() {
   const removeSignature = async () => {
     const next = { ...templateSettings, signatureUrl: undefined };
     setTemplateSettings(next);
-    await saveTemplateSettings(next);
+    try {
+      await saveTemplateSettings(next, { clearAssetFields: ["signatureUrl"] });
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حذف التوقيع");
+      return;
+    }
     if (signatureInputRef.current) signatureInputRef.current.value = "";
     toast.success("تم حذف التوقيع");
   };

@@ -985,7 +985,10 @@ export default function InsuranceClaimDetail() {
       });
       setVehicleId(resolvedVehicleId);
     } catch (error: any) {
-      toast.error(error?.message || "تعذر إنشاء أو ربط المركبة في Supabase قبل اعتماد المطالبة");
+      const message = String(error?.message || error || "");
+      toast.error(/failed to fetch|networkerror|fetch/i.test(message)
+        ? "تعذر الاتصال بقاعدة البيانات أثناء ربط المركبة. تحقق من الاتصال ثم حاول مرة أخرى."
+        : (message || "تعذر إنشاء أو ربط المركبة في Supabase قبل اعتماد المطالبة"));
       return;
     }
     updateStatus.mutate(
@@ -997,12 +1000,18 @@ export default function InsuranceClaimDetail() {
           await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(id) });
           await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
           // اقرأ المطالبة المحدّثة من DB لمعرفة WO المُنشأ
-          const { data: refreshed } = await supabase
-            .from("insurance_claims" as any)
-            .select("auto_job_order_id, job_order_id, vehicle_id")
-            .eq("id", id)
-            .maybeSingle();
-          const r = refreshed as any;
+          let r: any = verified || {};
+          try {
+            const { data: refreshed, error: refreshError } = await supabase
+              .from("insurance_claims" as any)
+              .select("auto_job_order_id, job_order_id, vehicle_id")
+              .eq("id", id)
+              .maybeSingle();
+            if (refreshError) console.warn("[claim approve refresh] skipped", refreshError.message);
+            if (refreshed) r = refreshed as any;
+          } catch (refreshError: any) {
+            console.warn("[claim approve refresh] skipped", refreshError?.message || refreshError);
+          }
           const woId = r?.auto_job_order_id || r?.job_order_id;
 
           // ── مزامنة بيانات السيارة من حقول المطالبة على سجل السيارة المرتبطة ──

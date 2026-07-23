@@ -63,14 +63,31 @@ export default function SettingsPage() {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
-  const handleSave = () => {
-    saveTemplateSettings(settings);
+  const handleSave = async () => {
+    try {
+      const saved = await saveTemplateSettings(settings);
+      setSettings(saved);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ إعدادات الشركة");
+      return;
+    }
     toast.success("تم حفظ الإعدادات بنجاح");
   };
 
-  const handleReset = () => {
-    saveTemplateSettings(DEFAULT_PDF_TEMPLATE_SETTINGS);
-    setSettings(DEFAULT_PDF_TEMPLATE_SETTINGS);
+  const handleReset = async () => {
+    const next: PdfTemplateSettings = {
+      ...DEFAULT_PDF_TEMPLATE_SETTINGS,
+      logoUrl: settings.logoUrl,
+      stampUrl: settings.stampUrl,
+      signatureUrl: settings.signatureUrl,
+    };
+    try {
+      const saved = await saveTemplateSettings(next);
+      setSettings(saved);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر إعادة إعدادات PDF");
+      return;
+    }
     toast.success("تم إعادة الإعدادات الافتراضية");
   };
 
@@ -97,7 +114,7 @@ export default function SettingsPage() {
     setSettings(next);
     if (stampRef.current) stampRef.current.value = "";
     try {
-      await saveTemplateSettings(next);
+      await saveTemplateSettings(next, { clearAssetFields: ["stampUrl"] });
       const { removeCompanyStampFromStorage } = await import("@/lib/pdfStampStorage");
       await removeCompanyStampFromStorage(previousStampUrl);
       toast.success("تم حذف ختم الشركة من الإعدادات");
@@ -106,9 +123,16 @@ export default function SettingsPage() {
     }
   };
 
-  const handleRemoveLogo = () => {
-    setSettings(prev => ({ ...prev, logoUrl: undefined }));
+  const handleRemoveLogo = async () => {
+    const next = { ...settings, logoUrl: undefined };
+    setSettings(next);
     if (fileRef.current) fileRef.current.value = "";
+    try {
+      await saveTemplateSettings(next, { clearAssetFields: ["logoUrl"] });
+      toast.success("تم حذف الشعار من إعدادات PDF");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حذف الشعار");
+    }
   };
 
   const handleImageUpload = async (
@@ -148,7 +172,6 @@ export default function SettingsPage() {
   };
 
   const handlePreview = () => {
-    saveTemplateSettings(settings);
     setPreviewHtml(getInvoiceHtml({
       invoiceNumber: "INV-PREVIEW",
       date: new Date().toLocaleDateString("ar-SA"),

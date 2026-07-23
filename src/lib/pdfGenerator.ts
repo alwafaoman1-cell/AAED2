@@ -217,6 +217,19 @@ export const STAMP_SIZE_PX: Record<StampSize, number> = { sm: 100, md: 150, lg: 
 const CLOUD_KEY = "company_template_settings_v1";
 let templateCache: PdfTemplateSettings | null = null;
 const templateListeners = new Set<() => void>();
+type TemplateAssetField = "logoUrl" | "stampUrl" | "signatureUrl";
+type TemplateIdentityField =
+  | "companyName"
+  | "companyNameEn"
+  | "commercialReg"
+  | "vatNumber"
+  | "phone"
+  | "email"
+  | "address";
+
+interface SaveTemplateSettingsOptions {
+  clearAssetFields?: TemplateAssetField[];
+}
 
 export function getTemplateSettings(): PdfTemplateSettings {
   if (templateCache) return templateCache;
@@ -235,12 +248,42 @@ export function subscribeTemplateSettings(cb: () => void): () => void {
   return () => { templateListeners.delete(cb); };
 }
 
-export function saveTemplateSettings(settings: PdfTemplateSettings) {
-  templateCache = { ...settings };
+function mergeTemplateSettingsForSave(
+  incoming: PdfTemplateSettings,
+  existing?: Partial<PdfTemplateSettings> | null,
+  options: SaveTemplateSettingsOptions = {},
+): PdfTemplateSettings {
+  const clearAssets = new Set(options.clearAssetFields || []);
+  const next = { ...DEFAULT_SETTINGS, ...(existing || {}), ...incoming } as PdfTemplateSettings;
+  for (const field of ["companyName", "companyNameEn", "commercialReg", "vatNumber", "phone", "email", "address"] as TemplateIdentityField[]) {
+    const value = incoming[field];
+    if ((value === undefined || value === "" || value === DEFAULT_SETTINGS[field]) && existing?.[field]) {
+      next[field] = existing[field] as string;
+    }
+  }
+  for (const field of ["logoUrl", "stampUrl", "signatureUrl"] as const) {
+    if (clearAssets.has(field)) {
+      delete next[field];
+      continue;
+    }
+    if (!incoming[field] && existing?.[field]) next[field] = existing[field];
+  }
+  return next;
+}
+
+export async function saveTemplateSettings(
+  settings: PdfTemplateSettings,
+  options: SaveTemplateSettingsOptions = {},
+): Promise<PdfTemplateSettings> {
+  const existing = await readCloudSetting<Partial<PdfTemplateSettings> | null>(CLOUD_KEY, null).catch(() => null);
+  const next = mergeTemplateSettingsForSave(settings, existing, options);
+  templateCache = { ...next };
   templateListeners.forEach((cb) => { try { cb(); } catch (_error) { void _error; } });
-  void writeCloudSetting(CLOUD_KEY, settings).catch((error) => {
+  await writeCloudSetting(CLOUD_KEY, next).catch((error) => {
     console.warn("[pdfGenerator] Supabase template write failed", error);
+    throw error;
   });
+  return next;
 }
 
 /** Load company/template settings from cloud and merge into local cache.
@@ -253,9 +296,7 @@ export async function loadTemplateSettingsFromCloud(): Promise<void> {
       templateCache = merged;
       templateListeners.forEach((cb) => { try { cb(); } catch (_error) { void _error; } });
     } else {
-      // First time on cloud — push current local copy up so it isn't lost on cache clear.
-      const local = getTemplateSettings();
-      await writeCloudSetting(CLOUD_KEY, local).catch(() => {});
+      return;
     }
   } catch { /* offline / not signed in — keep local */ }
 }
