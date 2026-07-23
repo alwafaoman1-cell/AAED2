@@ -94,6 +94,53 @@ function clearStoredProfiles() {
   }
 }
 
+function profileFromPartial(row: any, uid: string, user?: User | null): UserProfile | null {
+  const tenantId = String(row?.tenant_id || user?.user_metadata?.tenant_id || "").trim();
+  const role = String(row?.role || user?.user_metadata?.role || "admin").trim() as AppRole;
+  if (!tenantId) return null;
+  return {
+    id: String(row?.id || uid),
+    user_id: String(row?.user_id || uid),
+    tenant_id: tenantId,
+    full_name: String(
+      row?.full_name ||
+      user?.user_metadata?.full_name ||
+      user?.user_metadata?.name ||
+      user?.email?.split("@")[0] ||
+      "User",
+    ),
+    phone: row?.phone ?? user?.user_metadata?.phone ?? null,
+    avatar_url: row?.avatar_url ?? user?.user_metadata?.avatar_url ?? null,
+    role,
+  };
+}
+
+function firstValidProfile(promises: Array<Promise<UserProfile | null>>): Promise<UserProfile | null> {
+  return new Promise((resolve) => {
+    let pending = promises.length;
+    if (pending === 0) {
+      resolve(null);
+      return;
+    }
+    for (const promise of promises) {
+      promise
+        .then((profile) => {
+          if (profile) {
+            pending = -1;
+            resolve(profile);
+            return;
+          }
+          pending -= 1;
+          if (pending === 0) resolve(null);
+        })
+        .catch(() => {
+          pending -= 1;
+          if (pending === 0) resolve(null);
+        });
+    }
+  });
+}
+
 function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -124,8 +171,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (inFlight) return inFlight;
 
     const request = (async (): Promise<UserProfile | null> => {
-    try {
-      const { data, error } = await withTimeout(
+      const sessionData = await withTimeout(supabase.auth.getSession(), 3_000, "auth session query timeout")
+        .then(({ data }) => data)
+        .catch(() => null);
+      const sessionUser = sessionData?.session?.user ?? null;
+      const accessToken = sessionData?.session?.access_token;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const sdkProfile = withTimeout(
         supabase
           .from("profiles")
           .select("*")
@@ -133,42 +187,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .maybeSingle(),
         PROFILE_QUERY_TIMEOUT_MS,
         "profile query timeout",
-      );
-      if (!error) return (data as UserProfile) || null;
-      console.warn("[auth] profile SDK query failed", error);
-    } catch (error) {
-      console.warn("[auth] profile SDK query delayed or failed", error);
-    }
+      ).then(({ data, error }) => (!error ? profileFromPartial(data, uid, sessionUser) : null)).catch(() => null);
 
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      if (!accessToken || !supabaseUrl || !anonKey) return null;
+      const restProfile = (async () => {
+        if (!accessToken || !supabaseUrl || !anonKey) return null;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), PROFILE_QUERY_TIMEOUT_MS);
+        try {
+          const response = await fetch(
+            `${supabaseUrl}/rest/v1/profiles?select=*&user_id=eq.${encodeURIComponent(uid)}&limit=1`,
+            {
+              headers: {
+                apikey: anonKey,
+                Authorization: `Bearer ${accessToken}`,
+              },
+              signal: controller.signal,
+            },
+          );
+          if (!response.ok) return null;
+          const rows = await response.json();
+          return profileFromPartial(Array.isArray(rows) ? rows[0] : null, uid, sessionUser);
+        } catch {
+          return null;
+        } finally {
+          clearTimeout(timer);
+        }
+      })();
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), PROFILE_QUERY_TIMEOUT_MS);
-      const response = await fetch(
-        `${supabaseUrl}/rest/v1/profiles?select=*&user_id=eq.${encodeURIComponent(uid)}&limit=1`,
-        {
-          headers: {
-            apikey: anonKey,
-            Authorization: `Bearer ${accessToken}`,
-          },
-          signal: controller.signal,
-        },
-      ).finally(() => clearTimeout(timer));
-      if (!response.ok) {
-        console.warn("[auth] profile REST query failed", response.status);
-        return null;
-      }
-      const rows = await response.json();
-      return (Array.isArray(rows) ? rows[0] : null) as UserProfile | null;
-    } catch (error) {
-      console.warn("[auth] profile REST query delayed or failed", error);
-      return null;
-    }
+      const roleProfile = withTimeout(
+        (supabase.from("user_roles" as any) as any)
+          .select("id,user_id,tenant_id,role")
+          .eq("user_id", uid)
+          .limit(1)
+          .maybeSingle(),
+        PROFILE_QUERY_TIMEOUT_MS,
+        "role query timeout",
+      ).then(({ data, error }: any) => (!error ? profileFromPartial(data, uid, sessionUser) : null)).catch(() => null);
+
+      const metadataProfile = Promise.resolve(profileFromPartial(null, uid, sessionUser));
+
+      const profile = await firstValidProfile([sdkProfile, restProfile, roleProfile, metadataProfile]);
+      if (!profile) console.warn("[auth] profile load failed: no valid profile/role/tenant found");
+      return profile;
     })();
 
     inFlightProfileRequests.set(uid, request);
