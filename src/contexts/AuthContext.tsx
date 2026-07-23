@@ -30,8 +30,8 @@ interface AuthCtx {
 const AuthContext = createContext<AuthCtx | undefined>(undefined);
 
 const AUTH_BOOT_TIMEOUT_MS = 8_000;
-const PROFILE_TIMEOUT_MS = 35_000;
-const PROFILE_QUERY_TIMEOUT_MS = 20_000;
+const PROFILE_TIMEOUT_MS = 12_000;
+const PROFILE_QUERY_TIMEOUT_MS = 7_000;
 const PROFILE_STORAGE_PREFIX = "alwafa.auth.profile.";
 const PROFILE_STORAGE_TTL_MS = 12 * 60 * 60_000;
 const profileCache = new Map<string, UserProfile | null>();
