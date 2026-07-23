@@ -1461,13 +1461,22 @@ async function _flushPatch(orderNumber: string) {
       };
     }
     if (Object.keys(updates).length === 0) return;
-    let { error } = await supabase.from("job_orders")
-      .update(updates).eq("tenant_id", ctx.tenantId).eq("order_number", orderNumber);
+    const updateByCloudId = current?.cloudId && isUuid(current.cloudId);
+    let updateQuery = supabase.from("job_orders")
+      .update(updates)
+      .eq("tenant_id", ctx.tenantId);
+    updateQuery = updateByCloudId
+      ? updateQuery.eq("id", current.cloudId)
+      : updateQuery.eq("order_number", orderNumber);
+    let { error } = await updateQuery;
     if (error && isMissingJobOrderColumnError(error)) {
-      ({ error } = await supabase.from("job_orders")
+      let fallbackQuery = supabase.from("job_orders")
         .update(legacyCompatibleJobOrderPayload(updates, current?.vehicleBelongings) as any)
-        .eq("tenant_id", ctx.tenantId)
-        .eq("order_number", orderNumber));
+        .eq("tenant_id", ctx.tenantId);
+      fallbackQuery = updateByCloudId
+        ? fallbackQuery.eq("id", current.cloudId)
+        : fallbackQuery.eq("order_number", orderNumber);
+      ({ error } = await fallbackQuery);
     }
     if (error) console.warn("[pushPatchToCloud]", error);
     else if (current?.claimId) {

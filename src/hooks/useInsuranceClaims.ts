@@ -336,69 +336,98 @@ export function useDeleteClaim() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      // 1) fetch claim meta for linked work orders / claim_number
-      const { data: claim } = await supabase
+      // Non-destructive archive: preserve invoices, payments, estimates, work orders, and files.
+      const { data: claim, error: claimError } = await supabase
         .from("insurance_claims" as any)
-        .select("id, claim_number, auto_job_order_id, job_order_id")
+        .select("id, tenant_id, claim_number, auto_job_order_id, job_order_id, status, notes")
         .eq("id", id)
         .maybeSingle();
+      if (claimError) throw claimError;
+      if (!claim) throw new Error("Claim not found");
       const c: any = claim;
+      const archivedAt = new Date().toISOString();
 
-      // 2) delete dependent rows (best-effort, warn on failure)
-      const safeDel = async (table: string, col: string, val: string) => {
+      const audit = async (action: string, details: Record<string, any>) => {
         try {
-          const { error } = await supabase.from(table as any).delete().eq(col, val);
-          if (error) console.warn(`[cascade] ${table}.${col}=${val}`, error.message);
+          await supabase.from("claim_audit_logs" as any).insert({
+            tenant_id: c?.tenant_id,
+            claim_id: id,
+            action,
+            category: "delete_policy",
+            details,
+            created_at: archivedAt,
+          });
         } catch (e: any) {
-          console.warn(`[cascade] ${table}`, e?.message);
+          console.warn("[claim archive audit]", e?.message);
         }
       };
 
-      await safeDel("insurance_invoices", "claim_id", id);
-      await safeDel("claim_payments", "claim_id", id);
-      // independent estimates link via converted_claim_id
-      await safeDel("insurance_estimates", "converted_claim_id", id);
-
-      // 3) delete linked job_orders (cloud)
       const joIds = [c?.auto_job_order_id, c?.job_order_id].filter(Boolean) as string[];
       for (const joId of joIds) {
         try {
-          const { error } = await supabase.from("job_orders").delete().eq("id", joId);
-          if (error) console.warn("[cascade] job_orders", error.message);
+          const { error } = await supabase
+            .from("job_orders")
+            .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: null } as any)
+            .eq("id", joId);
+          if (error && /deleted_at|archived_at|deleted_by|column/i.test(String((error as any).message || ""))) {
+            const { error: fallbackError } = await supabase
+              .from("job_orders")
+              .update({ archived_at: archivedAt } as any)
+              .eq("id", joId);
+            if (fallbackError) console.warn("[claim archive] job_orders fallback", fallbackError.message);
+          } else if (error) {
+            console.warn("[claim archive] job_orders", error.message);
+          }
         } catch (e: any) { console.warn("[cascade] job_orders", e?.message); }
       }
 
-      // 4) delete local work orders (localStorage store) sharing claim_number
-      if (c?.claim_number) {
-        try {
-          const { getWorkOrders, deleteWorkOrder } = await import("@/lib/workOrdersStore");
-          const cn = String(c.claim_number).trim();
-          getWorkOrders()
-            .filter((o) => (o.claimNumber || "").trim() === cn)
-            .forEach((o) => deleteWorkOrder(o.id));
-        } catch (e: any) { console.warn("[cascade] local wo", e?.message); }
-      }
-
-      // 5) remove journal entry
+      // Keep historical accounting entries out of active operational summaries.
       try {
         const { removeInsuranceClaimJournal } = await import("@/lib/insuranceAccounting");
         removeInsuranceClaimJournal(id);
       } catch (e: any) { console.warn("[cascade] journal", e?.message); }
 
-      // 6) finally delete the claim itself
-      const { error } = await supabase
+      const archiveNote = `Archived from UI on ${archivedAt}. Related invoices, payments, estimates, work orders, files, and audit records were preserved.`;
+      const nextNotes = [String(c?.notes || "").trim(), archiveNote].filter(Boolean).join("\n");
+      let updatePayload: any = {
+        status: "cancelled",
+        rejection_reason: "Archived from UI without deleting related records",
+        notes: nextNotes,
+        updated_at: archivedAt,
+      };
+      let { data: updated, error } = await supabase
         .from("insurance_claims" as any)
-        .delete()
-        .eq("id", id);
+        .update(updatePayload)
+        .eq("id", id)
+        .select("*")
+        .maybeSingle();
+      if (error && /rejection_reason|notes|column/i.test(String((error as any).message || ""))) {
+        updatePayload = { status: "cancelled", updated_at: archivedAt };
+        ({ data: updated, error } = await supabase
+          .from("insurance_claims" as any)
+          .update(updatePayload)
+          .eq("id", id)
+          .select("*")
+          .maybeSingle());
+      }
       if (error) throw error;
+
+      await audit("claim_archived_non_destructive", {
+        previous_status: c?.status,
+        archived_at: archivedAt,
+        financial_records_preserved: true,
+        work_orders_archived: joIds,
+      });
+      return updated ?? { ...c, ...updatePayload };
     },
-    onSuccess: () => {
+    onSuccess: (updated: any) => {
+      if (updated?.id) qc.setQueryData(queryKeys.insuranceClaims.detail(updated.id), updated);
       qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
       qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
       qc.invalidateQueries({ queryKey: queryKeys.insuranceEstimates.all });
       qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
       qc.invalidateQueries({ queryKey: queryKeys.jobOrders.all });
-      toast.success("تم حذف المطالبة وكل المرتبطات");
+      toast.success("تمت أرشفة المطالبة بدون حذف السجلات المالية أو التشغيلية");
     },
     onError: (e: any) => toast.error(e.message),
   });
