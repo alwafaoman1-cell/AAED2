@@ -37,7 +37,11 @@ export function openSanitizedPdfWindow(html: string): Window | null {
     ADD_TAGS: ["style", "link", "meta"],
     ADD_ATTR: ["target", "dir", "lang"],
   });
-  const win = window.open("", "_blank", "noopener,noreferrer");
+  // Do not pass `noopener` in the feature string here. Some Chromium builds
+  // isolate the about:blank popup immediately, which leaves the preview tab
+  // empty because document.write() cannot populate it. We write sanitized HTML
+  // first, then defensively detach the opener reference below.
+  const win = window.open("", "_blank");
   if (!win) return null;
   try {
     // Defensive: ensure no opener reference remains
