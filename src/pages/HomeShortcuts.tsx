@@ -26,6 +26,7 @@ interface Tile {
 
 const TILES: Tile[] = [
   { to: "/work-orders/new", labelAr: "أمر عمل جديد", labelEn: "New Work Order", icon: PlusCircle, accent: "from-primary to-primary/60", span: "md:col-span-2", hint: "إنشاء سريع <5 ثوانٍ", badgeQuery: "todayWorkOrders" },
+  { to: "/vehicle-entry/new", labelAr: "???? ?????", labelEn: "Vehicle Entry", icon: Car, accent: "from-amber-600 to-yellow-600", hint: "?????? ????? ?? ??? ??????" },
   { to: "/work-orders", labelAr: "أوامر العمل", labelEn: "Work Orders", icon: ClipboardList, accent: "from-sky-500 to-blue-600", badgeQuery: "openWorkOrders" },
   { to: "/vehicles", labelAr: "السيارات", labelEn: "Vehicles", icon: Car, accent: "from-amber-500 to-orange-600", badgeQuery: "vehicles" },
   { to: "/customers", labelAr: "العملاء", labelEn: "Customers", icon: Users, accent: "from-emerald-500 to-teal-600" },

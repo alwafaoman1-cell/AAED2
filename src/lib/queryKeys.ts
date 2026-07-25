@@ -25,6 +25,12 @@ export const queryKeys = {
     byCustomer: (customerId?: string | null) => ["vehicles", customerId ?? ""] as const,
     media: (ids?: readonly string[]) => ["vehicles", "media", ids?.join(",") ?? ""] as const,
   },
+  vehicleEntries: {
+    all: ["vehicle_entries"] as const,
+    list: (filters?: unknown) => ["vehicle_entries", "list", filters ?? ""] as const,
+    detail: (id?: string | null) => ["vehicle_entries", "detail", id ?? ""] as const,
+    media: (id?: string | null) => ["vehicle_entries", "media", id ?? ""] as const,
+  },
   vehicleMedia: {
     avatar: (vehicleId?: string | null) => ["vehicle_media", "avatar", vehicleId ?? ""] as const,
     claim: (claimId?: string | null, workOrderId?: string | null, vehicleId?: string | null) =>

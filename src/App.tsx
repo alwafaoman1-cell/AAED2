@@ -114,6 +114,9 @@ const VehiclesOver30Days = lazy(() => import("./pages/reports/VehiclesOver30Days
 const EstimatesList = lazy(() => import("./pages/estimates/EstimatesList"));
 const EstimateForm = lazy(() => import("./pages/estimates/EstimateForm"));
 const EstimateDetail = lazy(() => import("./pages/estimates/EstimateDetail"));
+const VehicleEntryList = lazy(() => import("./pages/vehicle-entry/VehicleEntryList"));
+const VehicleEntryForm = lazy(() => import("./pages/vehicle-entry/VehicleEntryForm"));
+const VehicleEntryDetail = lazy(() => import("./pages/vehicle-entry/VehicleEntryDetail"));
 const ExecutiveDashboard = lazy(() => import("./pages/dashboard/ExecutiveDashboard"));
 const PrintTemplates = lazy(() => import("./pages/settings/PrintTemplates"));
 const PrintTemplateVariants = lazy(() => import("./pages/settings/PrintTemplateVariants"));
@@ -284,6 +287,10 @@ const App = () => (
               <Route path="/estimates/new" element={<EstimateForm />} />
               <Route path="/estimates/:id" element={<EstimateDetail />} />
               <Route path="/estimates/:id/edit" element={<EstimateForm />} />
+              <Route path="/vehicle-entry" element={<VehicleEntryList />} />
+              <Route path="/vehicle-entry/new" element={<VehicleEntryForm />} />
+              <Route path="/vehicle-entry/:id" element={<VehicleEntryDetail />} />
+              <Route path="/vehicle-entry/:id/edit" element={<VehicleEntryForm />} />
               <Route path="/accounting" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Accounting /></ProtectedRoute>} />
               <Route path="/accounting/expenses" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />
               <Route path="/accounting/expenses/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />

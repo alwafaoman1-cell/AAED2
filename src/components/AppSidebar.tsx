@@ -30,6 +30,7 @@ type MenuItem = {
 const menuItems: MenuItem[] = [
   { path: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { path: "/work-orders", labelKey: "nav.workOrders", icon: ClipboardList },
+  { path: "/vehicle-entry", labelKey: "دخول واستلام مركبة", icon: Car },
   { path: "/vehicles", labelKey: "nav.vehicles", icon: Car },
   { path: "/customers", labelKey: "nav.customers", icon: UserSquare },
   { path: "/messages", labelKey: "nav.messages", icon: Bell },
