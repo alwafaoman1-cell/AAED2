@@ -284,9 +284,16 @@ async function hydrateFromCloud() {
 if (typeof window !== "undefined") {
   hydrateFromCloud();
 
-  // Refresh after sign-in.
+  // Refresh only for a real sign-in when the store is not already hydrated.
+  // TOKEN_REFRESHED can fire when returning to a tab; do not clear/reload data.
   supabase.auth.onAuthStateChange((event) => {
-    if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+    if (event === "SIGNED_OUT") {
+      cache = [];
+      hydrated = false;
+      notify();
+      return;
+    }
+    if (event === "SIGNED_IN" && !hydrated) {
       hydrateFromCloud();
     }
   });

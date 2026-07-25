@@ -78,4 +78,18 @@ describe("no focus reload and draft loss guard contract", () => {
     expect(realtime).toContain("isRecentlyReturnedToTab()");
     expect(realtime).toContain("document.visibilityState !== \"visible\"");
   });
+
+  it("does not treat token refresh or same-user signed-in as app reload triggers", () => {
+    const auth = read("src/contexts/AuthContext.tsx");
+    const salesStore = read("src/lib/salesStore.ts");
+    const expensesStore = read("src/lib/expensesStore.ts");
+
+    expect(auth).toContain('_event === "SIGNED_IN" && !sameUser');
+    expect(salesStore).toContain('event === "SIGNED_OUT"');
+    expect(salesStore).toContain('event === "SIGNED_IN" && session?.user && cache.length === 0');
+    expect(salesStore).not.toContain('if (session?.user) scheduleSalesRefresh(500)');
+    expect(expensesStore).toContain('event === "SIGNED_OUT"');
+    expect(expensesStore).toContain('event === "SIGNED_IN" && !hydrated');
+    expect(expensesStore).not.toContain('event === "TOKEN_REFRESHED"');
+  });
 });

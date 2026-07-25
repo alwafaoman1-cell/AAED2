@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const nextUserId = nextUser?.id ?? null;
       const previousUserId = currentUserIdRef.current;
       const sameUser = !!nextUserId && currentUserIdRef.current === nextUserId;
-      const shouldRefreshProfile = _event === "SIGNED_IN" || _event === "USER_UPDATED";
+      const shouldRefreshProfile = _event === "USER_UPDATED" || (_event === "SIGNED_IN" && !sameUser);
       const generation = sessionGenerationRef.current + 1;
       sessionGenerationRef.current = generation;
 

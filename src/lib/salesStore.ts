@@ -654,10 +654,15 @@ export const salesStore = {
 
 if (typeof window !== "undefined") {
   scheduleSalesRefresh(0);
-  supabase.auth.onAuthStateChange((_event, session) => {
-    cache = [];
-    notify();
-    if (session?.user) scheduleSalesRefresh(500);
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_OUT") {
+      cache = [];
+      notify();
+      return;
+    }
+    if (event === "SIGNED_IN" && session?.user && cache.length === 0) {
+      scheduleSalesRefresh(500);
+    }
   });
   // Realtime invalidation is centralized in useRealtimeSync. Avoid duplicate
   // store-level subscriptions that refetch all sales documents repeatedly.
