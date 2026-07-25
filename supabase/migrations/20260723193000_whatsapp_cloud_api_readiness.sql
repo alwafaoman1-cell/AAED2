@@ -168,6 +168,10 @@ create table if not exists public.message_attachments (
   created_at timestamptz not null default now()
 );
 
+alter table public.message_attachments drop constraint if exists message_attachments_https_url_check;
+alter table public.message_attachments drop constraint if exists message_attachments_mime_check;
+alter table public.message_attachments drop constraint if exists message_attachments_size_check;
+
 alter table public.message_attachments
   add constraint message_attachments_https_url_check
   check (public_url is null or public_url ~* '^https://') not valid;
@@ -269,18 +273,17 @@ begin
   drop policy if exists "Staff insert whatsapp logs" on public.whatsapp_logs;
   drop policy if exists "Staff update whatsapp logs" on public.whatsapp_logs;
   drop policy if exists "Admin delete whatsapp logs" on public.whatsapp_logs;
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'whatsapp_logs' and policyname = 'admin read provider whatsapp logs') then
-    create policy "admin read provider whatsapp logs" on public.whatsapp_logs
-      for select to authenticated using (
-        tenant_id = public.get_user_tenant_id()
-        and exists (
-          select 1 from public.profiles p
-          where p.user_id = auth.uid()
-            and p.tenant_id = public.whatsapp_logs.tenant_id
-            and p.role in ('owner','admin','super_admin')
-        )
-      );
-  end if;
+  drop policy if exists "admin read provider whatsapp logs" on public.whatsapp_logs;
+  create policy "admin read provider whatsapp logs" on public.whatsapp_logs
+    for select to authenticated using (
+      tenant_id = public.get_user_tenant_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.user_id = auth.uid()
+          and p.tenant_id = public.whatsapp_logs.tenant_id
+          and p.role in ('admin','manager')
+      )
+    );
   if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'whatsapp_conversations' and policyname = 'tenant read whatsapp conversations') then
     create policy "tenant read whatsapp conversations" on public.whatsapp_conversations
       for select to authenticated using (tenant_id = public.get_user_tenant_id());
@@ -291,18 +294,17 @@ begin
   end if;
 
   drop policy if exists "tenant read whatsapp webhook events" on public.whatsapp_webhook_events;
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'whatsapp_webhook_events' and policyname = 'admin read whatsapp webhook events') then
-    create policy "admin read whatsapp webhook events" on public.whatsapp_webhook_events
-      for select to authenticated using (
-        tenant_id = public.get_user_tenant_id()
-        and exists (
-          select 1 from public.profiles p
-          where p.user_id = auth.uid()
-            and p.tenant_id = public.whatsapp_webhook_events.tenant_id
-            and p.role in ('owner','admin','super_admin')
-        )
-      );
-  end if;
+  drop policy if exists "admin read whatsapp webhook events" on public.whatsapp_webhook_events;
+  create policy "admin read whatsapp webhook events" on public.whatsapp_webhook_events
+    for select to authenticated using (
+      tenant_id = public.get_user_tenant_id()
+      and exists (
+        select 1 from public.profiles p
+        where p.user_id = auth.uid()
+          and p.tenant_id = public.whatsapp_webhook_events.tenant_id
+          and p.role in ('admin','manager')
+      )
+    );
 
   if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'whatsapp_templates' and policyname = 'tenant read whatsapp templates') then
     create policy "tenant read whatsapp templates" on public.whatsapp_templates
