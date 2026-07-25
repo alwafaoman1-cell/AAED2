@@ -1,9 +1,12 @@
+import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
+import { toast } from "sonner";
 
 export interface UplItem {
   description: string;
@@ -23,7 +26,23 @@ interface Props {
   suggestedAmount?: number;
 }
 
+function normalizeUplItemNameForMatch(value: string | null | undefined): string {
+  return String(value || "")
+    .trim()
+    .replace(/^\s*(?:[-*•]+|\d+[.)-])\s*/, "")
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("en-US");
+}
+
+function cleanBulkUplLine(value: string): string {
+  return value
+    .trim()
+    .replace(/^\s*(?:[-*•]+|\d+[.)-])\s*/, "")
+    .replace(/\s+/g, " ");
+}
+
 export default function UplItemsEditor({ items, onChange, readOnly, suggestedAmount = 0 }: Props) {
+  const [bulkItemsText, setBulkItemsText] = useState("");
   const total = items.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
 
   const update = (i: number, patch: Partial<UplItem>) =>
@@ -37,6 +56,42 @@ export default function UplItemsEditor({ items, onChange, readOnly, suggestedAmo
     })));
   const remove = (i: number) => onChange(items.filter((_, idx) => idx !== i));
 
+  function addBulkItems() {
+    const lines = bulkItemsText
+      .split(/\r?\n/)
+      .map(cleanBulkUplLine)
+      .filter(Boolean);
+
+    if (!lines.length) {
+      toast.error("الصق قائمة البنود أولًا، كل بند في سطر مستقل");
+      return;
+    }
+
+    const existingKeys = new Set(items.map((item) => normalizeUplItemNameForMatch(item.description)).filter(Boolean));
+    const seenKeys = new Set<string>();
+    const additions: UplItem[] = [];
+
+    for (const description of lines) {
+      const key = normalizeUplItemNameForMatch(description);
+      if (!key || existingKeys.has(key) || seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      additions.push({
+        description,
+        quantity: 1,
+        unit_price: "" as unknown as number,
+      });
+    }
+
+    if (!additions.length) {
+      toast.error("لم تتم إضافة أي بند: كل البنود موجودة مسبقًا أو مكررة");
+      return;
+    }
+
+    onChange([...items, ...additions]);
+    setBulkItemsText("");
+    toast.success(`تمت إضافة ${additions.length} بند إلى تقدير UPL. أدخل الأسعار يدويًا ثم احفظ المطالبة.`);
+  }
+
   return (
     <Card className="p-4 space-y-3 bg-muted/30">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -49,26 +104,58 @@ export default function UplItemsEditor({ items, onChange, readOnly, suggestedAmo
         {!readOnly && (
           <div className="flex flex-wrap gap-2 justify-end">
             {items.length === 0 && (
-              <Button size="sm" variant="secondary" onClick={addDefaults}>
+              <Button type="button" size="sm" variant="secondary" onClick={addDefaults}>
                 قطع الغيار + أجرة العمالة
               </Button>
             )}
             {suggestedAmount > 0 && (
               <>
-                <Button size="sm" variant="outline" onClick={() => fillSuggested("parts")}>
+                <Button type="button" size="sm" variant="outline" onClick={() => fillSuggested("parts")}>
                   تعبئة السعر في قطع الغيار
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => fillSuggested("labor")}>
+                <Button type="button" size="sm" variant="outline" onClick={() => fillSuggested("labor")}>
                   تعبئة السعر في أجرة العمالة
                 </Button>
               </>
             )}
-            <Button size="sm" variant="outline" onClick={add}>
+            <Button type="button" size="sm" variant="outline" onClick={add}>
               <Plus className="h-4 w-4 ml-1" /> إضافة بند
             </Button>
           </div>
         )}
       </div>
+
+      {!readOnly && (
+        <div className="rounded-lg border border-dashed border-primary/30 bg-background/70 p-3 space-y-2">
+          <div className="flex flex-col gap-1">
+            <Label className="text-sm">إضافة بنود متعددة دفعة واحدة</Label>
+            <p className="text-xs text-muted-foreground">
+              الصق كل قطعة أو بند في سطر مستقل. سيتم إدراج كل سطر كبند UPL مستقل بكمية 1 وسعر فارغ للتعبئة اليدوية.
+            </p>
+          </div>
+          <Textarea
+            value={bulkItemsText}
+            onChange={(e) => setBulkItemsText(e.target.value)}
+            placeholder={"متجار أمامي يمين\nبنفر أمامي كامل\nلايت أمامي يمين\nشبك كروم أمامي"}
+            className="min-h-24 bg-background text-sm"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-muted-foreground">
+              لا يتم حذف البنود الموجودة، ويتم تجاهل الأسطر الفارغة والبنود المكررة داخل نفس المطالبة.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={addBulkItems}
+              disabled={!bulkItemsText.trim()}
+              className="gap-1"
+            >
+              <Plus className="h-4 w-4" /> إضافة القائمة إلى البنود
+            </Button>
+          </div>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-4">
@@ -119,6 +206,7 @@ export default function UplItemsEditor({ items, onChange, readOnly, suggestedAmo
                 </div>
                 {!readOnly && (
                   <Button
+                    type="button"
                     size="icon"
                     variant="ghost"
                     className="col-span-1 h-8 w-8 text-destructive"

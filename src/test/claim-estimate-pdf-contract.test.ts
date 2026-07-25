@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { getClaimEstimateHtml } from "@/lib/insurancePdfTemplates";
 
@@ -71,5 +72,16 @@ describe("claim estimate PDF template", () => {
     expect(html).toContain("grid-template-columns:repeat(3,minmax(0,1fr))");
     expect(html).toContain(".claim-estimate-page .footer{margin-top:auto");
     expect(html).toContain(".claim-estimate-page .estimation-badge span{padding:4px 18px");
+  });
+
+  it("supports multiline pasted UPL items without replacing existing rows", () => {
+    const source = readFileSync(new URL("../components/insurance/UplItemsEditor.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("bulkItemsText");
+    expect(source).toContain("split(/\\r?\\n/)");
+    expect(source).toContain("existingKeys.has(key)");
+    expect(source).toContain("quantity: 1");
+    expect(source).toContain('unit_price: "" as unknown as number');
+    expect(source).toContain("onChange([...items, ...additions])");
   });
 });
