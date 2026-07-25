@@ -11,6 +11,7 @@ describe("no focus reload and draft loss guard contract", () => {
 
     expect(app).toContain("refetchOnWindowFocus: false");
     expect(app).toContain("refetchOnReconnect: false");
+    expect(app).toContain("focusManager.setEventListener(() => () => {})");
     expect(app).toContain("UnsavedWorkGuard");
   });
 
@@ -32,12 +33,16 @@ describe("no focus reload and draft loss guard contract", () => {
   it("registers beforeunload only through the central dirty registry", () => {
     const unsavedWork = read("src/lib/unsavedWork.ts");
     const workOrdersStore = read("src/lib/workOrdersStore.ts");
+    const claimDetail = read("src/pages/insurance/InsuranceClaimDetail.tsx");
 
     expect(unsavedWork).toContain("subscribeUnsavedWork");
     expect(unsavedWork).toContain("window.addEventListener(\"beforeunload\", handleBeforeUnload)");
     expect(unsavedWork).toContain("window.removeEventListener(\"beforeunload\", handleBeforeUnload)");
     expect(workOrdersStore).toContain("ensurePendingPatchUnloadFlush");
     expect(workOrdersStore).not.toContain("window.addEventListener(\"beforeunload\", () =>");
+    expect(claimDetail).toContain("markDirty(scope)");
+    expect(claimDetail).not.toContain("addEventListener(\"beforeunload\"");
+    expect(claimDetail).not.toContain("window.location.reload()");
   });
 
   it("persists only sanitized UI drafts for the critical creation forms", () => {
@@ -63,5 +68,14 @@ describe("no focus reload and draft loss guard contract", () => {
     expect(messages).toContain("window.setTimeout");
     expect(messages).not.toContain("customer_notifications\" }, () => load())");
     expect(messages).not.toContain("message_logs\" }, () => load())");
+  });
+
+  it("does not invalidate realtime queries immediately on tab focus return", () => {
+    const realtime = read("src/hooks/useRealtimeSync.ts");
+
+    expect(realtime).toContain("handleVisibilityChange");
+    expect(realtime).toContain("pending.clear()");
+    expect(realtime).toContain("isRecentlyReturnedToTab()");
+    expect(realtime).toContain("document.visibilityState !== \"visible\"");
   });
 });

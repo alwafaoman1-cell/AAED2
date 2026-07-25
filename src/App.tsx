@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -189,6 +189,10 @@ const queryClient = new QueryClient({
   },
 });
 setTemplateQueryClient(queryClient);
+
+// Do not let browser focus/visibility events trigger implicit app refreshes.
+// Explicit saves and scoped realtime events remain the only refresh paths.
+focusManager.setEventListener(() => () => {});
 
 const AutoTranslateBoot = () => {
   useAutoTranslate();

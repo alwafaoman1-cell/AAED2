@@ -77,6 +77,7 @@ import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { displayCustomerCode } from "@/lib/customerCode";
 import { upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
+import { markClean, markDirty } from "@/lib/unsavedWork";
 
 
 const insuranceCompanies = [
@@ -1874,14 +1875,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   ]);
 
   useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (!hasUnsavedChanges) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [hasUnsavedChanges]);
+    const scope = `insurance-claim-detail:${id || "new"}`;
+    if (hasUnsavedChanges) markDirty(scope);
+    else markClean(scope);
+    return () => markClean(scope);
+  }, [hasUnsavedChanges, id]);
 
   const confirmLeaveIfDirty = () => {
     if (!hasUnsavedChanges) return true;
@@ -1890,7 +1888,49 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
   const resetUnsavedChanges = () => {
     if (!existing) return;
-    window.location.reload();
+    queryClient.setQueryData(queryKeys.insuranceClaims.detail(id), existing);
+    setCompany(existing.insurance_company || "");
+    setCompanyId((existing as any).insurance_company_id ?? null);
+    setInsuranceEmployeeId((existing as any).insurance_employee_id ?? null);
+    setClaimNumber(existing.claim_number || "");
+    setCustomerId(existing.customer_id || "");
+    setVehicleId(existing.vehicle_id || "");
+    setOwnerName(existing.vehicle_owner_name ?? "");
+    setOwnerPhone(existing.vehicle_owner_phone ?? "");
+    setEstimatedCost(String(existing.estimated_cost ?? existing.estimated_amount ?? ""));
+    setApprovedAmount(String(existing.approved_amount ?? ""));
+    setEstimationType(normalizeClaimEstimationType((existing as any).estimation_type));
+    setUplItems(((existing as any).upl_items as UplItem[]) ?? []);
+    setVehicleMake((existing as any).vehicle_make ?? "");
+    setVehicleModel((existing as any).vehicle_model ?? "");
+    setVehiclePlate((existing as any).vehicle_plate ?? "");
+    setVehicleYear((existing as any).vehicle_year ? String((existing as any).vehicle_year) : "");
+    setVehicleColor((existing as any).vehicle_color ?? "");
+    setVehicleVin((existing as any).vehicle_vin ?? "");
+    setStatus(existing.status);
+    setRejectionReason(existing.rejection_reason ?? "");
+    const rawNotes = existing.notes ?? "";
+    const lpoMatch = rawNotes.match(/\[LPO:([^\]]+)\]/);
+    const lpoDateMatch = rawNotes.match(/\[LPO_DATE:([^\]]+)\]/);
+    const lpoAmountMatch = rawNotes.match(/\[LPO_AMOUNT:([^\]]+)\]/);
+    const lpoNoteMatch = rawNotes.match(/\[LPO_NOTE:([^\]]+)\]/);
+    setLpoNumber(lpoMatch ? lpoMatch[1].trim() : "");
+    setLpoDate(lpoDateMatch ? lpoDateMatch[1].trim() : "");
+    setLpoAmount(lpoAmountMatch ? lpoAmountMatch[1].trim() : "");
+    setLpoNote(lpoNoteMatch ? lpoNoteMatch[1].trim() : "");
+    setNotes(rawNotes);
+    setDamagePhotos(existing.damage_photos ?? []);
+    setDocuments(existing.documents ?? []);
+    setNeededParts(existing.needed_parts ?? []);
+    setLinkedWorkOrderId(existing.job_order_id);
+    const createdAtStr = existing.created_at ? String(existing.created_at).slice(0, 10) : "";
+    setEstimateDate((existing as any).estimate_date ?? createdAtStr);
+    setWorkshopArrivalDate(dateOnly((existing as any).workshop_arrival_date));
+    const ws = (existing as any).work_started_at;
+    setWorkStartedAt(ws ? String(ws).slice(0, 10) : "");
+    const wc = (existing as any).work_completed_at;
+    setWorkCompletedAt(wc ? String(wc).slice(0, 10) : "");
+    markClean(`insurance-claim-detail:${id || "new"}`);
   };
 
 

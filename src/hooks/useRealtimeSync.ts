@@ -105,9 +105,30 @@ export function useRealtimeSync() {
 
     const pending = new Set<string>();
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let visibleSince = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+    const isRecentlyReturnedToTab = () => {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      return now - visibleSince < 2_000;
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        visibleSince = typeof performance !== "undefined" ? performance.now() : Date.now();
+        pending.clear();
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      }
+    };
 
     const flush = () => {
       timer = null;
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        pending.clear();
+        return;
+      }
       const keys = Array.from(pending);
       pending.clear();
       for (const key of keys) {
@@ -117,6 +138,7 @@ export function useRealtimeSync() {
 
     const schedule = (keys: string[]) => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (isRecentlyReturnedToTab()) return;
       for (const key of keys) pending.add(key);
       if (!timer) timer = setTimeout(flush, 1_500);
     };
@@ -129,6 +151,9 @@ export function useRealtimeSync() {
     }
 
     channel.subscribe();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
 
     if (import.meta.env.DEV) {
       console.debug("[realtime]", {
@@ -140,6 +165,9 @@ export function useRealtimeSync() {
 
     return () => {
       if (timer) clearTimeout(timer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
       void supabase.removeChannel(channel);
     };
   }, [qc, realtimeScope]);
