@@ -2,9 +2,8 @@
 import { isPartStillNeeded, NEEDED_PART_STATUS_LABELS, type WorkOrder } from "./workOrdersStore";
 import type { WaMessageKind } from "./waMessageLogStore";
 import { normalizePhone } from "./phoneUtils";
-import { supabase } from "@/integrations/supabase/client";
 import { readSystemPreferences } from "@/lib/systemPreferences";
-import { getFunctionErrorMessage } from "@/lib/functionErrors";
+import { sendUnifiedMessage } from "@/lib/messaging/messagingService";
 
 async function digits(s: string | undefined | null): Promise<string> {
   const prefs = await readSystemPreferences();
@@ -160,13 +159,15 @@ export function buildCustomGreeting(order: WorkOrder): string {
 export async function openWhatsAppWithMessage(message: string, phone?: string) {
   const cleaned = await digits(phone);
   if (!cleaned) throw new Error("رقم الهاتف غير صالح");
-  const { data, error } = await supabase.functions.invoke("whatsapp-meta-send", {
-    body: { to: cleaned, type: "text", text: message, messageKind: "custom" },
+  return sendUnifiedMessage({
+    channel: "whatsapp",
+    recipientPhone: cleaned,
+    body: message,
+    templateType: "custom",
   });
-  if (error || !data?.ok) throw new Error(getFunctionErrorMessage(error, data));
 }
 
-/** يرسل عبر Edge Function؛ التسجيل يتم داخل الخادم في whatsapp_logs. */
+/** Sends through the unified messaging Edge Function; provider details are logged server-side. */
 export async function sendWhatsAppAndLog(args: {
   message: string;
   phone?: string;
@@ -198,20 +199,14 @@ export async function sendWhatsAppMessage(args: {
 }) {
   const cleaned = await digits(args.phone);
   if (!cleaned) throw new Error("رقم الهاتف غير صالح");
-  const { data, error } = await supabase.functions.invoke("whatsapp-meta-send", {
-    body: {
-      to: cleaned,
-      type: "text",
-      text: args.message,
-      jobOrderId: args.workOrderId,
-      customerId: args.customerId,
-      vehicleId: args.vehicleId,
-      insuranceClaimId: args.insuranceClaimId,
-      messageKind: args.kind || "custom",
-      recipientName: args.recipientName || "",
-      recipientType: args.recipientType || "other",
-    },
+  return sendUnifiedMessage({
+    channel: "whatsapp",
+    recipientPhone: cleaned,
+    body: args.message,
+    workOrderId: args.workOrderId,
+    customerId: args.customerId,
+    vehicleId: args.vehicleId,
+    claimId: args.insuranceClaimId,
+    templateType: args.kind || "custom",
   });
-  if (error || !data?.ok) throw new Error(getFunctionErrorMessage(error, data));
-  return data;
 }

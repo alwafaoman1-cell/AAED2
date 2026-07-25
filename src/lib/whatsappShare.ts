@@ -1,10 +1,10 @@
 // Unified helper: upload a PDF blob to Storage, then send/share via WhatsApp.
-// All sending is performed by the whatsapp-meta-send Edge Function.
+// All sending is performed by the unified-message-send Edge Function.
 
 import { supabase } from "@/integrations/supabase/client";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
 import { normalizePhone } from "@/lib/phoneUtils";
-import { getFunctionErrorMessage } from "@/lib/functionErrors";
+import { sendUnifiedMessage } from "@/lib/messaging/messagingService";
 
 const BUCKET = "invoices-pdf";
 const SIGNED_TTL = 60 * 60 * 24 * 30; // 30 days
@@ -13,6 +13,7 @@ export interface UploadPdfResult {
   url: string;
   path: string;
   fileName: string;
+  size: number;
 }
 
 /** Upload an existing Blob to invoices-pdf bucket (tenant-scoped path) and get a signed URL. */
@@ -28,7 +29,7 @@ export async function uploadPdfBlob(blob: Blob, fileBaseName: string, subFolder 
     });
     if (error) { console.warn("upload pdf failed", error); return null; }
     const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_TTL);
-    return { url: signed?.signedUrl || "", path, fileName: `${safeName}.pdf` };
+    return { url: signed?.signedUrl || "", path, fileName: `${safeName}.pdf`, size: blob.size };
   } catch (e) {
     console.warn("uploadPdfBlob exception", e);
     return null;
@@ -66,20 +67,28 @@ export async function sendPdfViaMetaCloud(args: {
   pdfUrl: string;        // public/signed URL
   fileName: string;
   caption?: string;
+  storagePath?: string;
+  fileSize?: number;
 }): Promise<{ ok: boolean; error?: string }> {
   const to = normalizePhone(args.to);
   if (!to) return { ok: false, error: "invalid_phone" };
   try {
-    const { data, error } = await supabase.functions.invoke("whatsapp-meta-send", {
-      body: {
-        to,
+    await sendUnifiedMessage({
+      channel: "whatsapp",
+      recipientPhone: to,
+      body: args.caption || args.fileName,
+      messageType: "document",
+      templateType: "document_share",
+      attachments: [{
         type: "document",
-        mediaUrl: args.pdfUrl,
-        filename: args.fileName,
+        url: args.pdfUrl,
+        fileName: args.fileName,
         caption: args.caption,
-      },
+        mimeType: "application/pdf",
+        fileSize: args.fileSize,
+        storagePath: args.storagePath,
+      }],
     });
-    if (error || !data?.ok) return { ok: false, error: getFunctionErrorMessage(error, data) };
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: e?.message || "network_error" };
@@ -111,7 +120,12 @@ export async function shareBlobViaWhatsApp(args: {
 
   if (!args.phone) return { ok: false, channel: "none", error: "phone_required" };
   const r = await sendPdfViaMetaCloud({
-    to: args.phone, pdfUrl: uploaded.url, fileName: uploaded.fileName, caption: args.caption,
+    to: args.phone,
+    pdfUrl: uploaded.url,
+    fileName: uploaded.fileName,
+    caption: args.caption,
+    storagePath: uploaded.path,
+    fileSize: uploaded.size,
   });
   if (r.ok) return { ok: true, channel: "meta", url: uploaded.url };
   return { ok: false, channel: "none", url: uploaded.url, error: r.error };

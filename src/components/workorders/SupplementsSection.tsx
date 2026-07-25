@@ -125,8 +125,13 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
       // إرسال صامت عبر WhatsApp Meta API الموجودة (إن مُعد)
       const message = `مرحباً ${customerName || ""}،\nيوجد بنود أعمال إضافية على مركبتك بانتظار موافقتك. الرجاء فتح الرابط لمراجعتها والموافقة:\n${link}\n(صالح 24 ساعة)`;
       try {
-        await supabase.functions.invoke("whatsapp-meta-send", {
-          body: { to: normalizePhone(customerPhone || ""), message },
+        await sendWhatsAppMessage({
+          message,
+          phone: customerPhone || "",
+          workOrderId: jobOrderId,
+          kind: "custom",
+          recipientName: customerName || "",
+          recipientType: "customer",
         });
         toast.success("تم إرسال الرابط عبر واتساب");
       } catch {

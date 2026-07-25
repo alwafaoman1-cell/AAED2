@@ -89,7 +89,8 @@ describe("phase 4 UI and realtime safety contracts", () => {
     expect(whatsappCenter).toContain("ALL_TEMPLATES");
     expect(whatsappCenter).toContain("normalizedRecipientPhone");
     expect(whatsappCenter).toContain("معاينة قبل الإرسال");
-    expect(partsWhatsApp).toContain('supabase.functions.invoke("whatsapp-meta-send"');
+    expect(partsWhatsApp).toContain("sendUnifiedMessage");
+    expect(partsWhatsApp).not.toContain('supabase.functions.invoke("whatsapp-meta-send"');
   });
 
   it("adds RLS-protected import/export operation logging and realtime publication", () => {

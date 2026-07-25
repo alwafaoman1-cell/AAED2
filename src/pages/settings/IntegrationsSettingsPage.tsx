@@ -124,7 +124,7 @@ export default function IntegrationsSettingsPage() {
     try {
       const { data: rows, error } = await supabase
         .from("tenant_integrations")
-        .select("provider, enabled, config, secrets, last_test_at, last_test_status, last_test_error")
+        .select("provider, enabled, config, last_test_at, last_test_status, last_test_error")
         .in("provider", ["twilio_whatsapp", "meta_whatsapp", "gmail"]);
       if (error) throw error;
 
@@ -135,13 +135,12 @@ export default function IntegrationsSettingsPage() {
       };
       (rows || []).forEach((row: any) => {
         if (!["twilio_whatsapp", "meta_whatsapp", "gmail"].includes(row.provider)) return;
-        const secrets = (row.secrets || {}) as Record<string, string>;
         next[row.provider as Provider] = {
           provider: row.provider,
           enabled: !!row.enabled,
           config: row.config || {},
           secrets: {},
-          hasSecrets: Object.fromEntries(Object.keys(secrets).map((key) => [key, !!secrets[key]])),
+          hasSecrets: {},
           last_test_at: row.last_test_at,
           last_test_status: row.last_test_status,
           last_test_error: row.last_test_error,
@@ -238,25 +237,25 @@ export default function IntegrationsSettingsPage() {
         .single();
       if (profileError) throw profileError;
 
-      const { data: current } = await supabase
-        .from("tenant_integrations")
-        .select("secrets")
-        .eq("provider", provider)
-        .maybeSingle();
-      const mergedSecrets = { ...((current?.secrets || {}) as Record<string, string>) };
-      Object.entries(data[provider].secrets).forEach(([key, value]) => {
-        if (value && value.trim()) mergedSecrets[key] = value.trim();
-      });
+      const forbiddenMetaSecretKeys = ["access_token", "app_secret", "verify_token"];
+      const config = { ...data[provider].config };
+      forbiddenMetaSecretKeys.forEach((key) => { delete config[key]; });
+      const secrets = provider === "meta_whatsapp" ? {} : Object.fromEntries(
+        Object.entries(data[provider].secrets).filter(([, value]) => value && value.trim()).map(([key, value]) => [key, value.trim()]),
+      );
+
+      const payload: any = {
+        tenant_id: profileRow!.tenant_id,
+        provider,
+        enabled: data[provider].enabled,
+        config,
+      };
+      if (provider === "meta_whatsapp") payload.secrets = {};
+      else if (Object.keys(secrets).length > 0) payload.secrets = secrets;
 
       const { error } = await supabase
         .from("tenant_integrations")
-        .upsert({
-          tenant_id: profileRow!.tenant_id,
-          provider,
-          enabled: data[provider].enabled,
-          config: data[provider].config,
-          secrets: mergedSecrets,
-        }, { onConflict: "tenant_id,provider" });
+        .upsert(payload, { onConflict: "tenant_id,provider" });
       if (error) throw error;
       toast.success("تم الحفظ");
       await load();
@@ -453,16 +452,18 @@ export default function IntegrationsSettingsPage() {
         saving={saving === "meta_whatsapp"}
         testing={testing === "meta_whatsapp"}
         helpUrl="https://developers.facebook.com/apps/"
-        helpText="Meta App + WhatsApp Product + Phone Number ID + Permanent Access Token."
+        helpText="Meta non-secret settings only. Access Token, App Secret, and Verify Token must be configured as Edge Function secrets."
         fields={[
           { key: "phone_number_id", label: "Phone Number ID", placeholder: "123456789012345", isSecret: false },
-          { key: "business_account_id", label: "WhatsApp Business Account ID (اختياري)", placeholder: "123456789012345", isSecret: false },
-          { key: "access_token", label: "Permanent Access Token", placeholder: "EAAG...", isSecret: true },
+          { key: "business_account_id", label: "WhatsApp Business Account ID", placeholder: "123456789012345", isSecret: false },
+          { key: "whatsapp_display_name", label: "WhatsApp Display Name", placeholder: "Al Wafa", isSecret: false },
+          { key: "whatsapp_number", label: "WhatsApp Number", placeholder: "+96899080203", isSecret: false },
+          { key: "webhook_url", label: "Webhook URL", placeholder: "https://.../functions/v1/whatsapp-webhook", isSecret: false },
         ]}
         onChange={(key, value, isSecret) => {
           const row = data.meta_whatsapp;
-          if (isSecret) update("meta_whatsapp", { secrets: { ...row.secrets, [key]: value } });
-          else update("meta_whatsapp", { config: { ...row.config, [key]: value } });
+          if (isSecret) return;
+          update("meta_whatsapp", { config: { ...row.config, [key]: value } });
         }}
       />
 

@@ -13,6 +13,8 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Textarea } from "@/components/ui/textarea";
 
+const PAGE_SIZE = 50;
+
 interface Row {
   id: string;
   job_order_id: string | null;
@@ -53,6 +55,19 @@ interface PortalNote {
   submitted_at: string;
 }
 
+interface WhatsAppConversation {
+  id: string;
+  phone: string;
+  customer_id: string | null;
+  customer_name_snapshot: string | null;
+  work_order_id: string | null;
+  claim_id: string | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  unread_count: number;
+  status: string;
+}
+
 const EVENT_LABELS: Record<string, string> = {
   received: "تم الاستلام",
   inspection_started: "بدأ الفحص",
@@ -76,12 +91,14 @@ const STATUS_COLORS: Record<string, string> = {
 export default function MessagesCenter() {
   const [rows, setRows] = useState<Row[]>([]);
   const [logs, setLogs] = useState<UnifiedLogRow[]>([]);
+  const [conversations, setConversations] = useState<WhatsAppConversation[]>([]);
   const [notes, setNotes] = useState<PortalNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState("all");
   const [channelF, setChannelF] = useState("all");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [tenantId, setTenantId] = useState<string | null>(null);
   const nav = useNavigate();
   const [params] = useSearchParams();
   const composeType = params.get("compose");
@@ -106,19 +123,27 @@ export default function MessagesCenter() {
 
   async function load() {
     setLoading(true);
-    const [{ data: msgs }, { data: ns }, { data: messageLogs }] = await Promise.all([
-      supabase.from("customer_notifications").select("*").order("created_at", { ascending: false }).limit(500),
-      supabase.from("customer_portal_notes").select("id, job_order_id, note, customer_name, status, submitted_at").order("submitted_at", { ascending: false }).limit(500),
-      supabase.from("message_logs" as any).select("*").order("created_at", { ascending: false }).limit(500),
+    const { data: currentTenant } = await supabase.rpc("get_user_tenant_id");
+    setTenantId((currentTenant as string) || null);
+    const [{ data: msgs }, { data: ns }, { data: messageLogs }, { data: convs }] = await Promise.all([
+      supabase.from("customer_notifications").select("*").order("created_at", { ascending: false }).range(0, PAGE_SIZE - 1),
+      supabase.from("customer_portal_notes").select("id, job_order_id, note, customer_name, status, submitted_at").order("submitted_at", { ascending: false }).range(0, PAGE_SIZE - 1),
+      supabase.from("message_logs" as any).select("id, channel, status, template_type, recipient_phone, recipient_email, body, message, error, created_at, sent_at, work_order_id, claim_id, invoice_id, tenant_id").eq("tenant_id", currentTenant).order("created_at", { ascending: false }).range(0, PAGE_SIZE - 1),
+      supabase.from("whatsapp_conversations" as any).select("id, phone, customer_id, customer_name_snapshot, work_order_id, claim_id, last_message_at, last_message_preview, unread_count, status, tenant_id").eq("tenant_id", currentTenant).order("last_message_at", { ascending: false }).range(0, PAGE_SIZE - 1),
     ]);
     setRows((msgs || []) as Row[]);
     setNotes((ns || []) as PortalNote[]);
     setLogs((messageLogs || []) as unknown as UnifiedLogRow[]);
+    setConversations((convs || []) as unknown as WhatsAppConversation[]);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
+  }, []);
+
+  useEffect(() => {
+    if (!tenantId) return undefined;
     let reloadTimer: number | null = null;
     const scheduleLoad = () => {
       if (reloadTimer) window.clearTimeout(reloadTimer);
@@ -127,17 +152,32 @@ export default function MessagesCenter() {
         load();
       }, 500);
     };
+    const upsertLog = (row: any) => {
+      if (!row?.id || row.tenant_id !== tenantId) return;
+      setLogs((current) => [row as UnifiedLogRow, ...current.filter((item) => item.id !== row.id)].slice(0, PAGE_SIZE));
+    };
+    const upsertConversation = (row: any) => {
+      if (!row?.id || row.tenant_id !== tenantId) return;
+      setConversations((current) => [row as WhatsAppConversation, ...current.filter((item) => item.id !== row.id)].slice(0, PAGE_SIZE));
+    };
     const ch = supabase
       .channel("messages_center_changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "customer_notifications" }, scheduleLoad)
-      .on("postgres_changes", { event: "*", schema: "public", table: "message_logs" }, scheduleLoad)
+      .on("postgres_changes", { event: "*", schema: "public", table: "message_logs", filter: `tenant_id=eq.${tenantId}` }, (payload) => {
+        if (payload.eventType === "DELETE") setLogs((current) => current.filter((item) => item.id !== (payload.old as any)?.id));
+        else upsertLog(payload.new);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "whatsapp_conversations", filter: `tenant_id=eq.${tenantId}` }, (payload) => {
+        if (payload.eventType === "DELETE") setConversations((current) => current.filter((item) => item.id !== (payload.old as any)?.id));
+        else upsertConversation(payload.new);
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "customer_portal_notes" }, scheduleLoad)
       .subscribe();
     return () => {
       if (reloadTimer) window.clearTimeout(reloadTimer);
       supabase.removeChannel(ch);
     };
-  }, []);
+  }, [tenantId]);
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -158,6 +198,13 @@ export default function MessagesCenter() {
   }, [notes, q]);
 
   const pendingNotesCount = notes.filter((n) => n.status === "pending").length;
+  const filteredConversations = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return conversations;
+    return conversations.filter((c) =>
+      `${c.phone} ${c.customer_name_snapshot || ""} ${c.last_message_preview || ""} ${c.work_order_id || ""}`.toLowerCase().includes(needle),
+    );
+  }, [conversations, q]);
 
   function buildTemplateText(template: string) {
     const link = composer.shortLink ? `\n${composer.shortLink}` : "";
@@ -360,6 +407,10 @@ export default function MessagesCenter() {
 
       <Tabs defaultValue="messages" className="w-full">
         <TabsList className="mb-3">
+          <TabsTrigger value="inbox" className="gap-2">
+            <Inbox size={14} /> WhatsApp Inbox
+            <Badge variant="outline" className="ms-1">{conversations.length}</Badge>
+          </TabsTrigger>
           <TabsTrigger value="messages" className="gap-2">
             <MessageCircle size={14} /> سجل الرسائل الموحد
             <Badge variant="outline" className="ms-1">{logs.length + rows.length}</Badge>
@@ -371,6 +422,37 @@ export default function MessagesCenter() {
             )}
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="inbox">
+          <Input placeholder="بحث في المحادثات..." value={q} onChange={(e) => setQ(e.target.value)} className="mb-3 sm:max-w-xs" />
+          {loading ? (
+            <div className="flex justify-center py-10"><Loader2 className="animate-spin text-muted-foreground" /></div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground text-sm">لا توجد محادثات WhatsApp</div>
+          ) : (
+            <div className="space-y-2">
+              {filteredConversations.map((c) => (
+                <div key={c.id} className="border border-border bg-card rounded-lg p-3">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <Badge className={c.unread_count > 0 ? "bg-success/20 text-success border-success/30" : ""}>
+                      {c.unread_count > 0 ? `${c.unread_count} unread` : c.status}
+                    </Badge>
+                    <span className="font-semibold">{c.customer_name_snapshot || c.phone}</span>
+                    <span className="text-xs text-muted-foreground" dir="ltr">{c.phone}</span>
+                    <span className="text-[10px] text-muted-foreground mr-auto">
+                      {c.last_message_at ? new Date(c.last_message_at).toLocaleString("en-GB") : "—"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{c.last_message_preview || "—"}</p>
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    {c.work_order_id && <Button size="sm" variant="outline" onClick={() => nav(`/work-orders/${c.work_order_id}`)}>أمر العمل</Button>}
+                    {c.claim_id && <Button size="sm" variant="outline" onClick={() => nav(`/insurance/${c.claim_id}`)}>المطالبة</Button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
 
         <TabsContent value="messages">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-4">

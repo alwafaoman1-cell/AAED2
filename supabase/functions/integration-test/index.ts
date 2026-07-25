@@ -54,8 +54,8 @@ Deno.serve(async (req) => {
       ok = r.ok;
       info = ok ? `Account: ${j.friendly_name}` : (j.message || "auth_failed");
     } else if (provider === "meta_whatsapp") {
-      const phoneId = cfg.phone_number_id;
-      const token = sec.access_token;
+      const phoneId = cfg.phone_number_id || Deno.env.get("META_WHATSAPP_PHONE_NUMBER_ID") || "";
+      const token = Deno.env.get("META_WHATSAPP_ACCESS_TOKEN") || Deno.env.get("WHATSAPP_META_ACCESS_TOKEN") || "";
       if (!phoneId || !token) throw new Error("missing_meta_credentials");
       const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}?fields=display_phone_number,verified_name`, {
         headers: { Authorization: `Bearer ${token}` },
