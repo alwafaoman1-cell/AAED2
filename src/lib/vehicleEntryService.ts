@@ -493,9 +493,29 @@ function entryPayload(form: VehicleEntryFormState, tenantId: string, entryNumber
   };
 }
 
+async function assertVehicleEntryCanBeIssued(entryId: string | null | undefined, tenantId: string) {
+  if (!entryId) {
+    throw new Error("Cannot issue a vehicle entry before saving it as a draft and capturing both required signatures.");
+  }
+  const { data: signatures, error: signaturesError } = await supabase
+    .from("vehicle_entry_signatures" as any)
+    .select("signature_role")
+    .eq("tenant_id", tenantId)
+    .eq("vehicle_entry_id", entryId);
+  if (signaturesError) throw signaturesError;
+  const roles = new Set(((signatures as any[]) || []).map((signature) => signature.signature_role));
+  if (!roles.has("delivered_by") || !roles.has("receiver")) {
+    throw new Error("Cannot issue the vehicle entry before saving both the delivered-by signature and the receiver signature.");
+  }
+}
+
 export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: string | null) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+
+  if (form.status === "Issued") {
+    await assertVehicleEntryCanBeIssued(form.id, tenantId);
+  }
 
   const customerId = await ensureCustomer(form, tenantId);
   let vehicleId = form.vehicle_id || null;
