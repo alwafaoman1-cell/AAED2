@@ -162,6 +162,7 @@ import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
 import KeyboardShortcuts from "@/components/KeyboardShortcuts";
 import SystemPreferencesBoot from "@/components/SystemPreferencesBoot";
+import UnsavedWorkGuard from "@/components/UnsavedWorkGuard";
 
 // كاش حيّ — يعيد الجلب فور الدخول للصفحة لمنع عرض بيانات قديمة بين التنقّلات.
 // المستخدم كان يضطر لـ Ctrl+Shift+R لأن staleTime كان 30s.
@@ -211,6 +212,7 @@ const App = () => (
           <FeatureProvider>
           <AutoTranslateBoot />
           <SystemPreferencesBoot />
+          <UnsavedWorkGuard />
           <KeyboardShortcuts />
           <Suspense fallback={<RouteFallback />}>
           <Routes>

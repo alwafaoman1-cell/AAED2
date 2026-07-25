@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, FileUp, Loader2, Plus, Save, Search, Trash2, Wand2 } from "lucide-react";
@@ -26,6 +26,7 @@ import {
   type EstimateType,
   type UnifiedEstimate,
 } from "@/lib/unifiedEstimates";
+import { useDraftPersistence } from "@/lib/drafts/useDraftPersistence";
 
 const emptyItem: EstimateItemInput = {
   category: "labor",
@@ -190,9 +191,16 @@ export default function EstimateForm() {
   const [aiFields, setAiFields] = useState<ExtractedField[]>([]);
   const [aiItems, setAiItems] = useState<EstimateItemInput[]>([]);
   const [aiVatSuggested, setAiVatSuggested] = useState(false);
+  const [formDirty, setFormDirty] = useState(false);
+  const formHydratedRef = useRef(false);
+  const draftScopeId = useMemo(
+    () => `estimate:${id || "new"}:${defaultType}:${searchParams.toString()}`,
+    [id, defaultType, searchParams],
+  );
 
   useEffect(() => {
     if (!existing) return;
+    formHydratedRef.current = false;
     setForm({ ...existing, vat_enabled: Boolean(existing.vat_enabled) });
     setItems((existing.items || []).map((item) => ({
       category: item.category,
@@ -203,7 +211,24 @@ export default function EstimateForm() {
       vat_rate: item.vat_rate,
       notes: item.notes,
     })));
+    setFormDirty(false);
+    const t = window.setTimeout(() => { formHydratedRef.current = true; }, 0);
+    return () => {
+      window.clearTimeout(t);
+      formHydratedRef.current = false;
+    };
   }, [existing]);
+
+  useEffect(() => {
+    if (isEdit) return;
+    formHydratedRef.current = false;
+    setFormDirty(false);
+    const t = window.setTimeout(() => { formHydratedRef.current = true; }, 0);
+    return () => {
+      window.clearTimeout(t);
+      formHydratedRef.current = false;
+    };
+  }, [isEdit, draftScopeId]);
 
   useEffect(() => {
     const term = searchTerm.trim();
@@ -362,11 +387,34 @@ export default function EstimateForm() {
       return createUnifiedEstimate({ estimate: estimatePayload, items });
     },
     onSuccess: (estimate: any) => {
+      draftGuard.clear();
+      setFormDirty(false);
       qc.invalidateQueries({ queryKey: queryKeys.estimates.all });
       toast.success("تم حفظ التقدير");
       navigate(`/estimates/${estimate.id}`);
     },
     onError: (error: any) => toast.error(error?.message || "فشل حفظ التقدير"),
+  });
+
+  useEffect(() => {
+    if (!formHydratedRef.current) return;
+    setFormDirty(true);
+  }, [form, items]);
+
+  const draftGuard = useDraftPersistence<{
+    form: Partial<UnifiedEstimate>;
+    items: EstimateItemInput[];
+  }>({
+    scopeId: draftScopeId,
+    data: { form, items },
+    dirty: formDirty,
+    enabled: true,
+    onRestore: (draft) => {
+      if (draft?.form) setForm((current) => ({ ...current, ...draft.form }));
+      if (Array.isArray(draft?.items) && draft.items.length) setItems(draft.items);
+      formHydratedRef.current = true;
+      setFormDirty(true);
+    },
   });
 
   function patchItem(index: number, patch: Partial<EstimateItemInput>) {

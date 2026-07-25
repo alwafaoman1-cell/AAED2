@@ -31,6 +31,7 @@ import { isUuid } from "@/lib/uuid";
 import { toE164 } from "@/lib/phoneUtils";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
+import { markClean, markDirty } from "@/lib/unsavedWork";
 
 // إنشاء/ربط المركبة يتم مركزياً داخل useCreateClaim
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ أنواع داخلية â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -120,6 +121,7 @@ export default function NewInsuranceClaim() {
   const skipNextDraftSaveRef = useRef(false);
   const savedDraftAtRef = useRef<number | null>(null);
   const cloudDraftKey = useMemo(() => `${DRAFT_KEY}:${user?.id || "anonymous"}`, [user?.id]);
+  const dirtyScopeId = useMemo(() => `insurance-claim:new:${user?.id || "anonymous"}`, [user?.id]);
   const [existingCustomerByPhone, setExistingCustomerByPhone] = useState<{ id: string; name: string; phone: string | null } | null>(null);
 
   // â”€â”€ استرجاع المسودة â”€â”€
@@ -189,11 +191,20 @@ export default function NewInsuranceClaim() {
     return () => clearTimeout(t);
   }, [cloudDraftKey, draft]);
 
+  useEffect(() => {
+    if (!draftHydratedRef.current) return;
+    const hasMeaningfulDraft = JSON.stringify(draft) !== JSON.stringify(emptyDraft());
+    if (hasMeaningfulDraft) markDirty(dirtyScopeId);
+    else markClean(dirtyScopeId);
+    return () => markClean(dirtyScopeId);
+  }, [dirtyScopeId, draft]);
+
   const clearStoredDraft = () => {
     skipNextDraftSaveRef.current = true;
     savedDraftAtRef.current = null;
     setSavedDraftAt(null);
     void writeCloudSetting(cloudDraftKey, null).catch(() => {});
+    markClean(dirtyScopeId);
   };
 
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));

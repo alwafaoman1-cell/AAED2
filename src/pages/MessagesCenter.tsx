@@ -119,13 +119,24 @@ export default function MessagesCenter() {
 
   useEffect(() => {
     load();
+    let reloadTimer: number | null = null;
+    const scheduleLoad = () => {
+      if (reloadTimer) window.clearTimeout(reloadTimer);
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = null;
+        load();
+      }, 500);
+    };
     const ch = supabase
       .channel("messages_center_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "customer_notifications" }, () => load())
-      .on("postgres_changes", { event: "*", schema: "public", table: "message_logs" }, () => load())
-      .on("postgres_changes", { event: "*", schema: "public", table: "customer_portal_notes" }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "customer_notifications" }, scheduleLoad)
+      .on("postgres_changes", { event: "*", schema: "public", table: "message_logs" }, scheduleLoad)
+      .on("postgres_changes", { event: "*", schema: "public", table: "customer_portal_notes" }, scheduleLoad)
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      if (reloadTimer) window.clearTimeout(reloadTimer);
+      supabase.removeChannel(ch);
+    };
   }, []);
 
   const filtered = useMemo(() => {

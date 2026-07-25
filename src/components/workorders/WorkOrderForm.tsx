@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Plus, Trash2, Link as LinkIcon, Wallet, Package, Car, Shield } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,6 +25,7 @@ import { isUuid } from "@/lib/uuid";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
+import { useDraftPersistence } from "@/lib/drafts/useDraftPersistence";
 
 function normalizeWorkOrderNumberInput(value: string) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -140,6 +141,12 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   const [useExistingVehicle, setUseExistingVehicle] = useState(false);
   const [wizardStep, setWizardStep] = useState<0 | 1 | 2>(0);
   const [bulkNeededPartsText, setBulkNeededPartsText] = useState("");
+  const [formDirty, setFormDirty] = useState(false);
+  const formHydratedRef = useRef(false);
+  const draftScopeId = useMemo(
+    () => `work-order:${initial?.cloudId || initial?.id || "new"}:${initialFormKey}`,
+    [initial?.cloudId, initial?.id, initialFormKey],
+  );
   const role = getCurrentRole();
   const canChooseInsurance = role === "admin" || role === "manager" || role === "supervisor";
   const isWizard = !isEdit;
@@ -159,6 +166,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
   };
 
   useEffect(() => {
+    formHydratedRef.current = false;
     setForm({
       ...empty,
       ...vehiclePrefillFields(prefillVehicle),
@@ -170,10 +178,38 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       extraExpenses: initial?.extraExpenses || [],
       partsNeeded: initial?.partsNeeded || [],
     });
+    setBulkNeededPartsText("");
+    setFormDirty(false);
+    const t = window.setTimeout(() => { formHydratedRef.current = true; }, 0);
+    return () => {
+      window.clearTimeout(t);
+      formHydratedRef.current = false;
+    };
     // Reset only when the loaded order/prefill identity changes. Including the full
     // initial object here can wipe user-entered fields during realtime/refetch updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFormKey]);
+
+  useEffect(() => {
+    if (!formHydratedRef.current || saving) return;
+    setFormDirty(true);
+  }, [form, receptionFiles.length, bulkNeededPartsText, saving]);
+
+  const draftGuard = useDraftPersistence<{
+    form: WorkOrder;
+    bulkNeededPartsText: string;
+  }>({
+    scopeId: draftScopeId,
+    data: { form, bulkNeededPartsText },
+    dirty: formDirty,
+    enabled: true,
+    onRestore: (draft) => {
+      if (draft?.form) setForm((prev) => ({ ...prev, ...draft.form }));
+      if (typeof draft?.bulkNeededPartsText === "string") setBulkNeededPartsText(draft.bulkNeededPartsText);
+      formHydratedRef.current = true;
+      setFormDirty(true);
+    },
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -559,6 +595,8 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     };
     try {
       const saved = await saveWorkOrderToCloud({ ...payload, id: targetOrderNumber });
+      draftGuard.clear();
+      setFormDirty(false);
       toast.success(isEdit ? `تم تحديث ${saved.id}` : `تم إنشاء ${saved.id}`);
       onClose();
     } catch (error: any) {

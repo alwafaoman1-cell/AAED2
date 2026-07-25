@@ -95,8 +95,8 @@ export default function UpdateNotice() {
 
   if (!latest) return null;
 
-  async function handleUpdate(force = false) {
-    if (!force && dirty) {
+  async function handleUpdate(_force = false) {
+    if (dirty) {
       toast.error("لديك عمل غير محفوظ. يرجى حفظ بياناتك أولاً ثم تطبيق التحديث.");
       return;
     }
@@ -119,7 +119,7 @@ export default function UpdateNotice() {
   }
 
   function handleApply() {
-    if (dirty && !latest?.mandatory) {
+    if (dirty) {
       toast.error("لديك عمل غير محفوظ. يرجى حفظ بياناتك أولاً ثم تطبيق التحديث.");
       return;
     }

@@ -1516,6 +1516,7 @@ function pushPatchToCloud(orderNumber: string, patch: Partial<WorkOrder>) {
   const existing = _patchTimers.get(orderNumber);
   if (existing) clearTimeout(existing);
   _patchTimers.set(orderNumber, setTimeout(() => _flushPatch(orderNumber), PATCH_DEBOUNCE_MS));
+  ensurePendingPatchUnloadFlush();
 }
 
 function pushPatchToCloudNow(orderNumber: string, patch: Partial<WorkOrder>) {
@@ -1530,15 +1531,20 @@ function pushPatchToCloudNow(orderNumber: string, patch: Partial<WorkOrder>) {
   void _flushPatch(orderNumber);
 }
 
-// Flush any pending patches on page unload so we don't lose the last edits.
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", () => {
-    for (const orderNumber of Array.from(_pendingPatches.keys())) {
-      const t = _patchTimers.get(orderNumber);
-      if (t) clearTimeout(t);
-      _flushPatch(orderNumber);
-    }
-  });
+let pendingPatchUnloadFlushInstalled = false;
+
+function flushPendingWorkOrderPatches() {
+  for (const orderNumber of Array.from(_pendingPatches.keys())) {
+    const t = _patchTimers.get(orderNumber);
+    if (t) clearTimeout(t);
+    _flushPatch(orderNumber);
+  }
+}
+
+function ensurePendingPatchUnloadFlush() {
+  if (pendingPatchUnloadFlushInstalled || typeof window === "undefined") return;
+  pendingPatchUnloadFlushInstalled = true;
+  window.addEventListener("beforeunload", flushPendingWorkOrderPatches, { once: true });
 }
 
 async function pushDeleteToCloud(orderNumber: string) {
