@@ -46,6 +46,8 @@ describe("vehicle entry receipt contract", () => {
     expect(service).toContain("createWorkOrderFromVehicleEntry");
     expect(service).toContain("softDeleteVehicleEntryMedia");
     expect(service).toContain("buildVehicleEntryHtml");
+    expect(service).toContain("insurance_claims!vehicle_entries_insurance_claim_id_fkey");
+    expect(service).toContain("job_orders!vehicle_entries_work_order_id_fkey");
     expect(service).not.toContain("localStorage");
   });
 

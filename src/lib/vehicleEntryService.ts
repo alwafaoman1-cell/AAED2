@@ -310,7 +310,7 @@ export async function listVehicleEntries(filters: VehicleEntryListFilters = {}) 
   if (!tenantId) return [];
   let query = supabase
     .from("vehicle_entries" as any)
-    .select("*,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,plate_letters,plate_country,vin_number,color),insurance_company:insurance_companies(id,name),claim:insurance_claims(id,claim_number),work_order:job_orders(id,order_number)")
+    .select("*,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,plate_letters,plate_country,vin_number,color),insurance_company:insurance_companies(id,name),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number)")
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
@@ -347,7 +347,7 @@ export async function getVehicleEntry(id: string) {
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   const { data, error } = await supabase
     .from("vehicle_entries" as any)
-    .select("*,customer:customers(*),vehicle:vehicles(*),insurance_company:insurance_companies(*),claim:insurance_claims(id,claim_number),work_order:job_orders(id,order_number)")
+    .select("*,customer:customers(*),vehicle:vehicles(*),insurance_company:insurance_companies(*),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number)")
     .eq("tenant_id", tenantId)
     .eq("id", id)
     .is("deleted_at", null)
