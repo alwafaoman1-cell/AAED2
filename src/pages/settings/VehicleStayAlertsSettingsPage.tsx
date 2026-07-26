@@ -13,18 +13,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { queryKeys } from "@/lib/queryKeys";
 
 const DEFAULT_TEMPLATE_AR = `عزيزي العميل،
-نود إفادتكم بأن مركبتكم موجودة لدى الورشة منذ {days} يومًا. يرجى التواصل معنا لمراجعة حالة المركبة والإجراءات المطلوبة، أو لتنسيق الاستلام عند جاهزيتها.
+نود إفادتكم بأن مركبتكم موجودة لدى الورشة منذ {days} يومًا، وقد يتأخر تسليم المركبة عدة أيام إضافية.
 رقم أمر العمل: {work_order_number}
 
-يمكنكم مراجعة شركة التأمين بشأن استحقاق سيارة بديلة أو بدل إيجار، وفقًا لشروط وثيقة التأمين وموافقة شركة التأمين.
+يمكنكم التواصل معنا لترتيب استلام مركبة تجارية بديلة من الورشة خلال مدة التأخير، حسب توفر المركبات البديلة وتأكيد الإدارة.
 
 شركة الوفاء للأعمال المتكاملة.`;
 
 const DEFAULT_TEMPLATE_EN = `Dear customer,
-Your vehicle has been at the workshop for {days} days. Please contact us to review the vehicle status and required actions, or to coordinate collection if it is ready.
+Your vehicle has been at the workshop for {days} days, and delivery may be delayed by a few additional days.
 Work order: {work_order_number}
 
-You may contact your insurance company regarding replacement vehicle or rental benefit eligibility, subject to policy terms and insurance approval.
+You may contact us to arrange a temporary commercial replacement vehicle from the workshop during the delay period, subject to vehicle availability and management confirmation.
 
 Al Wafa Integrated Business Company LLC.`;
 

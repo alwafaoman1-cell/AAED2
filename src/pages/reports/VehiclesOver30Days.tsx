@@ -17,12 +17,12 @@ import {
 } from "@/lib/vehicleStayAlerts";
 import { queryKeys } from "@/lib/queryKeys";
 
-type AgeFilter = "25" | "30" | "45" | "60";
+type AgeFilter = "25" | "29" | "30" | "45" | "60";
 
 export default function VehiclesOver30Days() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [age, setAge] = useState<AgeFilter>("30");
+  const [age, setAge] = useState<AgeFilter>("29");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "sent" | "not_sent" | "excluded">("all");
 
@@ -102,6 +102,7 @@ export default function VehiclesOver30Days() {
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="25">أكثر من 25 يومًا</SelectItem>
+            <SelectItem value="29">29 يومًا أو أكثر</SelectItem>
             <SelectItem value="30">أكثر من 30 يومًا</SelectItem>
             <SelectItem value="45">أكثر من 45 يومًا</SelectItem>
             <SelectItem value="60">أكثر من 60 يومًا</SelectItem>

@@ -35,6 +35,7 @@ function alertLevel(days: number): VehicleStayAlertRow["alert_level"] {
   if (days >= 45) return "day_45";
   if (days >= 37) return "day_37";
   if (days >= 30) return "day_30";
+  if (days >= 29) return "day_30";
   return "day_25";
 }
 
@@ -42,6 +43,7 @@ function recommendedAction(days: number) {
   if (days >= 45) return "تصعيد للمدير ومراجعة سبب التأخير";
   if (days >= 37) return "متابعة ثانية مع العميل/التأمين";
   if (days >= 30) return "مراجعة داخلية وتجهيز مسودة رسالة للعميل";
+  if (days >= 29) return "مراجعة داخلية وتجهيز مسودة رسالة تأخير ومركبة بديلة للعميل";
   return "تنبيه داخلي مبكر للموظف المسؤول";
 }
 
@@ -121,11 +123,13 @@ export async function getVehiclesOverStayAlerts(minDays = 25): Promise<VehicleSt
 
 export function buildVehicleStayCustomerDraft(row: VehicleStayAlertRow) {
   return `عزيزي العميل،
-نود إفادتكم بأن مركبتكم موجودة لدى الورشة منذ ${row.days_in_workshop} يومًا. يرجى التواصل معنا لمراجعة حالة المركبة والإجراءات المطلوبة، أو لتنسيق الاستلام عند جاهزيتها.
+نود إفادتكم بأن مركبتكم موجودة لدى الورشة منذ ${row.days_in_workshop} يومًا، وقد يتأخر تسليم المركبة عدة أيام إضافية.
+
 رقم أمر العمل: ${row.work_order_number || "—"}
 رقم المطالبة: ${row.claim_number || "—"}
+المركبة: ${row.vehicle_label} — ${row.plate_number}
 
-يمكنكم مراجعة شركة التأمين بشأن استحقاق سيارة بديلة أو بدل إيجار، وفقًا لشروط وثيقة التأمين وموافقة شركة التأمين.
+يمكنكم التواصل معنا لترتيب استلام مركبة تجارية بديلة من الورشة خلال مدة التأخير، حسب توفر المركبات البديلة وتأكيد الإدارة.
 
 شركة الوفاء للأعمال المتكاملة.`;
 }
