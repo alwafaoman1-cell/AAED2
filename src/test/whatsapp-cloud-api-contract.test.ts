@@ -25,7 +25,8 @@ describe("WhatsApp Cloud API security contract", () => {
   });
 
   it("keeps whatsapp-meta-send internal and rejects browser/direct invocation", () => {
-    expect(unifiedSend).toContain('admin.functions.invoke("whatsapp-meta-send"');
+    expect(unifiedSend).toContain('/functions/v1/whatsapp-meta-send');
+    expect(unifiedSend).toContain("Authorization: `Bearer ${SERVICE_KEY}`");
     expect(unifiedSend).toContain('"x-aaed-internal-secret"');
     expect(unifiedSend).toContain("WHATSAPP_INTERNAL_SHARED_SECRET");
     expect(metaSend).toContain("WHATSAPP_INTERNAL_SHARED_SECRET");

@@ -69,6 +69,12 @@ function validateAttachment(body: Body) {
   if (body.fileSize && body.fileSize > maxBytes) throw new Error("attachment_too_large");
 }
 
+function assertSafeHeaderValue(name: string, value: string) {
+  if (!value || /[\r\n]/.test(value) || /\bselect\s+/i.test(value)) {
+    throw new Error(`${name}_invalid`);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return json({ ok: false, error: "forbidden" }, 403);
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
@@ -79,6 +85,8 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "forbidden" }, 403);
   }
 
+  let logRowIdForFailure: string | null = null;
+  let adminForFailure: any = null;
   try {
     const body = (await req.json()) as Body;
     const tenantId = body.tenantId;
@@ -92,6 +100,7 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+    adminForFailure = admin;
 
     const { data: featureRow, error: featureError } = await admin
       .from("tenant_features")
@@ -115,6 +124,8 @@ Deno.serve(async (req) => {
     const phoneId = cfg.phone_number_id || Deno.env.get("META_WHATSAPP_PHONE_NUMBER_ID") || "";
     const token = Deno.env.get("META_WHATSAPP_ACCESS_TOKEN") || Deno.env.get("WHATSAPP_META_ACCESS_TOKEN") || "";
     if (!phoneId || !token) throw new Error("missing_credentials");
+    assertSafeHeaderValue("meta_whatsapp_access_token", token);
+    assertSafeHeaderValue("meta_whatsapp_phone_number_id", phoneId);
 
     const type = body.type || "text";
     const messageBody = type === "text"
@@ -163,6 +174,7 @@ Deno.serve(async (req) => {
       })
       .select("id")
       .single();
+    logRowIdForFailure = logRow?.id || null;
     if (logError) {
       if (body.idempotencyKey) {
         const { data: existingLog } = await admin
@@ -255,6 +267,16 @@ Deno.serve(async (req) => {
     return json({ ok: true, id: providerMessageId, providerMessageId, logId: logRow.id });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "unknown_error";
+    if (adminForFailure && logRowIdForFailure) {
+      await adminForFailure.from("whatsapp_logs").update({
+        status: "failed",
+        error_message: msg,
+        failed_at: new Date().toISOString(),
+        failure_reason: msg,
+        provider_response: sanitizeProviderResponse({ error: { message: msg } }),
+        updated_at: new Date().toISOString(),
+      }).eq("id", logRowIdForFailure);
+    }
     return json({ ok: false, error: msg }, 200);
   }
 });

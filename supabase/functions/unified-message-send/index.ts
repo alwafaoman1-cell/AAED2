@@ -161,6 +161,8 @@ async function findExistingMessageLog(admin: any, tenantId: string, idempotencyK
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  let adminForFailure: any = null;
+  let messageLogIdForFailure: string | null = null;
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) return json({ ok: false, error: "Unauthorized" }, 401);
@@ -170,6 +172,7 @@ Deno.serve(async (req) => {
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const caller = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+    adminForFailure = admin;
     const { data: userData } = await caller.auth.getUser();
     if (!userData?.user) return json({ ok: false, error: "Unauthorized" }, 401);
     const { data: profile } = await admin.from("profiles").select("tenant_id, role").eq("user_id", userData.user.id).maybeSingle();
@@ -242,6 +245,7 @@ Deno.serve(async (req) => {
       throw insertError;
     }
     const logId = inserted.id;
+    messageLogIdForFailure = logId;
     await admin.from("message_idempotency_keys").update({ message_log_id: logId, status: "queued" }).eq("tenant_id", tenantId).eq("idempotency_key", idempotencyKey);
 
     if (body.dry_run) return json({ ok: true, status: "dry_run", logId, idempotencyKey });
@@ -273,9 +277,17 @@ Deno.serve(async (req) => {
       await admin.from("message_logs").update({ status: "failed", error: "internal_provider_secret_missing", failed_at: new Date().toISOString(), failure_reason: "internal_provider_secret_missing" }).eq("id", logId);
       return json({ ok: false, status: "failed", error: "internal_provider_secret_missing", message: "WhatsApp internal provider is not configured.", logId }, 200);
     }
-    const { data: wa, error: waError } = await admin.functions.invoke("whatsapp-meta-send", {
-      headers: { "x-aaed-internal-secret": internalSecret },
-      body: {
+    let wa: any = null;
+    let waErrorMessage: string | null = null;
+    try {
+      const providerResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-meta-send`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SERVICE_KEY}`,
+          "x-aaed-internal-secret": internalSecret,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
         tenantId,
         userId: userData.user.id,
         to: recipientPhone,
@@ -295,23 +307,39 @@ Deno.serve(async (req) => {
         messageKind: templateType,
         messageLogId: logId,
         idempotencyKey,
-      },
-    });
-    const ok = !waError && wa?.ok;
+        }),
+      });
+      wa = await providerResponse.json().catch(() => ({}));
+      if (!providerResponse.ok) waErrorMessage = wa?.error || ("whatsapp_provider_http_" + providerResponse.status);
+    } catch (error) {
+      waErrorMessage = String(error?.message || error || "whatsapp_provider_failed");
+      wa = { ok: false, error: waErrorMessage };
+    }
+    const ok = !waErrorMessage && wa?.ok;
     const providerMessageId = wa?.id || wa?.providerMessageId || null;
+    const failure = wa?.error || waErrorMessage || "integration_disabled";
     await admin.from("message_logs").update({
       status: ok ? "sent" : "failed",
       provider: "meta_whatsapp",
       provider_message_id: providerMessageId,
-      error: ok ? null : (wa?.error || waError?.message || "integration_disabled"),
+      error: ok ? null : failure,
       sent_at: ok ? new Date().toISOString() : null,
       failed_at: ok ? null : new Date().toISOString(),
-      failure_reason: ok ? null : (wa?.error || waError?.message || "integration_disabled"),
+      failure_reason: ok ? null : failure,
       provider_response: sanitizeProviderResponse(wa || {}),
     }).eq("id", logId);
-    return json({ ok: !!ok, status: ok ? "sent" : "failed", error: ok ? null : (wa?.error || waError?.message || "integration_disabled"), message: ok ? null : userError(wa?.error || waError?.message || "integration_disabled"), logId, providerMessageId });
+    return json({ ok: !!ok, status: ok ? "sent" : "failed", error: ok ? null : failure, message: ok ? null : userError(failure), logId, providerMessageId });
   } catch (error) {
     const msg = String(error?.message || error || "server_function_failed");
+    if (adminForFailure && messageLogIdForFailure) {
+      await adminForFailure.from("message_logs").update({
+        status: "failed",
+        error: msg,
+        failed_at: new Date().toISOString(),
+        failure_reason: msg,
+        provider_response: sanitizeProviderResponse({ ok: false, error: msg }),
+      }).eq("id", messageLogIdForFailure);
+    }
     return json({ ok: false, error: msg, message: userError(msg) }, 200);
   }
 });
