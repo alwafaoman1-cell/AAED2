@@ -84,4 +84,13 @@ describe("claim estimate PDF template", () => {
     expect(source).toContain('unit_price: "" as unknown as number');
     expect(source).toContain("onChange([...items, ...additions])");
   });
+
+  it("does not allow the deprecated editable print template path for claim estimates", () => {
+    const pdfGeneratorSource = readFileSync(new URL("../lib/pdfGenerator.ts", import.meta.url), "utf8");
+    const resolverSource = readFileSync(new URL("../lib/printTemplates/resolver.ts", import.meta.url), "utf8");
+
+    expect(pdfGeneratorSource).not.toContain('tryCustomTemplate("claim_estimate"');
+    expect(resolverSource).toContain("DISABLED_CUSTOM_DOC_TYPES");
+    expect(resolverSource).toContain('"claim_estimate"');
+  });
 });

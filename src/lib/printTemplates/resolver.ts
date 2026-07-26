@@ -17,6 +17,13 @@ interface CachedTemplate {
 }
 
 const TEMPLATES_KEY = ["print_templates"];
+const DISABLED_CUSTOM_DOC_TYPES: ReadonlySet<DocType> = new Set([
+  // Claim estimates use the dedicated insurance estimate layout in
+  // insurancePdfTemplates/pdfGenerator. The old editable print-template path
+  // can render the deprecated magenta template and must not be used for
+  // official claim estimate preview/print/download.
+  "claim_estimate",
+]);
 
 function readCache(): CachedTemplate[] {
   if (!_qc) return [];
@@ -24,6 +31,7 @@ function readCache(): CachedTemplate[] {
 }
 
 export function getActiveTemplate(docType: DocType): CachedTemplate | null {
+  if (DISABLED_CUSTOM_DOC_TYPES.has(docType)) return null;
   const all = readCache();
   return all.find((t) => t.doc_type === docType && t.is_default) || null;
 }
@@ -40,6 +48,7 @@ export function renderWithCustomTemplate(docType: DocType, data: any, title?: st
 
 /** Async fallback: fetch directly if cache is empty (rare) */
 export async function fetchActiveTemplate(docType: DocType): Promise<CachedTemplate | null> {
+  if (DISABLED_CUSTOM_DOC_TYPES.has(docType)) return null;
   const cached = getActiveTemplate(docType);
   if (cached) return cached;
   try {

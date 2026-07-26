@@ -1280,8 +1280,10 @@ export interface InsuranceEstimateData extends AdvancedDocData {
 }
 
 export function getInsuranceEstimateHtml(data: InsuranceEstimateData): string {
-  const custom = tryCustomTemplate("claim_estimate", { ...data, ...getTemplateSettings() }, `ClaimEstimate ${(data as any).claimNumber || ""}`);
-  if (custom) return custom;
+  // Claim estimates must not use the editable print-template system. The old
+  // default/custom "claim_estimate" template is the deprecated magenta layout
+  // and can appear inconsistently when a saved default exists in Supabase.
+  // Keep this generator on the stable dedicated estimate layout only.
   const s = getTemplateSettings();
   const customFieldsHtml = data.customFields.filter(f => f.value).map(f => `
     <div class="info-row"><span class="label">${f.label}</span><span class="value">${f.value}</span></div>
