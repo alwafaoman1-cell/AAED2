@@ -254,8 +254,13 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
     const normalized = number.trim().toLowerCase();
     if (!normalized) return undefined;
     return salesStore
-      .list({ type, includeDeleted: true })
-      .find((d) => d.id !== doc.id && String(d.number || "").trim().toLowerCase() === normalized);
+      .list({ type, includeDeleted: false })
+      .find((d) => (
+        d.id !== doc.id
+        && !d.isDeleted
+        && d.status !== "cancelled"
+        && String(d.number || "").trim().toLowerCase() === normalized
+      ));
   }
 
   function save() {
