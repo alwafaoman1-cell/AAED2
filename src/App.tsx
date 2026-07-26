@@ -152,6 +152,7 @@ const SupervisorApp = lazy(() => import("./pages/apps/SupervisorApp"));
 const InstallAppPage = lazy(() => import("./pages/InstallAppPage"));
 const AppsHub = lazy(() => import("./pages/AppsHub"));
 const SupplementApprovalPage = lazy(() => import("./pages/public/SupplementApprovalPage"));
+const PrivacyPolicyPage = lazy(() => import("./pages/public/PrivacyPolicyPage"));
 const VehicleBelongingsSettingsPage = lazy(() => import("./pages/settings/VehicleBelongingsSettingsPage"));
 const MessagesCenter = lazy(() => import("./pages/MessagesCenter"));
 const CustomerNotificationsSettingsPage = lazy(() => import("./pages/settings/CustomerNotificationsSettingsPage"));
@@ -226,6 +227,8 @@ const App = () => (
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/install" element={<InstallAppPage />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+            <Route path="/privacy" element={<Navigate to="/privacy-policy" replace />} />
             <Route path="/track/:id" element={<LegacyPortalRedirect param="id" />} />
             <Route path="/invoice/view/:token" element={<InvoicePublicView />} />
             <Route path="/p/:token" element={<CustomerPortal />} />
