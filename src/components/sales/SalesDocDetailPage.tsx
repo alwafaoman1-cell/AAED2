@@ -178,7 +178,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
   const currency = doc.currency === "OMR" ? "ر.ع" : doc.currency;
   const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
-  const isLockedIssuedDocument = isFinancialDocument && doc.status !== "draft";
+  const isLockedIssuedDocument = isFinancialDocument && type !== "invoice" && doc.status !== "draft";
   const blockIssuedEdit = () => toast.error(isAr
     ? "لا يمكن تعديل فاتورة صادرة. استخدم إلغاء أو إشعار دائن."
     : "Issued invoices cannot be edited. Use cancellation or a credit note.");

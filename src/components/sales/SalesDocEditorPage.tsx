@@ -99,7 +99,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
 
   useEffect(() => {
     const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
-    if (id && isFinancialDocument && doc.status !== "draft") {
+    if (id && isFinancialDocument && type !== "invoice" && doc.status !== "draft") {
       toast.error(isAr
         ? "لا يمكن تعديل فاتورة صادرة. استخدم إلغاء أو إشعار دائن."
         : "Issued invoices cannot be edited. Use cancellation or a credit note.");
@@ -250,7 +250,29 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
     setDoc((d) => ({ ...d, vehicle: { ...(d.vehicle || {}), ...patch } }));
   }
 
+  function findDuplicateNumber(number: string) {
+    const normalized = number.trim().toLowerCase();
+    if (!normalized) return undefined;
+    return salesStore
+      .list({ type, includeDeleted: true })
+      .find((d) => d.id !== doc.id && String(d.number || "").trim().toLowerCase() === normalized);
+  }
+
   function save() {
+    const trimmedNumber = doc.number.trim();
+    if (!trimmedNumber) {
+      toast.error(isAr ? "أدخل رقم الفاتورة" : "Invoice number is required");
+      return;
+    }
+    const duplicate = findDuplicateNumber(trimmedNumber);
+    if (duplicate) {
+      toast.error(
+        isAr
+          ? `رقم الفاتورة مستخدم مسبقًا: ${duplicate.number}`
+          : `Invoice number already exists: ${duplicate.number}`
+      );
+      return;
+    }
     if (!doc.customerName.trim()) {
       toast.error(isAr ? "اكتب اسم العميل" : "Customer name required");
       return;
@@ -265,7 +287,23 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       return;
     }
     customersStore.getOrCreateByName(doc.customerName);
-    const saved = salesStore.upsert({ ...doc, items: validItems });
+    const previousNumber = id ? salesStore.get(doc.id)?.number : undefined;
+    const numberChanged = !!previousNumber && previousNumber !== trimmedNumber;
+    const saved = salesStore.upsert({
+      ...doc,
+      number: trimmedNumber,
+      items: validItems,
+      activity: numberChanged
+        ? [
+            ...doc.activity,
+            {
+              id: cryptoRandom(),
+              at: new Date().toISOString(),
+              text: isAr ? `تعديل رقم الفاتورة إلى ${trimmedNumber}` : `Invoice number changed to ${trimmedNumber}`,
+            },
+          ]
+        : doc.activity,
+    });
     toast.success(isAr ? "تم الحفظ" : "Saved");
     navigate(detailRoute(saved.id));
   }
@@ -308,6 +346,15 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
 
       {/* ===== Customer & dates ===== */}
       <div className="rounded-lg border bg-card p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <Label>{isAr ? "رقم الفاتورة" : "Invoice number"} *</Label>
+          <Input
+            value={doc.number}
+            onChange={(e) => setDoc({ ...doc, number: e.target.value })}
+            placeholder={type === "invoice" ? "INV-2026-00001" : "00001"}
+            className="font-mono"
+          />
+        </div>
         <div>
           <Label>{isAr ? "العميل" : "Customer"} *</Label>
           <CustomerAutocomplete
