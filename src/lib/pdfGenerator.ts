@@ -216,6 +216,7 @@ export const STAMP_SIZE_PX: Record<StampSize, number> = { sm: 100, md: 150, lg: 
 // In-memory cache + listeners so async cloud loads can notify open screens.
 const CLOUD_KEY = "company_template_settings_v1";
 let templateCache: PdfTemplateSettings | null = null;
+let templateSettingsLoadedFromCloud = false;
 const templateListeners = new Set<() => void>();
 type TemplateAssetField = "logoUrl" | "stampUrl" | "signatureUrl";
 type TemplateIdentityField =
@@ -276,6 +277,17 @@ export async function saveTemplateSettings(
   options: SaveTemplateSettingsOptions = {},
 ): Promise<PdfTemplateSettings> {
   const existing = await readCloudSetting<Partial<PdfTemplateSettings> | null>(CLOUD_KEY, null).catch(() => null);
+  const incomingUsesDefaultIdentity =
+    settings.companyName === DEFAULT_SETTINGS.companyName &&
+    settings.companyNameEn === DEFAULT_SETTINGS.companyNameEn &&
+    settings.commercialReg === DEFAULT_SETTINGS.commercialReg &&
+    settings.vatNumber === DEFAULT_SETTINGS.vatNumber &&
+    settings.phone === DEFAULT_SETTINGS.phone &&
+    settings.email === DEFAULT_SETTINGS.email &&
+    settings.address === DEFAULT_SETTINGS.address;
+  if (!existing && !templateSettingsLoadedFromCloud && incomingUsesDefaultIdentity) {
+    throw new Error("company_settings_not_loaded_refusing_default_overwrite");
+  }
   const next = mergeTemplateSettingsForSave(settings, existing, options);
   templateCache = { ...next };
   templateListeners.forEach((cb) => { try { cb(); } catch (_error) { void _error; } });
@@ -294,6 +306,7 @@ export async function loadTemplateSettingsFromCloud(): Promise<void> {
     if (cloud && typeof cloud === "object") {
       const merged = { ...DEFAULT_SETTINGS, ...cloud } as PdfTemplateSettings;
       templateCache = merged;
+      templateSettingsLoadedFromCloud = true;
       templateListeners.forEach((cb) => { try { cb(); } catch (_error) { void _error; } });
     } else {
       return;
@@ -305,6 +318,7 @@ export async function loadTemplateSettingsFromCloud(): Promise<void> {
 if (typeof window !== "undefined") {
   subscribeCloudSetting<Partial<PdfTemplateSettings>>(CLOUD_KEY, (value) => {
     templateCache = { ...DEFAULT_SETTINGS, ...value } as PdfTemplateSettings;
+    templateSettingsLoadedFromCloud = true;
     templateListeners.forEach((cb) => { try { cb(); } catch (_error) { void _error; } });
   });
 }

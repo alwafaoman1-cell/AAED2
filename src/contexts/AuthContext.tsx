@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactN
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { setCachedTenantId } from "@/lib/cloud/createCloudStore";
+import { clearCloudSettingsCache } from "@/lib/cloudSettings";
 import { setCurrentRole as setPermissionsRole } from "@/lib/permissions";
 import {
   clearAllAuthProfileCache,
@@ -107,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       currentUserIdRef.current = nextUserId;
       if (previousUserId && previousUserId !== nextUserId) {
         clearCachedAuthProfile(previousUserId);
+        clearCloudSettingsCache();
         applyProfile(null);
         setCachedTenantId(null);
       }
@@ -137,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionGenerationRef.current += 1;
         currentUserIdRef.current = null;
         clearAllAuthProfileCache();
+        clearCloudSettingsCache();
         applyProfile(null);
         setLoading(false);
       }
@@ -181,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signIn(email: string, password: string) {
     sessionGenerationRef.current += 1;
     clearAllAuthProfileCache();
+    clearCloudSettingsCache();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
     return {};
@@ -190,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionGenerationRef.current += 1;
     await supabase.auth.signOut();
     clearAllAuthProfileCache();
+    clearCloudSettingsCache();
     setCachedTenantId(null);
     applyProfile(null);
   }

@@ -6,18 +6,37 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { getTemplateSettings, saveTemplateSettings, type PdfTemplateSettings } from "@/lib/pdfGenerator";
+import { getTemplateSettings, getTemplateSettingsAsync, saveTemplateSettings, subscribeTemplateSettings, type PdfTemplateSettings } from "@/lib/pdfGenerator";
 
 export default function TaxSettingsPage() {
   const [s, setS] = useState<PdfTemplateSettings>(getTemplateSettings());
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
-  useEffect(() => { setS(getTemplateSettings()); }, []);
+  useEffect(() => {
+    let active = true;
+    void getTemplateSettingsAsync().then((value) => {
+      if (!active) return;
+      setS(value);
+      setSettingsLoaded(true);
+    }).catch(() => {
+      if (active) setSettingsLoaded(true);
+    });
+    const unsubscribe = subscribeTemplateSettings(() => {
+      setS(getTemplateSettings());
+      setSettingsLoaded(true);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const update = <K extends keyof PdfTemplateSettings>(k: K, v: PdfTemplateSettings[K]) =>
     setS((p) => ({ ...p, [k]: v }));
 
   const save = async () => {
     try {
+      if (!settingsLoaded) throw new Error("company_settings_still_loading");
       await saveTemplateSettings(s);
     } catch (error: any) {
       toast.error(error?.message || "تعذر حفظ إعدادات الضريبة");

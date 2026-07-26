@@ -10,7 +10,9 @@ describe("phase 4 performance architecture contracts", () => {
     const source = read("src/lib/cloudSettings.ts");
 
     expect(source).toContain("loadAllCloudSettings");
-    expect(source).toContain('.select("key,value")');
+    expect(source).toContain('.select("tenant_id,key,value")');
+    expect(source).toContain("scopedKey");
+    expect(source).toContain("clearCloudSettingsCache");
     expect(source).toContain("pendingAllSettings");
     expect(source).toContain('channel("tenant_settings")');
   });

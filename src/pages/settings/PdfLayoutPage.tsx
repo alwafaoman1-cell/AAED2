@@ -23,7 +23,7 @@ import {
   type PdfVehicleDisplayMode,
 } from "@/lib/pdfLayoutSettings";
 import { buildPdfV2Html } from "@/lib/pdf-v2/pdfEngine";
-import { getTemplateSettings, saveTemplateSettings, subscribeTemplateSettings, type PdfTemplateSettings } from "@/lib/pdfGenerator";
+import { getTemplateSettings, getTemplateSettingsAsync, saveTemplateSettings, subscribeTemplateSettings, type PdfTemplateSettings } from "@/lib/pdfGenerator";
 
 type NumberKey = {
   [K in keyof PdfLayoutSettings]: PdfLayoutSettings[K] extends number ? K : never;
@@ -52,11 +52,29 @@ export default function PdfLayoutPage() {
   const navigate = useNavigate();
   const [s, setS] = useState<PdfLayoutSettings>({ ...DEFAULT_PDF_LAYOUT, ...pdfLayoutStore.get() });
   const [templateSettings, setTemplateSettings] = useState<PdfTemplateSettings>(getTemplateSettings());
+  const [templateSettingsLoaded, setTemplateSettingsLoaded] = useState(false);
   const stampInputRef = useRef<HTMLInputElement>(null);
   const signatureInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => pdfLayoutStore.subscribe(() => setS({ ...DEFAULT_PDF_LAYOUT, ...pdfLayoutStore.get() })), []);
-  useEffect(() => subscribeTemplateSettings(() => setTemplateSettings(getTemplateSettings())), []);
+  useEffect(() => {
+    let active = true;
+    void getTemplateSettingsAsync().then((value) => {
+      if (!active) return;
+      setTemplateSettings(value);
+      setTemplateSettingsLoaded(true);
+    }).catch(() => {
+      if (active) setTemplateSettingsLoaded(true);
+    });
+    const unsubscribe = subscribeTemplateSettings(() => {
+      setTemplateSettings(getTemplateSettings());
+      setTemplateSettingsLoaded(true);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const patch = (next: Partial<PdfLayoutSettings>) => setS((prev) => ({ ...prev, ...next }));
 
@@ -123,6 +141,7 @@ export default function PdfLayoutPage() {
       return;
     }
     try {
+      if (!templateSettingsLoaded) throw new Error("company_settings_still_loading");
       const { uploadCompanyStampToStorage } = await import("@/lib/pdfStampStorage");
       const stampUrl = await uploadCompanyStampToStorage(file);
       const next = { ...templateSettings, stampUrl, stampEnabled: true };
@@ -144,6 +163,7 @@ export default function PdfLayoutPage() {
       return;
     }
     try {
+      if (!templateSettingsLoaded) throw new Error("company_settings_still_loading");
       const { fileToWebpDataUrl } = await import("@/lib/imageToWebp");
       const signatureUrl = await fileToWebpDataUrl(file, { maxDimension: 800, quality: 0.9 });
       const next = { ...templateSettings, signatureUrl, stampEnabled: true };
@@ -162,6 +182,7 @@ export default function PdfLayoutPage() {
     const next = { ...templateSettings, stampUrl: undefined };
     setTemplateSettings(next);
     try {
+      if (!templateSettingsLoaded) throw new Error("company_settings_still_loading");
       await saveTemplateSettings(next, { clearAssetFields: ["stampUrl"] });
       const { removeCompanyStampFromStorage } = await import("@/lib/pdfStampStorage");
       await removeCompanyStampFromStorage(previousStampUrl);
@@ -177,6 +198,7 @@ export default function PdfLayoutPage() {
     const next = { ...templateSettings, signatureUrl: undefined };
     setTemplateSettings(next);
     try {
+      if (!templateSettingsLoaded) throw new Error("company_settings_still_loading");
       await saveTemplateSettings(next, { clearAssetFields: ["signatureUrl"] });
     } catch (error: any) {
       toast.error(error?.message || "تعذر حذف التوقيع");

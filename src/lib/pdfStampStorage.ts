@@ -42,15 +42,15 @@ function safeStampExtension(file: File): string {
   return "png";
 }
 
-export async function uploadCompanyStampToStorage(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) throw new Error("stamp_file_must_be_image");
-  if (file.size > MAX_STAMP_BYTES) throw new Error("stamp_file_too_large");
+async function uploadCompanyPdfAssetToStorage(file: File, assetName: "company-stamp" | "company-logo"): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error(`${assetName}_file_must_be_image`);
+  if (file.size > MAX_STAMP_BYTES) throw new Error(`${assetName}_file_too_large`);
 
   const { tenantId, userId } = await getCurrentTenantAndUser();
   const ext = safeStampExtension(file);
   // The existing avatars bucket RLS only allows writes under the current user's
   // first path segment. The tenant-level URL is still saved in tenant settings.
-  const path = `${userId}/pdf-assets/${tenantId}/company-stamp-${Date.now()}.${ext}`;
+  const path = `${userId}/pdf-assets/${tenantId}/${assetName}-${Date.now()}.${ext}`;
 
   const { error } = await supabase.storage
     .from(STAMP_BUCKET)
@@ -65,7 +65,15 @@ export async function uploadCompanyStampToStorage(file: File): Promise<string> {
   return data.publicUrl;
 }
 
-export async function removeCompanyStampFromStorage(publicUrl?: string): Promise<void> {
+export async function uploadCompanyStampToStorage(file: File): Promise<string> {
+  return uploadCompanyPdfAssetToStorage(file, "company-stamp");
+}
+
+export async function uploadCompanyLogoToStorage(file: File): Promise<string> {
+  return uploadCompanyPdfAssetToStorage(file, "company-logo");
+}
+
+export async function removeCompanyPdfAssetFromStorage(publicUrl?: string): Promise<void> {
   if (!publicUrl) return;
   const marker = `/object/public/${STAMP_BUCKET}/`;
   const idx = publicUrl.indexOf(marker);
@@ -73,4 +81,8 @@ export async function removeCompanyStampFromStorage(publicUrl?: string): Promise
   const path = decodeURIComponent(publicUrl.slice(idx + marker.length).split("?")[0] || "");
   if (!path) return;
   await supabase.storage.from(STAMP_BUCKET).remove([path]);
+}
+
+export async function removeCompanyStampFromStorage(publicUrl?: string): Promise<void> {
+  await removeCompanyPdfAssetFromStorage(publicUrl);
 }

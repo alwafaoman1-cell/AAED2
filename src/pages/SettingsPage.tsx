@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { DEFAULT_PDF_TEMPLATE_SETTINGS, getTemplateSettings, saveTemplateSettings, subscribeTemplateSettings, type PdfTemplateSettings, getInvoiceHtml } from "@/lib/pdfGenerator";
+import { DEFAULT_PDF_TEMPLATE_SETTINGS, getTemplateSettings, getTemplateSettingsAsync, saveTemplateSettings, subscribeTemplateSettings, type PdfTemplateSettings, getInvoiceHtml } from "@/lib/pdfGenerator";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { usersStore, ROLE_LABELS, ROLE_DESCRIPTIONS, type AppUser } from "@/lib/usersStore";
@@ -37,6 +37,7 @@ const emptyUser: AppUser = {
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<PdfTemplateSettings>(getTemplateSettings());
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -57,7 +58,24 @@ export default function SettingsPage() {
 
   useEffect(() => usersStore.subscribe(() => setUsers([...usersStore.getAll()])), []);
   // عند وصول نسخة من قاعدة البيانات (بعد تسجيل الدخول أو على جهاز جديد) حدّث النموذج
-  useEffect(() => subscribeTemplateSettings(() => setSettings(getTemplateSettings())), []);
+  useEffect(() => {
+    let active = true;
+    void getTemplateSettingsAsync().then((value) => {
+      if (!active) return;
+      setSettings(value);
+      setSettingsLoaded(true);
+    }).catch(() => {
+      if (active) setSettingsLoaded(true);
+    });
+    const unsubscribe = subscribeTemplateSettings(() => {
+      setSettings(getTemplateSettings());
+      setSettingsLoaded(true);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const update = (key: keyof PdfTemplateSettings, value: string | number | boolean) => {
     setSettings(prev => ({ ...prev, [key]: value }));
@@ -65,6 +83,7 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     try {
+      if (!settingsLoaded) throw new Error("company_settings_still_loading");
       const saved = await saveTemplateSettings(settings);
       setSettings(saved);
     } catch (error: any) {
@@ -82,6 +101,7 @@ export default function SettingsPage() {
       signatureUrl: settings.signatureUrl,
     };
     try {
+      if (!settingsLoaded) throw new Error("company_settings_still_loading");
       const saved = await saveTemplateSettings(next);
       setSettings(saved);
     } catch (error: any) {
@@ -102,10 +122,19 @@ export default function SettingsPage() {
       toast.error("حجم الصورة يجب أن يكون أقل من 5 ميجابايت");
       return;
     }
-    const { fileToWebpDataUrl } = await import("@/lib/imageToWebp");
-    const dataUrl = await fileToWebpDataUrl(file, { maxDimension: 800, quality: 0.9 });
-    setSettings(prev => ({ ...prev, logoUrl: dataUrl }));
-    toast.success("تم رفع الشعار — اضغط حفظ لتثبيته");
+    try {
+      if (!settingsLoaded) throw new Error("company_settings_still_loading");
+      const { uploadCompanyLogoToStorage } = await import("@/lib/pdfStampStorage");
+      const logoUrl = await uploadCompanyLogoToStorage(file);
+      const next = { ...settings, logoUrl };
+      setSettings(next);
+      await saveTemplateSettings(next);
+      toast.success("تم رفع الشعار وحفظه في Supabase");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر رفع شعار الشركة");
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
   };
 
   const handleRemoveStamp = async () => {
@@ -124,11 +153,15 @@ export default function SettingsPage() {
   };
 
   const handleRemoveLogo = async () => {
+    const previousLogoUrl = settings.logoUrl;
     const next = { ...settings, logoUrl: undefined };
     setSettings(next);
     if (fileRef.current) fileRef.current.value = "";
     try {
+      if (!settingsLoaded) throw new Error("company_settings_still_loading");
       await saveTemplateSettings(next, { clearAssetFields: ["logoUrl"] });
+      const { removeCompanyPdfAssetFromStorage } = await import("@/lib/pdfStampStorage");
+      await removeCompanyPdfAssetFromStorage(previousLogoUrl);
       toast.success("تم حذف الشعار من إعدادات PDF");
     } catch (error: any) {
       toast.error(error?.message || "تعذر حذف الشعار");
@@ -152,6 +185,7 @@ export default function SettingsPage() {
     }
     if (field === "stampUrl") {
       try {
+        if (!settingsLoaded) throw new Error("company_settings_still_loading");
         const { uploadCompanyStampToStorage } = await import("@/lib/pdfStampStorage");
         const stampUrl = await uploadCompanyStampToStorage(file);
         const next = { ...settings, stampUrl, stampEnabled: true };
