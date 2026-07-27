@@ -24,7 +24,6 @@ const TRANSLATABLE_ATTRIBUTES = ["placeholder", "title", "aria-label"] as const;
 const SKIP_SELECTOR = [
   "[data-no-auto-translate]",
   "[data-no-translate]",
-  '[translate="no"]',
   "[data-pdf-layout]",
   "[data-print-content]",
   ".pdf-v2-page",
@@ -47,7 +46,14 @@ function shouldSkip(node: Node): boolean {
   const element = node.nodeType === Node.ELEMENT_NODE
     ? node as Element
     : node.parentElement;
-  return Boolean(element?.closest(SKIP_SELECTOR));
+  if (!element) return false;
+  if (element.closest(SKIP_SELECTOR)) return true;
+
+  // The application deliberately marks <html translate="no"> to disable
+  // browser translation. That root marker must not disable our own controlled
+  // UI translator; component-level translate="no" markers still opt out.
+  const noTranslate = element.closest('[translate="no"]');
+  return Boolean(noTranslate && noTranslate !== document.documentElement);
 }
 
 function looksLikeBusinessData(value: string): boolean {

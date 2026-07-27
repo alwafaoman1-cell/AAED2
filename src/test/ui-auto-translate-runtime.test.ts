@@ -69,6 +69,14 @@ describe("UI auto translation runtime", () => {
     expect(document.querySelector("[data-pdf-layout]")?.textContent).toBe("تعديل");
   });
 
+  it("does not let the browser-translation guard on html disable app translation", () => {
+    document.documentElement.setAttribute("translate", "no");
+    document.body.innerHTML = `<button>حذف</button>`;
+    startAutoTranslate();
+
+    expect(document.querySelector("button")?.textContent).toBe("Delete");
+  });
+
   it("preserves input values and sensitive business identifiers", () => {
     document.body.innerHTML = `
       <input value="اسم عميل عربي" placeholder="بحث" />
