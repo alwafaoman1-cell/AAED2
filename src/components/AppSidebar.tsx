@@ -16,6 +16,7 @@ import { canAccessPath } from "@/lib/rbac";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { translateAr } from "@/i18n/autoDictionary";
 
 type SubItem = { path: string; labelKey: string; icon: any };
 type MenuItem = {
@@ -135,6 +136,8 @@ export default function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isRtl = i18n.dir() === "rtl";
+  const localizeUiLabel = (label: string) =>
+    i18n.resolvedLanguage?.startsWith("en") ? translateAr(label) : label;
   const { isEnabled } = useFeatures();
 
   const isPathEnabled = (path: string): boolean => {
@@ -225,7 +228,7 @@ export default function AppSidebar() {
             const hasChildren = !!visibleChildren?.length;
             const isOpen = !!openMenus[item.path];
             const childActive = visibleChildren?.some((c) => location.pathname === c.path);
-            const itemLabel = t(item.labelKey);
+            const itemLabel = localizeUiLabel(t(item.labelKey));
 
             return (
               <div key={item.path}>
@@ -286,7 +289,7 @@ export default function AppSidebar() {
                           `}
                         >
                           <child.icon size={14} className="flex-shrink-0" />
-                          <span>{t(child.labelKey)}</span>
+                          <span>{localizeUiLabel(t(child.labelKey))}</span>
                         </Link>
                       );
                     })}
