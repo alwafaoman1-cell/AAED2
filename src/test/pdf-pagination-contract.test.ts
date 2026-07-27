@@ -65,4 +65,24 @@ describe("PDF pagination contract", () => {
     expect(engine).toContain("const qrText = appendStandaloneQr ? extractQrText(input.html) : \"\"");
     expect(engine).not.toContain("const qrText = extractQrText(input.html);");
   });
+
+  it("keeps insurance workshop reports explicitly paginated with repeated continuation headers", () => {
+    const report = read("src/lib/insuranceWorkshopReport.ts");
+
+    expect(report).toContain('data-pdf-paginated="1"');
+    expect(report).toContain("continuation-header");
+    expect(report).toContain("تقرير عمليات الورشة — تابع");
+    expect(report).toContain("thead { display: table-header-group }");
+    expect(report).toContain("position:absolute; right:12mm; left:12mm; bottom:5mm");
+    expect(report).toContain("page-break-after: always");
+  });
+
+  it("uses claim and invoice vehicle fields when the joined vehicle is missing", () => {
+    const companyDetail = read("src/pages/insurance/InsuranceCompanyDetail.tsx");
+
+    expect(companyDetail).toContain("v?.brand || claimVehicle.vehicle_make || inv?.vehicle_make");
+    expect(companyDetail).toContain("v?.model || claimVehicle.vehicle_model || inv?.vehicle_model");
+    expect(companyDetail).toContain("v?.year || claimVehicle.vehicle_year || inv?.vehicle_year");
+    expect(companyDetail).toContain("formatPlateLatin(linkedPlate || inlinePlate ||");
+  });
 });

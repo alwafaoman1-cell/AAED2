@@ -18,7 +18,7 @@ import { getInsuranceStatementHtml } from "@/lib/insuranceStatementPdf";
 import { getInsuranceWorkshopReportHtml, type WorkshopReportRow, type WorkshopColumnKey, DEFAULT_WORKSHOP_COLUMNS, WORKSHOP_COLUMN_LABELS } from "@/lib/insuranceWorkshopReport";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { formatDateLatin } from "@/lib/numberUtils";
+import { formatDateLatin, formatPlateLatin } from "@/lib/numberUtils";
 import { computeAging, summarizeAging, DEFAULT_BUCKETS, type AgingBasis, type AgingBucket } from "@/lib/insuranceAging";
 import { journalStore } from "@/lib/journalStore";
 import JournalPreview, { entryToPreviewLine } from "@/components/accounting/JournalPreview";
@@ -310,6 +310,12 @@ export default function InsuranceCompanyDetail() {
         : "pending";
       const v: any = c.vehicle;
       const inv = claimInvoiceMap.get(c.id);
+      const claimVehicle: any = c;
+      const vehicleMake = v?.brand || claimVehicle.vehicle_make || inv?.vehicle_make || "";
+      const vehicleModel = v?.model || claimVehicle.vehicle_model || inv?.vehicle_model || "";
+      const vehicleYear = v?.year || claimVehicle.vehicle_year || inv?.vehicle_year || "";
+      const linkedPlate = [v?.plate_letters, v?.plate_number].filter(Boolean).join(" ").trim();
+      const inlinePlate = claimVehicle.vehicle_plate || inv?.vehicle_plate || "";
       return {
         reportedDate: reported,
         estimateDate: (c as any).estimate_date ?? null,
@@ -320,8 +326,8 @@ export default function InsuranceCompanyDetail() {
         invoiceDate: invoiceDateValue(inv),
         invoiceNumber: inv?.invoice_number ?? null,
         claimNumber: c.claim_number,
-        vehicleNo: v?.plate_number || "—",
-        vehicleMakeModel: v ? [v.brand, v.model, v.year].filter(Boolean).join(" ") : undefined,
+        vehicleNo: formatPlateLatin(linkedPlate || inlinePlate || "—"),
+        vehicleMakeModel: [vehicleMake, vehicleModel, vehicleYear].filter(Boolean).join(" ") || undefined,
         customerName: (c as any).customer?.name || (c as any).vehicle_owner_name || "—",
         status: delivered ? "تم التسليم" : (CLAIM_STATUS_AR[c.status] ?? c.status),
         inWorkshopDays: days,
