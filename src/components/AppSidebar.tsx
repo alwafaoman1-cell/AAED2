@@ -256,9 +256,9 @@ export default function AppSidebar() {
                         toggleMenu(item.path);
                       }}
                       className="p-2 mx-1 rounded-md hover:bg-sidebar-accent/60 active:bg-sidebar-accent transition-colors flex-shrink-0"
-                      title={isOpen ? "إغلاق" : "فتح"}
+                      title={isOpen ? t("common.close") : t("common.open")}
                       aria-expanded={isOpen}
-                      aria-label={`Toggle ${itemLabel}`}
+                      aria-label={`${isOpen ? t("common.close") : t("common.open")} ${itemLabel}`}
                     >
                       <ChevronDown
                         size={18}
