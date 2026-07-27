@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Loader2, LogIn, Wrench, Mail, RefreshCcw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { getFunctionErrorMessage } from "@/lib/functionErrors";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 function homeForRole(role?: string | null): string {
   if (role === "supervisor") return "/supervisor";
@@ -142,7 +143,10 @@ export default function AuthPage() {
 
   if (session && !loading && !profile) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4" dir="rtl">
+      <div className="relative min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="absolute top-4 end-4">
+          <LanguageSwitcher variant="outline" />
+        </div>
         <Card className="w-full max-w-lg border-border/60 shadow-xl">
           <CardHeader className="text-center space-y-3">
             <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center">
@@ -227,7 +231,10 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4" dir="rtl">
+    <div className="relative min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="absolute top-4 end-4">
+        <LanguageSwitcher variant="outline" />
+      </div>
       <Card className="w-full max-w-md border-border/60 shadow-xl">
         <CardHeader className="text-center space-y-3">
           <div className="mx-auto w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">

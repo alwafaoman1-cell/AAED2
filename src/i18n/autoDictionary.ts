@@ -2,8 +2,47 @@
  * Runtime Arabic → English dictionary for auto-translation of UI text.
  * Auto-generated via Lovable AI Gateway. Add manual overrides at the bottom.
  */
+import generatedUiTranslations from "./locales/auto-en.json";
+import arLocale from "./locales/ar.json";
+import enLocale from "./locales/en.json";
 
-export const AR_TO_EN: Record<string, string> = {
+function buildLocaleValueTranslations(
+  arNode: Record<string, unknown>,
+  enNode: Record<string, unknown>,
+  result: Record<string, string> = {},
+): Record<string, string> {
+  Object.entries(arNode).forEach(([key, arValue]) => {
+    const enValue = enNode[key];
+    if (
+      typeof arValue === "string"
+      && typeof enValue === "string"
+      && /[\u0600-\u06ff]/.test(arValue)
+    ) {
+      result[arValue.trim()] = enValue.trim();
+      return;
+    }
+    if (
+      arValue
+      && enValue
+      && typeof arValue === "object"
+      && typeof enValue === "object"
+    ) {
+      buildLocaleValueTranslations(
+        arValue as Record<string, unknown>,
+        enValue as Record<string, unknown>,
+        result,
+      );
+    }
+  });
+  return result;
+}
+
+const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
+  arLocale as Record<string, unknown>,
+  enLocale as Record<string, unknown>,
+);
+
+const CURATED_AR_TO_EN: Record<string, string> = {
   " p.name.trim()).length} قطعة": " p.name.trim()).length} Pcs",
   " إضافة": " Add",
   " إضافة بند": " Add Item",
@@ -16,13 +55,13 @@ export const AR_TO_EN: Record<string, string> = {
   " تتبع الحالة": " Status Tracking",
   " تخصيص قوالب PDF": " Customize PDF Templates",
   " تعديل سند صرف": " Edit Disbursement Voucher",
-  " حفظ التغييرات / Save Changes": " حفظ التغييرات / Save Changes",
+  " حفظ التغييرات / Save Changes": " Save Changes",
   " رفع صور": " Upload Images",
   " سند صرف جديد": " New Disbursement Voucher",
-  " طباعة الملصق / Print Label": " طباعة الملصق / Print Label",
+  " طباعة الملصق / Print Label": " Print Label",
   " فني جديد": " New Technician",
   " قائمة المصروفات": " Expense List",
-  " محفوظ / Saved": " محفوظ / Saved",
+  " محفوظ / Saved": " Saved",
   " معاينة فورية — A4": " Instant Preview — A4",
   " معلومات الشركة": " Company Information",
   " ملاحظات": " Notes",
@@ -773,6 +812,91 @@ export const AR_TO_EN: Record<string, string> = {
   "← العودة للمطالبات": "← Back to Claims",
   "● غير محفوظ": "● Unsaved",
 };
+
+const COMMON_UI_OVERRIDES: Record<string, string> = {
+  "العربية": "Arabic",
+  "حذف": "Delete",
+  "تعديل": "Edit",
+  "رجوع": "Back",
+  "معاينة": "Preview",
+  "يوم": "Day",
+  "مسح": "Clear",
+  "تصدير CSV": "Export CSV",
+  "فتح": "Open",
+  "واتساب": "WhatsApp",
+  "مطالبة": "Claim",
+  "عرض": "View",
+  "رقم القطعة": "Part Number",
+  "إغلاق": "Close",
+  "تحديد الكل": "Select All",
+  "نسخ": "Copy",
+  "تحديث": "Refresh",
+  "موقع المركبة": "Vehicle Location",
+  "إضافة بند": "Add Item",
+  "التالي": "Next",
+  "طباعة / PDF": "Print / PDF",
+  "العميل:": "Customer:",
+  "عدد الزيارات": "Number of Visits",
+  "إضافة": "Add",
+  "شركة": "Company",
+  "تنزيل PDF": "Download PDF",
+  "تاريخ التسليم": "Delivery Date",
+  "رفض": "Reject",
+  "الصور": "Photos",
+  "إجمالي الإيرادات": "Total Revenue",
+  "صافي الربح": "Net Profit",
+  "تصدير": "Export",
+  "تم التسليم": "Delivered",
+  "إضافة قطعة": "Add Part",
+  "رقم الهيكل (VIN)": "VIN",
+  "تأمين": "Insurance",
+  "حذف نهائي": "Delete Permanently",
+  "تاريخ الإنشاء": "Created At",
+  "إزالة": "Remove",
+  "المركبة:": "Vehicle:",
+  "جاري التحميل…": "Loading…",
+  "جارِ التحميل…": "Loading…",
+  "سعر الشراء": "Purchase Price",
+  "اللوحة:": "Plate:",
+  "بحث": "Search",
+  "مسح الفلاتر": "Clear Filters",
+  "آخر تحديث:": "Last Updated:",
+  "تاريخ الدخول": "Entry Date",
+  "نشر": "Publish",
+  "فتح المطالبة": "Open Claim",
+  "مطالبة جديدة": "New Claim",
+  "التوقيع": "Signature",
+  "اعتماد المطالبة": "Approve Claim",
+  "بدء العمل": "Start Work",
+  "رفع مستند": "Upload Document",
+  "رفع صورة": "Upload Photo",
+  "إرسال واتساب": "Send WhatsApp",
+  "إجمالي الفاتورة": "Invoice Total",
+  "تصدير Excel": "Export Excel",
+  "حذف المحدد": "Delete Selected",
+  "أرشفة": "Archive",
+  "الإيرادات": "Revenue",
+  "مصروفات": "Expenses",
+  "فتح المصدر": "Open Source",
+  "البنود": "Items",
+  "نوع الضرر": "Damage Type",
+  "تقرير فحص": "Inspection Report",
+  "موظف التأمين": "Insurance Officer",
+  "عرض الكل": "View All",
+  "استعادة المركبة": "Restore Vehicle",
+};
+
+// UI literals are normalized before lookup because JSX formatting commonly
+// adds indentation whitespace around labels. Curated translations remain the
+// final authority over generated coverage.
+export const AR_TO_EN: Record<string, string> = Object.fromEntries(
+  Object.entries({
+    ...generatedUiTranslations,
+    ...LOCALE_VALUE_TRANSLATIONS,
+    ...CURATED_AR_TO_EN,
+    ...COMMON_UI_OVERRIDES,
+  }).map(([key, value]) => [key.trim(), value.trim()]),
+);
 
 /**
  * Translate an Arabic string to English using the dictionary.
