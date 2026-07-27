@@ -871,6 +871,7 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "رفع مستند": "Upload Document",
   "رفع صورة": "Upload Photo",
   "إرسال واتساب": "Send WhatsApp",
+  "إشعارات المدير": "Manager Notifications",
   "إجمالي الفاتورة": "Invoice Total",
   "تصدير Excel": "Export Excel",
   "حذف المحدد": "Delete Selected",

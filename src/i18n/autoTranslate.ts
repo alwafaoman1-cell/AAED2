@@ -50,10 +50,13 @@ function shouldSkip(node: Node): boolean {
   if (element.closest(SKIP_SELECTOR)) return true;
 
   // The application deliberately marks <html translate="no"> to disable
-  // browser translation. That root marker must not disable our own controlled
-  // UI translator; component-level translate="no" markers still opt out.
+  // browser translation, and applies the same marker to #root. Those global
+  // guards must not disable our controlled UI translator; component-level
+  // translate="no" markers still opt out.
   const noTranslate = element.closest('[translate="no"]');
-  return Boolean(noTranslate && noTranslate !== document.documentElement);
+  const isGlobalBrowserGuard =
+    noTranslate === document.documentElement || noTranslate?.id === "root";
+  return Boolean(noTranslate && !isGlobalBrowserGuard);
 }
 
 function looksLikeBusinessData(value: string): boolean {

@@ -71,7 +71,7 @@ describe("UI auto translation runtime", () => {
 
   it("does not let the browser-translation guard on html disable app translation", () => {
     document.documentElement.setAttribute("translate", "no");
-    document.body.innerHTML = `<button>حذف</button>`;
+    document.body.innerHTML = `<div id="root" translate="no"><button>حذف</button></div>`;
     startAutoTranslate();
 
     expect(document.querySelector("button")?.textContent).toBe("Delete");

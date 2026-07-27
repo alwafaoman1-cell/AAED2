@@ -95,7 +95,7 @@ describe("production UI translation coverage", () => {
     expect(translator).toContain("window.requestAnimationFrame");
     expect(translator).toContain("if (observer) return");
     expect(translator).toContain("observer.disconnect()");
-    expect(translator).toContain("noTranslate !== document.documentElement");
+    expect(translator).toContain('noTranslate?.id === "root"');
     expect(translator).toContain("[data-no-translate]");
     expect(translator).toContain("[data-pdf-layout]");
     expect(translator).not.toContain("innerHTML");

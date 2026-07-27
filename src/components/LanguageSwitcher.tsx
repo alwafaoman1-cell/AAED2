@@ -33,7 +33,7 @@ export default function LanguageSwitcher({
   const change = (code: string) => {
     if (code === i18n.language) return;
     i18n.changeLanguage(code).then(() => {
-      toast.success(t("common.saved"));
+      toast.success(i18n.t("common.saved"));
     });
   };
 
