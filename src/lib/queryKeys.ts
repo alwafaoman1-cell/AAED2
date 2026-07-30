@@ -56,6 +56,15 @@ export const queryKeys = {
     vehiclesOverStayAll: ["reports", "vehicles_over_stay"] as const,
     vehiclesOverStay: (age?: number | string) => ["reports", "vehicles_over_stay", age ?? "all"] as const,
   },
+  reportCenter: {
+    all: ["report_center"] as const,
+    catalog: ["report_center", "catalog"] as const,
+    summary: (filters: unknown) => ["report_center", "summary", filters] as const,
+    detail: (reportKey: string, filters: unknown) => ["report_center", "detail", reportKey, filters] as const,
+    aggregates: (reportKey: string, filters: unknown) => ["report_center", "aggregates", reportKey, filters] as const,
+    savedViews: (tenantId?: string | null) => ["report_center", "saved_views", tenantId ?? ""] as const,
+    export: (reportKey: string, filters: unknown) => ["report_center", "export", reportKey, filters] as const,
+  },
   insuranceEstimates: {
     all: ["insurance_estimates"] as const,
   },

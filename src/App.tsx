@@ -13,6 +13,7 @@ import AppLayout from "./components/AppLayout";
 import AuthPage from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
+import ReportsLegacyRedirect from "./components/reports/ReportsLegacyRedirect";
 
 import HomeShortcuts from "./pages/HomeShortcuts";
 
@@ -101,16 +102,8 @@ const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const CustomerPortal = lazy(() => import("./pages/CustomerPortal"));
 const TrashPage = lazy(() => import("./pages/TrashPage"));
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
-const Reports = lazy(() => import("./pages/Reports"));
 const ReportsCenter = lazy(() => import("./pages/ReportsCenter"));
-const WorkOrdersStatement = lazy(() => import("./pages/reports/WorkOrdersStatement"));
-const PartsProfitReport = lazy(() => import("./pages/reports/PartsProfitReport"));
-const MonthlyReport = lazy(() => import("./pages/reports/MonthlyReport"));
-const CloudAdvancedReports = lazy(() => import("./pages/reports/CloudAdvancedReports"));
 const EInvoicingSettingsPage = lazy(() => import("./pages/settings/EInvoicingSettingsPage"));
-const CompletedWithoutInvoice = lazy(() => import("./pages/reports/CompletedWithoutInvoice"));
-const OverdueInvoices = lazy(() => import("./pages/reports/OverdueInvoices"));
-const VehiclesOver30Days = lazy(() => import("./pages/reports/VehiclesOver30Days"));
 const EstimatesList = lazy(() => import("./pages/estimates/EstimatesList"));
 const EstimateForm = lazy(() => import("./pages/estimates/EstimateForm"));
 const EstimateDetail = lazy(() => import("./pages/estimates/EstimateDetail"));
@@ -349,15 +342,16 @@ const App = () => (
               <Route path="/daily-log" element={<DailyLog />} />
               <Route path="/expenses/import" element={<ExpensesImport />} />
               <Route path="/customers/:id" element={<CustomerDetail />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/reports/center" element={<ReportsCenter />} />
-              <Route path="/reports/work-orders-statement" element={<WorkOrdersStatement />} />
-              <Route path="/reports/parts-profit" element={<PartsProfitReport />} />
-              <Route path="/reports/monthly" element={<MonthlyReport />} />
-              <Route path="/reports/completed-without-invoice" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><CompletedWithoutInvoice /></ProtectedRoute>} />
-              <Route path="/reports/overdue-invoices" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><OverdueInvoices /></ProtectedRoute>} />
-              <Route path="/reports/vehicles-over-30-days" element={<ProtectedRoute roles={["admin", "manager", "insurance", "supervisor"]}><VehiclesOver30Days /></ProtectedRoute>} />
-              <Route path="/reports/cloud-advanced" element={<ProtectedRoute roles={["admin", "manager", "accountant", "insurance"]}><CloudAdvancedReports /></ProtectedRoute>} />
+              <Route path="/reports" element={<ReportsLegacyRedirect to="/reports-center" />} />
+              <Route path="/reports-center" element={<ReportsCenter />} />
+              <Route path="/reports/center" element={<ReportsLegacyRedirect to="/reports-center" />} />
+              <Route path="/reports/work-orders-statement" element={<ReportsLegacyRedirect to="/reports-center?report=work-orders&category=operations" />} />
+              <Route path="/reports/parts-profit" element={<ReportsLegacyRedirect to="/reports-center?report=gross-profitability&category=profitability" />} />
+              <Route path="/reports/monthly" element={<ReportsLegacyRedirect to="/reports-center?report=all-company-invoices&groupBy=month" />} />
+              <Route path="/reports/completed-without-invoice" element={<ReportsLegacyRedirect to="/reports-center?report=completed-without-invoice&category=invoices" />} />
+              <Route path="/reports/overdue-invoices" element={<ReportsLegacyRedirect to="/reports-center?report=delivered-awaiting-collection&category=invoices" />} />
+              <Route path="/reports/vehicles-over-30-days" element={<ReportsLegacyRedirect to="/reports-center?report=workshop-duration&category=performance" />} />
+              <Route path="/reports/cloud-advanced" element={<ReportsLegacyRedirect to="/reports-center?report=all-company-invoices&category=combined" />} />
               <Route path="/dashboard/executive" element={<ProtectedRoute roles={["admin", "manager", "accountant"]}><ExecutiveDashboard /></ProtectedRoute>} />
               <Route path="/media-studio" element={<MediaStudio />} />
               <Route path="/import-export" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ImportExportCenter /></ProtectedRoute>} />

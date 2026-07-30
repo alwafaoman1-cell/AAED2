@@ -95,7 +95,7 @@ const menuItems: MenuItem[] = [
       { path: "/accountant", labelKey: "تطبيق المحاسب", icon: FileSpreadsheet },
     ],
   },
-  { path: "/reports", labelKey: "nav.reports", icon: FileBarChart },
+  { path: "/reports-center", labelKey: "nav.reports", icon: FileBarChart },
   {
     path: "/staff",
     labelKey: "إدارة الفريق",

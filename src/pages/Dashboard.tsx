@@ -4,7 +4,7 @@ import {
   Car, Wrench, Clock, CheckCircle, FileText, AlertTriangle,
   Package, ClipboardCheck, Search, Shield, Star, PackageX,
   Filter, GripVertical, RotateCcw, Activity, Users, TrendingUp, Timer, Percent,
-  X,
+  X, FileBarChart,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import StatCard from "@/components/StatCard";
@@ -31,6 +31,7 @@ import { customersStore, refreshCustomersFromCloud, type Customer } from "@/lib/
 import { suppliersStore } from "@/lib/suppliersStore";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
 import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
+import { useCan } from "@/lib/rbac";
 import SupplementsKpiCard from "@/components/dashboard/SupplementsKpiCard";
 
 const statusColors: Record<string, string> = {
@@ -102,6 +103,7 @@ function SortableSection({ id, customizing, children }: { id: string; customizin
 }
 
 export default function Dashboard() {
+  const canViewReportsCenter = useCan("Reports Center", "View Center");
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const localeCode = i18n.language === "en" ? "en-US" : "ar-SA";
@@ -476,6 +478,10 @@ export default function Dashboard() {
           <p className="text-xs md:text-sm text-muted-foreground">{t("dashboard.interactiveDashboard")}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {canViewReportsCenter && <Button variant="outline" size="sm" onClick={() => navigate("/reports-center")} className="gap-2">
+            <FileBarChart size={14} />
+            {i18n.resolvedLanguage?.startsWith("en") ? "Reports Center" : "مركز التقارير"}
+          </Button>}
           <QuickActionsMenu />
           <div className="hidden md:flex items-center gap-2 text-xs text-muted-foreground bg-card rounded-lg px-3 py-2 border border-border">
             <Clock size={14} />
