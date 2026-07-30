@@ -126,7 +126,7 @@ function buildReportHtml(p: ReportExportPayload): string {
   }
   * { box-sizing: border-box; }
   body {
-    font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
+    font-family: ${english ? "'Arial', 'Segoe UI', sans-serif" : "'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif"};
     margin: 0;
     background: #fff;
     color: #111827;
