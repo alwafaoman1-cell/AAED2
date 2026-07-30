@@ -127,6 +127,7 @@ function buildReportHtml(p: ReportExportPayload): string {
   * { box-sizing: border-box; }
   body {
     font-family: ${english ? "'Arial', 'Segoe UI', sans-serif" : "'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif"};
+    word-spacing: ${english ? "0.16em" : "normal"};
     margin: 0;
     background: #fff;
     color: #111827;
