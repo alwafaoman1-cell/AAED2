@@ -1,4 +1,5 @@
 begin;
+select set_config('app.accounting_runtime_validation','on',true);
 
 create temporary table accounting_phase2_results (
   test_name text primary key,

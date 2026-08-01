@@ -1,4 +1,5 @@
 begin;
+select set_config('app.accounting_runtime_validation','on',true);
 
 create temporary table phase2_supplier_results(name text, result text, details text) on commit drop;
 grant select, insert on phase2_supplier_results to authenticated;

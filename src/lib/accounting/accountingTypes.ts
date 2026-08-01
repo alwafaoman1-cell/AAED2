@@ -26,6 +26,7 @@ export interface AccountingAccount {
   is_active: boolean;
   requires_cost_center: boolean;
   requires_reconciliation: boolean;
+  notes?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -216,6 +217,62 @@ export interface AccountingOpeningBalance {
   status: "draft" | "approved" | "posted" | "void";
   source: string | null;
   posting_journal_entry_id: string | null;
+  batch_id?: string | null;
+  line_description?: string | null;
+}
+
+export interface AccountingOpeningBalanceBatch {
+  id: string;
+  tenant_id: string;
+  fiscal_year_id: string;
+  batch_number: string;
+  description: string | null;
+  status: "draft" | "approved" | "posted" | "void";
+  approved_at: string | null;
+  posted_at: string | null;
+  posting_journal_entry_id: string | null;
+  created_at: string;
+}
+
+export interface AccountingCashBankAccount {
+  id: string;
+  tenant_id: string;
+  name_ar: string;
+  name_en: string;
+  account_kind: "cash" | "bank";
+  accounting_account_id: string;
+  bank_name: string | null;
+  reference_suffix: string | null;
+  currency: "OMR";
+  is_active: boolean;
+  is_default: boolean;
+}
+
+export interface AccountingPaymentMethodMapping {
+  id: string;
+  tenant_id: string;
+  payment_method: string;
+  cash_bank_account_id: string;
+  is_active: boolean;
+}
+
+export interface AccountingSetupReadiness {
+  schema_available: boolean;
+  accounts: number;
+  postable_accounts: number;
+  fiscal_years: number;
+  open_periods: number;
+  cost_centers: number;
+  mappings: number;
+  missing_mappings: string[];
+  posting_rules: number;
+  active_posting_rules: number;
+  cash_accounts: number;
+  bank_accounts: number;
+  opening_batches: number;
+  permissions: boolean;
+  tenant_isolation: boolean;
+  auto_posting: false;
 }
 
 export interface AccountingAuditLog {

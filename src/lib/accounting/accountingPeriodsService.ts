@@ -18,6 +18,12 @@ export async function createAccountingFiscalYear(input: {
   return unwrapAccountingResult<AccountingFiscalYear>(result, "ACCOUNTING_FISCAL_YEAR_CREATE_FAILED");
 }
 
+export async function getAccountingFiscalYear(tenantId: string, id: string): Promise<AccountingFiscalYear> {
+  const result = await supabase.from("accounting_fiscal_years" as never).select("*")
+    .eq("tenant_id", requireTenantId(tenantId)).eq("id", id).single();
+  return unwrapAccountingResult<AccountingFiscalYear>(result, "ACCOUNTING_FISCAL_YEAR_LOAD_FAILED");
+}
+
 export async function listAccountingPeriods(tenantId: string, fiscalYearId?: string): Promise<AccountingPeriod[]> {
   let query = supabase.from("accounting_periods" as never).select("*")
     .eq("tenant_id", requireTenantId(tenantId));
@@ -35,6 +41,12 @@ export async function createAccountingPeriod(input: {
     end_date: input.endDate, status: "open",
   } as never).select("*").single();
   return unwrapAccountingResult<AccountingPeriod>(result, "ACCOUNTING_PERIOD_CREATE_FAILED");
+}
+
+export async function getAccountingPeriod(tenantId: string, id: string): Promise<AccountingPeriod> {
+  const result = await supabase.from("accounting_periods" as never).select("*")
+    .eq("tenant_id", requireTenantId(tenantId)).eq("id", id).single();
+  return unwrapAccountingResult<AccountingPeriod>(result, "ACCOUNTING_PERIOD_LOAD_FAILED");
 }
 
 export async function setAccountingPeriodStatus(periodId: string, status: "open" | "closed" | "locked", reason?: string): Promise<AccountingPeriod> {
@@ -67,4 +79,22 @@ export async function createAccountingCostCenter(input: {
     effective_from: input.effectiveFrom ?? null, effective_to: input.effectiveTo ?? null,
   } as never).select("*").single();
   return unwrapAccountingResult<AccountingCostCenter>(result, "ACCOUNTING_COST_CENTER_CREATE_FAILED");
+}
+
+export async function getAccountingCostCenter(tenantId: string, id: string): Promise<AccountingCostCenter> {
+  const result = await supabase.from("accounting_cost_centers" as never).select("*")
+    .eq("tenant_id", requireTenantId(tenantId)).eq("id", id).single();
+  return unwrapAccountingResult<AccountingCostCenter>(result, "ACCOUNTING_COST_CENTER_LOAD_FAILED");
+}
+
+export async function updateAccountingCostCenter(input: {
+  tenantId: string; id: string; code: string; nameAr: string; nameEn: string; parentId?: string | null;
+  effectiveFrom?: string | null; effectiveTo?: string | null; isActive?: boolean;
+}): Promise<AccountingCostCenter> {
+  const result = await supabase.from("accounting_cost_centers" as never).update({
+    code: input.code.trim(), name_ar: input.nameAr.trim(), name_en: input.nameEn.trim(),
+    parent_id: input.parentId ?? null, effective_from: input.effectiveFrom ?? null,
+    effective_to: input.effectiveTo ?? null, is_active: input.isActive ?? true,
+  } as never).eq("tenant_id", requireTenantId(input.tenantId)).eq("id", input.id).select("*").single();
+  return unwrapAccountingResult<AccountingCostCenter>(result, "ACCOUNTING_COST_CENTER_UPDATE_FAILED");
 }

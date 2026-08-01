@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -11,31 +11,6 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
-  }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
   }
   public: {
     Tables: {
@@ -131,6 +106,7 @@ export type Database = {
           name_ar: string
           name_en: string
           normal_balance: string
+          notes: string | null
           parent_id: string | null
           requires_cost_center: boolean
           requires_reconciliation: boolean
@@ -153,6 +129,7 @@ export type Database = {
           name_ar: string
           name_en: string
           normal_balance: string
+          notes?: string | null
           parent_id?: string | null
           requires_cost_center?: boolean
           requires_reconciliation?: boolean
@@ -175,6 +152,7 @@ export type Database = {
           name_ar?: string
           name_en?: string
           normal_balance?: string
+          notes?: string | null
           parent_id?: string | null
           requires_cost_center?: boolean
           requires_reconciliation?: boolean
@@ -242,6 +220,75 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "accounting_audit_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      accounting_cash_bank_accounts: {
+        Row: {
+          account_kind: string
+          accounting_account_id: string
+          bank_name: string | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          id: string
+          is_active: boolean
+          is_default: boolean
+          name_ar: string
+          name_en: string
+          reference_suffix: string | null
+          tenant_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          account_kind: string
+          accounting_account_id: string
+          bank_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          name_ar: string
+          name_en: string
+          reference_suffix?: string | null
+          tenant_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          account_kind?: string
+          accounting_account_id?: string
+          bank_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          name_ar?: string
+          name_en?: string
+          reference_suffix?: string | null
+          tenant_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounting_cash_bank_accounts_ledger_fk"
+            columns: ["tenant_id", "accounting_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_accounts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "accounting_cash_bank_accounts_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -636,11 +683,88 @@ export type Database = {
           },
         ]
       }
+      accounting_opening_balance_batches: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          batch_number: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          fiscal_year_id: string
+          id: string
+          posted_at: string | null
+          posted_by: string | null
+          posting_journal_entry_id: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          batch_number: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          fiscal_year_id: string
+          id?: string
+          posted_at?: string | null
+          posted_by?: string | null
+          posting_journal_entry_id?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          batch_number?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          fiscal_year_id?: string
+          id?: string
+          posted_at?: string | null
+          posted_by?: string | null
+          posting_journal_entry_id?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounting_opening_balance_batches_journal_fk"
+            columns: ["tenant_id", "posting_journal_entry_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_journal_entries"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "accounting_opening_balance_batches_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accounting_opening_balance_batches_year_fk"
+            columns: ["tenant_id", "fiscal_year_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_fiscal_years"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       accounting_opening_balances: {
         Row: {
           account_id: string
           approved_at: string | null
           approved_by: string | null
+          batch_id: string | null
           cost_center_id: string | null
           created_at: string
           created_by: string | null
@@ -648,6 +772,7 @@ export type Database = {
           debit: number
           fiscal_year_id: string
           id: string
+          line_description: string | null
           posting_journal_entry_id: string | null
           source: string | null
           status: string
@@ -657,6 +782,7 @@ export type Database = {
           account_id: string
           approved_at?: string | null
           approved_by?: string | null
+          batch_id?: string | null
           cost_center_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -664,6 +790,7 @@ export type Database = {
           debit?: number
           fiscal_year_id: string
           id?: string
+          line_description?: string | null
           posting_journal_entry_id?: string | null
           source?: string | null
           status?: string
@@ -673,6 +800,7 @@ export type Database = {
           account_id?: string
           approved_at?: string | null
           approved_by?: string | null
+          batch_id?: string | null
           cost_center_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -680,6 +808,7 @@ export type Database = {
           debit?: number
           fiscal_year_id?: string
           id?: string
+          line_description?: string | null
           posting_journal_entry_id?: string | null
           source?: string | null
           status?: string
@@ -691,6 +820,13 @@ export type Database = {
             columns: ["tenant_id", "account_id"]
             isOneToOne: false
             referencedRelation: "accounting_accounts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "accounting_opening_balances_batch_fk"
+            columns: ["tenant_id", "batch_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_opening_balance_batches"
             referencedColumns: ["tenant_id", "id"]
           },
           {
@@ -720,6 +856,57 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "accounting_fiscal_years"
             referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      accounting_payment_method_mappings: {
+        Row: {
+          cash_bank_account_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          payment_method: string
+          tenant_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          cash_bank_account_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          payment_method: string
+          tenant_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          cash_bank_account_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          payment_method?: string
+          tenant_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounting_payment_method_mappings_account_fk"
+            columns: ["tenant_id", "cash_bank_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_cash_bank_accounts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "accounting_payment_method_mappings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -1002,6 +1189,50 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "accounting_receipts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      accounting_report_saved_views: {
+        Row: {
+          columns: Json
+          created_at: string
+          filters: Json
+          id: string
+          name: string
+          report_key: string
+          tenant_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          columns?: Json
+          created_at?: string
+          filters?: Json
+          id?: string
+          name: string
+          report_key: string
+          tenant_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          columns?: Json
+          created_at?: string
+          filters?: Json
+          id?: string
+          name?: string
+          report_key?: string
+          tenant_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounting_report_saved_views_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -8708,6 +8939,32 @@ export type Database = {
       }
     }
     Functions: {
+      accounting_approve_opening_balance_batch: {
+        Args: { p_batch_id: string }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          batch_number: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          fiscal_year_id: string
+          id: string
+          posted_at: string | null
+          posted_by: string | null
+          posting_journal_entry_id: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "accounting_opening_balance_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       accounting_assert_entry_ready: {
         Args: { p_entry_id: string; p_required_status: string }
         Returns: {
@@ -8778,8 +9035,48 @@ export type Database = {
         Args: { p_record: Json }
         Returns: boolean
       }
+      accounting_report_permission: {
+        Args: { p_report_key: string }
+        Returns: string
+      }
+      accounting_report_record_eligible: {
+        Args: {
+          p_archived_at?: string
+          p_deleted_at?: string
+          p_is_archived?: boolean
+          p_status: string
+          p_tenant_id: string
+        }
+        Returns: boolean
+      }
+      accounting_report_rpc: {
+        Args: {
+          p_direction?: string
+          p_filters?: Json
+          p_from?: string
+          p_page?: number
+          p_page_size?: number
+          p_report_key: string
+          p_search?: string
+          p_sort?: string
+          p_to?: string
+        }
+        Returns: Json
+      }
       accounting_reports_summary_rpc: {
         Args: { p_from_date?: string; p_to_date?: string }
+        Returns: Json
+      }
+      accounting_setup_readiness: { Args: never; Returns: Json }
+      accounting_vehicle_profit_loss_rpc: {
+        Args: {
+          p_filters?: Json
+          p_from?: string
+          p_page?: number
+          p_page_size?: number
+          p_search?: string
+          p_to?: string
+        }
         Returns: Json
       }
       admin_reopen_signature: {
@@ -9566,6 +9863,7 @@ export type Database = {
         | "insurance"
         | "customer"
         | "supervisor"
+        | "accountant"
       claim_payment_method: "bank_transfer" | "cheque" | "offset" | "cash"
       claim_payment_status: "pending" | "cleared" | "bounced"
       claim_status: "pending" | "approved" | "rejected" | "paid" | "cancelled"
@@ -9703,9 +10001,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       app_role: [
@@ -9715,6 +10010,7 @@ export const Constants = {
         "insurance",
         "customer",
         "supervisor",
+        "accountant",
       ],
       claim_payment_method: ["bank_transfer", "cheque", "offset", "cash"],
       claim_payment_status: ["pending", "cleared", "bounced"],

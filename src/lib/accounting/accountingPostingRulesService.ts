@@ -8,6 +8,12 @@ export async function listAccountingPostingRules(tenantId: string): Promise<Acco
   return unwrapAccountingResult<AccountingPostingRule[]>(result, "ACCOUNTING_POSTING_RULES_LOAD_FAILED") ?? [];
 }
 
+export async function getAccountingPostingRule(tenantId: string, id: string): Promise<AccountingPostingRule> {
+  const result = await supabase.from("accounting_posting_rules" as never).select("*")
+    .eq("tenant_id", requireTenantId(tenantId)).eq("id", id).single();
+  return unwrapAccountingResult<AccountingPostingRule>(result, "ACCOUNTING_POSTING_RULE_LOAD_FAILED");
+}
+
 export async function createInactiveAccountingPostingRule(input: {
   tenantId: string; ruleKey: string; sourceType: string; eventType: string;
   debitMappingKey: string; creditMappingKey: string; priority?: number;

@@ -1,5 +1,6 @@
 -- Development-only committed fixture for two-session idempotency validation.
 begin;
+select set_config('app.accounting_runtime_validation','on',true);
 
 insert into public.tenants(id,name,slug)
 values('e1000000-0000-4000-8000-000000000001','Accounting Phase 2 Concurrency','accounting-phase2-concurrency');

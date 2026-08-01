@@ -7,4 +7,8 @@ export const accountingQueryKeys = {
   journal: (tenantId: string, entryId: string) => ["accounting-cloud", tenantId, "journal", entryId] as const,
   journalLines: (tenantId: string, entryId: string) => ["accounting-cloud", tenantId, "journal", entryId, "lines"] as const,
   mappings: (tenantId: string) => ["accounting-cloud", tenantId, "mappings"] as const,
+  postingRules: (tenantId: string) => ["accounting-cloud", tenantId, "posting-rules"] as const,
+  cashBankAccounts: (tenantId: string) => ["accounting-cloud", tenantId, "cash-bank-accounts"] as const,
+  openingBatches: (tenantId: string) => ["accounting-cloud", tenantId, "opening-batches"] as const,
+  readiness: (tenantId: string) => ["accounting-cloud", tenantId, "readiness"] as const,
 } as const;

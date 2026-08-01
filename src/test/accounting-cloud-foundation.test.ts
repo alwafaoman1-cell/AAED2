@@ -211,10 +211,13 @@ describe("cloud service boundary", () => {
     expect(posting).toContain("revoke all on function public.accounting_assert_entry_ready(uuid,text) from public, anon, authenticated");
   });
 
-  it("does not add accounting report routes or UI pages in Phase 1", () => {
+  it("keeps the later accounting report UI production-gated and outside the Phase 1 migration", () => {
     const routes = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
-    expect(routes).not.toContain('/accounting/reports/general-ledger');
-    expect(routes).not.toContain('/accounting/reports/trial-balance');
-    expect(routes).not.toContain('/accounting/reports/income-statement');
+    const availability = readFileSync(resolve(process.cwd(), "src/lib/accounting/accountingReportsAvailability.ts"), "utf8");
+    expect(core).not.toContain('/accounting/reports/general-ledger');
+    expect(routes).toContain('/accounting/reports/general-ledger');
+    expect(routes).toContain('AccountingReportsRouteGuard');
+    expect(availability).toContain('import.meta.env.DEV');
+    expect(availability).toContain('VITE_ACCOUNTING_REPORTS_ENABLED');
   });
 });

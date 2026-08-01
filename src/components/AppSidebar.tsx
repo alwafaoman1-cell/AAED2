@@ -17,6 +17,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { translateAr } from "@/i18n/autoDictionary";
+import { isAccountingSetupFeatureEnabled } from "@/lib/accounting/accountingSetupAvailability";
+import { isAccountingReportsFeatureEnabled } from "@/lib/accounting/accountingReportsAvailability";
 
 type SubItem = { path: string; labelKey: string; icon: any };
 type MenuItem = {
@@ -79,6 +81,8 @@ const menuItems: MenuItem[] = [
       { path: "/accounting/expenses", labelKey: "nav.addExpense", icon: MinusCircle },
       { path: "/accounting/receipts", labelKey: "nav.receipts", icon: ReceiptText },
       { path: "/accounting/cashbox/topup", labelKey: "nav.cashboxTopup", icon: Wallet },
+      { path: "/accounting/setup", labelKey: "إعداد المحاسبة", icon: Settings },
+      { path: "/accounting/reports", labelKey: "تقارير المحاسبة", icon: FileBarChart },
     ],
   },
   { path: "/daily-log", labelKey: "nav.dailyLog", icon: FileSpreadsheet },
@@ -223,6 +227,8 @@ export default function AppSidebar() {
             .map((item) => {
             const visibleChildren = item.children
               ?.filter((c) => canAccessPath(c.path, roleForGate))
+              .filter((c) => c.path !== "/accounting/setup" || isAccountingSetupFeatureEnabled())
+              .filter((c) => c.path !== "/accounting/reports" || isAccountingReportsFeatureEnabled())
               .filter((c) => isPathEnabled(c.path));
             const isActive = location.pathname === item.path;
             const hasChildren = !!visibleChildren?.length;

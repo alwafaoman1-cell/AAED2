@@ -490,6 +490,9 @@ const CURATED_AR_TO_EN: Record<string, string> = {
   "حفظ المرتجع": "Save Return",
   "حفظ الملاحظات": "Save Notes",
   "حفظ فقط": "Save Only",
+  "حفظ العرض الحالي": "Save Current View",
+  "حفظ العرض": "Save View",
+  "نسخ الرابط": "Copy Link",
   "حفظ وطباعة سند": "Save and Print Voucher",
   "حقول إضافية / Additional Fields": "Additional Fields",
   "خزائن الموظفين": "Employee Treasuries",
@@ -816,6 +819,7 @@ const CURATED_AR_TO_EN: Record<string, string> = {
 const COMMON_UI_OVERRIDES: Record<string, string> = {
   "العربية": "Arabic",
   "حذف": "Delete",
+  "حذف العرض المحفوظ": "Delete Saved View",
   "تعديل": "Edit",
   "رجوع": "Back",
   "معاينة": "Preview",
@@ -889,6 +893,20 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "موظف التأمين": "Insurance Officer",
   "عرض الكل": "View All",
   "استعادة المركبة": "Restore Vehicle",
+  "الكاش": "Cash",
+  "هذه السنة": "This Year",
+  "مسح الفلاتر المتقدمة": "Clear Advanced Filters",
+  "فتح التقرير": "Open Report",
+  "عرض مسطح": "Flat view",
+  "عرض شجري": "Tree view",
+  "فعال": "Active",
+  "تطبيق على Tenant Development": "Apply to Development tenant",
+  "اختبار Resolver": "Test resolver",
+  "حفظ كغير فعالة": "Save inactive",
+  "حفظ الربط": "Save mapping",
+  "إنشاء مسودة": "Create draft",
+  "اعتماد الدفعة المتوازنة": "Approve balanced batch",
+  "إعادة الفحص": "Run check",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

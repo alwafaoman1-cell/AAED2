@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from "react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -154,12 +154,42 @@ const AdminNotifications = lazy(() => import("./pages/AdminNotifications"));
 const SaasAdminConsole = lazy(() => import("./pages/admin/SaasAdminConsole"));
 const TenantFiles = lazy(() => import("./pages/admin/TenantFiles"));
 const WorkOrderSignPage = lazy(() => import("./pages/public/WorkOrderSignPage"));
+const accountingSetupPage = <K extends keyof typeof import("./pages/accounting/setup/AccountingSetupPages")>(name: K) =>
+  lazy(() => import("./pages/accounting/setup/AccountingSetupPages").then((module) => ({ default: module[name] as ComponentType })));
+const AccountingSetupCenterPage = accountingSetupPage("AccountingSetupCenterPage");
+const AccountsPage = accountingSetupPage("AccountsPage");
+const AccountFormPage = accountingSetupPage("AccountFormPage");
+const AccountTemplatePage = lazy(() => import("./pages/accounting/setup/AccountTemplatePage"));
+const FiscalYearsPage = accountingSetupPage("FiscalYearsPage");
+const FiscalYearFormPage = accountingSetupPage("FiscalYearFormPage");
+const PeriodsPage = accountingSetupPage("PeriodsPage");
+const PeriodFormPage = accountingSetupPage("PeriodFormPage");
+const CostCentersPage = accountingSetupPage("CostCentersPage");
+const CostCenterFormPage = accountingSetupPage("CostCenterFormPage");
+const MappingsPage = accountingSetupPage("MappingsPage");
+const MappingFormPage = accountingSetupPage("MappingFormPage");
+const PostingRulesPage = accountingSetupPage("PostingRulesPage");
+const PostingRuleFormPage = accountingSetupPage("PostingRuleFormPage");
+const CashBankAccountsPage = accountingSetupPage("CashBankAccountsPage");
+const OpeningBalancesPage = accountingSetupPage("OpeningBalancesPage");
+const OpeningBalanceNewPage = accountingSetupPage("OpeningBalanceNewPage");
+const OpeningBalanceDetailPage = accountingSetupPage("OpeningBalanceDetailPage");
+const AccountingReadinessPage = accountingSetupPage("AccountingReadinessPage");
+const accountingReportsPage = <K extends keyof typeof import("./pages/accounting/reports/AccountingReportsPages")>(name: K) =>
+  lazy(() => import("./pages/accounting/reports/AccountingReportsPages").then((module) => ({ default: module[name] as ComponentType })));
+const AccountingReportsCenterPage = accountingReportsPage("AccountingReportsCenterPage");
+const AccountingReportPage = accountingReportsPage("AccountingReportPage") as LazyExoticComponent<ComponentType<{ reportKey: import("@/lib/accounting/accountingReports").AccountingReportKey }>>;
+const JournalEntryDetailPage = accountingReportsPage("JournalEntryDetailPage");
+const GeneralLedgerAccountPage = accountingReportsPage("GeneralLedgerAccountPage");
+const VehicleProfitLossDetailPage = accountingReportsPage("VehicleProfitLossDetailPage");
 
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
 import KeyboardShortcuts from "@/components/KeyboardShortcuts";
 import SystemPreferencesBoot from "@/components/SystemPreferencesBoot";
 import UnsavedWorkGuard from "@/components/UnsavedWorkGuard";
+import AccountingSetupRouteGuard from "@/components/accounting/AccountingSetupRouteGuard";
+import AccountingReportsRouteGuard from "@/components/accounting/AccountingReportsRouteGuard";
 
 // كاش حيّ — يعيد الجلب فور الدخول للصفحة لمنع عرض بيانات قديمة بين التنقّلات.
 // المستخدم كان يضطر لـ Ctrl+Shift+R لأن staleTime كان 30s.
@@ -292,6 +322,61 @@ const App = () => (
               <Route path="/accounting/expenses/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />
               <Route path="/accounting/receipts" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Receipts /></ProtectedRoute>} />
               <Route path="/accounting/cashbox/topup" element={<ProtectedRoute roles={["admin","manager","accountant"]}><CashboxTopup /></ProtectedRoute>} />
+              <Route path="/accounting/setup" element={<AccountingSetupRouteGuard permission="accounting.view_journal"><AccountingSetupCenterPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/accounts" element={<AccountingSetupRouteGuard permission="accounting.manage_accounts"><AccountsPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/accounts/new" element={<AccountingSetupRouteGuard permission="accounting.manage_accounts"><AccountFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/accounts/template" element={<AccountingSetupRouteGuard permission="accounting.manage_accounts"><AccountTemplatePage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/accounts/:accountId" element={<AccountingSetupRouteGuard permission="accounting.manage_accounts"><AccountFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/fiscal-years" element={<AccountingSetupRouteGuard permission="accounting.manage_fiscal_years"><FiscalYearsPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/fiscal-years/new" element={<AccountingSetupRouteGuard permission="accounting.manage_fiscal_years"><FiscalYearFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/fiscal-years/:fiscalYearId" element={<AccountingSetupRouteGuard permission="accounting.manage_fiscal_years"><FiscalYearFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/periods" element={<AccountingSetupRouteGuard permission="accounting.manage_periods"><PeriodsPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/periods/new" element={<AccountingSetupRouteGuard permission="accounting.manage_periods"><PeriodFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/periods/:periodId" element={<AccountingSetupRouteGuard permission="accounting.manage_periods"><PeriodFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/cost-centers" element={<AccountingSetupRouteGuard permission="accounting.manage_cost_centers"><CostCentersPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/cost-centers/new" element={<AccountingSetupRouteGuard permission="accounting.manage_cost_centers"><CostCenterFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/cost-centers/:costCenterId" element={<AccountingSetupRouteGuard permission="accounting.manage_cost_centers"><CostCenterFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/mappings" element={<AccountingSetupRouteGuard permission="accounting.manage_mappings"><MappingsPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/mappings/new" element={<AccountingSetupRouteGuard permission="accounting.manage_mappings"><MappingFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/mappings/:mappingId" element={<AccountingSetupRouteGuard permission="accounting.manage_mappings"><MappingFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/posting-rules" element={<AccountingSetupRouteGuard permission="accounting.manage_mappings"><PostingRulesPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/posting-rules/new" element={<AccountingSetupRouteGuard permission="accounting.manage_mappings"><PostingRuleFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/posting-rules/:ruleId" element={<AccountingSetupRouteGuard permission="accounting.manage_mappings"><PostingRuleFormPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/cash-bank-accounts" element={<AccountingSetupRouteGuard permission="accounting.manage_mappings"><CashBankAccountsPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/opening-balances" element={<AccountingSetupRouteGuard permission="accounting.manage_opening_balances"><OpeningBalancesPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/opening-balances/new" element={<AccountingSetupRouteGuard permission="accounting.manage_opening_balances"><OpeningBalanceNewPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/opening-balances/:batchId" element={<AccountingSetupRouteGuard permission="accounting.manage_opening_balances"><OpeningBalanceDetailPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/setup/readiness" element={<AccountingSetupRouteGuard permission="accounting.admin"><AccountingReadinessPage /></AccountingSetupRouteGuard>} />
+              <Route path="/accounting/reports" element={<AccountingReportsRouteGuard><AccountingReportsCenterPage /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/journal" element={<AccountingReportsRouteGuard permission="accounting_reports.journal"><AccountingReportPage reportKey="journal" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/journal/:entryId" element={<AccountingReportsRouteGuard permission="accounting_reports.journal"><JournalEntryDetailPage /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/general-ledger" element={<AccountingReportsRouteGuard permission="accounting_reports.ledger"><AccountingReportPage reportKey="general-ledger" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/general-ledger/:accountId" element={<AccountingReportsRouteGuard permission="accounting_reports.ledger"><GeneralLedgerAccountPage /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/account-statement" element={<AccountingReportsRouteGuard permission="accounting_reports.ledger"><AccountingReportPage reportKey="account-statement" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/trial-balance" element={<AccountingReportsRouteGuard permission="accounting_reports.trial_balance"><AccountingReportPage reportKey="trial-balance" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/income-statement" element={<AccountingReportsRouteGuard permission="accounting_reports.income_statement"><AccountingReportPage reportKey="income-statement" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/balance-sheet" element={<AccountingReportsRouteGuard permission="accounting_reports.balance_sheet"><AccountingReportPage reportKey="balance-sheet" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/cash-flow" element={<AccountingReportsRouteGuard permission="accounting_reports.cash_flow"><AccountingReportPage reportKey="cash-flow" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/receivables" element={<AccountingReportsRouteGuard permission="accounting_reports.receivables"><AccountingReportPage reportKey="receivables" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/insurance-receivables" element={<AccountingReportsRouteGuard permission="accounting_reports.receivables"><AccountingReportPage reportKey="insurance-receivables" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/customer-receivables" element={<AccountingReportsRouteGuard permission="accounting_reports.receivables"><AccountingReportPage reportKey="customer-receivables" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/receivables-aging" element={<AccountingReportsRouteGuard permission="accounting_reports.receivables"><AccountingReportPage reportKey="receivables-aging" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/payables" element={<AccountingReportsRouteGuard permission="accounting_reports.payables"><AccountingReportPage reportKey="payables" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/supplier-statement" element={<AccountingReportsRouteGuard permission="accounting_reports.payables"><AccountingReportPage reportKey="supplier-statement" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/payables-aging" element={<AccountingReportsRouteGuard permission="accounting_reports.payables"><AccountingReportPage reportKey="payables-aging" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/cashbook" element={<AccountingReportsRouteGuard permission="accounting_reports.cash_bank"><AccountingReportPage reportKey="cashbook" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/bank-ledger" element={<AccountingReportsRouteGuard permission="accounting_reports.cash_bank"><AccountingReportPage reportKey="bank-ledger" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/cash-bank-summary" element={<AccountingReportsRouteGuard permission="accounting_reports.cash_bank"><AccountingReportPage reportKey="cash-bank-summary" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/revenue" element={<AccountingReportsRouteGuard permission="accounting_reports.revenue"><AccountingReportPage reportKey="revenue" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/expenses" element={<AccountingReportsRouteGuard permission="accounting_reports.expenses"><AccountingReportPage reportKey="expenses" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/vat" element={<AccountingReportsRouteGuard permission="accounting_reports.vat"><AccountingReportPage reportKey="vat" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/vat-output" element={<AccountingReportsRouteGuard permission="accounting_reports.vat"><AccountingReportPage reportKey="vat-output" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/vat-input" element={<AccountingReportsRouteGuard permission="accounting_reports.vat"><AccountingReportPage reportKey="vat-input" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/vehicle-profit-loss" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><AccountingReportPage reportKey="vehicle-profit-loss" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/vehicle-profit-loss/:operationId" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><VehicleProfitLossDetailPage /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/cost-centers" element={<AccountingReportsRouteGuard permission="accounting_reports.cost_centers"><AccountingReportPage reportKey="cost-centers" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/audit-exceptions" element={<AccountingReportsRouteGuard permission="accounting_reports.audit"><AccountingReportPage reportKey="audit-exceptions" /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/unposted-documents" element={<AccountingReportsRouteGuard permission="accounting_reports.audit"><AccountingReportPage reportKey="unposted-documents" /></AccountingReportsRouteGuard>} />
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/inventory/purchase-invoices" element={<PurchaseInvoices />} />
               <Route path="/inventory/suppliers" element={<Suppliers />} />
