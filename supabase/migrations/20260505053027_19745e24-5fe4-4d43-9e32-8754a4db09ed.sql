@@ -16,15 +16,8 @@ REVOKE EXECUTE ON FUNCTION public.get_user_tenant_id() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_user_role() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_user_tenant_id() TO authenticated;
 
--- Realtime: scope subscriptions to tenant topic ("tenant:<uuid>") or rely on table RLS
--- Enable RLS on realtime.messages and require authenticated; broadcast channel topics
--- must include tenant id. We allow read only when topic equals 'tenant:<tenant_id>' or
--- when the user is authenticated and the underlying postgres_changes rows pass table RLS.
-ALTER TABLE IF EXISTS realtime.messages ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Authenticated realtime read" ON realtime.messages;
-CREATE POLICY "Authenticated realtime read"
-ON realtime.messages
-FOR SELECT
-TO authenticated
-USING (true);
+-- realtime.messages is owned and migrated by the managed Supabase Realtime
+-- service. Fresh hosted projects intentionally deny the migration role ALTER
+-- privileges on this system table. Application tenant isolation remains on the
+-- public source tables and their RLS policies; do not install a broad USING
+-- (true) policy on the managed Realtime schema.

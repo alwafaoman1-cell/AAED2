@@ -45,7 +45,7 @@ CREATE OR REPLACE FUNCTION public.ensure_portal_token()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_tok text;
 BEGIN
-  v_tok := encode(gen_random_bytes(32), 'hex');
+  v_tok := encode(extensions.gen_random_bytes(32), 'hex');
   INSERT INTO public.customer_portal_tokens (tenant_id, job_order_id, token)
   VALUES (NEW.tenant_id, NEW.id, v_tok)
   ON CONFLICT (job_order_id) DO NOTHING;
@@ -59,7 +59,7 @@ CREATE TRIGGER trg_ensure_portal_token
 
 -- Backfill tokens for existing job orders
 INSERT INTO public.customer_portal_tokens (tenant_id, job_order_id, token)
-SELECT jo.tenant_id, jo.id, encode(gen_random_bytes(32), 'hex')
+SELECT jo.tenant_id, jo.id, encode(extensions.gen_random_bytes(32), 'hex')
 FROM public.job_orders jo
 LEFT JOIN public.customer_portal_tokens t ON t.job_order_id = jo.id
 WHERE t.id IS NULL;
