@@ -165,6 +165,44 @@ export interface AccountingPostingRule {
   is_active: boolean;
   priority: number;
   configuration: Record<string, unknown>;
+  description_ar?: string | null;
+  description_en?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+}
+
+export interface AccountingPostingPreviewLine {
+  line_number: number;
+  side: "debit" | "credit";
+  mapping_key: string;
+  account_id: string;
+  description: string | null;
+  debit: number;
+  credit: number;
+  party_type: string | null;
+  party_id: string | null;
+  claim_id: string | null;
+  work_order_id: string | null;
+  vehicle_id: string | null;
+  invoice_id: string | null;
+  expense_id: string | null;
+  payment_id: string | null;
+}
+
+export interface AccountingPostingPreview {
+  tenant_id: string;
+  source_type: AccountingSourceType;
+  source_id: string;
+  event_type: string;
+  accounting_date: string;
+  rule_id: string;
+  rule_key: string;
+  source: Record<string, unknown>;
+  lines: AccountingPostingPreviewLine[];
+  total_debit: number;
+  total_credit: number;
+  balanced: true;
+  write_performed: false;
 }
 
 export interface AccountingOpeningBalance {
@@ -242,6 +280,7 @@ export const ACCOUNTING_MAPPING_KEYS = [
   "operating_expense",
   "discounts",
   "credit_notes",
+  "payment_clearing",
 ] as const;
 
 export type AccountingMappingKey = (typeof ACCOUNTING_MAPPING_KEYS)[number];

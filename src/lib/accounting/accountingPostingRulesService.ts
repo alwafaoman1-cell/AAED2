@@ -21,3 +21,27 @@ export async function createInactiveAccountingPostingRule(input: {
   } as never).select("*").single();
   return unwrapAccountingResult<AccountingPostingRule>(result, "ACCOUNTING_POSTING_RULE_CREATE_FAILED");
 }
+
+export async function updateAccountingPostingRule(input: {
+  tenantId: string;
+  ruleId: string;
+  isActive: boolean;
+  priority?: number;
+  configuration?: Record<string, unknown>;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+}): Promise<AccountingPostingRule> {
+  const result = await supabase.from("accounting_posting_rules" as never).update({
+    is_active: input.isActive,
+    ...(input.priority === undefined ? {} : { priority: input.priority }),
+    ...(input.configuration === undefined ? {} : { configuration: input.configuration }),
+    ...(input.effectiveFrom === undefined ? {} : { effective_from: input.effectiveFrom }),
+    ...(input.effectiveTo === undefined ? {} : { effective_to: input.effectiveTo }),
+    updated_at: new Date().toISOString(),
+  } as never)
+    .eq("tenant_id", requireTenantId(input.tenantId))
+    .eq("id", input.ruleId)
+    .select("*")
+    .single();
+  return unwrapAccountingResult<AccountingPostingRule>(result, "ACCOUNTING_POSTING_RULE_UPDATE_FAILED");
+}
