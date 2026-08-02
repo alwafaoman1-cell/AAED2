@@ -43,6 +43,10 @@ export const queryKeys = {
     detail: (id?: string | null) => ["job_orders", "detail", id ?? ""] as const,
     inline: (workOrderId?: string | null) => ["job_order_inline", workOrderId ?? ""] as const,
   },
+  workOrderFinancials: {
+    detail: (tenantId?: string | null, workOrderId?: string | null, claimId?: string | null) =>
+      ["work_order_financials", tenantId ?? "", workOrderId ?? "", claimId ?? ""] as const,
+  },
   insuranceCompanies: {
     all: ["insurance_companies"] as const,
     detail: (id?: string | null) => ["insurance_companies", id ?? ""] as const,

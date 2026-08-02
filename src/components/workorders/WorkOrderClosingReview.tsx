@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, FilePlus2, Lock, Save } from "lucide-react";
+import { AlertTriangle, FilePlus2, Lock, RefreshCw, Save, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,10 @@ import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { toast } from "sonner";
 import { isUuid } from "@/lib/uuid";
 import { isInsuranceWorkOrder } from "@/lib/workOrderType";
+import { useWorkOrderFinancials } from "@/hooks/useWorkOrderFinancials";
+import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
+import { paymentTargetFromWorkOrderInvoice } from "@/lib/paymentTargets";
+import type { WorkOrderLinkedInvoice } from "@/lib/workOrderFinancials";
 
 export const CLOSING_STATUSES = ["جاهز للتسليم", "تم التسليم", "مغلق", "Ready", "Completed", "Delivered", "Closed"];
 
@@ -48,17 +52,25 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
   const [skipInvoice, setSkipInvoice] = useState(false);
   const [skipReason, setSkipReason] = useState("");
   const [saving, setSaving] = useState(false);
+  const [paymentInvoice, setPaymentInvoice] = useState<WorkOrderLinkedInvoice | null>(null);
+  const financialQuery = useWorkOrderFinancials(order);
+  const financials = financialQuery.data;
 
   const manualTotal = Number(manualSpare || 0) + Number(manualLabour || 0) + Number(manualOther || 0);
-  const revenue = row?.revenueExVat || 0;
+  const revenue = financials?.subtotal ?? 0;
   const finalTotal = source === "Manual Final Cost" ? manualTotal : row?.totalCost || 0;
   const netProfit = revenue - finalTotal;
-  const hasInvoice = !!row?.hasInvoice;
-  const hasPayments = !!row && row.paidAmount > 0;
-  const isInsurance = isInsuranceWorkOrder(order);
+  const hasInvoice = !!financials?.invoices.length;
+  const hasPayments = Number(financials?.paid || 0) > 0;
+  const isInsurance = isInsuranceWorkOrder(order) || !!financials?.invoices.some((invoice) => invoice.kind === "insurance_invoice");
+  const paymentTarget = useMemo(() => paymentInvoice ? paymentTargetFromWorkOrderInvoice(paymentInvoice) : null, [paymentInvoice]);
 
   const confirm = async () => {
     if (!row) return;
+    if (!financialQuery.isSuccess) {
+      toast.error("لم تكتمل مزامنة الفواتير والدفعات بعد");
+      return;
+    }
     if (!source) return;
     if (source === "Manual Final Cost" && !manualReason.trim()) return;
     if (!isInsurance && !hasInvoice && !skipInvoice) return;
@@ -68,10 +80,10 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       workOrderNumber: row.workOrderNumber,
       targetStatus,
       revenueExVat: revenue,
-      vatOutput: row.vatOutput,
-      invoiceTotal: row.invoiceTotal,
-      paidAmount: row.paidAmount,
-      outstandingAmount: row.outstandingAmount,
+      vatOutput: financials?.vat || 0,
+      invoiceTotal: financials?.total || 0,
+      paidAmount: financials?.paid || 0,
+      outstandingAmount: financials?.remaining || 0,
       estimatedSparePartsCost: row.estimatedSparePartsCost,
       actualSparePartsCost: row.actualSparePartsCost,
       estimatedLabourCost: row.estimatedLabourCost,
@@ -96,7 +108,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       const { error: auditError } = await (supabase.from("work_order_closing_audit" as any) as any).insert({
         tenant_id: tenantId,
         work_order_id: order.cloudId || order.id,
-        invoice_id: Array.isArray((row as any).invoiceIds) && isUuid((row as any).invoiceIds[0]) ? (row as any).invoiceIds[0] : null,
+        invoice_id: financials?.invoices[0]?.id && isUuid(financials.invoices[0].id) ? financials.invoices[0].id : null,
         user_id: authData.user?.id || null,
         action: "closing_review_approved",
         details: {
@@ -159,11 +171,13 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
   }
 
   const canConfirm =
+    financialQuery.isSuccess &&
     !!source &&
     (source !== "Manual Final Cost" || !!manualReason.trim()) &&
     (isInsurance || hasInvoice || (skipInvoice && canApproveSkip && !!skipReason.trim()));
 
   return (
+    <>
     <Card className="space-y-4 border-primary/30 bg-primary/5 p-4">
       <div>
         <h3 className="text-base font-bold">Work Order Closing Review</h3>
@@ -202,6 +216,45 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
           <p className="font-bold">{hasActualExpenses ? "Use Actual Expenses" : "Estimate Only - not accounting actual"}</p>
         </div>
       </div>
+
+      {financialQuery.isLoading && (
+        <div className="rounded-lg border border-info/30 bg-info/5 p-3 text-sm text-info">
+          جاري مزامنة الفواتير والدفعات المرتبطة بأمر العمل...
+        </div>
+      )}
+      {financialQuery.isError && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          <span className="text-destructive">تعذر جلب الفواتير والدفعات المرتبطة. لن يتم اعتماد الإغلاق قبل اكتمال المزامنة.</span>
+          <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={() => void financialQuery.refetch()}>
+            <RefreshCw size={14} /> إعادة المحاولة
+          </Button>
+        </div>
+      )}
+      {!!financials?.invoices.length && (
+        <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+          <p className="text-sm font-semibold">الفواتير المرتبطة فعليًا</p>
+          {financials.invoices.map((invoice) => (
+            <div key={`${invoice.kind}:${invoice.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
+              <div>
+                <div className="font-semibold">{invoice.number}</div>
+                <div className="text-xs text-muted-foreground">
+                  {invoice.kind === "insurance_invoice" ? "فاتورة تأمين" : "فاتورة كاش"} · الإجمالي {formatOMR(invoice.total)} · المدفوع {formatOMR(invoice.paid)} · المتبقي {formatOMR(invoice.remaining)}
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                disabled={invoice.remaining <= 0.001}
+                onClick={() => setPaymentInvoice(invoice)}
+              >
+                <Wallet size={14} /> {invoice.remaining <= 0.001 ? "مدفوعة بالكامل" : "إضافة عملية دفع"}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground">مصدر التكلفة النهائي</label>
@@ -294,6 +347,17 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
         </Button>
       </div>
     </Card>
+    <UnifiedAddPaymentDialog
+      open={!!paymentInvoice}
+      onOpenChange={(open) => { if (!open) setPaymentInvoice(null); }}
+      initialTarget={paymentTarget}
+      lockInitialTarget
+      onSaved={() => {
+        setPaymentInvoice(null);
+        void financialQuery.refetch();
+      }}
+    />
+    </>
   );
 }
 

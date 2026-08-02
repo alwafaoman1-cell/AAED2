@@ -11,45 +11,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { salesStore } from "@/lib/salesStore";
 import { useCreateClaimPayment, type PaymentMethod } from "@/hooks/useClaimPayments";
 import { toast } from "sonner";
-
-type PaymentTarget =
-  | {
-      kind: "sales_invoice";
-      id: string;
-      number: string;
-      customerId: string | null;
-      customerName: string;
-      vehicleId: string | null;
-      vehiclePlate: string | null;
-      workOrderId: string | null;
-      claimId: null;
-      invoiceId: string;
-      total: number;
-      paid: number;
-      remaining: number;
-    }
-  | {
-      kind: "insurance_claim";
-      id: string;
-      number: string;
-      customerId: string;
-      customerName: string;
-      vehicleId: string | null;
-      vehiclePlate: string | null;
-      workOrderId: string | null;
-      claimId: string;
-      invoiceId: null;
-      insuranceCompanyId: string | null;
-      insuranceCompany: string;
-      total: number;
-      paid: number;
-      remaining: number;
-    };
+import type { PaymentTarget } from "@/lib/paymentTargets";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved?: () => void;
+  initialTarget?: PaymentTarget | null;
+  lockInitialTarget?: boolean;
 }
 
 const METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
@@ -67,7 +36,7 @@ function normalizeSearch(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
 
-export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }: Props) {
+export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, initialTarget = null, lockInitialTarget = false }: Props) {
   const createClaimPayment = useCreateClaimPayment();
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -89,8 +58,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }:
   useEffect(() => {
     if (!open) return;
     setQuery("");
-    setTargets([]);
-    setSelectedKey("");
+    setTargets(initialTarget ? [initialTarget] : []);
+    setSelectedKey(initialTarget ? `${initialTarget.kind}:${initialTarget.id}` : "");
     setAmount("");
     setMethod("cash");
     setDate(new Date().toISOString().slice(0, 10));
@@ -104,12 +73,12 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }:
         setTenantId(String(data));
       }
     });
-  }, [open]);
+  }, [open, initialTarget]);
 
   useEffect(() => {
     if (!selected) return;
     setAmount(selected.remaining > 0 ? selected.remaining.toFixed(3) : "");
-  }, [selectedKey]);
+  }, [selected]);
 
   async function runSearch() {
     const needle = normalizeSearch(query);
@@ -289,6 +258,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }:
     setSaving(true);
     try {
       if (selected.kind === "sales_invoice") {
+        const refreshed = await salesStore.refreshOne(selected.invoiceId);
+        if (!refreshed) throw new Error("الفاتورة المرتبطة غير موجودة أو لم تعد متاحة");
         await salesStore.addPayment(selected.invoiceId, {
           amount: value,
           method,
@@ -326,7 +297,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }:
           <DialogTitle>إضافة دفعة موحدة</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+        {!lockInitialTarget && <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
           <div className="relative">
             <Search className="absolute top-2.5 right-3 h-4 w-4 text-muted-foreground" />
             <Input
@@ -338,7 +309,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved }:
             />
           </div>
           <Button onClick={runSearch} disabled={loading}>{loading ? "جاري البحث..." : "بحث"}</Button>
-        </div>
+        </div>}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="space-y-2">

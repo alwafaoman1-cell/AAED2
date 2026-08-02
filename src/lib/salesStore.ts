@@ -250,6 +250,38 @@ async function refreshSalesFromCloud() {
   return cloudRefreshInFlight;
 }
 
+async function refreshSalesDocumentFromCloud(id: string): Promise<SalesDoc | null> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId || !isUuid(id)) return null;
+  const { data: row, error } = await (supabase.from("sales_documents") as any)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!row) return null;
+
+  const { data: paymentRows, error: paymentsError } = await (supabase.from("sales_payments") as any)
+    .select("id,date,amount,method,reference,notes")
+    .eq("tenant_id", tenantId)
+    .eq("sales_document_id", id)
+    .order("date", { ascending: false });
+  if (paymentsError) throw paymentsError;
+
+  const doc = rowToSalesDoc(row);
+  doc.payments = (paymentRows || []).map((payment: any) => ({
+    id: payment.id,
+    date: payment.date,
+    amount: Number(payment.amount || 0),
+    method: payment.method || "cash",
+    reference: payment.reference || undefined,
+    note: payment.notes || undefined,
+  }));
+  const next = read().filter((item) => item.id !== doc.id);
+  write([doc, ...next]);
+  return doc;
+}
+
 function scheduleSalesRefresh(delay = 250) {
   if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
   if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) return;
@@ -367,6 +399,9 @@ export const salesStore = {
   },
   async refresh() {
     await refreshSalesFromCloud();
+  },
+  async refreshOne(id: string) {
+    return refreshSalesDocumentFromCloud(id);
   },
   list(filter?: { type?: SalesDocType; includeDeleted?: boolean }): SalesDoc[] {
     const all = read();

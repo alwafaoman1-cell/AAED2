@@ -22,6 +22,7 @@ import {
   MessageCircle,
   Eye,
   Send,
+  Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -88,6 +89,10 @@ import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { classifyWorkOrderCosts, splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
 import { fetchUnifiedOperationalState, listUnifiedVehicleMedia, type UnifiedMediaRecord } from "@/lib/claimWorkOrderUnified";
+import { useWorkOrderFinancials } from "@/hooks/useWorkOrderFinancials";
+import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
+import { paymentTargetFromWorkOrderInvoice } from "@/lib/paymentTargets";
+import type { WorkOrderLinkedInvoice } from "@/lib/workOrderFinancials";
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
 
@@ -216,6 +221,8 @@ export default function WorkOrderDetail() {
   const [deliveryReceiptOpen, setDeliveryReceiptOpen] = useState(false);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
   const [convertPart, setConvertPart] = useState<NeededPart | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<WorkOrderLinkedInvoice | null>(null);
+  const financialQuery = useWorkOrderFinancials(order);
 
   const allowEdit = canEdit();
   const allowDelete = canDelete();
@@ -395,6 +402,12 @@ export default function WorkOrderDetail() {
       .list({ type: "quote", includeDeleted: false })
       .find((d) => d.fromDocId === key || (d.notes || "").includes(tag));
   }, [order, salesTick]);
+  const primaryFinancialInvoice = financialQuery.data?.invoices[0] || null;
+  const payableFinancialInvoice = financialQuery.data?.invoices.find((invoice) => invoice.remaining > 0.001) || null;
+  const paymentTarget = useMemo(
+    () => paymentInvoice ? paymentTargetFromWorkOrderInvoice(paymentInvoice) : null,
+    [paymentInvoice],
+  );
 
   // ابحث عن مطالبة تأمين مرتبطة بهذا الأمر (عبر رقم المطالبة أو job_order_id)
   const [linkedClaim, setLinkedClaim] = useState<{ id: string; claim_number: string } | null>(null);
@@ -750,13 +763,15 @@ export default function WorkOrderDetail() {
                   size="sm"
                   variant="outline"
                   className={
-                    linkedInvoice
+                    linkedInvoice || primaryFinancialInvoice
                       ? "h-9 gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
                       : "h-9 gap-1.5 border-success/40 text-success hover:bg-success/10"
                   }
                 >
-                  {linkedInvoice ? <Receipt size={14} /> : <FilePlus2 size={14} />}
-                  {linkedInvoice ? `الفاتورة ${linkedInvoice.number}` : "فاتورة"}
+                  {linkedInvoice || primaryFinancialInvoice ? <Receipt size={14} /> : <FilePlus2 size={14} />}
+                  {linkedInvoice || primaryFinancialInvoice
+                    ? `الفاتورة ${linkedInvoice?.number || primaryFinancialInvoice?.number}`
+                    : "فاتورة"}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-72">
@@ -790,6 +805,25 @@ export default function WorkOrderDetail() {
                         <span className="text-sm font-semibold">تعديل الفاتورة</span>
                         <span className="text-[10px] text-muted-foreground">
                           تعديل البنود والمدفوعات والإعدادات
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                {!linkedInvoice && primaryFinancialInvoice?.kind === "insurance_invoice" && (
+                  <>
+                    <DropdownMenuLabel className="text-xs">الفاتورة التأمينية المرتبطة</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => primaryFinancialInvoice.claimId && navigate(`/insurance/${primaryFinancialInvoice.claimId}?tab=payments`)}
+                      className="gap-2"
+                    >
+                      <Eye size={14} className="text-info" />
+                      <div className="flex flex-col">
+                        <span className="text-sm font-semibold">فتح الفاتورة والتحصيل</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          إجمالي: {primaryFinancialInvoice.total.toFixed(3)} — متبقي: {primaryFinancialInvoice.remaining.toFixed(3)}
                         </span>
                       </div>
                     </DropdownMenuItem>
@@ -834,6 +868,17 @@ export default function WorkOrderDetail() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 gap-1.5 border-success/40 text-success hover:bg-success/10"
+              disabled={financialQuery.isLoading || !payableFinancialInvoice}
+              onClick={() => payableFinancialInvoice && setPaymentInvoice(payableFinancialInvoice)}
+              title={payableFinancialInvoice ? `إضافة دفعة إلى ${payableFinancialInvoice.number}` : "لا توجد فاتورة مرتبطة برصيد مستحق"}
+            >
+              <Wallet size={14} /> إضافة عملية دفع
+            </Button>
 
             {/* عرض السعر */}
             <DropdownMenu>
@@ -1472,6 +1517,17 @@ export default function WorkOrderDetail() {
         open={deliveryReceiptOpen}
         onOpenChange={setDeliveryReceiptOpen}
         order={order}
+      />
+
+      <UnifiedAddPaymentDialog
+        open={!!paymentInvoice}
+        onOpenChange={(open) => { if (!open) setPaymentInvoice(null); }}
+        initialTarget={paymentTarget}
+        lockInitialTarget
+        onSaved={() => {
+          setPaymentInvoice(null);
+          void financialQuery.refetch();
+        }}
       />
 
       <ConfirmDeleteDialog
