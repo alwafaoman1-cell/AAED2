@@ -1,10 +1,4 @@
 {
-  "build": {
-    "env": {
-      "VITE_ACCOUNTING_SETUP_ENABLED": "true",
-      "VITE_ACCOUNTING_REPORTS_ENABLED": "true"
-    }
-  },
   "headers": [
     {
       "source": "/",
