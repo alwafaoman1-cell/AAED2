@@ -41,25 +41,34 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
   const [draftNotes, setDraftNotes] = useState("");
   const [bulkText, setBulkText] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [partSaving, setPartSaving] = useState(false);
 
   const parts = order.partsNeeded || [];
 
-  function handleAdd() {
+  async function handleAdd() {
     const name = draftName.trim();
     if (!name) {
       toast.error("اكتب اسم القطعة أولاً");
       return;
     }
-    addNeededPartToOrder(order.id, {
-      name,
-      quantity: Math.max(1, Number(draftQty) || 1),
-      notes: draftNotes.trim() || undefined,
-      status: "pending",
-    });
-    setDraftName("");
-    setDraftQty(1);
-    setDraftNotes("");
-    toast.success("تمت إضافة القطعة");
+    setPartSaving(true);
+    try {
+      const added = await addNeededPartToOrder(order.id, {
+        name,
+        quantity: Math.max(1, Number(draftQty) || 1),
+        notes: draftNotes.trim() || undefined,
+        status: "pending",
+      });
+      if (!added) throw new Error("أمر العمل غير موجود");
+      setDraftName("");
+      setDraftQty(1);
+      setDraftNotes("");
+      toast.success("تم حفظ القطعة ومزامنتها");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ القطعة في Supabase");
+    } finally {
+      setPartSaving(false);
+    }
   }
 
   function handleStatus(partId: string, s: NeededPartStatus) {
@@ -177,10 +186,11 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
           />
           <Button
             size="sm"
-            onClick={handleAdd}
+            onClick={() => void handleAdd()}
+            disabled={partSaving}
             className="col-span-2 h-9 gradient-gold text-primary-foreground gap-1"
           >
-            <Plus size={14} /> إضافة
+            <Plus size={14} /> {partSaving ? "جاري الحفظ..." : "إضافة"}
           </Button>
         </div>
         <div className="rounded-lg border border-dashed border-info/40 bg-info/5 p-2">

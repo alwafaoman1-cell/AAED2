@@ -47,4 +47,22 @@ describe("data sync performance contract", () => {
     expect(vehiclesPage).toContain("refreshVehiclesFromCloud");
     expect(workOrdersPage).toContain("refreshWorkOrdersFromCloud");
   });
+
+  it("syncs supervisor needed-parts changes into the desktop compatibility cache", () => {
+    const realtime = read("src/hooks/useRealtimeSync.ts");
+    const supervisor = read("src/pages/apps/SupervisorApp.tsx");
+    const store = read("src/lib/workOrdersStore.ts");
+    const manager = read("src/components/workorders/NeededPartsManager.tsx");
+
+    expect(realtime).toContain('scope: "supervisor"');
+    expect(realtime).toContain('tables: ["job_orders", "job_order_parts"]');
+    expect(realtime).toContain("applyWorkOrderRealtimeChange(payload)");
+    expect(supervisor).toContain("useRealtimeSync();");
+    expect(supervisor).not.toContain("setInterval(() => { refreshWorkOrdersFromCloud(); }, 30000)");
+    expect(store).toContain("export async function applyWorkOrderRealtimeChange");
+    expect(store).toContain("async function saveNeededPartsToCloud");
+    expect(store).toContain('.update({ parts_needed: partsNeeded as any })');
+    expect(manager).toContain("await addNeededPartToOrder");
+    expect(manager).toContain("تم حفظ القطعة ومزامنتها");
+  });
 });

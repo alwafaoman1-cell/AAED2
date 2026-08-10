@@ -50,6 +50,11 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
     tables: ["job_orders"],
   },
   {
+    scope: "supervisor",
+    test: (path) => path === "/supervisor" || path === "/supervisor-app",
+    tables: ["job_orders", "job_order_parts"],
+  },
+  {
     scope: "claim_detail",
     test: (path) =>
       /^\/insurance\/claims\/[^/]+/.test(path) ||
@@ -147,7 +152,17 @@ export function useRealtimeSync() {
     for (const table of realtimeScope.tables) {
       const keys = TABLES_TO_KEYS[table];
       if (!keys) continue;
-      channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, () => schedule(keys));
+      channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, (payload) => {
+        // Work-order screens still consume the compatibility store. Apply the
+        // changed row directly so another device is reflected immediately;
+        // query invalidation alone does not update that store.
+        if (table === "job_orders") {
+          void import("@/lib/workOrdersStore")
+            .then(({ applyWorkOrderRealtimeChange }) => applyWorkOrderRealtimeChange(payload))
+            .catch((error) => console.warn("[realtime:job_orders]", error));
+        }
+        schedule(keys);
+      });
     }
 
     channel.subscribe();

@@ -45,10 +45,12 @@ import { nextWorkOrderNumber } from "@/lib/numbering";
 import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
 import QrLabel from "@/components/workorders/QrLabel";
 import { toast } from "sonner";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 
 const SERVICE_TYPES = ["حادث", "صيانة", "كهرباء", "فحص", "ميكانيكا", "صبغ", "غسيل"] as const;
 
 export default function SupervisorApp() {
+  useRealtimeSync();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const isAr = i18n.language?.startsWith("ar");
@@ -65,9 +67,7 @@ export default function SupervisorApp() {
       expensesStore.subscribe(() => force((n) => n + 1)),
       subscribeWorkOrders(() => force((n) => n + 1)),
     ];
-    // مزامنة دورية كل 30 ثانية كحماية إضافية ضد البيانات القديمة
-    const interval = setInterval(() => { refreshWorkOrdersFromCloud(); }, 30000);
-    return () => { subs.forEach((u) => u()); clearInterval(interval); };
+    return () => { subs.forEach((u) => u()); };
   }, []);
 
 

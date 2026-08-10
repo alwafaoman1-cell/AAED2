@@ -305,10 +305,11 @@ export function updateWorkOrder(id: string, patch: Partial<WorkOrder>) {
 }
 
 // ===== Needed Parts direct helpers (independent additions/edits) =====
-export function addNeededPartToOrder(orderId: string, part: Omit<NeededPart, "id"> & { id?: string }): NeededPart | null {
+export async function addNeededPartToOrder(orderId: string, part: Omit<NeededPart, "id"> & { id?: string }): Promise<NeededPart | null> {
   const list = load();
   const idx = findWorkOrderIndex(orderId);
   if (idx < 0) return null;
+  const originalOrder = list[idx];
   const newPart: NeededPart = {
     id: part.id || `NP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     name: part.name || "",
@@ -320,8 +321,18 @@ export function addNeededPartToOrder(orderId: string, part: Omit<NeededPart, "id
   const partsNeeded = [...(list[idx].partsNeeded || []), newPart];
   list[idx] = { ...list[idx], partsNeeded };
   persist();
-  pushPatchToCloudNow(list[idx].id, { partsNeeded });
-  return newPart;
+  if (!KNOWN_CLOUD_NUMBERS.has(list[idx].id)) return newPart;
+  try {
+    await saveNeededPartsToCloud(list[idx], partsNeeded);
+    return newPart;
+  } catch (error) {
+    const rollbackIdx = findWorkOrderIndex(orderId);
+    if (rollbackIdx >= 0) {
+      cache[rollbackIdx] = originalOrder;
+      persist();
+    }
+    throw error;
+  }
 }
 
 export function normalizeNeededPartNameForMatch(value: unknown): string {
@@ -382,7 +393,7 @@ export async function addNeededPartsBulkToOrder(
 
   if (KNOWN_CLOUD_NUMBERS.has(updatedOrder.id)) {
     try {
-      const saved = await saveWorkOrderToCloud(updatedOrder);
+      const saved = await saveNeededPartsToCloud(updatedOrder, partsNeeded);
       return { added, skipped, order: saved };
     } catch (error) {
       const rollbackList = load();
@@ -1210,6 +1221,119 @@ async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
     });
   }
   return mapCloudRow(row, custMap, vehMap, claimMap);
+}
+
+type WorkOrderRealtimePayload = {
+  eventType?: string;
+  new?: Record<string, any>;
+  old?: Record<string, any>;
+};
+
+/**
+ * Applies one Supabase Realtime job_orders event to the compatibility cache.
+ * This keeps the supervisor app, desktop list, and detail page on the same row
+ * without a full-table refetch for every event.
+ */
+export async function applyWorkOrderRealtimeChange(payload: WorkOrderRealtimePayload): Promise<void> {
+  const eventType = String(payload?.eventType || "").toUpperCase();
+  const row = payload?.new && Object.keys(payload.new).length ? payload.new : payload?.old;
+  if (!row) return;
+
+  if (eventType === "DELETE") {
+    const before = cache.length;
+    cache = cache.filter((order) =>
+      order.cloudId !== row.id &&
+      order.id !== row.order_number &&
+      order.displayNumber !== row.order_number
+    );
+    if (cache.length !== before) persist();
+    return;
+  }
+
+  const idx = cache.findIndex((order) =>
+    (row.id && order.cloudId === row.id) ||
+    (row.order_number && (order.id === row.order_number || order.displayNumber === row.order_number))
+  );
+
+  if (idx < 0) {
+    const inserted = await mapSavedJobOrder(row);
+    upsertWorkOrderInCache(inserted);
+    return;
+  }
+
+  const current = cache[idx];
+  const custMap = new Map<string, { name: string; phone?: string | null }>();
+  if (row.customer_id) custMap.set(row.customer_id, { name: current.customer, phone: current.phone });
+  const vehMap = new Map<string, {
+    plate?: string | null;
+    brand?: string | null;
+    model?: string | null;
+    year?: number | null;
+    vin?: string | null;
+    color?: string | null;
+    imageUrl?: string | null;
+    thumbnailUrl?: string | null;
+  }>();
+  if (row.vehicle_id) {
+    vehMap.set(row.vehicle_id, {
+      plate: current.plate,
+      brand: current.vehicleType,
+      model: current.model,
+      year: current.year ? Number(current.year) : null,
+      vin: current.vin,
+      color: current.color,
+      imageUrl: current.vehicleImageUrl,
+      thumbnailUrl: current.vehicleThumbnailUrl,
+    });
+  }
+  const claimMap = new Map<string, ClaimApprovalInfo>();
+  if (row.claim_id) {
+    claimMap.set(row.claim_id, {
+      approvedAmount: current.insuranceApprovedAmount ?? null,
+      estimatedAmount: null,
+      estimationType: current.insuranceApprovalMode ?? null,
+    });
+  }
+
+  const mapped = mapCloudRow(row, custMap, vehMap, claimMap);
+  const pendingPatch = _pendingPatches.get(mapped.id);
+  cache[idx] = pendingPatch ? { ...mapped, ...pendingPatch } : mapped;
+  KNOWN_CLOUD_NUMBERS.add(mapped.id);
+  persist();
+}
+
+async function saveNeededPartsToCloud(order: WorkOrder, partsNeeded: NeededPart[]): Promise<WorkOrder> {
+  const ctx = await tenantContext();
+  if (!ctx) throw new Error("تعذر تحديد الورشة الحالية");
+
+  let query = supabase
+    .from("job_orders")
+    .update({ parts_needed: partsNeeded as any })
+    .eq("tenant_id", ctx.tenantId);
+  query = order.cloudId && isUuid(order.cloudId)
+    ? query.eq("id", order.cloudId)
+    : query.eq("order_number", order.id);
+
+  const { data, error } = await query.select("*").maybeSingle();
+  if (error) throw error;
+  if (!data?.id) throw new Error("تم الحفظ لكن تعذر تأكيد مزامنة قطع الغيار");
+
+  await applyWorkOrderRealtimeChange({ eventType: "UPDATE", new: data });
+  const saved = getWorkOrderById(data.id) || getWorkOrderById(data.order_number) || order;
+
+  if (saved.claimId) {
+    await upsertUnifiedOperationalState({
+      tenantId: ctx.tenantId,
+      claimId: saved.claimId,
+      workOrderId: saved.cloudId || data.id,
+      vehicleId: saved.vehicleId || null,
+      customerId: saved.customerId || null,
+      changedFrom: "work_order",
+      patch: { parts_required: partsNeeded },
+    });
+  }
+
+  return saved;
 }
 
 export async function fetchWorkOrderFromCloudByIdentifier(identifier: string): Promise<WorkOrder | null> {
