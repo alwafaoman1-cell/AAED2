@@ -305,6 +305,38 @@ export function updateWorkOrder(id: string, patch: Partial<WorkOrder>) {
 }
 
 // ===== Needed Parts direct helpers (independent additions/edits) =====
+const neededPartsWriteQueue = new Map<string, Promise<WorkOrder>>();
+
+function discardPendingNeededPartsPatch(orderNumber: string) {
+  const pending = _pendingPatches.get(orderNumber);
+  if (!pending || pending.partsNeeded === undefined) return;
+  const { partsNeeded: _discarded, ...remaining } = pending;
+  if (Object.keys(remaining).length) {
+    _pendingPatches.set(orderNumber, remaining);
+  } else {
+    _pendingPatches.delete(orderNumber);
+    const timer = _patchTimers.get(orderNumber);
+    if (timer) clearTimeout(timer);
+    _patchTimers.delete(orderNumber);
+  }
+}
+
+function queueNeededPartsCloudSave(order: WorkOrder, partsNeeded: NeededPart[]): Promise<WorkOrder> {
+  const key = order.cloudId || order.id;
+  discardPendingNeededPartsPatch(order.id);
+  const previous = neededPartsWriteQueue.get(key);
+  const write = (previous ? previous.catch(() => order) : Promise.resolve(order))
+    .then(() => {
+      const latest = getWorkOrderById(order.cloudId || "") || getWorkOrderById(order.id) || order;
+      return saveNeededPartsToCloud(latest, partsNeeded);
+    });
+  neededPartsWriteQueue.set(key, write);
+  void write.finally(() => {
+    if (neededPartsWriteQueue.get(key) === write) neededPartsWriteQueue.delete(key);
+  }).catch(() => undefined);
+  return write;
+}
+
 export async function addNeededPartToOrder(orderId: string, part: Omit<NeededPart, "id"> & { id?: string }): Promise<NeededPart | null> {
   const list = load();
   const idx = findWorkOrderIndex(orderId);
@@ -323,7 +355,7 @@ export async function addNeededPartToOrder(orderId: string, part: Omit<NeededPar
   persist();
   if (!KNOWN_CLOUD_NUMBERS.has(list[idx].id)) return newPart;
   try {
-    await saveNeededPartsToCloud(list[idx], partsNeeded);
+    await queueNeededPartsCloudSave(list[idx], partsNeeded);
     return newPart;
   } catch (error) {
     const rollbackIdx = findWorkOrderIndex(orderId);
@@ -393,7 +425,7 @@ export async function addNeededPartsBulkToOrder(
 
   if (KNOWN_CLOUD_NUMBERS.has(updatedOrder.id)) {
     try {
-      const saved = await saveNeededPartsToCloud(updatedOrder, partsNeeded);
+      const saved = await queueNeededPartsCloudSave(updatedOrder, partsNeeded);
       return { added, skipped, order: saved };
     } catch (error) {
       const rollbackList = load();
@@ -410,10 +442,11 @@ export async function addNeededPartsBulkToOrder(
   return { added, skipped, order: updatedOrder };
 }
 
-export function updateNeededPartInOrder(orderId: string, partId: string, patch: Partial<NeededPart>) {
+export async function updateNeededPartInOrder(orderId: string, partId: string, patch: Partial<NeededPart>): Promise<WorkOrder | null> {
   const list = load();
   const idx = findWorkOrderIndex(orderId);
-  if (idx < 0) return;
+  if (idx < 0) return null;
+  const originalOrder = list[idx];
   const parts = (list[idx].partsNeeded || []).map(p => {
     if (p.id !== partId) return p;
     const merged = { ...p, ...patch };
@@ -424,17 +457,49 @@ export function updateNeededPartInOrder(orderId: string, partId: string, patch: 
   });
   list[idx] = { ...list[idx], partsNeeded: parts };
   persist();
-  pushPatchToCloudNow(list[idx].id, { partsNeeded: parts });
+  if (!KNOWN_CLOUD_NUMBERS.has(list[idx].id) && !isUuid(list[idx].cloudId || "")) return list[idx];
+  try {
+    return await queueNeededPartsCloudSave(list[idx], parts);
+  } catch (error) {
+    const rollbackIdx = findWorkOrderIndex(orderId);
+    if (rollbackIdx >= 0) {
+      cache[rollbackIdx] = originalOrder;
+      persist();
+    }
+    throw error;
+  }
 }
 
-export function removeNeededPartFromOrder(orderId: string, partId: string) {
-  const list = load();
-  const idx = findWorkOrderIndex(orderId);
-  if (idx < 0) return;
+export async function removeNeededPartFromOrder(orderId: string, partId: string): Promise<boolean> {
+  let list = load();
+  let idx = findWorkOrderIndex(orderId);
+  if (idx < 0) {
+    await fetchWorkOrderFromCloudByIdentifier(orderId).catch(() => null);
+    list = load();
+    idx = findWorkOrderIndex(orderId);
+  }
+  if (idx < 0) throw new Error("أمر العمل غير موجود");
+  const originalOrder = list[idx];
+  const existed = (list[idx].partsNeeded || []).some((part) => part.id === partId);
+  if (!existed) return true;
   const partsNeeded = (list[idx].partsNeeded || []).filter(p => p.id !== partId);
   list[idx] = { ...list[idx], partsNeeded };
   persist();
-  pushPatchToCloudNow(list[idx].id, { partsNeeded });
+  if (!KNOWN_CLOUD_NUMBERS.has(list[idx].id) && !isUuid(list[idx].cloudId || "")) return true;
+  try {
+    const saved = await queueNeededPartsCloudSave(list[idx], partsNeeded);
+    if ((saved.partsNeeded || []).some((part) => part.id === partId)) {
+      throw new Error("تعذر تأكيد حذف القطعة من Supabase");
+    }
+    return true;
+  } catch (error) {
+    const rollbackIdx = findWorkOrderIndex(orderId);
+    if (rollbackIdx >= 0) {
+      cache[rollbackIdx] = originalOrder;
+      persist();
+    }
+    throw error;
+  }
 }
 
 export function addWorkOrder(order: WorkOrder) {
@@ -1322,15 +1387,21 @@ async function saveNeededPartsToCloud(order: WorkOrder, partsNeeded: NeededPart[
   const saved = getWorkOrderById(data.id) || getWorkOrderById(data.order_number) || order;
 
   if (saved.claimId) {
-    await upsertUnifiedOperationalState({
-      tenantId: ctx.tenantId,
-      claimId: saved.claimId,
-      workOrderId: saved.cloudId || data.id,
-      vehicleId: saved.vehicleId || null,
-      customerId: saved.customerId || null,
-      changedFrom: "work_order",
-      patch: { parts_required: partsNeeded },
-    });
+    try {
+      await upsertUnifiedOperationalState({
+        tenantId: ctx.tenantId,
+        claimId: saved.claimId,
+        workOrderId: saved.cloudId || data.id,
+        vehicleId: saved.vehicleId || null,
+        customerId: saved.customerId || null,
+        changedFrom: "work_order",
+        patch: { parts_required: partsNeeded },
+      });
+    } catch (error) {
+      // The authoritative job_orders write is already confirmed. A secondary
+      // claim mirror failure must not roll the deleted part back into the UI.
+      console.warn("[needed-parts unified mirror] primary write confirmed; mirror deferred", error);
+    }
   }
 
   return saved;
@@ -1641,18 +1712,6 @@ function pushPatchToCloud(orderNumber: string, patch: Partial<WorkOrder>) {
   if (existing) clearTimeout(existing);
   _patchTimers.set(orderNumber, setTimeout(() => _flushPatch(orderNumber), PATCH_DEBOUNCE_MS));
   ensurePendingPatchUnloadFlush();
-}
-
-function pushPatchToCloudNow(orderNumber: string, patch: Partial<WorkOrder>) {
-  if (!KNOWN_CLOUD_NUMBERS.has(orderNumber)) return;
-  const existing = _patchTimers.get(orderNumber);
-  if (existing) {
-    clearTimeout(existing);
-    _patchTimers.delete(orderNumber);
-  }
-  const prev = _pendingPatches.get(orderNumber) || {};
-  _pendingPatches.set(orderNumber, { ...prev, ...patch });
-  void _flushPatch(orderNumber);
 }
 
 let pendingPatchUnloadFlushInstalled = false;

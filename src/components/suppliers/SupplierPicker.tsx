@@ -115,12 +115,42 @@ async function findTableDuplicate(input: { name: string; phone?: string; taxNumb
   ));
 }
 
-async function ensureTableSupplier(input: { name: string; phone?: string; taxNumber?: string; category?: string }) {
+function parseVehicleBrands(value: string): string[] {
+  return Array.from(new Set(
+    value
+      .split(/[,،؛;|\n]+/)
+      .map((brand) => brand.trim())
+      .filter(Boolean),
+  ));
+}
+
+async function ensureTableSupplier(input: {
+  name: string;
+  phone?: string;
+  taxNumber?: string;
+  category?: string;
+  vehicleBrands?: string[];
+}) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("لا يمكن تحديد الورشة الحالية");
 
   const duplicate = await findTableDuplicate(input);
-  if (duplicate?.id) return mapTableSupplier(duplicate);
+  const requestedBrands = Array.from(new Set((input.vehicleBrands || []).map((brand) => brand.trim()).filter(Boolean)));
+  if (duplicate?.id) {
+    const currentBrands = Array.isArray(duplicate.vehicle_brands) ? duplicate.vehicle_brands : [];
+    const mergedBrands = Array.from(new Set([...currentBrands, ...requestedBrands]));
+    if (mergedBrands.length !== currentBrands.length) {
+      const { data, error } = await (supabase.from("suppliers") as any)
+        .update({ vehicle_brands: mergedBrands })
+        .eq("tenant_id", tenantId)
+        .eq("id", duplicate.id)
+        .select("id,name,phone,tax_number,category,notes,vehicle_brands,is_active")
+        .single();
+      if (error) throw error;
+      return mapTableSupplier(data);
+    }
+    return mapTableSupplier(duplicate);
+  }
 
   const { data, error } = await (supabase.from("suppliers") as any)
     .insert({
@@ -129,6 +159,7 @@ async function ensureTableSupplier(input: { name: string; phone?: string; taxNum
       phone: input.phone?.trim() || null,
       tax_number: input.taxNumber?.trim() || null,
       category: input.category || "مصروفات",
+      vehicle_brands: requestedBrands,
       notes: "Added from expense supplier picker",
       is_active: true,
     })
@@ -182,6 +213,7 @@ export default function SupplierPicker({
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [newTaxNumber, setNewTaxNumber] = useState("");
+  const [newVehicleBrands, setNewVehicleBrands] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => suppliersStore.subscribe(() => {
@@ -248,6 +280,7 @@ export default function SupplierPicker({
             phone: supplier.phone || undefined,
             taxNumber: supplier.taxNumber || undefined,
             category: supplier.category || undefined,
+            vehicleBrands: supplier.vehicleBrands || [],
           });
 
       syncLegacySupplier(selected);
@@ -263,6 +296,7 @@ export default function SupplierPicker({
     setNewName(query.trim());
     setNewPhone("");
     setNewTaxNumber(taxNumber || "");
+    setNewVehicleBrands("");
     setAddOpen(true);
   };
 
@@ -276,9 +310,13 @@ export default function SupplierPicker({
     setSaving(true);
     try {
       const duplicate = await findTableDuplicate({ name, phone: newPhone, taxNumber: newTaxNumber });
-      const selected = duplicate?.id
-        ? mapTableSupplier(duplicate)
-        : await ensureTableSupplier({ name, phone: newPhone, taxNumber: newTaxNumber, category: "مصروفات" });
+      const selected = await ensureTableSupplier({
+        name,
+        phone: newPhone,
+        taxNumber: newTaxNumber,
+        category: "مصروفات",
+        vehicleBrands: parseVehicleBrands(newVehicleBrands),
+      });
 
       if (duplicate?.id) toast.info("المورد موجود مسبقًا وتم اختياره");
       else toast.success("تم إضافة المورد واختياره");
@@ -371,6 +409,15 @@ export default function SupplierPicker({
             <div className="space-y-1">
               <Label>الرقم الضريبي</Label>
               <Input value={newTaxNumber} onChange={(event) => setNewTaxNumber(event.target.value)} placeholder="OM..." />
+            </div>
+            <div className="space-y-1">
+              <Label>ماذا يبيع؟ / ماركات السيارات</Label>
+              <Input
+                value={newVehicleBrands}
+                onChange={(event) => setNewVehicleBrands(event.target.value)}
+                placeholder="مثال: لكزس، هيونداي، تويوتا"
+              />
+              <p className="text-[10px] text-muted-foreground">افصل بين الماركات بفاصلة. ستظهر هذه المعلومات في بحث الموردين.</p>
             </div>
           </div>
           <DialogFooter>

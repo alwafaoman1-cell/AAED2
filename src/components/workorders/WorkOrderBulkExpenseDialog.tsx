@@ -46,6 +46,7 @@ interface ExpenseItem {
   beneficiary: string;
   supplierId?: string;
   supplierTaxNumber?: string;
+  supplierInvoiceNumber?: string;
   description: string;
   amount: string;
   parts: PartLine[];
@@ -103,6 +104,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       beneficiary: "",
       supplierId: "",
       supplierTaxNumber: "",
+      supplierInvoiceNumber: "",
       description: "",
       amount: "",
       parts: [newPart()],
@@ -220,9 +222,14 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             supplierId: it.supplierId || undefined,
             supplierName: it.beneficiary || undefined,
             supplierTaxNumber: it.supplierTaxNumber || undefined,
+            supplierInvoiceNumber: it.supplierInvoiceNumber?.trim() || undefined,
             description: `${it.description ? it.description + " — " : ""}${p.name}${p.partNumber ? ` (#${p.partNumber})` : ""}`,
             photo: null,
-            linkedWorkOrderId: order.id,
+            linkedWorkOrderId: order.cloudId || order.id,
+            sourceWorkOrderId: order.cloudId || order.id,
+            customerId: order.customerId,
+            vehicleId: order.vehicleId,
+            claimId: order.claimId,
             linkedVehiclePlate: order.plate,
             linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
             partName: p.name,
@@ -249,8 +256,13 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           supplierId: it.supplierId || undefined,
           supplierName: it.beneficiary || undefined,
           supplierTaxNumber: it.supplierTaxNumber || undefined,
+          supplierInvoiceNumber: it.supplierInvoiceNumber?.trim() || undefined,
           description: it.description, photo: null,
-          linkedWorkOrderId: order.id,
+          linkedWorkOrderId: order.cloudId || order.id,
+          sourceWorkOrderId: order.cloudId || order.id,
+          customerId: order.customerId,
+          vehicleId: order.vehicleId,
+          claimId: order.claimId,
           linkedVehiclePlate: order.plate,
           linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
           createdAt: new Date().toISOString(),
@@ -400,6 +412,15 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
                       supplierTaxNumber: supplier.taxNumber || item.supplierTaxNumber,
                     })}
                     onClear={() => updateItem(item.id, { supplierId: "" })}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">رقم فاتورة المورد</Label>
+                  <Input
+                    value={item.supplierInvoiceNumber || ""}
+                    onChange={(e) => updateItem(item.id, { supplierInvoiceNumber: e.target.value })}
+                    placeholder="INV-..."
+                    className="font-mono"
                   />
                 </div>
                 {!partsCat && (

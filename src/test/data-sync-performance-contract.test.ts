@@ -65,4 +65,20 @@ describe("data sync performance contract", () => {
     expect(manager).toContain("await addNeededPartToOrder");
     expect(manager).toContain("تم حفظ القطعة ومزامنتها");
   });
+
+  it("waits for confirmed cloud deletion before reporting a required part as deleted", () => {
+    const store = read("src/lib/workOrdersStore.ts");
+    const manager = read("src/components/workorders/NeededPartsManager.tsx");
+
+    expect(store).toContain("neededPartsWriteQueue");
+    expect(store).toContain("discardPendingNeededPartsPatch(order.id)");
+    expect(store).toContain("primary write confirmed; mirror deferred");
+    expect(store).toContain("await queueNeededPartsCloudSave(list[idx], partsNeeded)");
+    expect(store).toContain("تعذر تأكيد حذف القطعة من Supabase");
+    expect(manager).toContain("await removeNeededPartFromOrder(order.id, partId)");
+    expect(manager).toContain("تم حذف القطعة نهائيًا من أمر العمل");
+    expect(manager.indexOf("await removeNeededPartFromOrder(order.id, partId)")).toBeLessThan(
+      manager.indexOf("تم حذف القطعة نهائيًا من أمر العمل"),
+    );
+  });
 });

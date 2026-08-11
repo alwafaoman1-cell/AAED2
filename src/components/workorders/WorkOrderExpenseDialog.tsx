@@ -67,7 +67,7 @@ function ensureWorkOrderCategories(): string {
 }
 
 export default function WorkOrderExpenseDialog({ order, open, onOpenChange, initialRequiredPart, onExpenseSaved }: Props) {
-  const [, force] = useState(0);
+  const [expenseTick, force] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState("");
@@ -100,6 +100,10 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     ];
     return () => subs.forEach((u) => u());
   }, []);
+
+  useEffect(() => {
+    if (open && !expensesStore.isHydrated()) void expensesStore.refresh();
+  }, [open]);
 
   // عند فتح الحوار: إنشاء التصنيفات إن لم توجد + تعيين الافتراضي
   useEffect(() => {
@@ -139,10 +143,11 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
 
   const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
-  const linkedExpenses = useMemo(
-    () => (order ? getExpensesForWorkOrder(order.id) : []),
-    [order, expensesStore.getAll().length]
-  );
+  const linkedExpenses = useMemo(() => {
+    // The store revision intentionally refreshes this derived external-store view.
+    void expenseTick;
+    return order ? getExpensesForWorkOrder(order) : [];
+  }, [order, expenseTick]);
   const linkedTotal = linkedExpenses.reduce((s, e) => s + e.amount, 0);
   const linkedProfit = linkedExpenses.reduce((s, e) => s + getExpensePartProfit(e), 0);
 
@@ -158,7 +163,6 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       const total = qty * cost;
       if (total > 0) setAmount(total.toFixed(3));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unitBuyPrice, partQty, isPartsCategory]);
 
   const handlePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -281,12 +285,15 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       categoryId, categoryName: cat?.name,
       cashboxId, cashboxName: cb?.cashboxName,
       paymentMethod, beneficiary: beneficiary.trim(), description, photo,
-      linkedWorkOrderId: order.id,
+      linkedWorkOrderId: order.cloudId || order.id,
       // ربط تلقائي للسيارة (مهم لتتبع تكلفة كل سيارة من قطع الغيار)
       linkedVehiclePlate: order.plate,
       linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
       requiredPartId: initialRequiredPart?.id,
       sourceWorkOrderId: order.cloudId || order.id,
+      customerId: order.customerId,
+      vehicleId: order.vehicleId,
+      claimId: order.claimId,
       sourceClaimId: order.claimId,
       convertedFromRequiredPart: !!initialRequiredPart,
       ...supplierFields,

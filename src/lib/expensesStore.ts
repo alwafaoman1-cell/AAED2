@@ -101,8 +101,16 @@ export function normalizeExpenseAccountingFields(e: ExpenseRecord): ExpenseRecor
 let cache: ExpenseRecord[] = [];
 let hydrated = false;
 const listeners = new Set<() => void>();
+let cacheRevision = 0;
+let hydrationRequest = 0;
+let hydrationPromise: Promise<void> | null = null;
+const deletedExpenseIds = new Set<string>();
 
 function notify() { listeners.forEach((l) => { try { l(); } catch {} }); }
+
+function markCacheChanged() {
+  cacheRevision += 1;
+}
 
 function persistLocal() {}
 
@@ -256,28 +264,49 @@ function isMissingAccountingColumnError(error: any): boolean {
 }
 
 async function hydrateFromCloud() {
-  try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData.session) {
+  if (hydrationPromise) return hydrationPromise;
+  const requestId = ++hydrationRequest;
+  const revisionAtStart = cacheRevision;
+  hydrationPromise = (async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        hydrated = true;
+        notify();
+        return;
+      }
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("tenant_not_found");
+      const { data, error } = await supabase
+        .from("expenses")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
+        .is("archived_at", null)
+        .order("date", { ascending: false });
+      if (error) throw error;
+      if (requestId !== hydrationRequest) return;
+      const cloud = (data || []).map(rowToRecord);
+      if (revisionAtStart === cacheRevision) {
+        cache = cloud.filter((expense) => !deletedExpenseIds.has(expense.id));
+      } else {
+        // Preserve saves/realtime changes that completed after this SELECT
+        // started. An older snapshot must never hide a newly saved voucher.
+        const merged = new Map(cloud.map((expense) => [expense.id, expense]));
+        for (const expense of cache) merged.set(expense.id, expense);
+        for (const deletedId of deletedExpenseIds) merged.delete(deletedId);
+        cache = Array.from(merged.values()).sort((a, b) => b.date.localeCompare(a.date));
+      }
       hydrated = true;
+      persistLocal();
       notify();
-      return;
+    } catch (e) {
+      if (!hydrated) notify();
     }
-    const { data, error } = await supabase
-      .from("expenses")
-      .select("*")
-      .is("deleted_at", null)
-      .is("archived_at", null)
-      .order("date", { ascending: false });
-    if (error) throw error;
-    const cloud = (data || []).map(rowToRecord);
-    cache = cloud;
-    hydrated = true;
-    persistLocal();
-    notify();
-  } catch (e) {
-    if (!hydrated) notify();
-  }
+  })().finally(() => {
+    if (requestId === hydrationRequest) hydrationPromise = null;
+  });
+  return hydrationPromise;
 }
 
 // Initial hydration is Supabase-only.
@@ -288,8 +317,12 @@ if (typeof window !== "undefined") {
   // TOKEN_REFRESHED can fire when returning to a tab; do not clear/reload data.
   supabase.auth.onAuthStateChange((event) => {
     if (event === "SIGNED_OUT") {
+      hydrationRequest += 1;
+      hydrationPromise = null;
       cache = [];
       hydrated = false;
+      deletedExpenseIds.clear();
+      markCacheChanged();
       notify();
       return;
     }
@@ -311,17 +344,24 @@ if (typeof window !== "undefined") {
             const rec = rowToRecord(payload.new);
             if (rec.deletedAt || rec.archivedAt) {
               cache = cache.filter((x) => x.id !== rec.id);
+              deletedExpenseIds.add(rec.id);
+              markCacheChanged();
               persistLocal();
               notify();
               return;
             }
+            deletedExpenseIds.delete(rec.id);
             const idx = cache.findIndex((x) => x.id === rec.id);
             if (idx >= 0) cache[idx] = rec;
             else cache.unshift(rec);
           } else if (ev === "DELETE") {
             const oldId = (payload.old as any)?.id;
-            if (oldId) cache = cache.filter((x) => x.id !== oldId);
+            if (oldId) {
+              cache = cache.filter((x) => x.id !== oldId);
+              deletedExpenseIds.add(oldId);
+            }
           }
+          markCacheChanged();
           persistLocal();
           notify();
         },
@@ -363,7 +403,9 @@ export const expensesStore = {
     if (error) throw error;
     if (!data?.id) throw new Error("تعذر تأكيد حفظ المصروف في Supabase");
     const saved = rowToRecord(data);
+    deletedExpenseIds.delete(saved.id);
     cache = [saved, ...cache.filter((e) => e.id !== saved.id)];
+    markCacheChanged();
     persistLocal();
     notify();
     return saved;
@@ -398,6 +440,8 @@ export const expensesStore = {
     if (error) throw error;
     if (!data?.id) throw new Error("تعذر تأكيد تحديث المصروف في Supabase");
     cache[idx] = rowToRecord(data);
+    deletedExpenseIds.delete(id);
+    markCacheChanged();
     persistLocal();
     notify();
     return cache[idx];
@@ -424,6 +468,8 @@ export const expensesStore = {
       if (error) throw error;
       if (!data?.id) throw new Error("لم يتم حذف المصروف في Supabase");
       cache = cache.filter((e) => e.id !== id);
+      deletedExpenseIds.add(id);
+      markCacheChanged();
       persistLocal();
       notify();
     } catch (e) {
@@ -434,7 +480,9 @@ export const expensesStore = {
   },
   restore(item: ExpenseRecord) {
     if (cache.some((e) => e.id === item.id)) return;
+    deletedExpenseIds.delete(item.id);
     cache = [item, ...cache];
+    markCacheChanged();
     persistLocal();
     notify();
     // Best effort re-insert in cloud
@@ -450,19 +498,42 @@ export const expensesStore = {
     listeners.add(cb);
     return () => listeners.delete(cb);
   },
+  isHydrated() {
+    return hydrated;
+  },
   refresh() {
-    hydrateFromCloud();
+    return hydrateFromCloud();
   },
 };
 
-export function getExpensesForWorkOrder(workOrderId: string): ExpenseRecord[] {
+export interface WorkOrderExpenseIdentity {
+  id?: string | null;
+  cloudId?: string | null;
+  displayNumber?: string | null;
+}
+
+export function getWorkOrderExpenseReferences(workOrder: string | WorkOrderExpenseIdentity): string[] {
+  const raw = typeof workOrder === "string"
+    ? [workOrder]
+    : [workOrder.cloudId, workOrder.id, workOrder.displayNumber];
+  return Array.from(new Set(raw.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+export function expenseBelongsToWorkOrder(expense: ExpenseRecord, workOrder: string | WorkOrderExpenseIdentity): boolean {
+  const refs = new Set(getWorkOrderExpenseReferences(workOrder));
+  return [expense.linkedWorkOrderId, expense.sourceWorkOrderId]
+    .map((value) => String(value || "").trim())
+    .some((value) => value.length > 0 && refs.has(value));
+}
+
+export function getExpensesForWorkOrder(workOrder: string | WorkOrderExpenseIdentity): ExpenseRecord[] {
   return expensesStore
     .getAll()
-    .filter((e) => (e.linkedWorkOrderId === workOrderId || e.sourceWorkOrderId === workOrderId) && !e.deletedAt && !e.archivedAt)
+    .filter((expense) => expenseBelongsToWorkOrder(expense, workOrder) && !expense.deletedAt && !expense.archivedAt)
     .sort((a, b) => b.date.localeCompare(a.date));
 }
-export function getExpensesTotalForWorkOrder(workOrderId: string): number {
-  return getExpensesForWorkOrder(workOrderId).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+export function getExpensesTotalForWorkOrder(workOrder: string | WorkOrderExpenseIdentity): number {
+  return getExpensesForWorkOrder(workOrder).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 }
 
 export function getExpensesForClaim(claimId: string): ExpenseRecord[] {

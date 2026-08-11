@@ -32,10 +32,12 @@ describe("work order visible save contract", () => {
 
   it("flushes needed-parts edits immediately so refetch does not erase the new part", () => {
     const store = read("src/lib/workOrdersStore.ts");
-    expect(store).toContain("pushPatchToCloudNow(list[idx].id, { partsNeeded })");
+    expect(store).toContain("neededPartsWriteQueue");
+    expect(store).toContain("await queueNeededPartsCloudSave(list[idx], partsNeeded)");
+    expect(store).toContain("discardPendingNeededPartsPatch(order.id)");
     expect(store).toContain("const pendingPatch = _pendingPatches.get(mapped.id)");
     expect(store).toContain("return pendingPatch ? { ...mapped, ...pendingPatch } : mapped");
-    expect(store).toContain("patch: { parts_required: patch.partsNeeded }");
+    expect(store).toContain("patch: { parts_required: partsNeeded }");
   });
 
   it("does not require vehicle model when creating or linking a vehicle", () => {

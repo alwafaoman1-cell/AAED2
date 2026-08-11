@@ -310,7 +310,7 @@ export function buildPerVehicleProfitReport(f: ReportFilters): {
     const partsCost = 0;
     const laborCost = 0;
     const extraExpenses = 0;
-    const externalVouchers = getExpensesTotalForWorkOrder(o.id);
+    const externalVouchers = getExpensesTotalForWorkOrder(o);
     const totalCost = partsCost + laborCost + extraExpenses + externalVouchers;
     const profit = revenue - totalCost;
     const margin = revenue > 0 ? (profit / revenue) * 100 : 0;

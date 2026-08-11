@@ -1,4 +1,4 @@
-import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
+import { expenseBelongsToWorkOrder, expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { salesStore, type SalesDoc } from "@/lib/salesStore";
 import { getWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
 import { calculateVatExclusive, formatOMR as formatMoneyOMR, roundMoney as roundOmaniMoney, OMAN_VAT_RATE, OMR_DECIMALS } from "@/lib/money";
@@ -156,7 +156,7 @@ function expensesForWorkOrder(order: WorkOrder): ExpenseRecord[] {
   return uniqueExpenses(
     expensesStore.getAll().filter((expense) => {
       if (expense.refunded) return false;
-      return expense.linkedWorkOrderId === order.id || (!!order.plate && expense.linkedVehiclePlate === order.plate);
+      return expenseBelongsToWorkOrder(expense, order);
     }),
   );
 }

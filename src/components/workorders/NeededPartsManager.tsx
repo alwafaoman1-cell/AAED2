@@ -42,6 +42,7 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
   const [bulkText, setBulkText] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [partSaving, setPartSaving] = useState(false);
+  const [partActionId, setPartActionId] = useState<string | null>(null);
 
   const parts = order.partsNeeded || [];
 
@@ -71,13 +72,30 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
     }
   }
 
-  function handleStatus(partId: string, s: NeededPartStatus) {
-    updateNeededPartInOrder(order.id, partId, { status: s });
+  async function handleStatus(partId: string, s: NeededPartStatus) {
+    if (partActionId) return;
+    setPartActionId(partId);
+    try {
+      const saved = await updateNeededPartInOrder(order.id, partId, { status: s });
+      if (!saved) throw new Error("أمر العمل غير موجود");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تحديث حالة القطعة في Supabase");
+    } finally {
+      setPartActionId(null);
+    }
   }
 
-  function handleRemove(partId: string) {
-    removeNeededPartFromOrder(order.id, partId);
-    toast.success("تم حذف القطعة");
+  async function handleRemove(partId: string) {
+    if (partActionId) return;
+    setPartActionId(partId);
+    try {
+      await removeNeededPartFromOrder(order.id, partId);
+      toast.success("تم حذف القطعة نهائيًا من أمر العمل");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حذف القطعة من Supabase");
+    } finally {
+      setPartActionId(null);
+    }
   }
 
   async function handleBulkAdd() {
@@ -251,7 +269,7 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
                     <td className="py-2 px-3 text-muted-foreground text-xs">{p.notes || "-"}</td>
                     <td className="py-2 px-3 text-center">
                       {allowEdit ? (
-                        <Select value={status} onValueChange={(v) => handleStatus(p.id, v as NeededPartStatus)}>
+                        <Select value={status} disabled={partActionId === p.id} onValueChange={(v) => void handleStatus(p.id, v as NeededPartStatus)}>
                           <SelectTrigger className={`h-7 text-[11px] border ${STATUS_BADGE[status]} mx-auto w-32`}>
                             <SelectValue />
                           </SelectTrigger>
@@ -296,7 +314,8 @@ export default function NeededPartsManager({ order, onPrintRequest, onSendWhatsA
                         <Button
                           size="icon"
                           variant="ghost"
-                          onClick={() => handleRemove(p.id)}
+                          onClick={() => void handleRemove(p.id)}
+                          disabled={partActionId === p.id}
                           className="h-7 w-7 text-destructive hover:bg-destructive/10"
                         >
                           <Trash2 size={14} />

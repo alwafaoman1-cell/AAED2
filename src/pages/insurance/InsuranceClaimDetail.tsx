@@ -5,7 +5,7 @@ import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
   Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Sparkles, Phone,
-  DollarSign, PackageCheck, Download, ChevronDown,
+  DollarSign, PackageCheck, Download, ChevronDown, Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,7 @@ import TemplatePicker from "@/components/print/TemplatePicker";
 import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
 import { saveWorkOrderToCloud, type WorkOrder, type NeededPart } from "@/lib/workOrdersStore";
 import { inspectionsStore, type InspectionRecord } from "@/lib/inspectionsStore";
+import { buildReopenDeliveredVehiclePatch } from "@/lib/claimDelivery";
 import InsuranceInspectionDialog from "@/components/inspection/InsuranceInspectionDialog";
 import { insuranceInspectionStore } from "@/lib/insuranceInspectionStore";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
@@ -212,6 +213,9 @@ export default function InsuranceClaimDetail() {
   const [showSummary, setShowSummary] = useState(false);
   const [showInspectionPdf, setShowInspectionPdf] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showUndoDeliveryDialog, setShowUndoDeliveryDialog] = useState(false);
+  const [undoDeliveryReason, setUndoDeliveryReason] = useState("");
+  const [undoingDelivery, setUndoingDelivery] = useState(false);
   const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [showTaxInvoice, setShowTaxInvoice] = useState(false);
   const [taxInvoiceHtml, setTaxInvoiceHtml] = useState<string>("");
@@ -1933,6 +1937,111 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     markClean(`insurance-claim-detail:${id || "new"}`);
   };
 
+  const handleUndoDelivery = async () => {
+    if (!id || isNew || !(existing as any)?.delivered_at || undoingDelivery) return;
+    const reason = undoDeliveryReason.trim();
+    if (!reason) {
+      toast.error("اذكر سبب إلغاء التسليم وعودة المركبة");
+      return;
+    }
+
+    setUndoingDelivery(true);
+    try {
+      const changedAt = new Date().toISOString();
+      const previousDeliveredAt = (existing as any).delivered_at;
+      const { data: auth } = await supabase.auth.getUser();
+      const operationalPatch = buildReopenDeliveredVehiclePatch({
+        reason,
+        changedAt,
+        changedBy: auth.user?.id || null,
+      });
+      const workOrderCloudId = [
+        linkedWorkOrderId,
+        (existing as any)?.job_order_id,
+        (existing as any)?.auto_job_order_id,
+      ].find((value) => value && isUuid(String(value))) || null;
+
+      // Update the shared operational record first so the claim and its linked
+      // work order observe the same delivery state.
+      await syncClaimOperationalFile({
+        claimId: id,
+        workOrderId: workOrderCloudId,
+        patch: operationalPatch,
+      });
+
+      // Confirm the authoritative claim row was cleared even when an older
+      // deployment does not yet expose every optional unified column.
+      const { data: verified, error } = await supabase
+        .from("insurance_claims" as any)
+        .update({
+          delivered_at: null,
+          vehicle_delivered_at: null,
+          vehicle_presence_status: "in_workshop",
+          repair_stage: "ready",
+          vehicle_location_note: operationalPatch.vehicle_location_note,
+          vehicle_location_updated_at: changedAt,
+          vehicle_location_updated_by: auth.user?.id || null,
+          updated_at: changedAt,
+        })
+        .eq("id", id)
+        .eq("tenant_id", (existing as any).tenant_id)
+        .select("id,status,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,delivered_at,updated_at")
+        .single();
+      if (error) throw error;
+
+      if (workOrderCloudId) {
+        const { error: workOrderError } = await supabase
+          .from("job_orders" as any)
+          .update({
+            status: "completed",
+            vehicle_delivered_at: null,
+            vehicle_presence_status: "in_workshop",
+            vehicle_location_note: operationalPatch.vehicle_location_note,
+          })
+          .eq("id", workOrderCloudId)
+          .eq("tenant_id", (existing as any).tenant_id);
+        if (workOrderError) throw workOrderError;
+      }
+
+      queryClient.setQueryData(queryKeys.insuranceClaims.detail(id), (current: any) => ({
+        ...(current || existing || {}),
+        ...((verified as any) || {}),
+        delivered_at: null,
+        vehicle_delivered_at: null,
+        vehicle_presence_status: "in_workshop",
+        repair_stage: "ready",
+      }));
+      hydrateFromVerifiedClaim(verified);
+
+      await writeClaimAudit("claim_delivery_cancelled", {
+        reason,
+        previous_delivered_at: previousDeliveredAt,
+        reopened_at: changedAt,
+        vehicle_presence_status: "داخل الورشة",
+        resulting_stage: "جاهزة للتسليم",
+        linked_work_order_id: workOrderCloudId,
+      }, "delivery");
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.claimOperation(id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.jobOrders.all }),
+        workOrderCloudId
+          ? queryClient.invalidateQueries({ queryKey: queryKeys.jobOrders.detail(workOrderCloudId) })
+          : Promise.resolve(),
+      ]);
+
+      setShowUndoDeliveryDialog(false);
+      setUndoDeliveryReason("");
+      toast.success("تم إلغاء التسليم وإعادة المركبة إلى داخل الورشة");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر إلغاء التسليم");
+    } finally {
+      setUndoingDelivery(false);
+    }
+  };
+
 
   if (!isNew && isLoading) {
     return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
@@ -1956,7 +2065,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const effectiveWorkOrderId = linkedWorkOrderId || (existing as any)?.auto_job_order_id || (existing as any)?.job_order_id || "";
   const linkedWorkOrderStatus = (existing as any)?.job_order?.status || "—";
   const isClosedClaim = status === "cancelled" || status === "rejected";
-  const isDeliveredClaim = !!(existing as any)?.delivered_at || status === "paid";
+  const isDeliveredClaim = !!(existing as any)?.delivered_at;
   const isReadyForDelivery = !!workCompletedAt && !isDeliveredClaim && !isClosedClaim;
   const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
   const isAwaitingApproval = !isNew && status === "pending";
@@ -2000,13 +2109,13 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     : isDeliveredClaim
       ? 7
       : isReadyForDelivery
-        ? 5
+        ? 6
         : isRepairingClaim
-          ? 4
+          ? 5
           : isApprovedClaim
-            ? 3
+            ? 4
             : isAwaitingApproval
-              ? 2
+              ? 3
               : workshopArrivalDate
                 ? 1
                 : 0;
@@ -2030,6 +2139,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     claim_details_saved: "تم حفظ بيانات المطالبة",
     claim_workflow_dates_updated: "تم تحديث تواريخ سير العملية",
     claim_vehicle_stage_changed: "تم تغيير مرحلة المركبة",
+    claim_delivery_cancelled: "تم إلغاء التسليم وإعادة المركبة للورشة",
     operational_dates_updated: "تم تحديث التواريخ التشغيلية",
     claim_approved: "تم اعتماد المطالبة",
     claim_lpo_saved: "تم حفظ بيانات LPO",
@@ -2042,6 +2152,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     claim_summary: "ملخص المطالبة",
     inspection: "الفحص",
     audit: "تدقيق",
+    delivery: "التسليم",
   };
   const auditFieldLabels: Record<string, string> = {
     estimate_date: "تاريخ التقدير",
@@ -2063,6 +2174,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     file_name: "اسم الملف",
     mime_type: "نوع الملف",
     document_type: "نوع المستند",
+    reason: "سبب إلغاء التسليم",
+    previous_delivered_at: "تاريخ التسليم السابق",
+    reopened_at: "تاريخ عودة المركبة",
+    vehicle_presence_status: "موقع المركبة",
+    resulting_stage: "المرحلة بعد الإلغاء",
+    linked_work_order_id: "أمر العمل المرتبط",
   };
   const renderAuditValue = (value: unknown): string => {
     if (value === null || value === undefined || value === "") return "—";
@@ -2553,27 +2670,42 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
         <div className="flex flex-wrap gap-2">
           {vehicleProgress.map((step) => (
-            <button
-              key={step.key}
-              type="button"
-              onClick={() => step.editable ? openStageDialog(step) : toast.info("هذه المرحلة تُحدَّث من الإجراء الخاص بها.")}
-              disabled={isNew || isClosedClaim || step.state === "upcoming" && !step.editable}
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs transition-colors ${
-                step.state === "current"
-                  ? "border-primary bg-primary/10 text-primary font-bold"
-                  : step.state === "completed"
-                    ? "border-success/40 bg-success/10 text-success"
-                    : "border-border bg-secondary/20 text-muted-foreground"
-              } ${step.editable && !isClosedClaim ? "hover:border-primary/60 hover:bg-primary/5" : ""}`}
-              title={step.editable ? "اضغط لتحديث المرحلة بتأكيد" : "تُدار هذه المرحلة من الإجراء الخاص بها"}
-            >
-              <span aria-hidden>{step.icon}</span>
-              {step.state === "completed" && <CheckCircle2 size={13} />}
-              <span>{step.label}</span>
-              <span className="text-[10px] opacity-75">
-                {step.date ? formatDateLatin(step.date) : "لم يتم التسجيل"}
-              </span>
-            </button>
+            <div key={step.key} className="inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => step.editable ? openStageDialog(step) : toast.info("هذه المرحلة تُحدَّث من الإجراء الخاص بها.")}
+                disabled={isNew || isClosedClaim || step.state === "upcoming" && !step.editable}
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs transition-colors ${
+                  step.state === "current"
+                    ? "border-primary bg-primary/10 text-primary font-bold"
+                    : step.state === "completed"
+                      ? "border-success/40 bg-success/10 text-success"
+                      : "border-border bg-secondary/20 text-muted-foreground"
+                } ${step.editable && !isClosedClaim ? "hover:border-primary/60 hover:bg-primary/5" : ""}`}
+                title={step.editable ? "اضغط لتحديث المرحلة بتأكيد" : "تُدار هذه المرحلة من الإجراء الخاص بها"}
+              >
+                <span aria-hidden>{step.icon}</span>
+                {step.state === "completed" && <CheckCircle2 size={13} />}
+                <span>{step.label}</span>
+                <span className="text-[10px] opacity-75">
+                  {step.date ? formatDateLatin(step.date) : "لم يتم التسجيل"}
+                </span>
+              </button>
+              {step.key === "delivered" && isDeliveredClaim && !isClosedClaim && (
+                <Can module="Insurance Claims" action="Edit">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setShowUndoDeliveryDialog(true)}
+                  >
+                    <Undo2 size={13} />
+                    إلغاء التسليم
+                  </Button>
+                </Can>
+              )}
+            </div>
           ))}
         </div>
       </Card>
@@ -3352,6 +3484,59 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </Button>
               <Button onClick={handleConfirmStageChange} disabled={savingStage || !stageDate}>
                 {savingStage ? "جاري الحفظ..." : "تأكيد"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showUndoDeliveryDialog}
+        onOpenChange={(open) => {
+          if (undoingDelivery) return;
+          setShowUndoDeliveryDialog(open);
+          if (!open) setUndoDeliveryReason("");
+        }}
+      >
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>إلغاء تسليم المركبة</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
+              ستعود المركبة إلى <strong>داخل الورشة</strong> ومرحلة <strong>جاهزة للتسليم</strong>.
+              لن يُحذف تاريخ التسليم السابق؛ سيبقى محفوظًا في سجل التدقيق مع السبب.
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="undo-delivery-reason">سبب إلغاء التسليم وعودة المركبة *</Label>
+              <Textarea
+                id="undo-delivery-reason"
+                value={undoDeliveryReason}
+                onChange={(event) => setUndoDeliveryReason(event.target.value)}
+                rows={4}
+                placeholder="مثال: عادت المركبة لمعالجة ملاحظة بعد التسليم"
+                disabled={undoingDelivery}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={undoingDelivery}
+                onClick={() => {
+                  setShowUndoDeliveryDialog(false);
+                  setUndoDeliveryReason("");
+                }}
+              >
+                إلغاء
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={undoingDelivery || !undoDeliveryReason.trim()}
+                onClick={handleUndoDelivery}
+              >
+                {undoingDelivery ? "جاري الحفظ..." : "تأكيد إلغاء التسليم"}
               </Button>
             </div>
           </div>

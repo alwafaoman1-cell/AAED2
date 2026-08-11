@@ -392,7 +392,7 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
 
   // ===== Linked vouchers (read-only summary in edit mode) =====
   const linkedVouchers = useMemo(
-    () => isEdit && initial ? getExpensesForWorkOrder(initial.id) : [],
+    () => isEdit && initial ? getExpensesForWorkOrder(initial) : [],
     [isEdit, initial]
   );
   const linkedVouchersTotal = linkedVouchers.reduce((sum, v) => sum + (Number(v.amount) || 0), 0);

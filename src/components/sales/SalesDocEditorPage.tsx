@@ -144,7 +144,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       });
     });
     // ⬇️ إضافة قطع الغيار من سندات المصروف المرتبطة بأمر العمل (بسعر البيع)
-    const expenses = getExpensesForWorkOrder(wo.id).filter(
+    const expenses = getExpensesForWorkOrder(wo).filter(
       (e) => e.partName && (e.unitSellPrice ?? 0) > 0,
     );
     expenses.forEach((e) => {

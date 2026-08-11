@@ -222,10 +222,23 @@ export default function WorkOrderDetail() {
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
   const [convertPart, setConvertPart] = useState<NeededPart | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<WorkOrderLinkedInvoice | null>(null);
+  const [expenseTick, setExpenseTick] = useState(0);
+  const [expensesReady, setExpensesReady] = useState(() => expensesStore.isHydrated());
   const financialQuery = useWorkOrderFinancials(order);
 
   const allowEdit = canEdit();
   const allowDelete = canDelete();
+
+  useEffect(() => {
+    const unsubscribe = expensesStore.subscribe(() => {
+      setExpensesReady(expensesStore.isHydrated());
+      setExpenseTick((value) => value + 1);
+    });
+    if (!expensesStore.isHydrated()) {
+      void expensesStore.refresh().finally(() => setExpensesReady(expensesStore.isHydrated()));
+    }
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const local = getWorkOrderById(id);
@@ -374,11 +387,27 @@ export default function WorkOrderDetail() {
     [order]
   );
 
-  const linkedVouchers = useMemo(
-    () => (order ? getExpensesForWorkOrder(order.id) : []),
-    [order]
-  );
+  const linkedVouchers = useMemo(() => {
+    // The store revision intentionally refreshes this derived external-store view.
+    void expenseTick;
+    return order ? getExpensesForWorkOrder(order) : [];
+  }, [order, expenseTick]);
   const vouchersTotal = linkedVouchers.reduce((s, v) => s + (Number(v.amount) || 0), 0);
+  const partsExpenseTotal = linkedVouchers.reduce((sum, expense) => {
+    const text = `${expense.expenseType || ""} ${expense.categoryName || ""} ${expense.description || ""}`.toLowerCase();
+    const isPart = !!expense.partName || expense.expenseType === "cash_vehicle_parts" || /spare|parts|قطع|غيار/.test(text);
+    return sum + (isPart ? Number(expense.amount || 0) : 0);
+  }, 0);
+  const otherExpenseTotal = Math.max(0, vouchersTotal - partsExpenseTotal);
+  const expenseVatTotal = linkedVouchers.reduce((sum, expense) => sum + Number(expense.vatAmount || 0), 0);
+  const cashSpentTotal = linkedVouchers.reduce(
+    (sum, expense) => sum + Number(expense.total ?? (Number(expense.amount || 0) + Number(expense.vatAmount || 0))),
+    0,
+  );
+  const actualRevenue = Number(financialQuery.data?.subtotal || 0);
+  const actualCollected = Number(financialQuery.data?.paid || 0);
+  const actualOutstanding = Number(financialQuery.data?.remaining || 0);
+  const actualProfit = actualRevenue - vouchersTotal;
 
   // كشف الفاتورة المرتبطة بأمر العمل (إن وجدت)
   const [salesTick, setSalesTick] = useState(0);
@@ -1369,7 +1398,28 @@ export default function WorkOrderDetail() {
               {vouchersTotal.toLocaleString()} ر.ع
             </span>
           </div>
-          {linkedVouchers.length === 0 ? (
+          <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3">
+            <FinancialMetric label="تكلفة قطع الغيار الفعلية" value={partsExpenseTotal} tone="warning" />
+            <FinancialMetric label="مصروفات فعلية أخرى" value={otherExpenseTotal} />
+            <FinancialMetric label="إجمالي التكلفة قبل الضريبة" value={vouchersTotal} tone="warning" />
+            <FinancialMetric label="ضريبة المدخلات على المصروفات" value={expenseVatTotal} />
+            <FinancialMetric label="إجمالي المنفق على السيارة شامل الضريبة" value={cashSpentTotal} tone="warning" />
+            <FinancialMetric label="إيراد الفواتير قبل الضريبة" value={actualRevenue} tone="success" />
+            <FinancialMetric label="المبلغ المحصل" value={actualCollected} tone="success" />
+            <FinancialMetric label="المبلغ المتبقي" value={actualOutstanding} />
+            <FinancialMetric
+              label="الربح الفعلي حتى الآن"
+              value={actualProfit}
+              tone={actualProfit < 0 ? "danger" : "success"}
+              className="col-span-2 lg:col-span-3"
+            />
+          </div>
+          <p className="mb-3 text-[10px] text-muted-foreground">
+            الإيراد من الفواتير المعتمدة قبل الضريبة فقط، والتكلفة من سندات الصرف الفعلية المرتبطة بأمر العمل. التقديرات لا تدخل في الربح الفعلي.
+          </p>
+          {!expensesReady ? (
+            <p className="text-xs text-muted-foreground text-center py-4">جاري تحميل سندات الصرف المرتبطة…</p>
+          ) : linkedVouchers.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-4">لا توجد سندات</p>
           ) : (
             <>
@@ -1484,14 +1534,19 @@ export default function WorkOrderDetail() {
         initialRequiredPart={convertPart}
         onExpenseSaved={(expense) => {
           if (!convertPart) return;
-          updateNeededPartInOrder(order.id, convertPart.id, {
+          const convertedPartId = convertPart.id;
+          setConvertPart(null);
+          void updateNeededPartInOrder(order.id, convertedPartId, {
             convertedToExpense: true,
             convertedExpenseId: expense.id,
             convertedAt: new Date().toISOString(),
             status: "secured",
+          }).then((saved) => {
+            if (!saved) throw new Error("أمر العمل غير موجود");
+            toast.success("تم تحويل قطعة الغيار إلى مصروف وربطها بأمر العمل");
+          }).catch((error: any) => {
+            toast.error(error?.message || "تم حفظ المصروف لكن تعذر تحديث القطعة المرتبطة");
           });
-          toast.success("تم تحويل قطعة الغيار إلى مصروف وربطها بأمر العمل");
-          setConvertPart(null);
         }}
       />
       <ExpensePreviewDialog
@@ -1597,6 +1652,32 @@ function Section({
         {title}
       </p>
       <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function FinancialMetric({
+  label,
+  value,
+  tone = "default",
+  className = "",
+}: {
+  label: string;
+  value: number;
+  tone?: "default" | "success" | "warning" | "danger";
+  className?: string;
+}) {
+  const toneClass = tone === "success"
+    ? "border-success/30 bg-success/5 text-success"
+    : tone === "warning"
+      ? "border-warning/30 bg-warning/5 text-warning"
+      : tone === "danger"
+        ? "border-destructive/30 bg-destructive/5 text-destructive"
+        : "border-border bg-secondary/20 text-foreground";
+  return (
+    <div className={`rounded-lg border p-2 ${toneClass} ${className}`}>
+      <p className="text-[10px] text-muted-foreground">{label}</p>
+      <p className="font-mono text-sm font-bold">OMR {Number(value || 0).toFixed(3)}</p>
     </div>
   );
 }
