@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Search, ShieldCheck, ReceiptText } from "lucide-react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { salesStore } from "@/lib/salesStore";
 import { useCreateClaimPayment, type PaymentMethod } from "@/hooks/useClaimPayments";
 import { toast } from "sonner";
 import type { PaymentTarget } from "@/lib/paymentTargets";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface Props {
   open: boolean;
@@ -38,6 +40,7 @@ function normalizeSearch(value: string) {
 
 export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, initialTarget = null, lockInitialTarget = false }: Props) {
   const createClaimPayment = useCreateClaimPayment();
+  const queryClient = useQueryClient();
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [targets, setTargets] = useState<PaymentTarget[]>([]);
@@ -280,6 +283,17 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           notes: notes || null,
         });
       }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.workOrderFinancials.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.claimPayments.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.reportCenter.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.reports.all }),
+        queryClient.invalidateQueries({ queryKey: ["sales_documents"] }),
+        queryClient.invalidateQueries({ queryKey: ["sales_payments"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+        queryClient.invalidateQueries({ queryKey: ["accounting"] }),
+      ]);
       toast.success("تم حفظ الدفعة وربطها رسميًا");
       onSaved?.();
       onOpenChange(false);

@@ -11,6 +11,7 @@ import {
   FileBarChart,
   FileSpreadsheet,
   Filter,
+  History,
   Printer,
   RefreshCw,
   Save,
@@ -305,6 +306,18 @@ export default function ReportsCenter() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <Link to="/reports-legacy">
+              <History size={15} />
+              {english ? "Legacy Reports" : "التقارير السابقة"}
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/reports-classic">
+              <History size={15} />
+              {english ? "Original Classic Reports" : "التقارير القديمة الأصلية"}
+            </Link>
+          </Button>
           <Button variant="outline" onClick={() => summaryQuery.refetch()} disabled={summaryQuery.isFetching}>
             <RefreshCw className={summaryQuery.isFetching ? "animate-spin" : ""} size={15} />
             {english ? "Refresh" : "تحديث"}

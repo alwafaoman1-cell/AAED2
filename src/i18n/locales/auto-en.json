@@ -4282,5 +4282,15 @@
   "Vehicle Entry & Receipt — سجل مستقل لوصول المركبات إلى الورشة.": "Vehicle Entry & Receipt — An independent record of vehicles arriving at the workshop.",
   "Vehicles Archive — من صفحة أرشيف المركبات بعد إصلاح مزامنة الأرشيف.": "Vehicles Archive — From the Vehicles Archive page after fixing the archive sync.",
   "WhatsApp عبر Twilio": "WhatsApp via Twilio",
-  "Work Orders and delivered vehicles — من صفحة أوامر العمل.": "Work Orders and delivered vehicles — from the Work Orders page."
+  "Work Orders and delivered vehicles — من صفحة أوامر العمل.": "Work Orders and delivered vehicles — from the Work Orders page.",
+  "الفواتير والتحصيل الرسمي": "Invoices and Official Collection",
+  "النسخة القديمة الأصلية": "Original Classic Version",
+  "التقارير القديمة الأصلية": "Original Classic Reports",
+  "لا يوجد رصيد مستحق": "No outstanding balance",
+  "الإيراد الرسمي قبل الضريبة": "Official revenue before VAT",
+  "جاري مزامنة الفواتير والدفعات…": "Synchronizing linked invoices and payments…",
+  "تعذر تحميل الفاتورة والدفعات المرتبطة.": "Unable to load the linked invoice and payments.",
+  "لا توجد فاتورة معتمدة مرتبطة بأمر العمل. يجب إنشاء الفاتورة أولًا قبل تسجيل دفعة رسمية.": "No approved invoice is linked to this work order. Create the invoice before recording an official payment.",
+  "إضافة دفعة لهذه الفاتورة": "Add payment to this invoice",
+  "الإيراد يُثبت من الفاتورة المعتمدة قبل الضريبة، والدفعة تُسجل كتحصيل رسمي على الفاتورة نفسها دون مضاعفة الإيراد.": "Revenue is recognized from the approved invoice before VAT. The payment is recorded as official collection against the same invoice without duplicating revenue."
 }

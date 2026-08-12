@@ -103,6 +103,8 @@ const CustomerPortal = lazy(() => import("./pages/CustomerPortal"));
 const TrashPage = lazy(() => import("./pages/TrashPage"));
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
 const ReportsCenter = lazy(() => import("./pages/ReportsCenter"));
+const LegacyReports = lazy(() => import("./pages/Reports"));
+const ClassicReports = lazy(() => import("./pages/ReportsClassic"));
 const EInvoicingSettingsPage = lazy(() => import("./pages/settings/EInvoicingSettingsPage"));
 const EstimatesList = lazy(() => import("./pages/estimates/EstimatesList"));
 const EstimateForm = lazy(() => import("./pages/estimates/EstimateForm"));
@@ -429,6 +431,9 @@ const App = () => (
               <Route path="/customers/:id" element={<CustomerDetail />} />
               <Route path="/reports" element={<ReportsLegacyRedirect to="/reports-center" />} />
               <Route path="/reports-center" element={<ReportsCenter />} />
+              <Route path="/reports-legacy" element={<LegacyReports />} />
+              <Route path="/reports-classic" element={<ClassicReports />} />
+              <Route path="/reports/legacy" element={<ReportsLegacyRedirect to="/reports-legacy" />} />
               <Route path="/reports/center" element={<ReportsLegacyRedirect to="/reports-center" />} />
               <Route path="/reports/work-orders-statement" element={<ReportsLegacyRedirect to="/reports-center?report=work-orders&category=operations" />} />
               <Route path="/reports/parts-profit" element={<ReportsLegacyRedirect to="/reports-center?report=gross-profitability&category=profitability" />} />

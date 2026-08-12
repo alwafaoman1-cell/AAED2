@@ -71,7 +71,11 @@ const REPORT_DEFS: ReportCardDef[] = [
 
 const DEFAULT_FILTERS: ReportFilters = { range: rangeShortcut("month") };
 
-export default function Reports() {
+interface ReportsProps {
+  version?: "legacy" | "classic";
+}
+
+export default function Reports({ version = "legacy" }: ReportsProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const isRtl = i18n.dir() === "rtl";
@@ -447,7 +451,12 @@ export default function Reports() {
               <FileBarChart size={28} />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-foreground">{t("reports.title")}</h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-2xl font-bold text-foreground">{t("reports.title")}</h1>
+                {version === "classic" && (
+                  <Badge variant="secondary">{isRtl ? "النسخة القديمة الأصلية" : "Original Classic Version"}</Badge>
+                )}
+              </div>
               <p className="text-sm text-muted-foreground">
                 {isRtl
                   ? "تقارير احترافية متكاملة تربط جميع وحدات النظام: المبيعات • المشتريات • المخزون • المحاسبة"
@@ -491,34 +500,40 @@ export default function Reports() {
             },
             {
               key: "wo-statement",
-              title: isRtl ? "تقرير تكلفة وربحية أوامر العمل" : "Work Orders Cost & Profit Statement",
-              desc: isRtl ? "إيرادات، تكلفة قطع غيار، تكلفة عمالة، مصروفات أخرى، صافي ربح ومصدر التكلفة النهائي" : "Revenue, spare parts cost, labour cost, other expenses, net profit and final cost source",
+              title: version === "classic"
+                ? (isRtl ? "كشف حساب أوامر الشغل" : "Work Orders Statement")
+                : (isRtl ? "تقرير تكلفة وربحية أوامر العمل" : "Work Orders Cost & Profit Statement"),
+              desc: version === "classic"
+                ? (isRtl ? "تفاصيل كل أمر: تكلفة، عمالة، أجر الزبون، الربح/الخسارة" : "Per-order: cost, labor, charges, profit/loss")
+                : (isRtl ? "إيرادات، تكلفة قطع غيار، تكلفة عمالة، مصروفات أخرى، صافي ربح ومصدر التكلفة النهائي" : "Revenue, spare parts cost, labour cost, other expenses, net profit and final cost source"),
               icon: Wrench,
               route: "/reports/work-orders-statement",
               badge: isRtl ? "PDF أفقي" : "Landscape PDF",
               gradient: "from-success/15 to-success/5 border-success/40",
               iconColor: "bg-success/20 text-success",
             },
-            {
-              key: "completed-without-invoice",
-              title: isRtl ? "المسلّمة بانتظار LPO / فاتورة" : "Delivered Waiting LPO / Invoice",
-              desc: isRtl ? "تمييز أوامر التأمين المسلّمة بانتظار LPO أو فاتورة التأمين عن أوامر النقد التي تحتاج فاتورة مبيعات" : "Separate delivered insurance work orders waiting for LPO/insurance invoice from cash jobs that need a sales invoice",
-              icon: AlertTriangle,
-              route: "/reports/completed-without-invoice",
-              badge: isRtl ? "رقابة مالية" : "Control",
-              gradient: "from-warning/15 to-warning/5 border-warning/40",
-              iconColor: "bg-warning/20 text-warning",
-            },
-            {
-              key: "overdue-invoices",
-              title: isRtl ? "الفواتير المتأخرة" : "Overdue Invoices",
-              desc: isRtl ? "عرض الفواتير المستحقة مع تذكير دفع يمنع التكرار خلال 24 ساعة" : "View overdue invoices and prepare payment reminders without duplicate sends",
-              icon: Receipt,
-              route: "/reports/overdue-invoices",
-              badge: isRtl ? "تذكير دفع" : "Reminder",
-              gradient: "from-destructive/15 to-destructive/5 border-destructive/40",
-              iconColor: "bg-destructive/20 text-destructive",
-            },
+            ...(version === "legacy" ? [
+              {
+                key: "completed-without-invoice",
+                title: isRtl ? "المسلّمة بانتظار LPO / فاتورة" : "Delivered Waiting LPO / Invoice",
+                desc: isRtl ? "تمييز أوامر التأمين المسلّمة بانتظار LPO أو فاتورة التأمين عن أوامر النقد التي تحتاج فاتورة مبيعات" : "Separate delivered insurance work orders waiting for LPO/insurance invoice from cash jobs that need a sales invoice",
+                icon: AlertTriangle,
+                route: "/reports/completed-without-invoice",
+                badge: isRtl ? "رقابة مالية" : "Control",
+                gradient: "from-warning/15 to-warning/5 border-warning/40",
+                iconColor: "bg-warning/20 text-warning",
+              },
+              {
+                key: "overdue-invoices",
+                title: isRtl ? "الفواتير المتأخرة" : "Overdue Invoices",
+                desc: isRtl ? "عرض الفواتير المستحقة مع تذكير دفع يمنع التكرار خلال 24 ساعة" : "View overdue invoices and prepare payment reminders without duplicate sends",
+                icon: Receipt,
+                route: "/reports/overdue-invoices",
+                badge: isRtl ? "تذكير دفع" : "Reminder",
+                gradient: "from-destructive/15 to-destructive/5 border-destructive/40",
+                iconColor: "bg-destructive/20 text-destructive",
+              },
+            ] : []),
             {
               key: "parts-profit",
               title: isRtl ? "ربح قطع الغيار التفصيلي" : "Parts Profit Detailed",

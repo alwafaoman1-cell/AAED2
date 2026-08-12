@@ -35,6 +35,19 @@ describe("work order invoice and payment synchronization", () => {
     expect(dialog).toContain("salesStore.refreshOne(selected.invoiceId)");
     expect(dialog).toContain("salesStore.addPayment(selected.invoiceId");
     expect(dialog).toContain("createClaimPayment.mutateAsync");
+    expect(dialog).toContain("queryKeys.workOrderFinancials.all");
+    expect(dialog).toContain("queryKeys.reportCenter.all");
+    expect(dialog).toContain("queryKeys.reports.all");
     expect(sales).toContain("refreshSalesDocumentFromCloud");
+  });
+
+  it("shows each linked invoice and records collection without treating it as duplicate revenue", () => {
+    const detail = read("src/pages/WorkOrderDetail.tsx");
+    expect(detail).toContain("الفواتير والتحصيل الرسمي");
+    expect(detail).toContain("إضافة دفعة لهذه الفاتورة");
+    expect(detail).toContain("الإيراد الرسمي قبل الضريبة");
+    expect(detail).toContain("الدفعة تُسجل كتحصيل رسمي على الفاتورة نفسها دون مضاعفة الإيراد");
+    expect(detail).toContain("value={actualRevenue}");
+    expect(detail).toContain("value={actualCollected}");
   });
 });

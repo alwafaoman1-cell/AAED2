@@ -1356,6 +1356,72 @@ export default function WorkOrderDetail() {
 
       {/* Inspections + Vouchers */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-card border border-border rounded-xl p-4 md:col-span-2">
+          <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Wallet size={16} className="text-success" />
+              الفواتير والتحصيل الرسمي
+              <span className="text-[10px] text-muted-foreground font-normal">
+                ({financialQuery.data?.invoices.length || 0})
+              </span>
+            </h2>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 border-success/40 text-success hover:bg-success/10"
+              disabled={financialQuery.isLoading || !payableFinancialInvoice}
+              onClick={() => payableFinancialInvoice && setPaymentInvoice(payableFinancialInvoice)}
+            >
+              <Wallet size={13} />
+              {payableFinancialInvoice ? "إضافة دفعة" : "لا يوجد رصيد مستحق"}
+            </Button>
+          </div>
+          <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <FinancialMetric label="الإيراد الرسمي قبل الضريبة" value={actualRevenue} tone="success" />
+            <FinancialMetric label="المبلغ المحصل" value={actualCollected} tone="success" />
+            <FinancialMetric label="الرصيد المتبقي" value={actualOutstanding} />
+          </div>
+          {financialQuery.isLoading ? (
+            <p className="py-3 text-center text-xs text-muted-foreground">جاري مزامنة الفواتير والدفعات…</p>
+          ) : financialQuery.isError ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+              <span>تعذر تحميل الفاتورة والدفعات المرتبطة.</span>
+              <Button size="sm" variant="outline" onClick={() => void financialQuery.refetch()}>إعادة المحاولة</Button>
+            </div>
+          ) : !financialQuery.data?.invoices.length ? (
+            <p className="rounded-lg border border-dashed p-3 text-center text-xs text-muted-foreground">
+              لا توجد فاتورة معتمدة مرتبطة بأمر العمل. يجب إنشاء الفاتورة أولًا قبل تسجيل دفعة رسمية.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {financialQuery.data.invoices.map((invoice) => (
+                <div key={`${invoice.kind}:${invoice.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-secondary/20 p-3">
+                  <div>
+                    <div className="text-sm font-semibold">{invoice.number}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {invoice.kind === "insurance_invoice" ? "فاتورة تأمين" : "فاتورة كاش"}
+                      {` · الإجمالي ${invoice.total.toFixed(3)} · المدفوع ${invoice.paid.toFixed(3)} · المتبقي ${invoice.remaining.toFixed(3)} ر.ع`}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={invoice.remaining <= 0.001}
+                    onClick={() => setPaymentInvoice(invoice)}
+                  >
+                    <Wallet size={13} />
+                    {invoice.remaining <= 0.001 ? "مدفوعة بالكامل" : "إضافة دفعة لهذه الفاتورة"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-3 text-[10px] text-muted-foreground">
+            الإيراد يُثبت من الفاتورة المعتمدة قبل الضريبة، والدفعة تُسجل كتحصيل رسمي على الفاتورة نفسها دون مضاعفة الإيراد.
+          </p>
+        </div>
+
         <div className="bg-card border border-border rounded-xl p-4">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -1404,9 +1470,6 @@ export default function WorkOrderDetail() {
             <FinancialMetric label="إجمالي التكلفة قبل الضريبة" value={vouchersTotal} tone="warning" />
             <FinancialMetric label="ضريبة المدخلات على المصروفات" value={expenseVatTotal} />
             <FinancialMetric label="إجمالي المنفق على السيارة شامل الضريبة" value={cashSpentTotal} tone="warning" />
-            <FinancialMetric label="إيراد الفواتير قبل الضريبة" value={actualRevenue} tone="success" />
-            <FinancialMetric label="المبلغ المحصل" value={actualCollected} tone="success" />
-            <FinancialMetric label="المبلغ المتبقي" value={actualOutstanding} />
             <FinancialMetric
               label="الربح الفعلي حتى الآن"
               value={actualProfit}

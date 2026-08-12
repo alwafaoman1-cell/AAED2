@@ -44,6 +44,7 @@ export const queryKeys = {
     inline: (workOrderId?: string | null) => ["job_order_inline", workOrderId ?? ""] as const,
   },
   workOrderFinancials: {
+    all: ["work_order_financials"] as const,
     detail: (tenantId?: string | null, workOrderId?: string | null, claimId?: string | null) =>
       ["work_order_financials", tenantId ?? "", workOrderId ?? "", claimId ?? ""] as const,
   },
@@ -56,6 +57,7 @@ export const queryKeys = {
   },
   insuranceAccounting: (filters?: unknown) => ["insurance_accounting", filters ?? ""] as const,
   reports: {
+    all: ["reports"] as const,
     cloud: (filters?: unknown) => ["reports", "cloud", filters ?? ""] as const,
     vehiclesOverStayAll: ["reports", "vehicles_over_stay"] as const,
     vehiclesOverStay: (age?: number | string) => ["reports", "vehicles_over_stay", age ?? "all"] as const,

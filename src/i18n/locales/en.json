@@ -143,6 +143,8 @@
     "purchaseReturns": "Purchase Returns",
     "supplierBalance": "Supplier Balance Report",
     "reports": "Reports & Exports",
+    "legacyReports": "Legacy Reports",
+    "classicReports": "Original Classic Reports",
     "staff": "Technicians & Staff",
     "users": "User Management",
     "customers": "Customers",

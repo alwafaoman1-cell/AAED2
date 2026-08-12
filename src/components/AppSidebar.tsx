@@ -5,7 +5,7 @@ import {
   LayoutDashboard, ClipboardList, Search, ShoppingCart, Calculator,
   Package, Users, Shield, Settings, ChevronLeft, ChevronRight, Menu, X,
   Car, Trash2, UserSquare, ChevronDown, MinusCircle, ReceiptText, Wallet, History, Database,
-  FileText, Building2, DollarSign, RotateCcw, BarChart3, ArrowDownUp, FileBarChart, Wrench,
+  FileText, Building2, DollarSign, RotateCcw, BarChart3, ArrowDownUp, FileBarChart, Wrench, BookOpen,
   UserCog, LogOut, Palette, Plus, Tags, KanbanSquare, Bell, List, FileSpreadsheet,
   Smartphone, Download, Power, Key, ServerCog, FolderLock,
 } from "lucide-react";
@@ -100,6 +100,8 @@ const menuItems: MenuItem[] = [
     ],
   },
   { path: "/reports-center", labelKey: "nav.reports", icon: FileBarChart },
+  { path: "/reports-legacy", labelKey: "nav.legacyReports", icon: History },
+  { path: "/reports-classic", labelKey: "nav.classicReports", icon: BookOpen },
   {
     path: "/staff",
     labelKey: "إدارة الفريق",

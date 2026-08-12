@@ -86,6 +86,31 @@ describe("reports center contract", () => {
     expect(app).toContain('path="/reports/center" element={<ReportsLegacyRedirect to="/reports-center"');
   });
 
+  it("keeps the current reports center and exposes the previous reports page separately", () => {
+    const app = read("src/App.tsx");
+    const sidebar = read("src/components/AppSidebar.tsx");
+    const center = read("src/pages/ReportsCenter.tsx");
+    expect(app).toContain('const LegacyReports = lazy(() => import("./pages/Reports"))');
+    expect(app).toContain('path="/reports-center" element={<ReportsCenter />}');
+    expect(app).toContain('path="/reports-legacy" element={<LegacyReports />}');
+    expect(sidebar).toContain('path: "/reports-center"');
+    expect(sidebar).toContain('path: "/reports-legacy"');
+    expect(center).toContain('to="/reports-legacy"');
+  });
+
+  it("restores the original classic reports as a third independent page", () => {
+    const app = read("src/App.tsx");
+    const sidebar = read("src/components/AppSidebar.tsx");
+    const reports = read("src/pages/Reports.tsx");
+    const classic = read("src/pages/ReportsClassic.tsx");
+    expect(app).toContain('path="/reports-classic" element={<ClassicReports />}');
+    expect(sidebar).toContain('path: "/reports-classic"');
+    expect(classic).toContain('<Reports version="classic" />');
+    expect(reports).toContain('version?: "legacy" | "classic"');
+    expect(reports).toContain('isRtl ? "كشف حساب أوامر الشغل" : "Work Orders Statement"');
+    expect(reports).toContain('version === "legacy" ? [');
+  });
+
   it("classifies insurance, cash and unknown records structurally", () => {
     expect(
       classifyReportBusinessType({ recordKind: "work_order", claimId: "claim-a" }),
