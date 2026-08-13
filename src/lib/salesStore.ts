@@ -466,7 +466,13 @@ export const salesStore = {
     return finalDoc;
   },
   remove(id: string) {
-    const all = read().map((d) => (d.id === id ? { ...d, isDeleted: true } : d));
+    const all = read().map((d) => (d.id === id ? {
+      ...d,
+      isDeleted: true,
+      payments: [],
+      paidTotal: 0,
+      balanceDue: Number(d.total || 0),
+    } : d));
     write(all);
     const removed = all.find((d) => d.id === id);
     if (removed) void upsertSalesCloud(removed);

@@ -148,17 +148,31 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
       const claimRows = claimsResult.data || [];
       const claimIds = claimRows.map((row: any) => row.id);
       let paidByClaim = new Map<string, number>();
+      let invoiceByClaim = new Map<string, { id: string; total: number }>();
       if (claimIds.length) {
-        const { data: payments, error } = await (supabase.from("claim_payments") as any)
-          .select("claim_id,amount,status")
-          .eq("tenant_id", tenantId)
-          .in("claim_id", claimIds)
-          .neq("status", "bounced");
+        const [{ data: payments, error }, { data: invoices, error: invoicesError }] = await Promise.all([
+          (supabase.from("claim_payments") as any)
+            .select("claim_id,amount,status")
+            .eq("tenant_id", tenantId)
+            .in("claim_id", claimIds)
+            .neq("status", "bounced"),
+          (supabase.from("insurance_invoices") as any)
+            .select("id,claim_id,total,issued_at")
+            .eq("tenant_id", tenantId)
+            .in("claim_id", claimIds)
+            .neq("status", "cancelled")
+            .order("issued_at", { ascending: false }),
+        ]);
         if (error) throw error;
+        if (invoicesError) throw invoicesError;
         paidByClaim = (payments || []).reduce((map: Map<string, number>, row: any) => {
           map.set(row.claim_id, (map.get(row.claim_id) || 0) + Number(row.amount || 0));
           return map;
         }, paidByClaim);
+        invoiceByClaim = (invoices || []).reduce((map: Map<string, { id: string; total: number }>, row: any) => {
+          if (!map.has(row.claim_id)) map.set(row.claim_id, { id: row.id, total: Number(row.total || 0) });
+          return map;
+        }, invoiceByClaim);
       }
 
       const salesRows = salesResult.data || [];
@@ -219,7 +233,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
       });
 
       const claimTargets: PaymentTarget[] = claimRows.map((row: any) => {
-        const total = Number(row.approved_amount || row.estimated_amount || 0);
+        const linkedInvoice = invoiceByClaim.get(row.id);
+        const total = linkedInvoice?.total ?? Number(row.approved_amount || row.estimated_amount || 0);
         const paid = paidByClaim.get(row.id) || 0;
         return {
           kind: "insurance_claim",
@@ -231,7 +246,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           vehiclePlate: row.vehicle_plate || null,
           workOrderId: row.job_order_id || row.auto_job_order_id || null,
           claimId: row.id,
-          invoiceId: null,
+          invoiceId: linkedInvoice?.id || null,
           insuranceCompanyId: row.insurance_company_id || null,
           insuranceCompany: row.insurance_company || "—",
           total,
@@ -278,6 +293,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           amount: value,
           payment_method: method,
           payment_date: date,
+          offset_against_invoice_id: selected.invoiceId,
           reference_number: reference || null,
           status: method === "cheque" ? "pending" : "cleared",
           notes: notes || null,

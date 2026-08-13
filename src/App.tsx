@@ -184,6 +184,7 @@ const AccountingReportPage = accountingReportsPage("AccountingReportPage") as La
 const JournalEntryDetailPage = accountingReportsPage("JournalEntryDetailPage");
 const GeneralLedgerAccountPage = accountingReportsPage("GeneralLedgerAccountPage");
 const VehicleProfitLossDetailPage = accountingReportsPage("VehicleProfitLossDetailPage");
+const MonthlyVehicleProfitabilityPage = lazy(() => import("./pages/accounting/reports/MonthlyVehicleProfitabilityPage"));
 
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
@@ -376,6 +377,7 @@ const App = () => (
               <Route path="/accounting/reports/vat-input" element={<AccountingReportsRouteGuard permission="accounting_reports.vat"><AccountingReportPage reportKey="vat-input" /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/vehicle-profit-loss" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><AccountingReportPage reportKey="vehicle-profit-loss" /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/vehicle-profit-loss/:operationId" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><VehicleProfitLossDetailPage /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/monthly-vehicle-profitability" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><MonthlyVehicleProfitabilityPage /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/cost-centers" element={<AccountingReportsRouteGuard permission="accounting_reports.cost_centers"><AccountingReportPage reportKey="cost-centers" /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/audit-exceptions" element={<AccountingReportsRouteGuard permission="accounting_reports.audit"><AccountingReportPage reportKey="audit-exceptions" /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/unposted-documents" element={<AccountingReportsRouteGuard permission="accounting_reports.audit"><AccountingReportPage reportKey="unposted-documents" /></AccountingReportsRouteGuard>} />

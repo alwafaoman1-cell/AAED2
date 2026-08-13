@@ -83,6 +83,7 @@ const menuItems: MenuItem[] = [
       { path: "/accounting/cashbox/topup", labelKey: "nav.cashboxTopup", icon: Wallet },
       { path: "/accounting/setup", labelKey: "إعداد المحاسبة", icon: Settings },
       { path: "/accounting/reports", labelKey: "تقارير المحاسبة", icon: FileBarChart },
+      { path: "/accounting/reports/monthly-vehicle-profitability", labelKey: "ربحية المركبات الشهرية", icon: BarChart3 },
     ],
   },
   { path: "/daily-log", labelKey: "nav.dailyLog", icon: FileSpreadsheet },

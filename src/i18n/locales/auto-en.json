@@ -4292,5 +4292,21 @@
   "تعذر تحميل الفاتورة والدفعات المرتبطة.": "Unable to load the linked invoice and payments.",
   "لا توجد فاتورة معتمدة مرتبطة بأمر العمل. يجب إنشاء الفاتورة أولًا قبل تسجيل دفعة رسمية.": "No approved invoice is linked to this work order. Create the invoice before recording an official payment.",
   "إضافة دفعة لهذه الفاتورة": "Add payment to this invoice",
-  "الإيراد يُثبت من الفاتورة المعتمدة قبل الضريبة، والدفعة تُسجل كتحصيل رسمي على الفاتورة نفسها دون مضاعفة الإيراد.": "Revenue is recognized from the approved invoice before VAT. The payment is recorded as official collection against the same invoice without duplicating revenue."
+  "الإيراد يُثبت من الفاتورة المعتمدة قبل الضريبة، والدفعة تُسجل كتحصيل رسمي على الفاتورة نفسها دون مضاعفة الإيراد.": "Revenue is recognized from the approved invoice before VAT. The payment is recorded as official collection against the same invoice without duplicating revenue.",
+  "المحاسبة / التحليل الشهري": "Accounting / Monthly Analysis",
+  "ربحية المركبات — الكاش والتأمين": "Vehicle Profitability — Cash and Insurance",
+  "الإيراد من الفواتير المعتمدة قبل VAT، التحصيل من الدفعات الفعلية، والتكلفة من المصروفات الفعلية المرتبطة فقط.": "Revenue comes from approved invoices before VAT, collections from actual payments, and costs from linked actual expenses only.",
+  "كل التقارير": "All Reports",
+  "زبائن الكاش": "Cash Customers",
+  "العميل، اللوحة، VIN، أمر العمل، المطالبة أو الفاتورة": "Customer, plate, VIN, work order, claim, or invoice",
+  "تطبيق": "Apply",
+  "الأعمدة (": "Columns (",
+  "أعمدة العرض والتصدير": "Display and Export Columns",
+  "تحديد الكل / الافتراضي": "Select All / Default",
+  "مصروفات الشهر العامة — لا توزّع على السيارات": "Monthly Overheads — Not Allocated to Vehicles",
+  "تفاصيل ربح وخسارة كل سيارة": "Profit and Loss Details by Vehicle",
+  "الفواتير غير المدفوعة تظهر ضمن المفوتر والمستحق، بينما يبقى التحصيل صفرًا حتى تسجيل دفعة فعلية.": "Unpaid invoices remain included in invoiced revenue and outstanding balances, while collections remain zero until an actual payment is recorded.",
+  "جاري تحميل التقرير…": "Loading report…",
+  "لا توجد حركة مالية مطابقة خلال الفترة.": "No matching financial activity in this period.",
+  "أساس الشهر: الفاتورة حسب تاريخها، التحصيل حسب تاريخ الدفعة، والمصروف حسب تاريخ السند. VAT لا يدخل في الربح.": "Monthly basis: invoices by invoice date, collections by payment date, and expenses by voucher date. VAT is excluded from profit."
 }

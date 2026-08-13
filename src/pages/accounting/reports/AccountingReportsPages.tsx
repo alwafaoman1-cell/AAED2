@@ -28,7 +28,14 @@ function value(v:unknown,key:string,en:boolean){if(v===null||v===undefined||v===
 
 export function AccountingReportsCenterPage(){
   const en=useEnglish();
-  return <main className="mx-auto max-w-7xl space-y-6 p-4 md:p-6"><header><h1 className="text-2xl font-bold">{en?"Accounting Reports":"تقارير المحاسبة"}</h1><p className="text-muted-foreground">{en?"Standalone, tenant-isolated reports based on posted journals.":"تقارير مستقلة ومعزولة حسب المؤسسة وتعتمد القيود المرحلة."}</p></header><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{ACCOUNTING_REPORTS.map(r=><Card key={r.key}><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><BookOpen size={17}/>{en?r.titleEn:r.titleAr}</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-muted-foreground">{en?r.descriptionEn:r.descriptionAr}</p><Button asChild size="sm"><Link to={`/accounting/reports/${r.path}`}>{en?"Open report":"فتح التقرير"}</Link></Button></CardContent></Card>)}</div></main>
+  return <main className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+    <header><h1 className="text-2xl font-bold">{en?"Accounting Reports":"تقارير المحاسبة"}</h1><p className="text-muted-foreground">{en?"Standalone, tenant-isolated reports based on posted journals.":"تقارير مستقلة ومعزولة حسب المؤسسة وتعتمد القيود المرحلة."}</p></header>
+    <Card className="border-blue-300 bg-gradient-to-l from-blue-50 to-white dark:from-blue-950/40 dark:to-background">
+      <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-lg"><BookOpen size={19}/>{en?"Monthly vehicle profitability":"ربحية المركبات الشهرية"}</CardTitle></CardHeader>
+      <CardContent><p className="mb-3 text-sm text-muted-foreground">{en?"Cash and insurance are separated, with invoice revenue, collections, outstanding balances, direct vehicle costs, and unallocated overheads.":"تقرير احترافي يفصل الكاش عن التأمين ويعرض المفوتر والتحصيل والمستحق والتكلفة والربح لكل سيارة، مع عزل المصروفات العامة."}</p><Button asChild><Link to="/accounting/reports/monthly-vehicle-profitability">{en?"Open monthly report":"فتح التقرير الشهري"}</Link></Button></CardContent>
+    </Card>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{ACCOUNTING_REPORTS.map(r=><Card key={r.key}><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><BookOpen size={17}/>{en?r.titleEn:r.titleAr}</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-muted-foreground">{en?r.descriptionEn:r.descriptionAr}</p><Button asChild size="sm"><Link to={`/accounting/reports/${r.path}`}>{en?"Open report":"فتح التقرير"}</Link></Button></CardContent></Card>)}</div>
+  </main>
 }
 
 function useFilters(def:AccountingReportDefinition,forced?:Partial<AccountingReportFilters>){

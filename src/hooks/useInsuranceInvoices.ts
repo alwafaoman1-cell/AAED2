@@ -206,5 +206,12 @@ export function useDeleteInsuranceInvoice() {
       toast.success("تم حذف الفاتورة");
     },
     onError: (e: any) => toast.error(e.message),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reportCenter.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reports.all });
+      qc.invalidateQueries({ queryKey: ["accounting"] });
+    },
   });
 }
