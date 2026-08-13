@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -11,6 +11,31 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -1912,13 +1937,6 @@ export type Database = {
             foreignKeyName: "claim_work_order_operations_work_order_id_fkey"
             columns: ["work_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "claim_work_order_operations_work_order_id_fkey"
-            columns: ["work_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -2065,13 +2083,6 @@ export type Database = {
             foreignKeyName: "customer_advances_applied_to_work_order_id_fkey"
             columns: ["applied_to_work_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "customer_advances_applied_to_work_order_id_fkey"
-            columns: ["applied_to_work_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -2109,13 +2120,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customer_advances_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "customer_advances_job_order_id_fkey"
@@ -2189,13 +2193,6 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customer_feedback_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: true
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "customer_feedback_job_order_id_fkey"
@@ -2336,13 +2333,6 @@ export type Database = {
             foreignKeyName: "customer_notifications_job_order_id_fkey"
             columns: ["job_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "customer_notifications_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -2427,13 +2417,6 @@ export type Database = {
             foreignKeyName: "customer_portal_notes_job_order_id_fkey"
             columns: ["job_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "customer_portal_notes_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -2507,13 +2490,6 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customer_portal_tokens_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: true
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "customer_portal_tokens_job_order_id_fkey"
@@ -3047,13 +3023,6 @@ export type Database = {
             foreignKeyName: "estimates_work_order_id_fkey"
             columns: ["work_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "estimates_work_order_id_fkey"
-            columns: ["work_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -3068,39 +3037,172 @@ export type Database = {
       }
       expense_categories: {
         Row: {
+          accounting_mapping_key: string | null
           active: boolean
+          category_type: string | null
+          code: string | null
           color: string | null
+          cost_center_id: string | null
           created_at: string
+          created_by: string | null
+          department_code: string | null
           description: string | null
+          description_ar: string | null
+          description_en: string | null
+          expense_scope: string | null
           id: string
+          is_active: boolean | null
+          is_system: boolean
+          level: number | null
           name: string
+          name_ar: string | null
+          name_en: string | null
+          parent_id: string | null
+          sort_order: number
           tenant_id: string
           updated_at: string
+          updated_by: string | null
         }
         Insert: {
+          accounting_mapping_key?: string | null
           active?: boolean
+          category_type?: string | null
+          code?: string | null
           color?: string | null
+          cost_center_id?: string | null
           created_at?: string
+          created_by?: string | null
+          department_code?: string | null
           description?: string | null
+          description_ar?: string | null
+          description_en?: string | null
+          expense_scope?: string | null
           id?: string
+          is_active?: boolean | null
+          is_system?: boolean
+          level?: number | null
           name: string
+          name_ar?: string | null
+          name_en?: string | null
+          parent_id?: string | null
+          sort_order?: number
           tenant_id: string
           updated_at?: string
+          updated_by?: string | null
         }
         Update: {
+          accounting_mapping_key?: string | null
           active?: boolean
+          category_type?: string | null
+          code?: string | null
           color?: string | null
+          cost_center_id?: string | null
           created_at?: string
+          created_by?: string | null
+          department_code?: string | null
           description?: string | null
+          description_ar?: string | null
+          description_en?: string | null
+          expense_scope?: string | null
           id?: string
+          is_active?: boolean | null
+          is_system?: boolean
+          level?: number | null
           name?: string
+          name_ar?: string | null
+          name_en?: string | null
+          parent_id?: string | null
+          sort_order?: number
           tenant_id?: string
           updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_categories_cost_center_fk"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_categories_parent_fk"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expense_category_audit_logs: {
+        Row: {
+          action: string
+          category_id: string
+          created_at: string
+          id: string
+          new_value: Json | null
+          old_value: Json | null
+          tenant_id: string
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          category_id: string
+          created_at?: string
+          id?: string
+          new_value?: Json | null
+          old_value?: Json | null
+          tenant_id: string
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          category_id?: string
+          created_at?: string
+          id?: string
+          new_value?: Json | null
+          old_value?: Json | null
+          tenant_id?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      expense_category_template_items: {
+        Row: {
+          accounting_mapping_key: string | null
+          category_type: string
+          code: string
+          expense_scope: string
+          name_ar: string
+          name_en: string
+          parent_code: string | null
+          sort_order: number
+        }
+        Insert: {
+          accounting_mapping_key?: string | null
+          category_type: string
+          code: string
+          expense_scope: string
+          name_ar: string
+          name_en: string
+          parent_code?: string | null
+          sort_order?: number
+        }
+        Update: {
+          accounting_mapping_key?: string | null
+          category_type?: string
+          code?: string
+          expense_scope?: string
+          name_ar?: string
+          name_en?: string
+          parent_code?: string | null
+          sort_order?: number
         }
         Relationships: []
       }
       expenses: {
         Row: {
+          accounting_mapping_key: string | null
           amount: number
           archived_at: string | null
           attachments: Json
@@ -3110,14 +3212,19 @@ export type Database = {
           category_id: string | null
           category_name: string | null
           claim_id: string | null
+          classification_status: string | null
           cost_center: string
+          cost_center_id: string | null
           created_at: string
           created_by: string | null
           customer_id: string | null
           date: string
           deleted_at: string | null
           deleted_by: string | null
+          department_id: string | null
           description: string | null
+          expense_category_id: string | null
+          expense_scope: string | null
           expense_type: string
           id: string
           invoice_id: string | null
@@ -3126,7 +3233,11 @@ export type Database = {
           linked_vehicle_plate: string | null
           linked_work_order_id: string | null
           meta: Json
+          notes: string | null
           payment_method: string
+          reference_number: string | null
+          status: string | null
+          subcategory_id: string | null
           subtotal: number
           supplier_id: string | null
           supplier_invoice_number: string | null
@@ -3137,8 +3248,11 @@ export type Database = {
           vat_amount: number
           vehicle_id: string | null
           voucher_number: string
+          work_order_channel: string | null
+          work_order_id: string | null
         }
         Insert: {
+          accounting_mapping_key?: string | null
           amount?: number
           archived_at?: string | null
           attachments?: Json
@@ -3148,14 +3262,19 @@ export type Database = {
           category_id?: string | null
           category_name?: string | null
           claim_id?: string | null
+          classification_status?: string | null
           cost_center?: string
+          cost_center_id?: string | null
           created_at?: string
           created_by?: string | null
           customer_id?: string | null
           date?: string
           deleted_at?: string | null
           deleted_by?: string | null
+          department_id?: string | null
           description?: string | null
+          expense_category_id?: string | null
+          expense_scope?: string | null
           expense_type?: string
           id?: string
           invoice_id?: string | null
@@ -3164,7 +3283,11 @@ export type Database = {
           linked_vehicle_plate?: string | null
           linked_work_order_id?: string | null
           meta?: Json
+          notes?: string | null
           payment_method?: string
+          reference_number?: string | null
+          status?: string | null
+          subcategory_id?: string | null
           subtotal?: number
           supplier_id?: string | null
           supplier_invoice_number?: string | null
@@ -3175,8 +3298,11 @@ export type Database = {
           vat_amount?: number
           vehicle_id?: string | null
           voucher_number: string
+          work_order_channel?: string | null
+          work_order_id?: string | null
         }
         Update: {
+          accounting_mapping_key?: string | null
           amount?: number
           archived_at?: string | null
           attachments?: Json
@@ -3186,14 +3312,19 @@ export type Database = {
           category_id?: string | null
           category_name?: string | null
           claim_id?: string | null
+          classification_status?: string | null
           cost_center?: string
+          cost_center_id?: string | null
           created_at?: string
           created_by?: string | null
           customer_id?: string | null
           date?: string
           deleted_at?: string | null
           deleted_by?: string | null
+          department_id?: string | null
           description?: string | null
+          expense_category_id?: string | null
+          expense_scope?: string | null
           expense_type?: string
           id?: string
           invoice_id?: string | null
@@ -3202,7 +3333,11 @@ export type Database = {
           linked_vehicle_plate?: string | null
           linked_work_order_id?: string | null
           meta?: Json
+          notes?: string | null
           payment_method?: string
+          reference_number?: string | null
+          status?: string | null
+          subcategory_id?: string | null
           subtotal?: number
           supplier_id?: string | null
           supplier_invoice_number?: string | null
@@ -3213,6 +3348,8 @@ export type Database = {
           vat_amount?: number
           vehicle_id?: string | null
           voucher_number?: string
+          work_order_channel?: string | null
+          work_order_id?: string | null
         }
         Relationships: [
           {
@@ -3237,10 +3374,38 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "expenses_cost_center_fk"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "expenses_customer_id_fkey"
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_department_category_fk"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_expense_category_fk"
+            columns: ["expense_category_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_subcategory_fk"
+            columns: ["subcategory_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
             referencedColumns: ["id"]
           },
           {
@@ -3256,6 +3421,41 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "vehicles"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_work_order_uuid_fk"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_work_order_profit_view"
+            referencedColumns: ["work_order_id"]
+          },
+          {
+            foreignKeyName: "expenses_work_order_uuid_fk"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "delivered_vehicles_report"
+            referencedColumns: ["job_order_id"]
+          },
+          {
+            foreignKeyName: "expenses_work_order_uuid_fk"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "job_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_work_order_uuid_fk"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "reports_work_order_facts_v1"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_work_order_uuid_fk"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_operations_report"
+            referencedColumns: ["job_order_id"]
           },
         ]
       }
@@ -3410,13 +3610,6 @@ export type Database = {
             foreignKeyName: "inspections_job_order_id_fkey"
             columns: ["job_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "inspections_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -3449,6 +3642,7 @@ export type Database = {
           customer_id: string
           damage_photos: string[] | null
           deductible_amount: number | null
+          deleted_at: string | null
           delivered_at: string | null
           delivery_notes: string | null
           delivery_photos: string[] | null
@@ -3547,6 +3741,7 @@ export type Database = {
           customer_id: string
           damage_photos?: string[] | null
           deductible_amount?: number | null
+          deleted_at?: string | null
           delivered_at?: string | null
           delivery_notes?: string | null
           delivery_photos?: string[] | null
@@ -3645,6 +3840,7 @@ export type Database = {
           customer_id?: string
           damage_photos?: string[] | null
           deductible_amount?: number | null
+          deleted_at?: string | null
           delivered_at?: string | null
           delivery_notes?: string | null
           delivery_photos?: string[] | null
@@ -3766,13 +3962,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "insurance_claims_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "insurance_claims_job_order_id_fkey"
@@ -4272,13 +4461,6 @@ export type Database = {
             foreignKeyName: "invoices_job_order_id_fkey"
             columns: ["job_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "invoices_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -4347,13 +4529,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "job_order_logs_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "job_order_logs_job_order_id_fkey"
@@ -4437,13 +4612,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "job_order_parts_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "job_order_parts_job_order_id_fkey"
@@ -4716,13 +4884,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "job_orders_parent_work_order_id_fkey"
-            columns: ["parent_work_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "job_orders_parent_work_order_id_fkey"
@@ -5911,13 +6072,6 @@ export type Database = {
             foreignKeyName: "supplement_approval_requests_job_order_id_fkey"
             columns: ["job_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "supplement_approval_requests_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -5991,13 +6145,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "supplement_audit_logs_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "supplement_audit_logs_job_order_id_fkey"
@@ -6451,13 +6598,6 @@ export type Database = {
             foreignKeyName: "tenant_files_job_order_id_fkey"
             columns: ["job_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "tenant_files_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -6888,13 +7028,6 @@ export type Database = {
             foreignKeyName: "vehicle_entries_converted_work_order_id_fkey"
             columns: ["converted_work_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "vehicle_entries_converted_work_order_id_fkey"
-            columns: ["converted_work_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -6974,13 +7107,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "vehicle_entries_work_order_id_fkey"
-            columns: ["work_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "vehicle_entries_work_order_id_fkey"
@@ -7436,13 +7562,6 @@ export type Database = {
             foreignKeyName: "vehicle_media_work_order_id_fkey"
             columns: ["work_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "vehicle_media_work_order_id_fkey"
-            columns: ["work_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -7631,13 +7750,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "vehicle_stay_notifications_work_order_id_fkey"
-            columns: ["work_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "vehicle_stay_notifications_work_order_id_fkey"
@@ -7953,13 +8065,6 @@ export type Database = {
             foreignKeyName: "whatsapp_logs_job_order_id_fkey"
             columns: ["job_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "whatsapp_logs_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -8226,13 +8331,6 @@ export type Database = {
             foreignKeyName: "work_order_supplements_job_order_id_fkey"
             columns: ["job_order_id"]
             isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
-          },
-          {
-            foreignKeyName: "work_order_supplements_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
             referencedRelation: "reports_work_order_facts_v1"
             referencedColumns: ["id"]
           },
@@ -8413,13 +8511,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_orders"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "insurance_claims_job_order_id_fkey"
-            columns: ["job_order_id"]
-            isOneToOne: false
-            referencedRelation: "reports_expense_facts_v1"
-            referencedColumns: ["work_order_id"]
           },
           {
             foreignKeyName: "insurance_claims_job_order_id_fkey"
@@ -8634,17 +8725,24 @@ export type Database = {
       }
       reports_expense_facts_v1: {
         Row: {
+          accounting_mapping_key: string | null
           archived_at: string | null
           beneficiary: string | null
           business_type: string | null
           category_name: string | null
           claim_id: string | null
+          classification_status: string | null
+          cost_center_id: string | null
           date: string | null
           deleted_at: string | null
+          department_id: string | null
           description: string | null
+          expense_category_id: string | null
+          expense_scope: string | null
           expense_type: string | null
           id: string | null
           payment_method: string | null
+          subcategory_id: string | null
           subtotal: number | null
           supplier_id: string | null
           tenant_id: string | null
@@ -8654,7 +8752,43 @@ export type Database = {
           voucher_number: string | null
           work_order_id: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "expenses_cost_center_fk"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "accounting_cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_department_category_fk"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_expense_category_fk"
+            columns: ["expense_category_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_subcategory_fk"
+            columns: ["subcategory_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       reports_insurance_statement_facts_v1: {
         Row: {
@@ -9083,6 +9217,7 @@ export type Database = {
         Args: { p_job_order_id: string }
         Returns: Json
       }
+      apply_default_expense_category_template: { Args: never; Returns: number }
       approve_accounting_journal_entry: {
         Args: { p_entry_id: string }
         Returns: {
@@ -9179,6 +9314,18 @@ export type Database = {
           p_tenant_id: string
         }
         Returns: string
+      }
+      expense_has_permission: {
+        Args: { p_permission: string }
+        Returns: boolean
+      }
+      expense_management_rpc: {
+        Args: { p_filters?: Json; p_page?: number; p_page_size?: number }
+        Returns: Json
+      }
+      expense_work_order_search_rpc: {
+        Args: { p_limit?: number; p_search?: string }
+        Returns: Json
       }
       extract_plate_digits: { Args: { p: string }; Returns: string }
       extract_plate_letters: { Args: { p: string }; Returns: string }
@@ -10001,6 +10148,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_role: [

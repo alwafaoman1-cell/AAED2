@@ -60,7 +60,10 @@ const RecurringDetail = lazy(() => import("./pages/sales/Recurring").then(m => (
 const CustomerPayments = lazy(() => import("./pages/sales/CustomerPayments"));
 const SalesSettings = lazy(() => import("./pages/sales/SalesSettings"));
 const Accounting = lazy(() => import("./pages/Accounting"));
-const ExpenseNew = lazy(() => import("./pages/accounting/ExpenseNew"));
+const ExpensesManagementPage = lazy(() => import("./pages/accounting/expenses/ExpensesManagementPage"));
+const ExpenseFormPage = lazy(() => import("./pages/accounting/expenses/ExpenseFormPage"));
+const ExpenseCategoriesManagementPage = lazy(() => import("./pages/accounting/expenses/ExpenseCategoriesPage"));
+const ExpenseCategoryFormPage = lazy(() => import("./pages/accounting/expenses/ExpenseCategoryFormPage"));
 const Receipts = lazy(() => import("./pages/accounting/Receipts"));
 const CashboxTopup = lazy(() => import("./pages/accounting/CashboxTopup"));
 const Inventory = lazy(() => import("./pages/Inventory"));
@@ -116,7 +119,6 @@ const ExecutiveDashboard = lazy(() => import("./pages/dashboard/ExecutiveDashboa
 const PrintTemplates = lazy(() => import("./pages/settings/PrintTemplates"));
 const PrintTemplateVariants = lazy(() => import("./pages/settings/PrintTemplateVariants"));
 const PrintTemplateEditor = lazy(() => import("./pages/settings/PrintTemplateEditor"));
-const ExpenseCategoriesPage = lazy(() => import("./pages/settings/ExpenseCategoriesPage"));
 const RolesPermissionsPage = lazy(() => import("./pages/settings/RolesPermissionsPage"));
 const VehiclesCleanupPage = lazy(() => import("./pages/settings/VehiclesCleanup"));
 const QuickActionsSettingsPage = lazy(() => import("./pages/settings/QuickActionsSettingsPage"));
@@ -321,8 +323,12 @@ const App = () => (
               <Route path="/vehicle-entry/:id" element={<VehicleEntryDetail />} />
               <Route path="/vehicle-entry/:id/edit" element={<VehicleEntryForm />} />
               <Route path="/accounting" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Accounting /></ProtectedRoute>} />
-              <Route path="/accounting/expenses" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />
-              <Route path="/accounting/expenses/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseNew /></ProtectedRoute>} />
+              <Route path="/accounting/expenses" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpensesManagementPage /></ProtectedRoute>} />
+              <Route path="/accounting/expenses/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseFormPage /></ProtectedRoute>} />
+              <Route path="/accounting/expenses/:expenseId/edit" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseFormPage /></ProtectedRoute>} />
+              <Route path="/accounting/expenses/categories" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseCategoriesManagementPage /></ProtectedRoute>} />
+              <Route path="/accounting/expenses/categories/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseCategoryFormPage /></ProtectedRoute>} />
+              <Route path="/accounting/expenses/categories/:categoryId" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseCategoryFormPage /></ProtectedRoute>} />
               <Route path="/accounting/receipts" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Receipts /></ProtectedRoute>} />
               <Route path="/accounting/cashbox/topup" element={<ProtectedRoute roles={["admin","manager","accountant"]}><CashboxTopup /></ProtectedRoute>} />
               <Route path="/accounting/setup" element={<AccountingSetupRouteGuard permission="accounting.view_journal"><AccountingSetupCenterPage /></AccountingSetupRouteGuard>} />
@@ -452,7 +458,7 @@ const App = () => (
               <Route path="/settings/print-templates" element={<PrintTemplates />} />
               <Route path="/settings/print-templates/:docType" element={<PrintTemplateVariants />} />
               <Route path="/settings/print-templates/:docType/edit/:id" element={<PrintTemplateEditor />} />
-              <Route path="/settings/expense-categories" element={<ExpenseCategoriesPage />} />
+              <Route path="/settings/expense-categories" element={<Navigate to="/accounting/expenses/categories" replace />} />
               <Route path="/settings/roles-permissions" element={<ProtectedRoute roles={["admin"]}><RolesPermissionsPage /></ProtectedRoute>} />
               <Route path="/settings/quick-actions" element={<QuickActionsSettingsPage />} />
               <Route path="/settings/data-migration" element={<ProtectedRoute roles={["admin"]}><DataMigrationPage /></ProtectedRoute>} />

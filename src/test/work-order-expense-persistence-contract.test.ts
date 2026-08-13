@@ -43,7 +43,7 @@ describe("work-order expense persistence and profitability", () => {
     expect(detail).toContain("getExpensesForWorkOrder(order)");
     expect(detail).toContain("تكلفة قطع الغيار الفعلية");
     expect(detail).toContain("إجمالي المنفق على السيارة");
-    expect(detail).toContain("إيراد الفواتير قبل الضريبة");
+    expect(detail).toContain("الإيراد الرسمي قبل الضريبة");
     expect(detail).toContain("الربح الفعلي حتى الآن");
     expect(detail).toContain("actualRevenue - vouchersTotal");
   });

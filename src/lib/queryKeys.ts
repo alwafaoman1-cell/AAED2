@@ -62,6 +62,17 @@ export const queryKeys = {
     vehiclesOverStayAll: ["reports", "vehicles_over_stay"] as const,
     vehiclesOverStay: (age?: number | string) => ["reports", "vehicles_over_stay", age ?? "all"] as const,
   },
+  expenseManagement: {
+    all: ["expense_management"] as const,
+    list: (filters?: unknown) => ["expense_management", "list", filters ?? ""] as const,
+    detail: (id?: string | null) => ["expense_management", "detail", id ?? ""] as const,
+    categories: (filters?: unknown) => ["expense_management", "categories", filters ?? ""] as const,
+    category: (id?: string | null) => ["expense_management", "category", id ?? ""] as const,
+    categoryAudit: (id?: string | null) => ["expense_management", "category_audit", id ?? ""] as const,
+    workOrders: (search?: string) => ["expense_management", "work_orders", search ?? ""] as const,
+    suppliers: (search?: string) => ["expense_management", "suppliers", search ?? ""] as const,
+    costCenters: ["expense_management", "cost_centers"] as const,
+  },
   reportCenter: {
     all: ["report_center"] as const,
     catalog: ["report_center", "catalog"] as const,
