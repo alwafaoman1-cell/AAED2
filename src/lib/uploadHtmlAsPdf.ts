@@ -10,6 +10,7 @@ export type ClaimDocCategory =
   | "claim_estimate"   // تقدير المطالبة
   | "tax_invoice"      // فاتورة ضريبية
   | "delivery_proof"   // محضر تسليم
+  | "cancelled_delivery_proof" // تسليم المركبة بعد إلغاء المطالبة
   | "inspection"       // تقرير فحص
   | "claim_summary";   // ملخص المطالبة
 
@@ -181,6 +182,7 @@ const CAT_LABELS_AR: Record<ClaimDocCategory, string> = {
   claim_estimate: "تقدير المطالبة",
   tax_invoice: "فاتورة ضريبية",
   delivery_proof: "محضر تسليم",
+  cancelled_delivery_proof: "تسليم مركبة بعد إلغاء المطالبة",
   inspection: "تقرير فحص",
   claim_summary: "ملخص المطالبة",
 };
@@ -188,6 +190,7 @@ const CAT_LABELS_EN: Record<ClaimDocCategory, string> = {
   claim_estimate: "Claim Estimate",
   tax_invoice: "Tax Invoice",
   delivery_proof: "Delivery Proof",
+  cancelled_delivery_proof: "Cancelled Claim Vehicle Handover",
   inspection: "Inspection Report",
   claim_summary: "Claim Summary",
 };

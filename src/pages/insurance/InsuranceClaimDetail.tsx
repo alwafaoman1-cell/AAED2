@@ -79,6 +79,8 @@ import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { displayCustomerCode } from "@/lib/customerCode";
 import { upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
 import { markClean, markDirty } from "@/lib/unsavedWork";
+import { ensureVehicleEntryForClaim, getVehicleEntryByClaimId } from "@/lib/vehicleEntryService";
+import { buildCancelledClaimVehicleHandoverHtml } from "@/lib/cancelledClaimVehicleHandover";
 
 
 const insuranceCompanies = [
@@ -213,6 +215,8 @@ export default function InsuranceClaimDetail() {
   const [showSummary, setShowSummary] = useState(false);
   const [showInspectionPdf, setShowInspectionPdf] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showCancelledHandover, setShowCancelledHandover] = useState(false);
+  const [registeringVehicleEntry, setRegisteringVehicleEntry] = useState(false);
   const [showUndoDeliveryDialog, setShowUndoDeliveryDialog] = useState(false);
   const [undoDeliveryReason, setUndoDeliveryReason] = useState("");
   const [undoingDelivery, setUndoingDelivery] = useState(false);
@@ -276,6 +280,12 @@ export default function InsuranceClaimDetail() {
   const { data: vehicles } = useVehiclesByCustomer(customerId || null);
   const { data: insuranceCo } = useInsuranceCompany(companyId || undefined);
   const queryClient = useQueryClient();
+  const vehicleEntryByClaimQuery = useQuery({
+    queryKey: queryKeys.vehicleEntries.byClaim(isNew ? null : id),
+    queryFn: () => getVehicleEntryByClaimId(id!),
+    enabled: !isNew && !!id,
+    staleTime: 30_000,
+  });
 
   // Hydrate from DB
   useEffect(() => {
@@ -749,6 +759,92 @@ export default function InsuranceClaimDetail() {
         ...(params.patch || {}),
       },
     });
+  };
+
+  const handleRegisterVehicleEntry = async () => {
+    if (!id || isNew || !existing) return;
+    if (!vehicleId && !vehiclePlate.trim()) {
+      toast.error("يجب ربط مركبة أو إدخال رقم اللوحة قبل تسجيل الدخول");
+      return;
+    }
+    setRegisteringVehicleEntry(true);
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const result = await ensureVehicleEntryForClaim({
+        claimId: id,
+        customerId: customerId || null,
+        vehicleId: vehicleId || null,
+        insuranceCompanyId: companyId || null,
+        workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
+        receivedByName: auth.user?.user_metadata?.full_name || auth.user?.email || "",
+        customer: {
+          name: ownerName || customer?.name || "",
+          phone: ownerPhone || customer?.phone || "",
+        },
+        vehicle: {
+          plate_number: vehicle?.plate_number || vehiclePlate,
+          plate_letters: (vehicle as any)?.plate_letters || "",
+          plate_country: (vehicle as any)?.plate_country || "OM",
+          make: vehicle?.brand || vehicleMake,
+          model: vehicle?.model || vehicleModel,
+          year: String(vehicle?.year || vehicleYear || ""),
+          color: (vehicle as any)?.color || vehicleColor,
+          vin: (vehicle as any)?.vin_number || vehicleVin,
+          current_owner_name: ownerName || customer?.name || "",
+        },
+        insurance: {
+          company_name: insuranceCo?.name || company,
+          claim_number: claimNumber,
+          policy_number: (existing as any)?.policy_number || "",
+          lpo_number: lpoNumber,
+        },
+      }, auth.user?.id || null);
+
+      const arrivalDate = String(result.entry.arrival_date || new Date().toISOString().slice(0, 10));
+      const arrivalTime = String(result.entry.arrival_time || "00:00").slice(0, 5);
+      const receivedAt = new Date(`${arrivalDate}T${arrivalTime}:00`).toISOString();
+      const { data: savedClaim, error: claimError } = await supabase
+        .from("insurance_claims")
+        .update({ workshop_arrival_date: arrivalDate } as any)
+        .eq("tenant_id", (existing as any).tenant_id)
+        .eq("id", id)
+        .select("id,workshop_arrival_date")
+        .single();
+      if (claimError) throw claimError;
+
+      await syncClaimOperationalFile({
+        patch: {
+          vehicle_received_at: receivedAt,
+          vehicle_presence_status: "in_workshop",
+          vehicle_location_section: "داخل الورشة",
+          vehicle_location_bay: result.entry.vehicle_location_bay || null,
+          vehicle_location_updated_at: new Date().toISOString(),
+          vehicle_location_updated_by: auth.user?.id || null,
+          operational_status: "received",
+        },
+      });
+      setWorkshopArrivalDate((savedClaim as any)?.workshop_arrival_date || arrivalDate);
+      await writeClaimAudit("vehicle_entry.registered", {
+        entry_number: result.entry.entry_number,
+        vehicle_entry_id: result.entry.id,
+        created: result.created,
+        vehicle_presence_status: "in_workshop",
+      }, "vehicle_entry");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) }),
+        linkedWorkOrderId
+          ? queryClient.invalidateQueries({ queryKey: queryKeys.jobOrders.detail(linkedWorkOrderId) })
+          : Promise.resolve(),
+      ]);
+      toast.success(result.created
+        ? `تم تسجيل دخول المركبة برقم ${result.entry.entry_number}`
+        : `المركبة مسجلة مسبقًا برقم ${result.entry.entry_number}`);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تسجيل دخول المركبة");
+    } finally {
+      setRegisteringVehicleEntry(false);
+    }
   };
 
   const hydrateFromVerifiedClaim = (verified: any) => {
@@ -2364,6 +2460,31 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   إلغاء التعديلات
                 </Button>
               )}
+              {vehicleEntryByClaimQuery.data ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/vehicle-entry/${vehicleEntryByClaimQuery.data.id}`)}
+                  className="gap-1.5"
+                >
+                  <Car size={14} /> فتح كرت الدخول {vehicleEntryByClaimQuery.data.entry_number}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRegisterVehicleEntry}
+                  disabled={registeringVehicleEntry || vehicleEntryByClaimQuery.isLoading || status === "cancelled"}
+                  className="gap-1.5"
+                >
+                  <Car size={14} /> {registeringVehicleEntry ? "جارٍ تسجيل الدخول..." : "تسجيل دخول المركبة"}
+                </Button>
+              )}
+              {status === "cancelled" && (
+                <Button variant="outline" size="sm" onClick={() => setShowCancelledHandover(true)} className="gap-1.5 border-red-300 text-red-700">
+                  <FileText size={14} /> ورقة تسليم المطالبة الملغاة
+                </Button>
+              )}
               {isAwaitingApproval && (
                 <Button size="sm" onClick={openApproveDialog} disabled={updateStatus.isPending} className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground">
                   <CheckCircle2 size={14} /> اعتماد المطالبة
@@ -3263,7 +3384,19 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
         {/* ── 5) Delivery tab ── */}
         <TabsContent value="delivery" className="space-y-4 mt-4">
-          {!isNew && id && (
+          {!isNew && id && status === "cancelled" ? (
+            <Card className="p-5 border-red-200 bg-red-50/40">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-bold text-red-800">تسليم المركبة بعد إلغاء المطالبة</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">تظهر هذه الورقة للمطالبة الملغاة فقط، ولا تسجل فاتورة أو اكتمال إصلاح.</p>
+                </div>
+                <Button onClick={() => setShowCancelledHandover(true)} className="gap-2">
+                  <Printer size={16} /> معاينة وطباعة الورقة
+                </Button>
+              </div>
+            </Card>
+          ) : !isNew && id ? (
             <ClaimDeliverySection
               claimId={id}
               workOrderId={linkedWorkOrderId || undefined}
@@ -3279,7 +3412,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               }}
               onSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) })}
             />
-          )}
+          ) : null}
         </TabsContent>
 
         {/* ── 6) Payments tab ── */}
@@ -3383,6 +3516,46 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               fileBaseName: `Claim-Summary-${claimNumber}`,
               htmlContent: html,
               meta: { claim_number: claimNumber },
+            })}
+            onSaved={refreshClaimMedia}
+          />
+        );
+      })()}
+
+      {/* Vehicle handover document for cancelled claims only */}
+      {!isNew && id && status === "cancelled" && showCancelledHandover && (() => {
+        const html = buildCancelledClaimVehicleHandoverHtml({
+          claimNumber,
+          cancelledAt: (existing as any)?.updated_at,
+          cancellationReason: rejectionReason || (existing as any)?.rejection_reason,
+          customerName: ownerName || customer?.name,
+          customerPhone: ownerPhone || customer?.phone,
+          insuranceCompany: insuranceCo?.name || company,
+          vehicleMake: vehicle?.brand || vehicleMake,
+          vehicleModel: vehicle?.model || vehicleModel,
+          vehicleYear: vehicle?.year || vehicleYear,
+          plateNumber: vehicle?.plate_number || vehiclePlate,
+          plateLetters: (vehicle as any)?.plate_letters,
+          plateCountry: (vehicle as any)?.plate_country,
+          vin: (vehicle as any)?.vin_number || vehicleVin,
+          workshopArrivalDate,
+        }, getTemplateSettings());
+        return (
+          <PdfPreviewDialog
+            open={showCancelledHandover}
+            onOpenChange={setShowCancelledHandover}
+            htmlContent={html}
+            title={`تسليم مركبة بعد إلغاء المطالبة ${claimNumber}`}
+            fileName={`Cancelled-Claim-Handover-${claimNumber}`}
+            autoSave={async () => saveClaimDocument({
+              claimId: id,
+              category: "cancelled_delivery_proof",
+              fileBaseName: `Cancelled-Claim-Handover-${claimNumber}`,
+              htmlContent: html,
+              meta: {
+                claim_number: claimNumber,
+                cancellation_reason: rejectionReason || (existing as any)?.rejection_reason || null,
+              },
             })}
             onSaved={refreshClaimMedia}
           />
@@ -3642,6 +3815,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   onSuccess: () => {
                     setStatus("cancelled");
                     setRejectionReason(reason);
+                    setTab("delivery");
+                    toast.success("تم إلغاء المطالبة، وأصبحت ورقة تسليم المركبة الملغاة متاحة");
                     resolve();
                   },
                   onError: (e) => reject(e),

@@ -136,6 +136,18 @@ export interface VehicleEntryListFilters {
   to?: string;
 }
 
+export interface ClaimVehicleEntryInput {
+  claimId: string;
+  customerId?: string | null;
+  vehicleId?: string | null;
+  insuranceCompanyId?: string | null;
+  workOrderId?: string | null;
+  receivedByName?: string;
+  customer?: Partial<VehicleEntryFormState["customer"]>;
+  vehicle?: Partial<VehicleEntryFormState["vehicle"]>;
+  insurance?: Partial<VehicleEntryFormState["insurance"]>;
+}
+
 export function defaultVehicleEntryForm(): VehicleEntryFormState {
   const now = new Date();
   return {
@@ -405,6 +417,59 @@ export async function getVehicleEntry(id: string) {
     vehicle_entry_signatures: (signaturesRes.data as any[]) || [],
     vehicle_entry_audit_logs: (auditRes.data as any[]) || [],
   };
+}
+
+export async function getVehicleEntryByClaimId(claimId: string) {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId || !claimId) return null;
+  const { data, error } = await supabase
+    .from("vehicle_entries" as any)
+    .select("id,entry_number,status,arrival_date,arrival_time,vehicle_location,vehicle_location_bay,insurance_claim_id,work_order_id,vehicle_id,customer_id,created_at")
+    .eq("tenant_id", tenantId)
+    .eq("insurance_claim_id", claimId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as any) || null;
+}
+
+export async function ensureVehicleEntryForClaim(input: ClaimVehicleEntryInput, userId?: string | null) {
+  const existing = await getVehicleEntryByClaimId(input.claimId);
+  if (existing) return { entry: existing, created: false };
+
+  const base = defaultVehicleEntryForm();
+  const form: VehicleEntryFormState = {
+    ...base,
+    status: "Received",
+    customer_id: input.customerId || null,
+    vehicle_id: input.vehicleId || null,
+    insurance_company_id: input.insuranceCompanyId || null,
+    insurance_claim_id: input.claimId,
+    work_order_id: input.workOrderId || null,
+    vehicle_location: "داخل الورشة",
+    received_by_name: cleanText(input.receivedByName),
+    customer: { ...base.customer, ...(input.customer || {}) },
+    vehicle: { ...base.vehicle, ...(input.vehicle || {}) },
+    insurance: {
+      ...base.insurance,
+      is_insurance_related: true,
+      ...(input.insurance || {}),
+    },
+  };
+
+  try {
+    const entry = await saveVehicleEntry(form, userId);
+    return { entry, created: true };
+  } catch (error) {
+    const text = `${(error as any)?.code || ""} ${(error as any)?.message || error || ""}`;
+    if (/23505|vehicle entry already exists for this claim/i.test(text)) {
+      const concurrent = await getVehicleEntryByClaimId(input.claimId);
+      if (concurrent) return { entry: concurrent, created: false };
+    }
+    throw error;
+  }
 }
 
 export function formFromVehicleEntry(row: any): VehicleEntryFormState {

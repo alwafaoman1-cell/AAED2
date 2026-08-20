@@ -989,6 +989,14 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "كل التصنيفات الفرعية": "All Subcategories",
   "كل مراكز التكلفة": "All Cost Centers",
   "حالة التصنيف": "Classification Status",
+  "فتح كرت الدخول": "Open Entry Receipt",
+  "جارٍ تسجيل الدخول...": "Registering vehicle entry...",
+  "تسجيل دخول المركبة": "Register Vehicle Entry",
+  "ورقة تسليم المطالبة الملغاة": "Cancelled Claim Handover Paper",
+  "تسليم المركبة بعد إلغاء المطالبة": "Vehicle Handover After Claim Cancellation",
+  "تظهر هذه الورقة للمطالبة الملغاة فقط، ولا تسجل فاتورة أو اكتمال إصلاح.": "This paper is available only for a cancelled claim and does not record an invoice or completed repair.",
+  "معاينة وطباعة الورقة": "Preview and Print Paper",
+  "تعديل سند الصرف المرتبط": "Edit Linked Expense Voucher",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

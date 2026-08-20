@@ -51,6 +51,32 @@ describe("vehicle entry receipt contract", () => {
     expect(service).not.toContain("localStorage");
   });
 
+  it("registers claim vehicle entry with the shared sequence and an atomic duplicate guard", () => {
+    const service = read("src/lib/vehicleEntryService.ts");
+    const detail = read("src/pages/insurance/InsuranceClaimDetail.tsx");
+    const guard = read("supabase/migrations/20260820120000_claim_vehicle_entry_duplicate_guard.sql");
+    expect(service).toContain("ensureVehicleEntryForClaim");
+    expect(service).toContain("getVehicleEntryByClaimId");
+    expect(detail).toContain("handleRegisterVehicleEntry");
+    expect(detail).toContain('vehicle_presence_status: "in_workshop"');
+    expect(detail).toContain("فتح كرت الدخول");
+    expect(guard).toContain("pg_advisory_xact_lock");
+    expect(guard).toContain("Vehicle entry already exists for this claim");
+    expect(guard.toLowerCase()).not.toContain("delete from");
+  });
+
+  it("shows a dedicated archived handover paper after claim cancellation", () => {
+    const detail = read("src/pages/insurance/InsuranceClaimDetail.tsx");
+    const handover = read("src/lib/cancelledClaimVehicleHandover.ts");
+    const upload = read("src/lib/uploadHtmlAsPdf.ts");
+    expect(detail).toContain("ورقة تسليم المطالبة الملغاة");
+    expect(detail).toContain('status === "cancelled" && showCancelledHandover');
+    expect(detail).toContain('category: "cancelled_delivery_proof"');
+    expect(handover).toContain("CANCELLED CLAIM VEHICLE HANDOVER");
+    expect(handover).toContain("ولا يُعد فاتورة");
+    expect(upload).toContain('"cancelled_delivery_proof"');
+  });
+
   it("keeps media in vehicle_media and exports real XLSX from the list", () => {
     const service = read("src/lib/vehicleEntryService.ts");
     const list = read("src/pages/vehicle-entry/VehicleEntryList.tsx");

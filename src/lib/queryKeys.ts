@@ -29,6 +29,7 @@ export const queryKeys = {
     all: ["vehicle_entries"] as const,
     list: (filters?: unknown) => ["vehicle_entries", "list", filters ?? ""] as const,
     detail: (id?: string | null) => ["vehicle_entries", "detail", id ?? ""] as const,
+    byClaim: (claimId?: string | null) => ["vehicle_entries", "claim", claimId ?? ""] as const,
     media: (id?: string | null) => ["vehicle_entries", "media", id ?? ""] as const,
   },
   vehicleMedia: {

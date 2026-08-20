@@ -81,6 +81,7 @@ const DOC_CATEGORY_TO_SECTION: Record<ClaimDocCategory, SectionKey> = {
   claim_estimate: "estimates",
   tax_invoice: "invoices",
   delivery_proof: "delivery",
+  cancelled_delivery_proof: "delivery",
   inspection: "documents",
   claim_summary: "documents",
 };
