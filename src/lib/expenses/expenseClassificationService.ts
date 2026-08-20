@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { roundMoney } from "@/lib/money";
+import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 export type ExpenseScope = "work_order" | "operating";
 export type WorkOrderChannel = "cash" | "insurance";
@@ -122,18 +123,13 @@ export async function listCostCenters(tenantId: string) {
   if (error) fail(error); return data || [];
 }
 
-function voucherNumber() {
-  const d = new Date();
-  return `EXP-${d.getFullYear()}-${d.toISOString().replace(/\D/g, "").slice(4, 14)}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
-}
-
 export async function saveExpense(input: ExpenseInput, userId: string, id?: string) {
   const payload: any = {
     ...input, amount: roundMoney(input.subtotal), subtotal: roundMoney(input.subtotal),
     vat_amount: roundMoney(input.vat_amount), total: roundMoney(input.total), created_by: userId,
     category_id: input.subcategory_id || input.expense_category_id,
   };
-  if (!id) payload.voucher_number = voucherNumber();
+  if (!id) payload.voucher_number = await nextExpenseVoucherNumber();
   const query = id
     ? (supabase.from("expenses") as any).update(payload).eq("tenant_id", input.tenant_id).eq("id", id)
     : (supabase.from("expenses") as any).insert(payload);

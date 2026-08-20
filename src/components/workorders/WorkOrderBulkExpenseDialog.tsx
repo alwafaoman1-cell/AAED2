@@ -27,6 +27,7 @@ import { logActivity } from "@/lib/auditLogStore";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { syncWorkOrderInvoiceFromExpenses } from "@/lib/workOrderInvoiceSync";
 import SupplierPicker from "@/components/suppliers/SupplierPicker";
+import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 interface PartLine {
   id: string;
@@ -199,7 +200,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === it.cashboxId);
       const partsCat = isPartsCat(it);
       const totalAmt = computeAmount(it);
-      const number = voucherSettingsStore.generateNextNumber("payment");
+      const number = await nextExpenseVoucherNumber();
       let savedAmountForItem = 0;
 
       if (partsCat && it.parts.length > 0) {

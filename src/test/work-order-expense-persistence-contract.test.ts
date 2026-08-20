@@ -48,6 +48,17 @@ describe("work-order expense persistence and profitability", () => {
     expect(detail).toContain("actualRevenue - vouchersTotal");
   });
 
+  it("allows an authorized user to edit the same linked voucher from work-order detail", () => {
+    const detail = read("src/pages/WorkOrderDetail.tsx");
+    const dialog = read("src/components/workorders/WorkOrderExpenseDialog.tsx");
+    expect(detail).toContain("canManageFinance");
+    expect(detail).toContain("setEditingExpense(v)");
+    expect(detail).toContain("initialExpense={editingExpense}");
+    expect(dialog).toContain("initialExpense?: ExpenseRecord | null");
+    expect(dialog).toContain("setEditingId(initialExpense.id)");
+    expect(dialog).toContain("expensesStore.update(editingId");
+  });
+
   it("stores the supplier invoice number for every bulk expense line", () => {
     const source = read("src/components/workorders/WorkOrderBulkExpenseDialog.tsx");
     expect(source).toContain("supplierInvoiceNumber?: string");

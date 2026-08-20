@@ -11,9 +11,9 @@ import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import {
   expenseCategoriesStore,
   employeeCashboxesStore,
-  voucherSettingsStore,
   type FinanceCategory,
 } from "@/lib/financeSettingsStore";
+import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 interface StagedExpense {
   id: string;
@@ -134,7 +134,7 @@ export default function ExpensesImport() {
     if (!s.amount) { toast.error("المبلغ مطلوب"); return false; }
     const cat = cats.find((c) => c.id === s.categoryId) || findCategory(s.categoryName, cats);
     const cb = employeeCashboxesStore.getAll().find((c) => c.isDefault) || employeeCashboxesStore.getAll()[0];
-    const voucher = voucherSettingsStore.generateNextNumber("payment");
+    const voucher = await nextExpenseVoucherNumber();
     const rec: ExpenseRecord = {
       id: `EXP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       voucherNumber: voucher,

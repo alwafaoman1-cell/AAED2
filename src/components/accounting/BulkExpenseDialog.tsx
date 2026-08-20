@@ -17,6 +17,7 @@ import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { vehiclesStore } from "@/lib/vehiclesStore";
 import { logActivity } from "@/lib/auditLogStore";
 import SupplierPicker from "@/components/suppliers/SupplierPicker";
+import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 interface PartLine {
   id: string;
@@ -122,7 +123,7 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === it.cashboxId);
       const isParts = !!cat && /قطع غيار/.test(cat.name);
       const linkedVehicle = it.linkedVehiclePlate ? allVehicles.find((v) => v.plate === it.linkedVehiclePlate) : undefined;
-      const number = voucherSettingsStore.generateNextNumber("payment");
+      const number = await nextExpenseVoucherNumber();
       let savedAmountForItem = 0;
 
       // إذا فيه قطع → نسجّل كل قطعة كسجل منفصل لتتبع كل قطعة محاسبياً

@@ -46,6 +46,7 @@ import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
 import QrLabel from "@/components/workorders/QrLabel";
 import { toast } from "sonner";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
+import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 const SERVICE_TYPES = ["حادث", "صيانة", "كهرباء", "فحص", "ميكانيكا", "صبغ", "غسيل"] as const;
 
@@ -358,7 +359,7 @@ export default function SupervisorApp() {
       return;
     }
 
-    const number = voucherSettingsStore.generateNextNumber("payment");
+    const number = await nextExpenseVoucherNumber();
     const record: ExpenseRecord = {
       id: `EXP-${Date.now()}`,
       voucherNumber: number,

@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -3200,6 +3200,38 @@ export type Database = {
         }
         Relationships: []
       }
+      expense_voucher_sequences: {
+        Row: {
+          last_number: number
+          prefix: string
+          tenant_id: string
+          updated_at: string
+          voucher_year: number
+        }
+        Insert: {
+          last_number: number
+          prefix: string
+          tenant_id: string
+          updated_at?: string
+          voucher_year: number
+        }
+        Update: {
+          last_number?: number
+          prefix?: string
+          tenant_id?: string
+          updated_at?: string
+          voucher_year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_voucher_sequences_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expenses: {
         Row: {
           accounting_mapping_key: string | null
@@ -3248,6 +3280,7 @@ export type Database = {
           vat_amount: number
           vehicle_id: string | null
           voucher_number: string
+          voucher_number_guarded: boolean | null
           work_order_channel: string | null
           work_order_id: string | null
         }
@@ -3298,6 +3331,7 @@ export type Database = {
           vat_amount?: number
           vehicle_id?: string | null
           voucher_number: string
+          voucher_number_guarded?: boolean | null
           work_order_channel?: string | null
           work_order_id?: string | null
         }
@@ -3348,6 +3382,7 @@ export type Database = {
           vat_amount?: number
           vehicle_id?: string | null
           voucher_number?: string
+          voucher_number_guarded?: boolean | null
           work_order_channel?: string | null
           work_order_id?: string | null
         }
@@ -9434,6 +9469,10 @@ export type Database = {
       }
       next_customer_code: {
         Args: { p_tenant_id: string; p_year?: number }
+        Returns: string
+      }
+      next_expense_voucher_number: {
+        Args: { p_padding?: number; p_prefix?: string; p_year?: number }
         Returns: string
       }
       next_vehicle_entry_number: { Args: { p_year?: number }; Returns: string }

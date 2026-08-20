@@ -6,7 +6,8 @@ import { getWorkOrders, saveWorkOrderToCloud, type WorkOrder } from "./workOrder
 import { salesStore, makeEmptyDoc, calculateTotals, cryptoRandom, type SalesLineItem } from "./salesStore";
 import { customersStore } from "./customersStore";
 import { expensesStore, type ExpenseRecord } from "./expensesStore";
-import { expenseCategoriesStore, employeeCashboxesStore, voucherSettingsStore } from "./financeSettingsStore";
+import { expenseCategoriesStore, employeeCashboxesStore } from "./financeSettingsStore";
+import { nextExpenseVoucherNumber } from "./expenseVoucherNumbering";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
 import { findExistingVehicle } from "./vehicleIdentity";
 
@@ -194,7 +195,7 @@ export async function generateOrderAndInvoiceForRow(row: DailyLogRow): Promise<{
     const cats = expenseCategoriesStore.getAll();
     const partsCat = cats.find((c) => /قطع/.test(c.name)) || cats[0];
     const cb = employeeCashboxesStore.getAll().find((c) => c.isDefault) || employeeCashboxesStore.getAll()[0];
-    const voucher = voucherSettingsStore.generateNextNumber("payment");
+    const voucher = await nextExpenseVoucherNumber();
     const exp: ExpenseRecord = {
       id: `EXP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       voucherNumber: voucher,

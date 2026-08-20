@@ -24,11 +24,13 @@ import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import { writeOperationalAudit } from "@/lib/deletePolicy";
 import SupplierPicker from "@/components/suppliers/SupplierPicker";
+import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 interface Props {
   order: WorkOrder | null;
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  initialExpense?: ExpenseRecord | null;
   initialRequiredPart?: {
     id: string;
     name: string;
@@ -66,7 +68,7 @@ function ensureWorkOrderCategories(): string {
   return defaultId;
 }
 
-export default function WorkOrderExpenseDialog({ order, open, onOpenChange, initialRequiredPart, onExpenseSaved }: Props) {
+export default function WorkOrderExpenseDialog({ order, open, onOpenChange, initialExpense, initialRequiredPart, onExpenseSaved }: Props) {
   const [expenseTick, force] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -129,7 +131,25 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       setPartQty("1");
       setUnitBuyPrice("");
       setUnitSellPrice("");
-      if (initialRequiredPart) {
+      if (initialExpense) {
+        setEditingId(initialExpense.id);
+        setDate(initialExpense.date);
+        setAmount(String(initialExpense.amount));
+        setCategoryId(initialExpense.categoryId);
+        setCashboxId(initialExpense.cashboxId);
+        setPaymentMethod(initialExpense.paymentMethod);
+        setBeneficiary(initialExpense.beneficiary || "");
+        setSelectedSupplierId(initialExpense.supplierId || "");
+        setSupplierTaxNumber(initialExpense.supplierTaxNumber || "");
+        setSupplierInvoiceNumber(initialExpense.supplierInvoiceNumber || "");
+        setDescription(initialExpense.description || "");
+        setPhoto(initialExpense.photo || null);
+        setPartName(initialExpense.partName || "");
+        setPartNumber(initialExpense.partNumber || "");
+        setPartQty(initialExpense.partQty ? String(initialExpense.partQty) : "1");
+        setUnitBuyPrice(initialExpense.unitBuyPrice != null ? String(initialExpense.unitBuyPrice) : "");
+        setUnitSellPrice(initialExpense.unitSellPrice != null ? String(initialExpense.unitSellPrice) : "");
+      } else if (initialRequiredPart) {
         const qty = Math.max(1, Number(initialRequiredPart.quantity) || 1);
         const unit = Number(initialRequiredPart.estimatedUnitPrice || 0);
         setPartName(initialRequiredPart.name || "");
@@ -139,7 +159,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
         setDescription([initialRequiredPart.notes, "Converted from required spare part"].filter(Boolean).join(" — "));
       }
     }
-  }, [open, initialRequiredPart]);
+  }, [open, initialExpense, initialRequiredPart]);
 
   const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
@@ -276,7 +296,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       return;
     }
 
-    const number = voucherSettingsStore.generateNextNumber("payment");
+    const number = await nextExpenseVoucherNumber();
 
     const record: ExpenseRecord = {
       id: `EXP-${Date.now()}`,

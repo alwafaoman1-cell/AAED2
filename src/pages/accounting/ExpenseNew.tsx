@@ -43,6 +43,7 @@ import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { calculateVatExclusive, roundMoney } from "@/lib/money";
+import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 type ReportPeriod = "all" | "day" | "month" | "year";
 
@@ -200,7 +201,7 @@ export default function ExpenseNew() {
       return;
     }
 
-    const number = voucherSettingsStore.generateNextNumber("payment");
+    const number = await nextExpenseVoucherNumber();
 
     const record: ExpenseRecord = {
       id: `EXP-${Date.now()}`,

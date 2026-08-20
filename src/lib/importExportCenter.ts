@@ -8,6 +8,7 @@ import { vehiclesStore } from "@/lib/vehiclesStore";
 import { readSystemPreferences } from "@/lib/systemPreferences";
 import { toE164 } from "@/lib/phoneUtils";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 export type ImportExportEntity =
   | "daily_log"
@@ -229,7 +230,8 @@ export async function importExpensesRows(rows: Record<string, string>[]) {
       continue;
     }
 
-    const voucherNumber = (readImportField(row, "voucher_number", "voucherNumber") || `EXP-IMP-${Date.now()}-${index + 1}`).trim();
+    const importedVoucherNumber = readImportField(row, "voucher_number", "voucherNumber").trim();
+    const voucherNumber = importedVoucherNumber || await nextExpenseVoucherNumber({ prefix: "EXP-IMP" });
     const voucherKey = voucherNumber.toLowerCase();
     if (existing.has(voucherKey)) {
       errors.push({ rowIndex: index + 1, error: "Expense voucher already exists" });

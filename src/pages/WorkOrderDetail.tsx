@@ -51,7 +51,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { inspectionsStore } from "@/lib/inspectionsStore";
 import { getExpensesForWorkOrder, expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { Checkbox } from "@/components/ui/checkbox";
-import { canDelete, canEdit } from "@/lib/permissions";
+import { canDelete, canEdit, canManageFinance } from "@/lib/permissions";
 import { moveToTrash } from "@/lib/trashStore";
 import { logActivity } from "@/lib/auditLogStore";
 import { getNeededPartsRequestHtml, getWorkOrderHtml } from "@/lib/pdfGenerator";
@@ -203,6 +203,7 @@ export default function WorkOrderDetail() {
   const [photosOpen, setPhotosOpen] = useState(false);
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [previewExpense, setPreviewExpense] = useState<ExpenseRecord | null>(null);
+  const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -228,6 +229,7 @@ export default function WorkOrderDetail() {
 
   const allowEdit = canEdit();
   const allowDelete = canDelete();
+  const allowManageExpenses = canManageFinance();
 
   useEffect(() => {
     const unsubscribe = expensesStore.subscribe(() => {
@@ -1560,6 +1562,18 @@ export default function WorkOrderDetail() {
                           {Number(v.amount).toLocaleString()} ر.ع
                         </span>
                       </button>
+                      {allowManageExpenses && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-9 shrink-0 gap-1 px-2 text-[11px]"
+                          onClick={() => setEditingExpense(v)}
+                          title="تعديل سند الصرف المرتبط"
+                        >
+                          <Edit size={12} /> تعديل
+                        </Button>
+                      )}
                     </li>
                   );
                 })}
@@ -1635,6 +1649,13 @@ export default function WorkOrderDetail() {
         open={deliveryReceiptOpen}
         onOpenChange={setDeliveryReceiptOpen}
         order={order}
+      />
+      <WorkOrderExpenseDialog
+        order={editingExpense ? order : null}
+        open={!!editingExpense}
+        onOpenChange={(open) => !open && setEditingExpense(null)}
+        initialExpense={editingExpense}
+        onExpenseSaved={(expense) => setEditingExpense(expense)}
       />
 
       <UnifiedAddPaymentDialog

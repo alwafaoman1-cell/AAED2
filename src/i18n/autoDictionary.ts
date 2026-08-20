@@ -997,6 +997,8 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "تظهر هذه الورقة للمطالبة الملغاة فقط، ولا تسجل فاتورة أو اكتمال إصلاح.": "This paper is available only for a cancelled claim and does not record an invoice or completed repair.",
   "معاينة وطباعة الورقة": "Preview and Print Paper",
   "تعديل سند الصرف المرتبط": "Edit Linked Expense Voucher",
+  "تحميل بيانات الإقرار المحفوظة…": "Loading saved handover receipt data…",
+  "حفظ الإقرار": "Save Receipt",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

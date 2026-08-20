@@ -2,11 +2,12 @@
 import { expensesStore, type ExpenseRecord } from "./expensesStore";
 import { saveWorkOrderToCloud, type WorkOrder } from "./workOrdersStore";
 import { nextWorkOrderNumber } from "./numbering";
+import { nextExpenseVoucherNumber } from "./expenseVoucherNumbering";
 import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
 
 /** إنشاء سند مصروف تلقائي للمطالبة الملغاة */
 export async function createExpenseFromCancelledClaim(claim: InsuranceClaim, amount: number): Promise<ExpenseRecord> {
-  const voucherNumber = `EXP-CNL-${Date.now().toString().slice(-6)}`;
+  const voucherNumber = await nextExpenseVoucherNumber({ prefix: "EXP-CNL" });
   const record: ExpenseRecord = {
     id: `${voucherNumber}`,
     voucherNumber,

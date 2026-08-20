@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Printer, FileSignature, Trash2, Eraser, FileCheck2 } from "lucide-react";
+import { Printer, FileSignature, Trash2, Eraser, FileCheck2, Save, Loader2 } from "lucide-react";
 import { ResponsiveDialog, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogFooter } from "@/components/ui/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ import {
   buildDeliveryReceiptData,
   getDefaultDeliveryWarrantyNotes,
   getDeliveredDateInputValue,
+  loadVehicleDeliveryReceiptDraft,
+  saveVehicleDeliveryReceiptDraft,
   type VehicleDeliveryReceiptDraft,
 } from "@/lib/vehicleDeliveryReceipt";
 import { syncWorkOrderInvoiceFromExpenses, isInsuranceWorkOrder } from "@/lib/workOrderInvoiceSync";
@@ -44,6 +46,41 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
 
   const [pdfOpen, setPdfOpen] = useState(false);
   const [html, setHtml] = useState("");
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+
+  function applyDraft(draft?: VehicleDeliveryReceiptDraft | null) {
+    setDate(getDeliveredDateInputValue(draft?.date));
+    setReceiverName(draft?.receiverName || "");
+    setReceiverIdNumber(draft?.receiverIdNumber || "");
+    setCustomerIdNumber(draft?.customerIdNumber || "");
+    setMileageOut(draft?.mileageOut || "");
+    setWorkSummary(draft?.workSummary || "");
+    setPartsReplaced(draft?.partsReplaced || "");
+    setWarrantyNotes(draft?.warrantyNotes || getDefaultDeliveryWarrantyNotes());
+    setSatisfactionNotes(draft?.satisfactionNotes || "");
+    setIdPhoto(draft?.idPhotoDataUrl || null);
+    setSignature(draft?.signatureDataUrl || null);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setLoadingDraft(true);
+    void loadVehicleDeliveryReceiptDraft({ id: order.id, orderNumber: order.displayNumber })
+      .then((saved) => {
+        if (active) applyDraft(saved ? { ...deliveryDraft, ...saved } : deliveryDraft);
+      })
+      .catch((error: any) => {
+        if (!active) return;
+        applyDraft(deliveryDraft);
+        toast.error(error?.message || "تعذر تحميل بيانات إقرار التسليم المحفوظة");
+      })
+      .finally(() => {
+        if (active) setLoadingDraft(false);
+      });
+    return () => { active = false; };
+  }, [open, order.id, order.displayNumber]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill parts replaced from work order parts
   useEffect(() => {
@@ -98,6 +135,19 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
     setSignature(null);
   }
 
+  useEffect(() => {
+    if (!open || !signature || !sigCanvas.current) return;
+    const canvas = sigCanvas.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const image = new Image();
+    image.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    };
+    image.src = signature;
+  }, [open, signature]);
+
   async function handleIdPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -121,7 +171,41 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
     }));
   }
 
-  function handlePreview() {
+  function currentDraft(): VehicleDeliveryReceiptDraft {
+    return {
+      date,
+      customerIdNumber,
+      receiverName,
+      receiverIdNumber,
+      mileageOut,
+      workSummary,
+      partsReplaced,
+      warrantyNotes,
+      satisfactionNotes,
+      signatureDataUrl: signature,
+      idPhotoDataUrl: idPhoto,
+    };
+  }
+
+  async function handleSave(showSuccess = true): Promise<boolean> {
+    setSavingDraft(true);
+    try {
+      await saveVehicleDeliveryReceiptDraft(
+        { id: order.id, orderNumber: order.displayNumber },
+        currentDraft(),
+      );
+      if (showSuccess) toast.success("تم حفظ بيانات إقرار استلام السيارة");
+      return true;
+    } catch (error: any) {
+      toast.error(error?.message || "فشل حفظ بيانات إقرار استلام السيارة");
+      return false;
+    } finally {
+      setSavingDraft(false);
+    }
+  }
+
+  async function handlePreview() {
+    if (!(await handleSave(false))) return;
     setHtml(buildHtml());
     setPdfOpen(true);
   }
@@ -181,6 +265,11 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
           </ResponsiveDialogHeader>
 
           <div className="space-y-4 py-2 max-h-[70vh] overflow-y-auto pr-1">
+            {loadingDraft && (
+              <div className="flex items-center justify-center gap-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" /> تحميل بيانات الإقرار المحفوظة…
+              </div>
+            )}
             {/* Header summary */}
             <div className="bg-success/5 border border-success/30 rounded-lg p-3 text-xs space-y-1">
               <div><strong>أمر العمل:</strong> {orderDisplay}</div>
@@ -266,6 +355,16 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
 
           <ResponsiveDialogFooter className="flex flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)} className="sm:flex-1">إلغاء</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSave(true)}
+              disabled={savingDraft || loadingDraft}
+              className="sm:flex-1 gap-2"
+            >
+              {savingDraft ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+              حفظ الإقرار
+            </Button>
             {isInsuranceWorkOrder(order) ? (
               <Button
                 onClick={async () => {
@@ -296,7 +395,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
                 <FileCheck2 size={16} /> إصدار فاتورة ضريبية
               </Button>
             )}
-            <Button onClick={handlePreview} className="sm:flex-1 gap-2 bg-success hover:bg-success/90 text-white">
+            <Button disabled={savingDraft || loadingDraft} onClick={() => void handlePreview()} className="sm:flex-1 gap-2 bg-success hover:bg-success/90 text-white">
               <Printer size={16} /> معاينة وطباعة الإقرار
             </Button>
           </ResponsiveDialogFooter>
