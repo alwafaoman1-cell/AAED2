@@ -14,6 +14,40 @@ export interface ExpenseCategoryRow {
   description_ar?: string | null; description_en?: string | null;
 }
 
+export function normalizeExpenseCategoryRow(row: any): ExpenseCategoryRow {
+  const rawSortOrder = row?.sort_order;
+  const sortOrder = rawSortOrder == null || rawSortOrder === ""
+    ? Number.MAX_SAFE_INTEGER
+    : Number(rawSortOrder);
+  return {
+    ...row,
+    code: String(row?.code ?? ""),
+    name_ar: String(row?.name_ar ?? ""),
+    name_en: String(row?.name_en ?? ""),
+    parent_id: row?.parent_id || null,
+    level: Number(row?.level) || 1,
+    sort_order: Number.isFinite(sortOrder) ? sortOrder : Number.MAX_SAFE_INTEGER,
+  } as ExpenseCategoryRow;
+}
+
+export function compareExpenseCategoryRows(
+  a: ExpenseCategoryRow,
+  b: ExpenseCategoryRow,
+  mode: "tree" | "code" = "tree",
+) {
+  const left = normalizeExpenseCategoryRow(a);
+  const right = normalizeExpenseCategoryRow(b);
+  if (mode === "code") {
+    const byCode = left.code.localeCompare(right.code, "en", { numeric: true, sensitivity: "base" });
+    if (byCode) return byCode;
+  }
+  const byOrder = left.sort_order - right.sort_order;
+  if (byOrder) return byOrder;
+  return left.name_en.localeCompare(right.name_en, "en", { sensitivity: "base" })
+    || left.name_ar.localeCompare(right.name_ar, "ar", { sensitivity: "base" })
+    || left.code.localeCompare(right.code, "en", { numeric: true, sensitivity: "base" });
+}
+
 export interface ExpenseManagementFilters {
   from?: string; to?: string; scope?: string; channel?: string; work_order_id?: string;
   claim_id?: string; vehicle_id?: string; customer_id?: string; department_id?: string;
@@ -40,7 +74,7 @@ export async function listExpenseCategories(tenantId: string, includeInactive = 
   if (!includeInactive) q = q.eq("is_active", true);
   const { data, error } = await q;
   if (error) fail(error);
-  return (data || []) as ExpenseCategoryRow[];
+  return (data || []).map(normalizeExpenseCategoryRow);
 }
 
 export async function getExpenseCategory(tenantId: string, id: string) {

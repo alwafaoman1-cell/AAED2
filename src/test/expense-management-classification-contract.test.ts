@@ -80,6 +80,17 @@ describe("expense management classification refactor", () => {
     expect(page).toContain("listCategoryAudit");
     expect(page).toContain("Category Audit Trail");
     expect(page).toContain("visited.has(row.id)");
+    expect(page).toContain("compareExpenseCategoryRows");
+  });
+
+  it("normalizes legacy category nulls before locale-aware sorting", async () => {
+    const { compareExpenseCategoryRows, normalizeExpenseCategoryRow } = await import("@/lib/expenses/expenseClassificationService");
+    const legacy = normalizeExpenseCategoryRow({ id: "legacy", code: null, name_ar: "قديم", name_en: null, sort_order: null });
+    const current = normalizeExpenseCategoryRow({ id: "current", code: "A-1", name_ar: "حديث", name_en: "Current", sort_order: 10 });
+    expect(legacy.code).toBe("");
+    expect(legacy.name_en).toBe("");
+    expect(() => compareExpenseCategoryRows(legacy, current)).not.toThrow();
+    expect(() => compareExpenseCategoryRows(legacy, current, "code")).not.toThrow();
   });
 
   it("exposes expense and category management from the accounting center", () => {

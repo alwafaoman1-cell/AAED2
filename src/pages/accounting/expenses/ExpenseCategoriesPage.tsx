@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { queryKeys } from "@/lib/queryKeys";
 import {
   applyDefaultCategoryTemplate,
+  compareExpenseCategoryRows,
   deleteExpenseCategory,
   disableExpenseCategory,
   listCategoryAudit,
@@ -26,7 +27,7 @@ type ViewMode = "tree" | "flat";
 function treeOrder(rows: ExpenseCategoryRow[]) {
   const children = new Map<string | null, ExpenseCategoryRow[]>();
   rows.forEach((row) => children.set(row.parent_id, [...(children.get(row.parent_id) || []), row]));
-  children.forEach((items) => items.sort((a, b) => a.sort_order - b.sort_order || a.name_en.localeCompare(b.name_en)));
+  children.forEach((items) => items.sort((a, b) => compareExpenseCategoryRows(a, b)));
   const result: ExpenseCategoryRow[] = [];
   const visited = new Set<string>();
   const visit = (parent: string | null) => (children.get(parent) || []).forEach((row) => {
@@ -37,7 +38,7 @@ function treeOrder(rows: ExpenseCategoryRow[]) {
   // A search can match a child while excluding its parent. Keep that matching
   // row visible instead of silently dropping it from Tree view.
   rows.filter((row) => !visited.has(row.id))
-    .sort((a, b) => a.sort_order - b.sort_order || a.name_en.localeCompare(b.name_en))
+    .sort((a, b) => compareExpenseCategoryRows(a, b))
     .forEach((row) => { visited.add(row.id); result.push(row); });
   return result;
 }
@@ -83,7 +84,7 @@ export default function ExpenseCategoriesPage() {
       if (departmentIds && row.id !== department && !departmentIds.has(row.parent_id || "") && !departmentIds.has(row.id)) return false;
       return true;
     });
-    return view === "tree" ? treeOrder(filtered) : [...filtered].sort((a, b) => a.code.localeCompare(b.code));
+    return view === "tree" ? treeOrder(filtered) : [...filtered].sort((a, b) => compareExpenseCategoryRows(a, b, "code"));
   }, [active, department, query.data, scope, search, view]);
 
   return <div className="space-y-5 p-4 md:p-6" dir={isAr ? "rtl" : "ltr"}>
