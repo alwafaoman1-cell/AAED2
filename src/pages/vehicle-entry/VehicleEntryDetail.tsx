@@ -123,11 +123,11 @@ export default function VehicleEntryDetail() {
     );
   }
 
-  const customer = entry.customers || {};
-  const vehicle = entry.vehicles || {};
+  const customer = entry.customer || entry.customers || entry.customer_snapshot || {};
+  const vehicle = entry.vehicle || entry.vehicles || entry.vehicle_snapshot || {};
   const insurance = entry.insurance_snapshot || {};
-  const deliveredBy = entry.delivered_by_snapshot || {};
-  const damageMarks = entry.vehicle_entry_damage_marks || [];
+  const deliveredBy = entry.delivered_by || entry.delivered_by_snapshot || {};
+  const damageMarks = entry.damage_marks || entry.vehicle_entry_damage_marks || [];
   const media = entry.vehicle_media || [];
   const signatures = entry.vehicle_entry_signatures || [];
   const auditLogs = entry.vehicle_entry_audit_logs || [];
@@ -161,9 +161,9 @@ export default function VehicleEntryDetail() {
         <Card className="p-4 space-y-3">
           {cardTitle("بيانات الاستلام", "Receipt Details")}
           <Info label="رقم الاستلام" value={entry.entry_number} />
-          <Info label="تاريخ ووقت الوصول" value={fmtDateTime(entry.arrival_at)} />
+          <Info label="تاريخ ووقت الوصول" value={fmtDateTime(entry.arrival_at || `${entry.arrival_date}T${String(entry.arrival_time || "00:00").slice(0, 5)}:00`)} />
           <Info label="طريقة الوصول" value={entry.arrival_method} />
-          <Info label="الموقع" value={[entry.vehicle_location_section, entry.vehicle_location_bay].filter(Boolean).join(" / ") || "—"} />
+          <Info label="الموقع" value={[entry.vehicle_location || entry.vehicle_location_section, entry.vehicle_location_bay].filter(Boolean).join(" / ") || "—"} />
         </Card>
         <Card className="p-4 space-y-3">
           {cardTitle("العميل", "Customer")}
@@ -184,7 +184,7 @@ export default function VehicleEntryDetail() {
       <Card className="p-4 space-y-3">
         {cardTitle("بيانات التأمين", "Insurance")}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Info label="شركة التأمين" value={insurance.insurance_company_name || "—"} />
+          <Info label="شركة التأمين" value={insurance.company_name || insurance.insurance_company_name || entry.insurance_company?.name || "—"} />
           <Info label="رقم المطالبة" value={insurance.claim_number || "—"} />
           <Info label="رقم الوثيقة" value={insurance.policy_number || "—"} />
         </div>
@@ -194,9 +194,9 @@ export default function VehicleEntryDetail() {
         {cardTitle("حالة المركبة والأضرار", "Condition & Damage")}
         <DamageMapPreview marks={damageMarks} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Info label="حالة المركبة" value={entry.condition_snapshot?.condition_description || "—"} />
-          <Info label="الأضرار الظاهرة" value={entry.condition_snapshot?.visible_damage || "—"} />
-          <Info label="سبب الضرر/الحادث" value={entry.condition_snapshot?.incident_description || "—"} />
+          <Info label="حالة المركبة" value={entry.vehicle_condition?.condition_description || entry.condition_snapshot?.condition_description || "—"} />
+          <Info label="الأضرار الظاهرة" value={entry.vehicle_condition?.visible_damage || entry.condition_snapshot?.visible_damage || "—"} />
+          <Info label="سبب الضرر/الحادث" value={entry.vehicle_condition?.incident_description || entry.condition_snapshot?.incident_description || "—"} />
           <Info label="ملاحظات" value={entry.notes || "—"} />
         </div>
         <div className="overflow-x-auto">
@@ -244,10 +244,10 @@ export default function VehicleEntryDetail() {
                     <Trash2 size={15} />
                   </Button>
                 </div>
-                {item.public_url && item.media_type === "image" ? (
-                  <img src={item.public_url} alt="" className="h-32 w-full rounded object-cover" />
-                ) : item.public_url ? (
-                  <a href={item.public_url} target="_blank" rel="noreferrer" className="text-primary underline">فتح الملف</a>
+                {(item.url || item.public_url) && item.media_type === "image" ? (
+                  <img src={item.url || item.public_url} alt="" className="h-32 w-full rounded object-cover" />
+                ) : (item.url || item.public_url) ? (
+                  <a href={item.url || item.public_url} target="_blank" rel="noreferrer" className="text-primary underline">فتح الملف</a>
                 ) : (
                   <span className="text-xs text-muted-foreground">لا يوجد رابط عام للملف</span>
                 )}
@@ -313,10 +313,8 @@ function SignatureBox({ label, signature }: { label: string; signature?: any }) 
 function DamageMapPreview({ marks }: { marks: any[] }) {
   if (!marks.some((mark) => mark.x != null && mark.y != null)) return null;
   return (
-    <div className="relative mx-auto h-[300px] max-w-[230px] rounded-[36px] border-2 border-dashed border-primary/40 bg-gradient-to-b from-muted to-background">
-      <div className="absolute left-1/2 top-5 h-12 w-24 -translate-x-1/2 rounded-t-full border border-border bg-background/80 text-center text-xs pt-3">Front</div>
-      <div className="absolute left-1/2 top-24 h-32 w-32 -translate-x-1/2 rounded-[28px] border border-border bg-background/70" />
-      <div className="absolute left-1/2 bottom-6 h-14 w-28 -translate-x-1/2 rounded-b-full border border-border bg-background/80 text-center text-xs pt-5">Rear</div>
+    <div className="relative mx-auto aspect-[944/1676] w-full max-w-[230px] overflow-hidden rounded-xl border-2 border-dashed border-primary/40 bg-white">
+      <img src="/assets/vehicle-damage-map.png" alt="خريطة أضرار المركبة" className="absolute inset-0 h-full w-full object-contain" />
       {marks.filter((mark) => mark.x != null && mark.y != null).map((mark) => (
         <div
           key={`${mark.mark_number}-${mark.x}-${mark.y}`}

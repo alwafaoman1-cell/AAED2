@@ -1026,6 +1026,9 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "النص المحفوظ هنا هو نفسه الذي يظهر في المعاينة والطباعة.": "The text saved here is the same text shown in preview and print.",
   "نص الإقرار بالعربية": "Declaration Text in Arabic",
   "خريطة أضرار المركبة / Vehicle damage map": "Vehicle Damage Map",
+  "خريطة أضرار المركبة": "Vehicle Damage Map",
+  "العميل أحضر المركبة / Customer": "Customer Brought the Vehicle",
+  "يتم تعبئة اسم العميل ورقم الهاتف والبطاقة تلقائيًا من العميل المحدد. إذا لم يكن العميل موجودًا، فسيُنشأ عند حفظ النموذج بعد التحقق من رقم الهاتف لمنع التكرار.": "The selected customer's name, phone, and ID are filled automatically. If the customer does not exist, the record is created on save after checking the phone number to prevent duplicates.",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

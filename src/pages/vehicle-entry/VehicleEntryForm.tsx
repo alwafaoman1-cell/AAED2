@@ -31,15 +31,9 @@ import {
 import { toast } from "sonner";
 
 const ARRIVAL_METHODS = [
-  "المالك أحضر المركبة",
+  "العميل أحضر المركبة",
   "سائق أحضر المركبة",
   "وصلت بواسطة رافعة",
-  "العميل قاد المركبة",
-  "مندوب أحضر المركبة",
-  "رافعة شركة التأمين",
-  "رافعة خاصة",
-  "مركبة غير قابلة للقيادة",
-  "أخرى",
 ];
 
 const CONDITION_FLAGS = [
@@ -183,13 +177,13 @@ export default function VehicleEntryForm() {
   function chooseDeliveredBy(type: VehicleEntryFormState["delivered_by"]["delivery_type"]) {
     if (type === "owner") {
       setDeliveryDataSource("owner");
-      patch({ arrival_method: "المالك أحضر المركبة" });
+      patch({ arrival_method: "العميل أحضر المركبة" });
       patchDeliveredBy({
         delivery_type: type,
         full_name: form.vehicle.current_owner_name || form.customer.name,
         phone: form.customer.phone,
         id_number: form.customer.id_number,
-        relation: "مالك المركبة",
+        relation: "العميل/مالك المركبة",
         towing_company: "",
         towing_plate: "",
       });
@@ -299,7 +293,7 @@ export default function VehicleEntryForm() {
         full_name: form.vehicle.current_owner_name || customer.name || "",
         phone: customer.phone || "",
         id_number: customer.id_number || "",
-        relation: "مالك المركبة",
+        relation: "العميل/مالك المركبة",
       } : form.delivered_by,
     });
     setCustomerSearch("");
@@ -332,7 +326,7 @@ export default function VehicleEntryForm() {
         ...form.delivered_by,
         full_name: vehicle.customers?.name || form.vehicle.current_owner_name || form.customer.name,
         phone: vehicle.customers?.phone || form.customer.phone,
-        relation: "مالك المركبة",
+        relation: "العميل/مالك المركبة",
       } : form.delivered_by,
     });
     setVehicleSearch("");
@@ -473,7 +467,14 @@ export default function VehicleEntryForm() {
           <Field label="تاريخ الوصول"><Input type="date" value={form.arrival_date} onChange={(e) => patch({ arrival_date: e.target.value })} /></Field>
           <Field label="وقت الوصول"><Input type="time" value={form.arrival_time} onChange={(e) => patch({ arrival_time: e.target.value })} /></Field>
           <Field label="طريقة الوصول">
-            <Select value={form.arrival_method} onValueChange={(value) => patch({ arrival_method: value })}>
+            <Select
+              value={form.arrival_method}
+              onValueChange={(value) => {
+                if (value === "وصلت بواسطة رافعة") chooseDeliveredBy("tow");
+                else if (value === "سائق أحضر المركبة") chooseDeliveredBy("driver");
+                else chooseDeliveredBy("owner");
+              }}
+            >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>{ARRIVAL_METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
             </Select>
@@ -625,7 +626,7 @@ export default function VehicleEntryForm() {
       <Section title="بيانات مسلّم المركبة / Vehicle Delivered By">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <Button type="button" variant={form.delivered_by.delivery_type === "owner" ? "default" : "outline"} onClick={() => chooseDeliveredBy("owner")} className="gap-2">
-            <UserRound size={16} /> صاحب المركبة / Owner
+            <UserRound size={16} /> العميل أحضر المركبة / Customer
           </Button>
           <Button type="button" variant={form.delivered_by.delivery_type === "driver" ? "default" : "outline"} onClick={() => chooseDeliveredBy("driver")} className="gap-2">
             <CarFront size={16} /> سائق / Driver
@@ -634,7 +635,10 @@ export default function VehicleEntryForm() {
             <Truck size={16} /> رافعة / Tow Truck
           </Button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {form.delivered_by.delivery_type === "owner" && <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+          يتم تعبئة اسم العميل ورقم الهاتف والبطاقة تلقائيًا من العميل المحدد. إذا لم يكن العميل موجودًا، فسيُنشأ عند حفظ النموذج بعد التحقق من رقم الهاتف لمنع التكرار.
+        </div>}
+        {form.delivered_by.delivery_type !== "owner" && <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <Field label="تعبئة بيانات الشخص من">
             <Select
               value={deliveryDataSource}
@@ -647,17 +651,15 @@ export default function VehicleEntryForm() {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="manual">إدخال/تعديل يدوي</SelectItem>
-                <SelectItem value="owner">اسم المالك Owner Name</SelectItem>
                 <SelectItem value="customer">بيانات العميل المرتبط</SelectItem>
               </SelectContent>
             </Select>
           </Field>
-        </div>
+        </div>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="الاسم الكامل *"><Input value={form.delivered_by.full_name} onChange={(e) => patchDeliveredBy({ full_name: e.target.value })} /></Field>
+          <Field label={form.delivered_by.delivery_type === "driver" ? "اسم السائق *" : form.delivered_by.delivery_type === "tow" ? "اسم سائق الرافعة *" : "اسم العميل/المالك *"}><Input value={form.delivered_by.full_name} onChange={(e) => patchDeliveredBy({ full_name: e.target.value })} /></Field>
           <Field label="رقم الهاتف"><Input dir="ltr" value={form.delivered_by.phone} onChange={(e) => patchDeliveredBy({ phone: e.target.value })} /></Field>
           <Field label="رقم البطاقة"><Input dir="ltr" value={form.delivered_by.id_number} onChange={(e) => patchDeliveredBy({ id_number: e.target.value })} /></Field>
-          <Field label="الصفة"><Input value={form.delivered_by.relation} onChange={(e) => patchDeliveredBy({ relation: e.target.value })} /></Field>
           {form.delivered_by.delivery_type === "tow" && <Field label="شركة الرافعة"><Input value={form.delivered_by.towing_company} onChange={(e) => patchDeliveredBy({ towing_company: e.target.value })} /></Field>}
           {form.delivered_by.delivery_type === "tow" && <Field label="لوحة الرافعة"><Input dir="ltr" value={form.delivered_by.towing_plate} onChange={(e) => patchDeliveredBy({ towing_plate: e.target.value })} /></Field>}
           <div className="md:col-span-3"><Field label="ملاحظات"><Textarea rows={2} value={form.delivered_by.notes} onChange={(e) => patchDeliveredBy({ notes: e.target.value })} /></Field></div>
@@ -720,7 +722,7 @@ export default function VehicleEntryForm() {
           {ENTRY_PHOTO_SLOTS.map((slot) => {
             const pending = pendingPhotos.find((photo) => photo.category === slot.key);
             const existing = ((detail.data as any)?.vehicle_media || []).find((media: any) => media.category === slot.key && media.media_type === "image");
-            const previewUrl = pending?.previewUrl || existing?.public_url;
+            const previewUrl = pending?.previewUrl || existing?.url || existing?.public_url;
             return (
               <div key={slot.key} className="relative overflow-hidden rounded-xl border border-dashed border-border bg-muted/30">
                 <button
@@ -755,7 +757,7 @@ export default function VehicleEntryForm() {
             <div key={media.id} className="rounded-lg border border-border p-2 text-sm">
               <div className="font-semibold truncate">{media.file_name || media.storage_path}</div>
               <div className="text-xs text-muted-foreground">{media.media_type} • {media.category}</div>
-              {media.public_url && media.media_type === "image" && <img src={media.public_url} alt="" className="mt-2 h-24 w-full object-cover rounded" />}
+              {(media.url || media.public_url) && media.media_type === "image" && <img src={media.url || media.public_url} alt="" className="mt-2 h-24 w-full object-cover rounded" />}
             </div>
           ))}
         </div>

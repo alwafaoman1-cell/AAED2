@@ -85,6 +85,9 @@ describe("vehicle entry receipt contract", () => {
     expect(service).toContain('.from("vehicle_media" as any)');
     expect(service).toContain("vehicle_entry_id");
     expect(service).toContain("onConflict: \"tenant_id,storage_bucket,storage_path\"");
+    expect(service).toContain("resolveVehicleEntryMediaUrls");
+    expect(service).toContain("createSignedUrls");
+    expect(service).toContain("public_url: null");
     expect(list).toContain('import * as XLSX from "xlsx"');
     expect(list).toContain("XLSX.writeFile");
     expect(list).not.toContain("exportRowsAsCsv");
@@ -108,6 +111,7 @@ describe("vehicle entry receipt contract", () => {
     expect(form).toContain('chooseDeliveredBy("owner")');
     expect(form).toContain('chooseDeliveredBy("driver")');
     expect(form).toContain('chooseDeliveredBy("tow")');
+    expect(form).toContain("العميل أحضر المركبة / Customer");
     expect(form).toContain("ENTRY_PHOTO_SLOTS");
     expect(form).toContain("pendingPhotos");
     expect(form).toContain("تم تجهيز");
@@ -126,12 +130,24 @@ describe("vehicle entry receipt contract", () => {
     expect(currentTemplate).toContain("main_damage");
     expect(currentTemplate).toContain("/assets/vehicle-damage-map.png");
     expect(currentTemplate).toContain("damage-map-image");
+    expect(currentTemplate).toContain("damage-map-stage");
+    expect(currentTemplate).toContain("deliveryType === \"tow\"");
+    expect(currentTemplate).toContain("اسم السائق Driver Name");
     expect(currentTemplate).toContain("important-value");
     expect(currentTemplate).toContain("رقم أمر الإصلاح Repair Order No.");
     expect(currentTemplate).not.toContain("نوع الوقود Fuel Type");
     expect(currentTemplate).not.toContain("تاريخ الحادث Accident Date");
     expect(currentTemplate).not.toContain("مكان الحادث Accident Location");
     expect(currentTemplate).not.toContain("نوع الحادث Accident Type");
+  });
+
+  it("reads the canonical vehicle entry aliases in detail and uses resolved media URLs", () => {
+    const detail = read("src/pages/vehicle-entry/VehicleEntryDetail.tsx");
+    expect(detail).toContain("entry.customer || entry.customers");
+    expect(detail).toContain("entry.vehicle || entry.vehicles");
+    expect(detail).toContain("entry.delivered_by || entry.delivered_by_snapshot");
+    expect(detail).toContain("entry.damage_marks || entry.vehicle_entry_damage_marks");
+    expect(detail).toContain("item.url || item.public_url");
   });
 
   it("renders the entry barcode and the saved declaration into print HTML", async () => {

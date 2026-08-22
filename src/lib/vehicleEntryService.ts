@@ -162,7 +162,7 @@ export function defaultVehicleEntryForm(): VehicleEntryFormState {
     arrival_time: now.toTimeString().slice(0, 5),
     vehicle_location: "داخل الورشة",
     vehicle_location_bay: "",
-    arrival_method: "المالك أحضر المركبة",
+    arrival_method: "العميل أحضر المركبة",
     received_by_name: "",
     declaration_ar: VEHICLE_ENTRY_DECLARATION_AR,
     declaration_en: VEHICLE_ENTRY_DECLARATION_EN,
@@ -420,10 +420,12 @@ export async function getVehicleEntry(id: string) {
   if (signaturesRes.error) throw signaturesRes.error;
   if (auditRes.error) throw auditRes.error;
 
+  const resolvedMedia = await resolveVehicleEntryMediaUrls((mediaRes.data as any[]) || []);
+
   return {
     ...(data as any),
     damage_marks: (marks as any[]) || [],
-    vehicle_media: (mediaRes.data as any[]) || [],
+    vehicle_media: resolvedMedia,
     vehicle_entry_documents: (docsRes.data as any[]) || [],
     vehicle_entry_signatures: (signaturesRes.data as any[]) || [],
     vehicle_entry_audit_logs: (auditRes.data as any[]) || [],
@@ -444,6 +446,33 @@ export async function getVehicleEntryByClaimId(claimId: string) {
     .maybeSingle();
   if (error) throw error;
   return (data as any) || null;
+}
+
+async function resolveVehicleEntryMediaUrls(rows: any[]) {
+  if (!rows.length) return [];
+  const signedByStorageKey = new Map<string, string>();
+  const groups = new Map<string, any[]>();
+  rows.forEach((row) => {
+    if (!row?.storage_path) return;
+    const bucket = String(row.storage_bucket || "insurance-docs");
+    groups.set(bucket, [...(groups.get(bucket) || []), row]);
+  });
+
+  await Promise.all(Array.from(groups.entries()).map(async ([bucket, items]) => {
+    const uniquePaths = Array.from(new Set(items.map((item) => String(item.storage_path))));
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrls(uniquePaths, 60 * 60 * 24 * 7);
+    if (error) return;
+    ((data as any[]) || []).forEach((signed, index) => {
+      const path = String(signed?.path || uniquePaths[index] || "");
+      if (path && signed?.signedUrl) signedByStorageKey.set(`${bucket}:${path}`, signed.signedUrl);
+    });
+  }));
+
+  return rows.map((row) => {
+    const bucket = String(row.storage_bucket || "insurance-docs");
+    const url = signedByStorageKey.get(`${bucket}:${row.storage_path}`) || row.url || row.public_url || null;
+    return { ...row, url, public_url: url };
+  });
 }
 
 export async function ensureVehicleEntryForClaim(input: ClaimVehicleEntryInput, userId?: string | null) {
@@ -774,9 +803,6 @@ export async function uploadVehicleEntryFiles(args: {
       contentType: file.type || "application/octet-stream",
     });
     if (uploadError) throw uploadError;
-    const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(path);
-    const publicUrl = publicData?.publicUrl || null;
-
     const { data: media, error: mediaError } = await supabase
       .from("vehicle_media" as any)
       .upsert({
@@ -787,7 +813,9 @@ export async function uploadVehicleEntryFiles(args: {
         work_order_id: entry.work_order_id || entry.converted_work_order_id || null,
         storage_bucket: bucket,
         storage_path: path,
-        public_url: publicUrl,
+        // insurance-docs is private. A fresh signed URL is resolved by
+        // getVehicleEntry() instead of persisting a broken/expiring URL.
+        public_url: null,
         media_type: mediaType,
         category: args.category || args.kind,
         stage: "vehicle_entry",
@@ -1143,7 +1171,7 @@ export function buildVehicleEntryHtml(entry: any) {
   const condition = entry.vehicle_condition || {};
   const contents = entry.vehicle_contents || {};
   const marks = (entry.damage_marks || []) as any[];
-  const media = ((entry.vehicle_media || []) as any[]).filter((item) => item.media_type === "image" && item.public_url);
+  const media = ((entry.vehicle_media || []) as any[]).filter((item) => item.media_type === "image" && (item.url || item.public_url));
   const signatures = ((entry.vehicle_entry_signatures || []) as any[]);
   const receiverSignature = signatures.find((signature) => signature.signature_role === "receiver");
   const deliveredBySignature = signatures.find((signature) => signature.signature_role === "delivered_by");
@@ -1164,7 +1192,7 @@ export function buildVehicleEntryHtml(entry: any) {
   const photoCells = Array.from({ length: 8 }).map((_, index) => {
     const photo = categoryPhoto.get(photoCategories[index]) || uncategorizedPhotos[index];
     const labels = ["Front View", "Rear View", "Right Side", "Left Side", "Plate No.", "Odometer", "VIN", "Main Damage"];
-    return `<div class="photo-cell"><div class="photo-title">${labels[index]}</div>${photo ? `<img src="${htmlEscape(photo.public_url)}" alt="${htmlEscape(photo.file_name || labels[index])}" />` : `<div class="photo-empty">No Photo</div>`}</div>`;
+    return `<div class="photo-cell"><div class="photo-title">${labels[index]}</div>${photo ? `<img src="${htmlEscape(photo.url || photo.public_url)}" alt="${htmlEscape(photo.file_name || labels[index])}" />` : `<div class="photo-empty">No Photo</div>`}</div>`;
   }).join("");
   const damageRows = marks.length
     ? marks.slice(0, 6).map((mark) => `<tr><td>${htmlEscape(mark.mark_number || "")}</td><td>${htmlEscape(mark.damage_type || "-")}</td><td>${htmlEscape(mark.vehicle_part || "-")}</td><td>${htmlEscape(mark.description || mark.notes || "-")}</td></tr>`).join("")
@@ -1179,6 +1207,20 @@ export function buildVehicleEntryHtml(entry: any) {
   const yn = (value: unknown) => value ? "Yes / نعم" : "No / لا";
   const barcodeSvg = buildVehicleEntryBarcode(String(entry.entry_number || ""));
   const highlightColor = /^#[0-9a-f]{6}$/i.test(String(vehicle.highlight_color || "")) ? vehicle.highlight_color : "#dc2626";
+  const deliveryType = deliveredBy.delivery_type || "owner";
+  const deliveryCells = deliveryType === "tow"
+    ? [
+        cell("الاسم الكامل Full Name", deliveredBy.full_name),
+        cell("رقم الهاتف Contact No.", deliveredBy.phone),
+        cell("رقم البطاقة ID No.", deliveredBy.id_number),
+        cell("شركة الرافعة Tow Company", deliveredBy.towing_company),
+        cell("رقم لوحة الرافعة Tow Plate No.", [deliveredBy.towing_plate, deliveredBy.towing_country].filter(Boolean).join(" - ")),
+      ].join("")
+    : [
+        cell(deliveryType === "driver" ? "اسم السائق Driver Name" : "اسم العميل/المالك Customer / Owner", deliveredBy.full_name),
+        cell("رقم الهاتف Contact No.", deliveredBy.phone),
+        cell("رقم البطاقة ID No.", deliveredBy.id_number),
+      ].join("");
   const damageMapImageUrl = typeof window !== "undefined"
     ? new URL("/assets/vehicle-damage-map.png", window.location.origin).toString()
     : "/assets/vehicle-damage-map.png";
@@ -1196,7 +1238,7 @@ export function buildVehicleEntryHtml(entry: any) {
     .entry-box .label{font-weight:700;padding:1mm;background:#f8fafc;border-bottom:1px solid #cbd5e1;font-size:8px}.entry-box .num{font-size:15px;font-weight:900;padding:1.6mm 1mm}.barcode{height:10mm;margin:0 4mm 2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}.barcode svg{display:block;width:100%;height:10mm}.barcode-fallback{width:100%;height:10mm;background:repeating-linear-gradient(90deg,#111 0 1px,#fff 1px 2px,#111 2px 4px,#fff 4px 6px,#111 6px 7px,#fff 7px 9px)}
     .thin-table,.damage-table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:1.6mm}.thin-table td,.thin-table th,.damage-table td,.damage-table th{border:1px solid #b8c2cf;padding:1.15mm .9mm;text-align:center;vertical-align:middle}.thin-table span,.damage-table span{display:block;font-weight:700;font-size:7.1px;color:#111827}.thin-table strong{display:block;font-size:8.9px;margin-top:.8mm;color:#020817;word-break:break-word}.important-value{color:${highlightColor}!important;font-size:10px!important;font-weight:900!important}
     .section-title{background:#082a59;color:#fff;text-align:center;font-weight:800;padding:1mm;margin:1.5mm 0 0;font-size:8.2px}.section-title b{font-size:7.5px;margin-inline-start:1mm}.tri-grid{display:grid;grid-template-columns:29% 31% 40%;gap:1.3mm;margin-top:1.5mm}.box{border:1px solid #b8c2cf;min-height:38mm}.box h3{background:#082a59;color:#fff;margin:0;padding:1mm;text-align:center;font-size:7.7px}.box p{margin:0;padding:1.1mm;border-bottom:1px solid #e2e8f0;min-height:7mm}
-    .damage-map{position:relative;height:56mm;background:#fff;overflow:hidden}.damage-map-image{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+    .damage-map{height:52mm;background:#fff;display:flex;align-items:center;justify-content:center;overflow:visible}.damage-map-stage{position:relative;height:100%;aspect-ratio:944/1676;max-width:100%;flex:0 0 auto}.damage-map-image{position:absolute;inset:0;width:100%;height:100%;display:block}
     .damage-dot{position:absolute;z-index:2;display:flex;align-items:center;justify-content:center;width:4.6mm;height:4.6mm;border-radius:50%;font-size:6px;font-weight:800;background:#fff;border:1.2px solid #ef4444;color:#ef4444;transform:translate(-50%,-50%)}.dot-1{border-color:#f59e0b;color:#b45309}.dot-2{border-color:#22c55e;color:#15803d}.dot-3{border-color:#2563eb;color:#1d4ed8}.legend{display:flex;gap:1mm;justify-content:center;font-size:6px;margin-top:.5mm}.legend span{display:inline-flex;align-items:center;gap:.5mm}.legend i{width:3mm;height:3mm;border-radius:50%;border:1px solid currentColor;display:inline-block}
     .damage-table{margin:0}.damage-table th{background:#f8fafc;font-size:7px}.damage-table td{font-size:7.2px;height:7.5mm}.lower{display:grid;grid-template-columns:27% 41% 32%;gap:1.3mm;margin-top:1.5mm}.contents-table{width:100%;border-collapse:collapse;table-layout:fixed}.contents-table td{border:1px solid #cbd5e1;padding:1mm;text-align:center;font-size:7.1px}.check{font-size:11px;color:#15803d;font-weight:900}
     .photos{display:grid;grid-template-columns:repeat(4,1fr);gap:1mm;padding:1mm}.photo-cell{height:20mm;border:1px solid #d6dde7;text-align:center;overflow:hidden;background:#f8fafc}.photo-title{font-size:5.7px;height:4mm;line-height:4mm;background:#fff}.photo-cell img{width:100%;height:16mm;object-fit:cover}.photo-empty{font-size:6px;color:#94a3b8;padding-top:5mm}.declaration{padding:1.4mm;font-size:7.2px;line-height:1.35;text-align:justify}.declaration p{margin:0 0 1mm}.declaration p.en{direction:ltr;text-align:left}
@@ -1207,8 +1249,8 @@ export function buildVehicleEntryHtml(entry: any) {
     <table class="thin-table"><tr>${cell("تاريخ الدخول Date & Time", `${arrivalDate}   ${arrivalTime}`)}${cell("طريقة الوصول Arrival By", entry.arrival_method || "-")}${cell("موقع المركبة داخل الكراج", [entry.vehicle_location, entry.vehicle_location_bay].filter(Boolean).join(" / "))}${cell("الموظف المستلم Received By", entry.received_by_name || "-")}</tr></table>
     ${title(1, "بيانات المطالبة", "CLAIM INFORMATION")}<table class="thin-table"><tr>${cell("رقم المطالبة Claim No.", insurance.claim_number || entry.claim?.claim_number)}${cell("شركة التأمين Insurance Company", insurance.company_name || insurance.insurance_company_name || entry.insurance_company?.name)}${cell("موظف التأمين Insurance Officer", insurance.employee_name)}${cell("رقم تقرير الشرطة ROP No.", insurance.police_report_number)}${cell("رقم أمر الإصلاح Repair Order No.", insurance.lpo_number)}</tr></table>
     ${title(2, "بيانات المركبة", "VEHICLE INFORMATION")}<table class="thin-table"><tr><td><span>رقم اللوحة Plate No.</span><strong class="important-value">${htmlEscape(plate || "-")}</strong></td>${cell("الدولة Country", vehicle.plate_country || "Oman")}<td><span>الماركة Make</span><strong class="important-value">${htmlEscape(vehicle.brand || vehicle.make || "-")}</strong></td>${cell("الموديل Model", vehicle.model)}${cell("سنة الصنع Year", vehicle.year)}${cell("اللون Color", vehicle.color)}</tr><tr><td><span>رقم الهيكل VIN</span><strong class="important-value">${htmlEscape(vehicle.vin_number || vehicle.vin || "-")}</strong></td>${cell("قراءة العداد Odometer", vehicle.mileage)}${cell("حالة التشغيل Running Condition", condition.condition_description)}${cell("اسم المالك Owner Name", vehicle.current_owner_name || customer.name)}${cell("رقم الهاتف Contact No.", customer.phone)}</tr></table>
-    ${title(3, "بيانات الشخص الذي أدخل المركبة", "VEHICLE DELIVERED BY")}<table class="thin-table"><tr>${cell("الاسم الكامل Full Name", deliveredBy.full_name)}${cell("رقم الهاتف Contact No.", deliveredBy.phone)}${cell("رقم البطاقة ID No.", deliveredBy.id_number)}${cell("الصفة Capacity", deliveredBy.relation)}${cell("شركة الرافعة Tow Company", deliveredBy.towing_company)}${cell("رقم الرافعة Tow Plate No.", [deliveredBy.towing_plate, deliveredBy.towing_country].filter(Boolean).join(" - "))}</tr></table>
-    <section class="tri-grid"><div class="box"><h3>4. وصف الحادث والأضرار الظاهرة</h3><p><b>Accident Description</b><br/>${htmlEscape(condition.incident_description || "-")}</p><p><b>Visible Damages</b><br/>${htmlEscape(condition.visible_damage || "-")}</p><p><b>Previous Damages</b><br/>${htmlEscape(condition.previous_damage || "-")}</p><p><b>Additional Notes</b><br/>${htmlEscape(condition.additional_notes || condition.mechanical_notes || "-")}</p></div><div class="box"><h3>5. خريطة الأضرار DAMAGE MAP</h3><div class="damage-map"><img class="damage-map-image" src="${htmlEscape(damageMapImageUrl)}" alt="Vehicle damage map" />${markDots}</div><div class="legend"><span><i></i>Impact</span><span><i></i>Broken</span><span><i></i>Scratch</span><span><i></i>Dent</span></div></div><div class="box"><h3>Damage Details تفاصيل الأضرار</h3><table class="damage-table"><thead><tr><th>No.</th><th>Damage Type</th><th>Affected Part</th><th>Notes</th></tr></thead><tbody>${damageRows}</tbody></table></div></section>
+    ${title(3, "بيانات الشخص الذي أدخل المركبة", "VEHICLE DELIVERED BY")}<table class="thin-table"><tr>${deliveryCells}</tr></table>
+    <section class="tri-grid"><div class="box"><h3>4. وصف الحادث والأضرار الظاهرة</h3><p><b>Accident Description</b><br/>${htmlEscape(condition.incident_description || "-")}</p><p><b>Visible Damages</b><br/>${htmlEscape(condition.visible_damage || "-")}</p><p><b>Previous Damages</b><br/>${htmlEscape(condition.previous_damage || "-")}</p><p><b>Additional Notes</b><br/>${htmlEscape(condition.additional_notes || condition.mechanical_notes || "-")}</p></div><div class="box"><h3>5. خريطة الأضرار DAMAGE MAP</h3><div class="damage-map"><div class="damage-map-stage"><img class="damage-map-image" src="${htmlEscape(damageMapImageUrl)}" alt="Vehicle damage map" />${markDots}</div></div><div class="legend"><span><i></i>Impact</span><span><i></i>Broken</span><span><i></i>Scratch</span><span><i></i>Dent</span></div></div><div class="box"><h3>Damage Details تفاصيل الأضرار</h3><table class="damage-table"><thead><tr><th>No.</th><th>Damage Type</th><th>Affected Part</th><th>Notes</th></tr></thead><tbody>${damageRows}</tbody></table></div></section>
     <section class="lower"><div class="box"><h3>6. محتويات المركبة VEHICLE CONTENTS</h3><table class="contents-table"><tr><td>Keys<br/><b>${htmlEscape(contents.keys_count || "-")}</b></td><td>Personal Items<br/><b>${yn(contents.personal_items)}</b></td></tr><tr><td>Registration Card<br/><b>${contents.registration_card ? '<span class="check">✓</span>' : '-'}</b></td><td>Number Plates<br/><b>${contents.front_plate || contents.rear_plate ? '<span class="check">✓</span>' : '-'}</b></td></tr><tr><td>Spare Tire<br/><b>${contents.spare_tire ? '<span class="check">✓</span>' : '-'}</b></td><td>Fuel Level<br/><b>${htmlEscape(contents.fuel_level || "-")}</b></td></tr><tr><td>Tools & Jack<br/><b>${contents.tools_jack ? '<span class="check">✓</span>' : '-'}</b></td><td>Fire Extinguisher<br/><b>${contents.fire_extinguisher ? '<span class="check">✓</span>' : '-'}</b></td></tr></table></div><div class="box"><h3>7. صور المركبة عند الدخول VEHICLE PHOTOS AT ENTRY</h3><div class="photos">${photoCells}</div></div><div class="box"><h3>8. الإقرار DECLARATION</h3><div class="declaration"><p>${htmlEscape(entry.declaration_ar || VEHICLE_ENTRY_DECLARATION_AR)}</p><p class="en">${htmlEscape(entry.declaration_en || VEHICLE_ENTRY_DECLARATION_EN)}</p></div></div></section>
     <section class="sign-row"><div class="sig"><h4>توقيع الشخص الذي أدخل المركبة<br/>Signature of Vehicle Delivered By</h4>${deliveredBySignature?.signature_data_url ? `<img src="${htmlEscape(deliveredBySignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig"><h4>توقيع موظف الاستلام<br/>Signature of Receiver</h4>${receiverSignature?.signature_data_url ? `<img src="${htmlEscape(receiverSignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig stamp"><h4>ختم الشركة<br/>Company Stamp</h4>${stamp || '<div class="line"></div>'}</div></section>
     <footer class="footer">Note: This is an electronic form and is considered valid without signature if it bears the company stamp. - ${htmlEscape(companyNameEn)} - ${now.getFullYear()}</footer>
