@@ -6,7 +6,7 @@ import type { PaymentMethod } from "./financeSettingsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isUuid } from "@/lib/uuid";
-import { calculateVatExclusive, roundMoney } from "@/lib/money";
+import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
 
 export type ExpenseAccountingType =
   | "workshop_general"
@@ -85,9 +85,9 @@ export function inferExpenseAccountingType(e: Partial<ExpenseRecord>): ExpenseAc
 
 export function normalizeExpenseAccountingFields(e: ExpenseRecord): ExpenseRecord {
   const isVatApplicable = e.isVatApplicable ?? true;
-  const subtotal = roundMoney(e.subtotal ?? e.amount);
-  const vatAmount = isVatApplicable ? calculateVatExclusive(subtotal).vatAmount : 0;
-  const total = roundMoney(e.total ?? subtotal + vatAmount);
+  // `amount` is the authoritative VAT-exclusive value. Never retain derived
+  // subtotal/VAT/total values from before an edit.
+  const { subtotal, vatAmount, total } = deriveExpenseTotals(e.amount, isVatApplicable);
   const expenseType = e.expenseType || inferExpenseAccountingType(e);
   const costCenter = e.costCenter || (
     expenseType === "workshop_general"
@@ -117,7 +117,7 @@ function persistLocal() {}
 function rowToRecord(r: any): ExpenseRecord {
   const meta = (r.meta || {}) as Record<string, any>;
   const photo = Array.isArray(r.attachments) && r.attachments[0]?.url ? r.attachments[0].url : (meta.photo ?? null);
-  return {
+  return normalizeExpenseAccountingFields({
     id: r.id,
     voucherNumber: r.voucher_number,
     date: r.date,
@@ -165,7 +165,7 @@ function rowToRecord(r: any): ExpenseRecord {
     deletedAt: meta.deletedAt || r.deleted_at || undefined,
     deleteReason: meta.deleteReason,
     createdAt: r.created_at || new Date().toISOString(),
-  };
+  });
 }
 
 function recordToRow(e: ExpenseRecord, tenantId: string) {

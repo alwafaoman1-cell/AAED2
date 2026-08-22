@@ -59,6 +59,12 @@ describe("work-order expense persistence and profitability", () => {
     expect(dialog).toContain("expensesStore.update(editingId");
   });
 
+  it("re-derives VAT-inclusive totals after an expense amount is edited", () => {
+    const store = read("src/lib/expensesStore.ts");
+    expect(store).toContain("deriveExpenseTotals(e.amount, isVatApplicable)");
+    expect(store).toContain("return normalizeExpenseAccountingFields({");
+  });
+
   it("stores the supplier invoice number for every bulk expense line", () => {
     const source = read("src/components/workorders/WorkOrderBulkExpenseDialog.tsx");
     expect(source).toContain("supplierInvoiceNumber?: string");
