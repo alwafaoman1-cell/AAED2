@@ -69,6 +69,8 @@ interface InvoiceData {
   /** المبلغ المدفوع والمتبقي لعرضهم في صندوق الإجماليات */
   paidTotal?: number;
   balanceDue?: number;
+  /** مرجع الفاتورة أو رقم أمر الشراء/العقد. */
+  reference?: string;
 }
 
 interface WorkOrderData {
@@ -610,6 +612,11 @@ export function getInvoiceHtml(data: InvoiceData): string {
     ${data.paymentTerms ? `
     <div style="margin:0 0 10px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:10px;color:#1e3a8a;">
       <strong>شروط الدفع · Payment Terms:</strong> ${data.paymentTerms}
+    </div>` : ''}
+
+    ${data.reference ? `
+    <div style="margin:0 0 10px;padding:6px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;color:#374151;direction:ltr;text-align:left;">
+      <strong>Reference:</strong> ${invoiceRefEscape(data.reference)}
     </div>` : ''}
 
     ${sectionTitle('تفاصيل الفاتورة', 'Invoice Details')}

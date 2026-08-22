@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -96,6 +98,64 @@ describe("vehicle entry receipt contract", () => {
     expect(form).toContain("toDataURL");
     expect(form).toContain("saveVehicleEntrySignature");
     expect(form).toContain("uploadVehicleEntryFiles");
+  });
+
+  it("keeps vehicle entry officer, delivery source, staged photos, and editable declaration cloud-backed", () => {
+    const form = read("src/pages/vehicle-entry/VehicleEntryForm.tsx");
+    const service = read("src/lib/vehicleEntryService.ts");
+    expect(form).toContain("InsuranceCompanyAutocomplete");
+    expect(form).toContain("useInsuranceEmployees");
+    expect(form).toContain('chooseDeliveredBy("owner")');
+    expect(form).toContain('chooseDeliveredBy("driver")');
+    expect(form).toContain('chooseDeliveredBy("tow")');
+    expect(form).toContain("ENTRY_PHOTO_SLOTS");
+    expect(form).toContain("pendingPhotos");
+    expect(form).toContain("تم تجهيز");
+    expect(form).toContain("form.declaration_ar");
+    expect(form).toContain("form.declaration_en");
+    expect(service).toContain("declaration_ar: cleanText(form.declaration_ar)");
+    expect(service).toContain("declaration_en: cleanText(form.declaration_en)");
+  });
+
+  it("prints a real barcode, categorized entry photos, and highlighted identity fields without removed accident fields", () => {
+    const service = read("src/lib/vehicleEntryService.ts");
+    const currentTemplate = service.slice(service.indexOf("export function buildVehicleEntryHtml(entry"));
+    expect(service).toContain('import JsBarcode from "jsbarcode"');
+    expect(currentTemplate).toContain("buildVehicleEntryBarcode");
+    expect(currentTemplate).toContain("front_view");
+    expect(currentTemplate).toContain("main_damage");
+    expect(currentTemplate).toContain("/assets/vehicle-damage-map.png");
+    expect(currentTemplate).toContain("damage-map-image");
+    expect(currentTemplate).toContain("important-value");
+    expect(currentTemplate).toContain("رقم أمر الإصلاح Repair Order No.");
+    expect(currentTemplate).not.toContain("نوع الوقود Fuel Type");
+    expect(currentTemplate).not.toContain("تاريخ الحادث Accident Date");
+    expect(currentTemplate).not.toContain("مكان الحادث Accident Location");
+    expect(currentTemplate).not.toContain("نوع الحادث Accident Type");
+  });
+
+  it("renders the entry barcode and the saved declaration into print HTML", async () => {
+    const { buildVehicleEntryHtml } = await import("@/lib/vehicleEntryService");
+    const html = buildVehicleEntryHtml({
+      entry_number: "ENT-2026-00058",
+      arrival_date: "2026-08-22",
+      arrival_time: "10:30",
+      customer_snapshot: { name: "Test Owner", phone: "90000000" },
+      vehicle_snapshot: { plate_number: "12345", plate_letters: "A", make: "Toyota", vin: "VIN123", highlight_color: "#dc2626" },
+      insurance_snapshot: {},
+      delivered_by: { full_name: "Test Owner", delivery_type: "owner" },
+      vehicle_condition: {},
+      vehicle_contents: {},
+      damage_marks: [],
+      vehicle_media: [],
+      vehicle_entry_signatures: [],
+      declaration_ar: "إقرار مخصص محفوظ",
+      declaration_en: "Saved custom declaration",
+    });
+    expect(html).toContain("<svg");
+    expect(html).toContain("ENT-2026-00058");
+    expect(html).toContain("إقرار مخصص محفوظ");
+    expect(html).toContain("Saved custom declaration");
   });
 
   it("does not issue a vehicle entry before both required signatures are saved", () => {

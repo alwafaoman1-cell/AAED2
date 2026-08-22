@@ -4,6 +4,7 @@ import { ensureVehicleForCustomer, normalizeVin } from "@/lib/vehicleIdentity";
 import { extractPlateDigits, extractPlateLetters, formatPlate } from "@/lib/plateUtils";
 import { toE164 } from "@/lib/phoneUtils";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
+import JsBarcode from "jsbarcode";
 
 type VehicleEntryMediaKind = "entry_photo" | "damage_photo" | "document";
 type VehicleEntrySignatureRole = "delivered_by" | "receiver" | "override";
@@ -40,6 +41,8 @@ export interface VehicleEntryFormState {
   vehicle_location_bay: string;
   arrival_method: string;
   received_by_name: string;
+  declaration_ar: string;
+  declaration_en: string;
   customer: {
     name: string;
     phone: string;
@@ -59,6 +62,7 @@ export interface VehicleEntryFormState {
     year: string;
     color: string;
     vin: string;
+    highlight_color: string;
     mileage: string;
     fuel_type: string;
     engine_number: string;
@@ -68,6 +72,7 @@ export interface VehicleEntryFormState {
   insurance: {
     is_insurance_related: boolean;
     company_name: string;
+    employee_id: string;
     employee_name: string;
     claim_number: string;
     policy_number: string;
@@ -80,6 +85,7 @@ export interface VehicleEntryFormState {
   };
   delivered_by: {
     full_name: string;
+    delivery_type: "owner" | "driver" | "tow";
     phone: string;
     id_number: string;
     relation: string;
@@ -156,8 +162,10 @@ export function defaultVehicleEntryForm(): VehicleEntryFormState {
     arrival_time: now.toTimeString().slice(0, 5),
     vehicle_location: "داخل الورشة",
     vehicle_location_bay: "",
-    arrival_method: "العميل قاد المركبة",
+    arrival_method: "المالك أحضر المركبة",
     received_by_name: "",
+    declaration_ar: VEHICLE_ENTRY_DECLARATION_AR,
+    declaration_en: VEHICLE_ENTRY_DECLARATION_EN,
     customer: {
       name: "",
       phone: "",
@@ -177,6 +185,7 @@ export function defaultVehicleEntryForm(): VehicleEntryFormState {
       year: "",
       color: "",
       vin: "",
+      highlight_color: "#dc2626",
       mileage: "",
       fuel_type: "",
       engine_number: "",
@@ -186,6 +195,7 @@ export function defaultVehicleEntryForm(): VehicleEntryFormState {
     insurance: {
       is_insurance_related: false,
       company_name: "",
+      employee_id: "",
       employee_name: "",
       claim_number: "",
       policy_number: "",
@@ -198,6 +208,7 @@ export function defaultVehicleEntryForm(): VehicleEntryFormState {
     },
     delivered_by: {
       full_name: "",
+      delivery_type: "owner",
       phone: "",
       id_number: "",
       relation: "مالك المركبة",
@@ -493,6 +504,8 @@ export function formFromVehicleEntry(row: any): VehicleEntryFormState {
     vehicle_location_bay: row.vehicle_location_bay || "",
     arrival_method: row.arrival_method || "",
     received_by_name: row.received_by_name || "",
+    declaration_ar: row.declaration_ar || VEHICLE_ENTRY_DECLARATION_AR,
+    declaration_en: row.declaration_en || VEHICLE_ENTRY_DECLARATION_EN,
     customer: { ...base.customer, ...customerSnapshot, ...(row.customer || {}) },
     vehicle: {
       ...base.vehicle,
@@ -550,8 +563,8 @@ function entryPayload(form: VehicleEntryFormState, tenantId: string, entryNumber
     vehicle_condition: form.condition,
     vehicle_contents: form.contents,
     damage_map: { marks: form.damage_marks.map((m) => ({ n: m.mark_number, x: m.x ?? null, y: m.y ?? null, type: m.damage_type })) },
-    declaration_ar: VEHICLE_ENTRY_DECLARATION_AR,
-    declaration_en: VEHICLE_ENTRY_DECLARATION_EN,
+    declaration_ar: cleanText(form.declaration_ar) || VEHICLE_ENTRY_DECLARATION_AR,
+    declaration_en: cleanText(form.declaration_en) || VEHICLE_ENTRY_DECLARATION_EN,
     issued_at: form.status === "Issued" ? new Date().toISOString() : null,
     issued_by: form.status === "Issued" ? userId || null : null,
     updated_by: userId || null,
@@ -1091,7 +1104,7 @@ function buildVehicleEntryHtmlLegacy(entry: any) {
     </section>
     <section class="section"><h3>بيانات الوصول / Arrival</h3><div class="grid">${info("رقم الدخول", entry.entry_number)}${info("الحالة", entry.status)}${info("طريقة الوصول", entry.arrival_method)}${info("موقع المركبة", `${entry.vehicle_location || ""} ${entry.vehicle_location_bay || ""}`.trim())}</div></section>
     <section class="section"><h3>العميل والمركبة / Customer & Vehicle</h3><div class="grid">${info("العميل", customer.name)}${info("الهاتف", customer.phone)}${info("اللوحة", plate)}${info("المركبة", `${vehicle.brand || vehicle.make || ""} ${vehicle.model || ""} ${vehicle.year || ""}`.trim())}${info("اللون", vehicle.color)}${info("VIN", vehicle.vin_number || vehicle.vin)}${info("العداد", vehicle.mileage)}${info("المالك الحالي", vehicle.current_owner_name || customer.name)}</div></section>
-    <section class="section"><h3>التأمين / Insurance</h3><div class="grid">${info("مطالبة تأمين", insurance.is_insurance_related ? "نعم" : "لا")}${info("شركة التأمين", insurance.company_name)}${info("رقم المطالبة", insurance.claim_number)}${info("رقم LPO", insurance.lpo_number)}${info("المعاين", insurance.surveyor_name)}${info("هاتف المعاين", insurance.surveyor_phone)}</div></section>
+    <section class="section"><h3>التأمين / Insurance</h3><div class="grid">${info("مطالبة تأمين", insurance.is_insurance_related ? "نعم" : "لا")}${info("شركة التأمين", insurance.company_name)}${info("رقم المطالبة", insurance.claim_number)}${info("رقم أمر الإصلاح", insurance.lpo_number)}${info("المعاين", insurance.surveyor_name)}${info("هاتف المعاين", insurance.surveyor_phone)}</div></section>
     <section class="section"><h3>مسلّم المركبة / Delivered By</h3><div class="grid">${info("الاسم", deliveredBy.full_name)}${info("الهاتف", deliveredBy.phone)}${info("الصفة", deliveredBy.relation)}${info("شركة الرافعة", deliveredBy.towing_company)}</div></section>
     <section class="section"><h3>حالة المركبة / Condition</h3><p>${htmlEscape(condition.condition_description || "—")}</p><p>${htmlEscape(condition.visible_damage || "")}</p></section>
     <section class="section"><h3>تفاصيل الأضرار / Damage Details</h3><table><thead><tr><th>#</th><th>النوع</th><th>الجزء</th><th>الوصف</th><th>الإجراء</th></tr></thead><tbody>${marks.length ? marks.map((m) => `<tr><td>${m.mark_number}</td><td>${htmlEscape(m.damage_type)}</td><td>${htmlEscape(m.vehicle_part)}</td><td>${htmlEscape(m.description)}</td><td>${htmlEscape(m.expected_action)}</td></tr>`).join("") : `<tr><td colspan="5">لا توجد علامات مسجلة</td></tr>`}</tbody></table></section>
@@ -1100,6 +1113,25 @@ function buildVehicleEntryHtmlLegacy(entry: any) {
     <section class="signatures"><div class="sig"><b>توقيع مسلّم المركبة</b><div class="line"></div></div><div class="sig"><b>توقيع موظف الاستلام</b><div class="line"></div></div><div class="sig"><b>ختم الشركة</b><div>${stamp}</div></div></section>
     <footer class="footer">${htmlEscape(settings.companyNameEn)} · ${new Date().getFullYear()}</footer>
   </main></body></html>`;
+}
+
+function buildVehicleEntryBarcode(value: string) {
+  if (!value || typeof document === "undefined" || typeof XMLSerializer === "undefined") return "";
+  try {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    JsBarcode(svg, value, {
+      format: "CODE128",
+      displayValue: false,
+      margin: 0,
+      width: 1.35,
+      height: 34,
+      background: "#ffffff",
+      lineColor: "#000000",
+    });
+    return new XMLSerializer().serializeToString(svg);
+  } catch {
+    return "";
+  }
 }
 
 export function buildVehicleEntryHtml(entry: any) {
@@ -1123,9 +1155,14 @@ export function buildVehicleEntryHtml(entry: any) {
   const now = new Date();
   const arrivalDate = entry.arrival_date || (entry.arrival_at ? String(entry.arrival_at).slice(0, 10) : "");
   const arrivalTime = String(entry.arrival_time || (entry.arrival_at ? new Date(entry.arrival_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "")).slice(0, 5);
-  const photos = media.slice(0, 8);
+  const photoCategories = ["front_view", "rear_view", "right_side", "left_side", "plate_number", "odometer", "vin", "main_damage"];
+  const categoryPhoto = new Map<string, any>();
+  media.forEach((item) => {
+    if (item.category && !categoryPhoto.has(item.category)) categoryPhoto.set(item.category, item);
+  });
+  const uncategorizedPhotos = media.filter((item) => !photoCategories.includes(item.category));
   const photoCells = Array.from({ length: 8 }).map((_, index) => {
-    const photo = photos[index];
+    const photo = categoryPhoto.get(photoCategories[index]) || uncategorizedPhotos[index];
     const labels = ["Front View", "Rear View", "Right Side", "Left Side", "Plate No.", "Odometer", "VIN", "Main Damage"];
     return `<div class="photo-cell"><div class="photo-title">${labels[index]}</div>${photo ? `<img src="${htmlEscape(photo.public_url)}" alt="${htmlEscape(photo.file_name || labels[index])}" />` : `<div class="photo-empty">No Photo</div>`}</div>`;
   }).join("");
@@ -1140,6 +1177,11 @@ export function buildVehicleEntryHtml(entry: any) {
   const cell = (label: string, value: unknown) => `<td><span>${htmlEscape(label)}</span><strong>${htmlEscape(value || "-")}</strong></td>`;
   const title = (n: number, ar: string, en: string) => `<div class="section-title">${n}. ${htmlEscape(ar)} <b>${htmlEscape(en)}</b></div>`;
   const yn = (value: unknown) => value ? "Yes / نعم" : "No / لا";
+  const barcodeSvg = buildVehicleEntryBarcode(String(entry.entry_number || ""));
+  const highlightColor = /^#[0-9a-f]{6}$/i.test(String(vehicle.highlight_color || "")) ? vehicle.highlight_color : "#dc2626";
+  const damageMapImageUrl = typeof window !== "undefined"
+    ? new URL("/assets/vehicle-damage-map.png", window.location.origin).toString()
+    : "/assets/vehicle-damage-map.png";
 
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"/>
   <title>${htmlEscape(entry.entry_number)}</title>
@@ -1151,23 +1193,23 @@ export function buildVehicleEntryHtml(entry: any) {
     .top{display:grid;grid-template-columns:54mm 1fr 49mm;align-items:center;gap:3mm;margin-bottom:2mm}.brand{display:grid;grid-template-columns:18mm 1fr;gap:2mm;align-items:center;direction:ltr;text-align:left}
     .brand img{width:17mm;height:17mm;object-fit:contain}.logo-fallback{font-weight:900;color:#0b3b78;text-align:center;font-size:10px;line-height:1}.brand h2{font-size:9.8px;margin:0;color:#061c3c;line-height:1.15}.brand p{font-size:7.6px;margin:.6mm 0 0;color:#23364f}
     .doc-title{text-align:center}.doc-title h1{font-size:15px;margin:0 0 1mm;line-height:1.25}.doc-title h2{font-size:13px;margin:0;letter-spacing:.2px}.entry-box{border:1px solid #9aa8b8;border-radius:2mm;text-align:center;overflow:hidden;direction:ltr}
-    .entry-box .label{font-weight:700;padding:1mm;background:#f8fafc;border-bottom:1px solid #cbd5e1;font-size:8px}.entry-box .num{font-size:15px;font-weight:900;padding:1.6mm 1mm}.barcode{height:10mm;margin:0 4mm 2mm;background:repeating-linear-gradient(90deg,#111 0 1px,#fff 1px 2px,#111 2px 4px,#fff 4px 6px,#111 6px 7px,#fff 7px 9px)}
-    .thin-table,.damage-table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:1.6mm}.thin-table td,.thin-table th,.damage-table td,.damage-table th{border:1px solid #b8c2cf;padding:1.15mm .9mm;text-align:center;vertical-align:middle}.thin-table span,.damage-table span{display:block;font-weight:700;font-size:7.1px;color:#111827}.thin-table strong{display:block;font-size:8.9px;margin-top:.8mm;color:#020817;word-break:break-word}
+    .entry-box .label{font-weight:700;padding:1mm;background:#f8fafc;border-bottom:1px solid #cbd5e1;font-size:8px}.entry-box .num{font-size:15px;font-weight:900;padding:1.6mm 1mm}.barcode{height:10mm;margin:0 4mm 2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}.barcode svg{display:block;width:100%;height:10mm}.barcode-fallback{width:100%;height:10mm;background:repeating-linear-gradient(90deg,#111 0 1px,#fff 1px 2px,#111 2px 4px,#fff 4px 6px,#111 6px 7px,#fff 7px 9px)}
+    .thin-table,.damage-table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:1.6mm}.thin-table td,.thin-table th,.damage-table td,.damage-table th{border:1px solid #b8c2cf;padding:1.15mm .9mm;text-align:center;vertical-align:middle}.thin-table span,.damage-table span{display:block;font-weight:700;font-size:7.1px;color:#111827}.thin-table strong{display:block;font-size:8.9px;margin-top:.8mm;color:#020817;word-break:break-word}.important-value{color:${highlightColor}!important;font-size:10px!important;font-weight:900!important}
     .section-title{background:#082a59;color:#fff;text-align:center;font-weight:800;padding:1mm;margin:1.5mm 0 0;font-size:8.2px}.section-title b{font-size:7.5px;margin-inline-start:1mm}.tri-grid{display:grid;grid-template-columns:29% 31% 40%;gap:1.3mm;margin-top:1.5mm}.box{border:1px solid #b8c2cf;min-height:38mm}.box h3{background:#082a59;color:#fff;margin:0;padding:1mm;text-align:center;font-size:7.7px}.box p{margin:0;padding:1.1mm;border-bottom:1px solid #e2e8f0;min-height:7mm}
-    .damage-map{position:relative;height:56mm;background:#fff;overflow:hidden}.car{position:absolute;left:50%;top:4mm;width:26mm;height:45mm;transform:translateX(-50%);border:1.8px solid #334155;border-radius:14mm 14mm 8mm 8mm}.car:before{content:"FRONT";position:absolute;top:-4mm;left:50%;transform:translateX(-50%);font-size:6px}.car:after{content:"REAR";position:absolute;bottom:-4mm;left:50%;transform:translateX(-50%);font-size:6px}.side{position:absolute;top:14mm;width:16mm;height:34mm;border:1.4px solid #334155;border-radius:9mm}.side.l{left:7mm}.side.r{right:7mm}
+    .damage-map{position:relative;height:56mm;background:#fff;overflow:hidden}.damage-map-image{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
     .damage-dot{position:absolute;z-index:2;display:flex;align-items:center;justify-content:center;width:4.6mm;height:4.6mm;border-radius:50%;font-size:6px;font-weight:800;background:#fff;border:1.2px solid #ef4444;color:#ef4444;transform:translate(-50%,-50%)}.dot-1{border-color:#f59e0b;color:#b45309}.dot-2{border-color:#22c55e;color:#15803d}.dot-3{border-color:#2563eb;color:#1d4ed8}.legend{display:flex;gap:1mm;justify-content:center;font-size:6px;margin-top:.5mm}.legend span{display:inline-flex;align-items:center;gap:.5mm}.legend i{width:3mm;height:3mm;border-radius:50%;border:1px solid currentColor;display:inline-block}
     .damage-table{margin:0}.damage-table th{background:#f8fafc;font-size:7px}.damage-table td{font-size:7.2px;height:7.5mm}.lower{display:grid;grid-template-columns:27% 41% 32%;gap:1.3mm;margin-top:1.5mm}.contents-table{width:100%;border-collapse:collapse;table-layout:fixed}.contents-table td{border:1px solid #cbd5e1;padding:1mm;text-align:center;font-size:7.1px}.check{font-size:11px;color:#15803d;font-weight:900}
     .photos{display:grid;grid-template-columns:repeat(4,1fr);gap:1mm;padding:1mm}.photo-cell{height:20mm;border:1px solid #d6dde7;text-align:center;overflow:hidden;background:#f8fafc}.photo-title{font-size:5.7px;height:4mm;line-height:4mm;background:#fff}.photo-cell img{width:100%;height:16mm;object-fit:cover}.photo-empty{font-size:6px;color:#94a3b8;padding-top:5mm}.declaration{padding:1.4mm;font-size:7.2px;line-height:1.35;text-align:justify}.declaration p{margin:0 0 1mm}.declaration p.en{direction:ltr;text-align:left}
     .sign-row{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid #cbd5e1;border-top:0;margin-top:1.5mm}.sig{min-height:21mm;text-align:center;border-inline-start:1px solid #cbd5e1;padding:1.2mm}.sig:first-child{border-inline-start:0}.sig h4{margin:0 0 1mm;font-size:7.4px}.sig img{max-width:35mm;max-height:12mm;object-fit:contain}.sig .line{height:10mm;border-bottom:1px solid #334155;margin:1mm 7mm}.stamp img{max-width:25mm;max-height:15mm;object-fit:contain}.sig-meta{display:flex;justify-content:space-around;border-top:1px solid #e2e8f0;padding-top:.8mm;font-size:6.5px}.footer{text-align:center;font-size:6.8px;margin-top:1.2mm;color:#475569}
     @media screen{body{background:#e5e7eb;padding:8mm}.page{box-shadow:0 2px 12px rgba(15,23,42,.18)}}@media print{body{background:#fff}.page{box-shadow:none;margin:0;page-break-after:auto}}
   </style></head><body><main class="page">
-    <section class="top"><div class="brand">${logo}<div><h2>${htmlEscape(companyNameAr)}</h2><h2>${htmlEscape(companyNameEn)}</h2><p>Specialized Car Maintenance Center</p></div></div><div class="doc-title"><h1>نموذج دخول واستلام مركبة</h1><h2>VEHICLE ENTRY & RECEIPT FORM</h2></div><div class="entry-box"><div class="label">رقم الدخول / Entry No.</div><div class="num">${htmlEscape(entry.entry_number)}</div><div class="barcode"></div></div></section>
+    <section class="top"><div class="brand">${logo}<div><h2>${htmlEscape(companyNameAr)}</h2><h2>${htmlEscape(companyNameEn)}</h2><p>Specialized Car Maintenance Center</p></div></div><div class="doc-title"><h1>نموذج دخول واستلام مركبة</h1><h2>VEHICLE ENTRY & RECEIPT FORM</h2></div><div class="entry-box"><div class="label">رقم الدخول / Entry No.</div><div class="num">${htmlEscape(entry.entry_number)}</div><div class="barcode">${barcodeSvg || '<div class="barcode-fallback"></div>'}</div></div></section>
     <table class="thin-table"><tr>${cell("تاريخ الدخول Date & Time", `${arrivalDate}   ${arrivalTime}`)}${cell("طريقة الوصول Arrival By", entry.arrival_method || "-")}${cell("موقع المركبة داخل الكراج", [entry.vehicle_location, entry.vehicle_location_bay].filter(Boolean).join(" / "))}${cell("الموظف المستلم Received By", entry.received_by_name || "-")}</tr></table>
-    ${title(1, "بيانات المطالبة", "CLAIM INFORMATION")}<table class="thin-table"><tr>${cell("رقم المطالبة Claim No.", insurance.claim_number || entry.claim?.claim_number)}${cell("شركة التأمين Insurance Company", insurance.company_name || insurance.insurance_company_name || entry.insurance_company?.name)}${cell("موظف التأمين Insurance Officer", insurance.employee_name)}${cell("رقم تقرير الشرطة ROP No.", insurance.police_report_number)}${cell("رقم أمر الإصلاح LPO", insurance.lpo_number)}</tr></table>
-    ${title(2, "بيانات المركبة", "VEHICLE INFORMATION")}<table class="thin-table"><tr>${cell("رقم اللوحة Plate No.", plate)}${cell("الدولة Country", vehicle.plate_country || "Oman")}${cell("الماركة Make", vehicle.brand || vehicle.make)}${cell("الموديل Model", vehicle.model)}${cell("سنة الصنع Year", vehicle.year)}${cell("اللون Color", vehicle.color)}</tr><tr>${cell("رقم الهيكل VIN", vehicle.vin_number || vehicle.vin)}${cell("قراءة العداد Odometer", vehicle.mileage)}${cell("نوع الوقود Fuel Type", vehicle.fuel_type)}${cell("حالة التشغيل Running Condition", condition.condition_description)}${cell("اسم المالك Owner Name", vehicle.current_owner_name || customer.name)}${cell("رقم الهاتف Contact No.", customer.phone)}</tr><tr>${cell("تاريخ الحادث Accident Date", insurance.incident_date)}${cell("مكان الحادث Accident Location", insurance.accident_location)}${cell("نوع الحادث Accident Type", insurance.claim_type || condition.incident_description)}</tr></table>
+    ${title(1, "بيانات المطالبة", "CLAIM INFORMATION")}<table class="thin-table"><tr>${cell("رقم المطالبة Claim No.", insurance.claim_number || entry.claim?.claim_number)}${cell("شركة التأمين Insurance Company", insurance.company_name || insurance.insurance_company_name || entry.insurance_company?.name)}${cell("موظف التأمين Insurance Officer", insurance.employee_name)}${cell("رقم تقرير الشرطة ROP No.", insurance.police_report_number)}${cell("رقم أمر الإصلاح Repair Order No.", insurance.lpo_number)}</tr></table>
+    ${title(2, "بيانات المركبة", "VEHICLE INFORMATION")}<table class="thin-table"><tr><td><span>رقم اللوحة Plate No.</span><strong class="important-value">${htmlEscape(plate || "-")}</strong></td>${cell("الدولة Country", vehicle.plate_country || "Oman")}<td><span>الماركة Make</span><strong class="important-value">${htmlEscape(vehicle.brand || vehicle.make || "-")}</strong></td>${cell("الموديل Model", vehicle.model)}${cell("سنة الصنع Year", vehicle.year)}${cell("اللون Color", vehicle.color)}</tr><tr><td><span>رقم الهيكل VIN</span><strong class="important-value">${htmlEscape(vehicle.vin_number || vehicle.vin || "-")}</strong></td>${cell("قراءة العداد Odometer", vehicle.mileage)}${cell("حالة التشغيل Running Condition", condition.condition_description)}${cell("اسم المالك Owner Name", vehicle.current_owner_name || customer.name)}${cell("رقم الهاتف Contact No.", customer.phone)}</tr></table>
     ${title(3, "بيانات الشخص الذي أدخل المركبة", "VEHICLE DELIVERED BY")}<table class="thin-table"><tr>${cell("الاسم الكامل Full Name", deliveredBy.full_name)}${cell("رقم الهاتف Contact No.", deliveredBy.phone)}${cell("رقم البطاقة ID No.", deliveredBy.id_number)}${cell("الصفة Capacity", deliveredBy.relation)}${cell("شركة الرافعة Tow Company", deliveredBy.towing_company)}${cell("رقم الرافعة Tow Plate No.", [deliveredBy.towing_plate, deliveredBy.towing_country].filter(Boolean).join(" - "))}</tr></table>
-    <section class="tri-grid"><div class="box"><h3>4. وصف الحادث والأضرار الظاهرة</h3><p><b>Accident Description</b><br/>${htmlEscape(condition.incident_description || "-")}</p><p><b>Visible Damages</b><br/>${htmlEscape(condition.visible_damage || "-")}</p><p><b>Previous Damages</b><br/>${htmlEscape(condition.previous_damage || "-")}</p><p><b>Additional Notes</b><br/>${htmlEscape(condition.additional_notes || condition.mechanical_notes || "-")}</p></div><div class="box"><h3>5. خريطة الأضرار DAMAGE MAP</h3><div class="damage-map"><div class="side l"></div><div class="car"></div><div class="side r"></div>${markDots}</div><div class="legend"><span><i></i>Impact</span><span><i></i>Broken</span><span><i></i>Scratch</span><span><i></i>Dent</span></div></div><div class="box"><h3>Damage Details تفاصيل الأضرار</h3><table class="damage-table"><thead><tr><th>No.</th><th>Damage Type</th><th>Affected Part</th><th>Notes</th></tr></thead><tbody>${damageRows}</tbody></table></div></section>
-    <section class="lower"><div class="box"><h3>6. محتويات المركبة VEHICLE CONTENTS</h3><table class="contents-table"><tr><td>Keys<br/><b>${htmlEscape(contents.keys_count || "-")}</b></td><td>Personal Items<br/><b>${yn(contents.personal_items)}</b></td></tr><tr><td>Registration Card<br/><b>${contents.registration_card ? '<span class="check">✓</span>' : '-'}</b></td><td>Number Plates<br/><b>${contents.front_plate || contents.rear_plate ? '<span class="check">✓</span>' : '-'}</b></td></tr><tr><td>Spare Tire<br/><b>${contents.spare_tire ? '<span class="check">✓</span>' : '-'}</b></td><td>Fuel Level<br/><b>${htmlEscape(contents.fuel_level || "-")}</b></td></tr><tr><td>Tools & Jack<br/><b>${contents.tools_jack ? '<span class="check">✓</span>' : '-'}</b></td><td>Fire Extinguisher<br/><b>${contents.fire_extinguisher ? '<span class="check">✓</span>' : '-'}</b></td></tr></table></div><div class="box"><h3>7. صور المركبة عند الدخول VEHICLE PHOTOS AT ENTRY</h3><div class="photos">${photoCells}</div></div><div class="box"><h3>8. الإقرار DECLARATION</h3><div class="declaration"><p>أقر بأن المركبة تم تسليمها إلى شركة الوفاء للأعمال المتكاملة بالحالة والأضرار والمحتويات الموضحة في هذا النموذج والصور المرفقة، وأن هذا النموذج يوثق حالة المركبة عند الوصول فقط.</p><p class="en">${htmlEscape(VEHICLE_ENTRY_DECLARATION_EN)}</p></div></div></section>
+    <section class="tri-grid"><div class="box"><h3>4. وصف الحادث والأضرار الظاهرة</h3><p><b>Accident Description</b><br/>${htmlEscape(condition.incident_description || "-")}</p><p><b>Visible Damages</b><br/>${htmlEscape(condition.visible_damage || "-")}</p><p><b>Previous Damages</b><br/>${htmlEscape(condition.previous_damage || "-")}</p><p><b>Additional Notes</b><br/>${htmlEscape(condition.additional_notes || condition.mechanical_notes || "-")}</p></div><div class="box"><h3>5. خريطة الأضرار DAMAGE MAP</h3><div class="damage-map"><img class="damage-map-image" src="${htmlEscape(damageMapImageUrl)}" alt="Vehicle damage map" />${markDots}</div><div class="legend"><span><i></i>Impact</span><span><i></i>Broken</span><span><i></i>Scratch</span><span><i></i>Dent</span></div></div><div class="box"><h3>Damage Details تفاصيل الأضرار</h3><table class="damage-table"><thead><tr><th>No.</th><th>Damage Type</th><th>Affected Part</th><th>Notes</th></tr></thead><tbody>${damageRows}</tbody></table></div></section>
+    <section class="lower"><div class="box"><h3>6. محتويات المركبة VEHICLE CONTENTS</h3><table class="contents-table"><tr><td>Keys<br/><b>${htmlEscape(contents.keys_count || "-")}</b></td><td>Personal Items<br/><b>${yn(contents.personal_items)}</b></td></tr><tr><td>Registration Card<br/><b>${contents.registration_card ? '<span class="check">✓</span>' : '-'}</b></td><td>Number Plates<br/><b>${contents.front_plate || contents.rear_plate ? '<span class="check">✓</span>' : '-'}</b></td></tr><tr><td>Spare Tire<br/><b>${contents.spare_tire ? '<span class="check">✓</span>' : '-'}</b></td><td>Fuel Level<br/><b>${htmlEscape(contents.fuel_level || "-")}</b></td></tr><tr><td>Tools & Jack<br/><b>${contents.tools_jack ? '<span class="check">✓</span>' : '-'}</b></td><td>Fire Extinguisher<br/><b>${contents.fire_extinguisher ? '<span class="check">✓</span>' : '-'}</b></td></tr></table></div><div class="box"><h3>7. صور المركبة عند الدخول VEHICLE PHOTOS AT ENTRY</h3><div class="photos">${photoCells}</div></div><div class="box"><h3>8. الإقرار DECLARATION</h3><div class="declaration"><p>${htmlEscape(entry.declaration_ar || VEHICLE_ENTRY_DECLARATION_AR)}</p><p class="en">${htmlEscape(entry.declaration_en || VEHICLE_ENTRY_DECLARATION_EN)}</p></div></div></section>
     <section class="sign-row"><div class="sig"><h4>توقيع الشخص الذي أدخل المركبة<br/>Signature of Vehicle Delivered By</h4>${deliveredBySignature?.signature_data_url ? `<img src="${htmlEscape(deliveredBySignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig"><h4>توقيع موظف الاستلام<br/>Signature of Receiver</h4>${receiverSignature?.signature_data_url ? `<img src="${htmlEscape(receiverSignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig stamp"><h4>ختم الشركة<br/>Company Stamp</h4>${stamp || '<div class="line"></div>'}</div></section>
     <footer class="footer">Note: This is an electronic form and is considered valid without signature if it bears the company stamp. - ${htmlEscape(companyNameEn)} - ${now.getFullYear()}</footer>
   </main></body></html>`;

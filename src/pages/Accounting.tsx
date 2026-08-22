@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { DollarSign, TrendingUp, TrendingDown, BarChart3, LayoutDashboard, Settings2, BookOpen, ChevronDown, ChevronLeft, ExternalLink } from "lucide-react";
+import { DollarSign, TrendingUp, TrendingDown, BarChart3, LayoutDashboard, Settings2, BookOpen, ChevronDown, ChevronLeft, ExternalLink, FolderTree, PlusCircle, ReceiptText } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -174,6 +174,7 @@ export default function Accounting() {
         <TabsList>
           <TabsTrigger value="overview"><LayoutDashboard size={14} className="ml-1" /> نظرة عامة</TabsTrigger>
           <TabsTrigger value="journal"><BookOpen size={14} className="ml-1" /> دفتر اليومية</TabsTrigger>
+          <TabsTrigger value="expenses"><ReceiptText size={14} className="ml-1" /> إدارة المصروفات</TabsTrigger>
           <TabsTrigger value="settings"><Settings2 size={14} className="ml-1" /> إعدادات المالية</TabsTrigger>
         </TabsList>
 
@@ -356,6 +357,28 @@ export default function Accounting() {
         </TabsContent>
 
         <TabsContent value="journal"><JournalLedger /></TabsContent>
+        <TabsContent value="expenses" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <button type="button" onClick={() => navigate("/accounting/expenses/new")} className="rounded-xl border border-border bg-card p-5 text-start shadow-card transition-colors hover:border-primary/50 hover:bg-primary/5">
+              <PlusCircle className="mb-3 h-7 w-7 text-primary" />
+              <h3 className="font-bold">إضافة مصروف</h3>
+              <p className="mt-1 text-sm text-muted-foreground">تسجيل مصروف أمر عمل أو مصروف تشغيلي وربطه بالقسم والتصنيف.</p>
+            </button>
+            <button type="button" onClick={() => navigate("/accounting/expenses")} className="rounded-xl border border-border bg-card p-5 text-start shadow-card transition-colors hover:border-primary/50 hover:bg-primary/5">
+              <ReceiptText className="mb-3 h-7 w-7 text-primary" />
+              <h3 className="font-bold">سجل المصروفات</h3>
+              <p className="mt-1 text-sm text-muted-foreground">بحث وتعديل وتصدير المصروفات الفعلية مع فلاتر الأقسام وأوامر العمل.</p>
+            </button>
+            <button type="button" onClick={() => navigate("/accounting/expenses/categories")} className="rounded-xl border border-border bg-card p-5 text-start shadow-card transition-colors hover:border-primary/50 hover:bg-primary/5">
+              <FolderTree className="mb-3 h-7 w-7 text-primary" />
+              <h3 className="font-bold">الأقسام وتصنيفات المصروفات</h3>
+              <p className="mt-1 text-sm text-muted-foreground">إدارة شجرة القسم ← التصنيف ← التصنيف الفرعي المستخدمة في نموذج إضافة المصروف.</p>
+            </button>
+          </div>
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground">
+            التصنيفات سحابية وموحدة: أي تعديل معتمد هنا يظهر مباشرة في إضافة المصروف. تطبيق قالب الورشة لا يغيّر المصروفات القديمة ولا يعيد تصنيفها تلقائيًا.
+          </div>
+        </TabsContent>
         <TabsContent value="settings"><FinanceSettings /></TabsContent>
       </Tabs>
     </div>

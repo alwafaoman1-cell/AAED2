@@ -183,11 +183,10 @@ export default function VehicleEntryDetail() {
 
       <Card className="p-4 space-y-3">
         {cardTitle("بيانات التأمين", "Insurance")}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <Info label="شركة التأمين" value={insurance.insurance_company_name || "—"} />
           <Info label="رقم المطالبة" value={insurance.claim_number || "—"} />
           <Info label="رقم الوثيقة" value={insurance.policy_number || "—"} />
-          <Info label="تاريخ الحادث" value={insurance.incident_date || "—"} />
         </div>
       </Card>
 
@@ -260,9 +259,8 @@ export default function VehicleEntryDetail() {
 
       <Card className="p-4 space-y-3">
         {cardTitle("الإقرار والتوقيعات", "Declaration & Signatures")}
-        <p className="text-sm leading-7 text-muted-foreground">
-          تم استلام المركبة بالحالة الموضحة أعلاه، وتبقى بيانات الاستلام والصور والمستندات مرتبطة بملف المركبة دون نسخ أو تكرار.
-        </p>
+        <p className="text-sm leading-7 text-muted-foreground">{entry.declaration_ar || "—"}</p>
+        {entry.declaration_en && <p className="text-sm leading-7 text-muted-foreground" dir="ltr">{entry.declaration_en}</p>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-center">
           <SignatureBox label="توقيع المستلم" signature={signatures.find((s: any) => s.signature_role === "receiver")} />
           <SignatureBox label="توقيع العميل/المسلم" signature={signatures.find((s: any) => s.signature_role === "delivered_by")} />

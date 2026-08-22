@@ -53,6 +53,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   const isRtl = i18n.dir() === "rtl";
   const [tick, setTick] = useState(0);
   const [showPayment, setShowPayment] = useState(false);
+  const [showReference, setShowReference] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
   const [showNote, setShowNote] = useState(false);
   const [showAppt, setShowAppt] = useState(false);
@@ -139,6 +140,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
       total: doc.total,
       notes: doc.notes,
       paymentTerms: doc.paymentTerms,
+      reference: doc.documentReference,
       paidVia,
       paidTotal: doc.paidTotal || 0,
       balanceDue: doc.balanceDue,
@@ -268,10 +270,10 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem disabled={!doc.fromDocId}>
-              {doc.fromDocId
-                ? (isAr ? `محول من: ${doc.fromDocType} ${doc.fromDocId}` : `Linked from ${doc.fromDocType}`)
-                : (isAr ? "لا يوجد مرجع" : "No reference")}
+            {doc.fromDocId && <DropdownMenuItem disabled>{isAr ? `محول من: ${doc.fromDocType} ${doc.fromDocId}` : `Linked from ${doc.fromDocType}`}</DropdownMenuItem>}
+            {doc.documentReference && <DropdownMenuItem disabled>{isAr ? `المرجع الحالي: ${doc.documentReference}` : `Current reference: ${doc.documentReference}`}</DropdownMenuItem>}
+            <DropdownMenuItem onClick={() => setShowReference(true)}>
+              {doc.documentReference ? (isAr ? "تعديل المرجع" : "Edit reference") : (isAr ? "إضافة مرجع" : "Add reference")}
             </DropdownMenuItem>
             {type === "quote" && (
               <DropdownMenuItem onClick={convertToInvoice}>{isAr ? "تحويل إلى فاتورة" : "Convert to invoice"}</DropdownMenuItem>
@@ -523,6 +525,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
       {/* Dialogs */}
       <PaymentDialog open={showPayment} onClose={() => setShowPayment(false)} doc={doc} isAr={isAr} />
+      <ReferenceDialog open={showReference} onClose={() => setShowReference(false)} doc={doc} isAr={isAr} />
       <NoteDialog open={showNote} onClose={() => setShowNote(false)} doc={doc} isAr={isAr} />
       <AppointmentDialog open={showAppt} onClose={() => setShowAppt(false)} doc={doc} isAr={isAr} />
       <CostCenterDialog open={showCost} onClose={() => setShowCost(false)} doc={doc} isAr={isAr} />
@@ -696,6 +699,46 @@ function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: (
     </Dialog>
     </>
   );
+}
+
+function ReferenceDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: () => void; doc: SalesDoc; isAr: boolean }) {
+  const [reference, setReference] = useState(doc.documentReference || "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) setReference(doc.documentReference || "");
+  }, [doc.documentReference, open]);
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await salesStore.setDocumentReference(doc.id, reference);
+      toast.success(reference.trim()
+        ? (isAr ? "تم حفظ مرجع الفاتورة" : "Invoice reference saved")
+        : (isAr ? "تم حذف مرجع الفاتورة" : "Invoice reference removed"));
+      onClose();
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر حفظ مرجع الفاتورة" : "Unable to save invoice reference"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <Dialog open={open} onOpenChange={(value) => !value && !saving && onClose()}>
+    <DialogContent>
+      <DialogHeader><DialogTitle>{isAr ? "مرجع الفاتورة" : "Invoice Reference"}</DialogTitle></DialogHeader>
+      <div className="space-y-2">
+        <Label>{isAr ? "رقم المرجع / طلب الشراء / العقد" : "Reference / Purchase Order / Contract Number"}</Label>
+        <Input value={reference} onChange={(event) => setReference(event.target.value)} maxLength={160} dir="ltr" autoFocus />
+        <p className="text-xs text-muted-foreground">{isAr ? "يُحفظ في Supabase ويظهر في الفاتورة والطباعة." : "Saved in Supabase and shown on the invoice and print output."}</p>
+      </div>
+      <DialogFooter className="gap-2 sm:gap-2">
+        <Button variant="outline" onClick={onClose} disabled={saving}>{isAr ? "إلغاء" : "Cancel"}</Button>
+        <Button onClick={save} disabled={saving}>{saving ? (isAr ? "جاري الحفظ..." : "Saving...") : (isAr ? "حفظ المرجع" : "Save Reference")}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>;
 }
 
 

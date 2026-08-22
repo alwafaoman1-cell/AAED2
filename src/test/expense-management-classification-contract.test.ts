@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const migration = read("supabase/migrations/20260813130000_expense_management_classification_refactor.sql");
+const workshopTemplate = read("supabase/migrations/20260822100000_expense_workshop_subcategory_template.sql");
 
 describe("expense management classification refactor", () => {
   it("is additive and never reclassifies historical expenses", () => {
@@ -79,5 +80,22 @@ describe("expense management classification refactor", () => {
     expect(page).toContain("listCategoryAudit");
     expect(page).toContain("Category Audit Trail");
     expect(page).toContain("visited.has(row.id)");
+  });
+
+  it("exposes expense and category management from the accounting center", () => {
+    const accounting = read("src/pages/Accounting.tsx");
+    const form = read("src/pages/accounting/expenses/ExpenseFormPage.tsx");
+    expect(accounting).toContain('value="expenses"');
+    expect(accounting).toContain('/accounting/expenses/categories');
+    expect(accounting).toContain('/accounting/expenses/new');
+    expect(form).toContain('إدارة الأقسام والتصنيفات');
+  });
+
+  it("adds a manual three-level workshop template without historical backfill", () => {
+    expect(workshopTemplate).toContain("'subcategory'");
+    expect(workshopTemplate).toContain("for v_level in 1..3 loop");
+    expect(workshopTemplate).toContain("v_parent.level<>v_level-1");
+    expect(workshopTemplate).not.toMatch(/update\s+public\.expenses/i);
+    expect(workshopTemplate).not.toMatch(/select\s+public\.apply_default_expense_category_template\s*\(/i);
   });
 });

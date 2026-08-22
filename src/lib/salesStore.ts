@@ -95,6 +95,8 @@ export interface SalesDoc {
   // مرجع/تحويل
   fromDocId?: string;                // مثلا فاتورة محولة من عرض سعر
   fromDocType?: SalesDocType;
+  /** مرجع المستند التجاري مثل رقم طلب الشراء أو العقد. */
+  documentReference?: string;
   // مرفقات/ملاحظات/مواعيد
   payments: SalesPayment[];
   attachments: SalesAttachment[];
@@ -172,6 +174,7 @@ function rowToSalesDoc(r: any): SalesDoc {
     costCenter: m.costCenter,
     fromDocId: m.fromDocId || linkedWorkOrderId || r.converted_invoice_id,
     fromDocType: m.fromDocType,
+    documentReference: m.documentReference,
     payments: Array.isArray(m.payments) ? m.payments : [],
     attachments: Array.isArray(m.attachments) ? m.attachments : [],
     noteEntries: Array.isArray(m.noteEntries) ? m.noteEntries : [],
@@ -329,6 +332,7 @@ async function upsertSalesCloud(doc: SalesDoc) {
       costCenter: doc.costCenter,
       fromDocId: doc.fromDocId,
       fromDocType: doc.fromDocType,
+      documentReference: doc.documentReference,
       payments: doc.payments,
       attachments: doc.attachments,
       noteEntries: doc.noteEntries,
@@ -392,6 +396,55 @@ async function insertSalesPaymentCloud(doc: SalesDoc, payment: Omit<SalesPayment
   };
 }
 
+async function updateSalesDocumentReferenceCloud(doc: SalesDoc, reference: string): Promise<SalesDoc> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذّر تحديد المؤسسة");
+  if (!isUuid(doc.id)) throw new Error("لا يمكن تعديل مرجع فاتورة غير محفوظة في السحابة");
+
+  const { data: current, error: readError } = await (supabase.from("sales_documents") as any)
+    .select("metadata")
+    .eq("tenant_id", tenantId)
+    .eq("id", doc.id)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!current) throw new Error("الفاتورة غير موجودة في Supabase");
+
+  const currentMetadata = (current.metadata || {}) as Record<string, any>;
+  const currentActivity = Array.isArray(currentMetadata.activity) ? currentMetadata.activity : doc.activity;
+  const cleanReference = reference.trim();
+  const nextActivity = [
+    ...currentActivity,
+    {
+      id: cryptoRandom(),
+      at: new Date().toISOString(),
+      text: cleanReference ? `تحديث مرجع الفاتورة: ${cleanReference}` : "حذف مرجع الفاتورة",
+    },
+  ];
+  const nextMetadata = {
+    ...currentMetadata,
+    documentReference: cleanReference || null,
+    activity: nextActivity,
+  };
+
+  const { data: updated, error: updateError } = await (supabase.from("sales_documents") as any)
+    .update({ metadata: nextMetadata })
+    .eq("tenant_id", tenantId)
+    .eq("id", doc.id)
+    .select("id,metadata,updated_at")
+    .maybeSingle();
+  if (updateError) throw updateError;
+  if (!updated?.id) throw new Error("لم يتم تأكيد حفظ مرجع الفاتورة");
+
+  const nextDoc: SalesDoc = {
+    ...doc,
+    documentReference: cleanReference || undefined,
+    activity: nextActivity,
+    updatedAt: updated.updated_at || new Date().toISOString(),
+  };
+  write(read().map((item) => item.id === doc.id ? nextDoc : item));
+  return nextDoc;
+}
+
 export const salesStore = {
   subscribe(cb: () => void) {
     subscribers.add(cb);
@@ -402,6 +455,11 @@ export const salesStore = {
   },
   async refreshOne(id: string) {
     return refreshSalesDocumentFromCloud(id);
+  },
+  async setDocumentReference(id: string, reference: string) {
+    const doc = salesStore.get(id);
+    if (!doc) throw new Error("الفاتورة غير موجودة");
+    return updateSalesDocumentReferenceCloud(doc, reference);
   },
   list(filter?: { type?: SalesDocType; includeDeleted?: boolean }): SalesDoc[] {
     const all = read();
