@@ -216,7 +216,7 @@ export default function CustomerDetail() {
     navigate("/work-orders", { state: { prefillCustomer: customer.name, prefillPhone: customer.phone } });
   }
   function newInvoice() {
-    navigate("/sales", { state: { prefillCustomer: customer.name, mode: "invoice" } });
+    navigate("/sales/invoices/new", { state: { prefillCustomer: customer.name } });
   }
   function newQuote() { setQuoteOpen(true); }
   function newDeposit() { setDepositOpen(true); }

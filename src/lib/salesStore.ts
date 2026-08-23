@@ -73,6 +73,9 @@ export interface SalesDoc {
   number: string;                   // رقم الفاتورة المعروض (00001 …)
   type: SalesDocType;
   status: SalesDocStatus;
+  /** Official database issuance state. Drafts have no official invoice number. */
+  invoiceStatus?: "draft" | "issued" | "cancelled" | "credited";
+  issuedAt?: string;
   customerId?: string;
   customerName: string;
   customerAddress?: string;
@@ -155,6 +158,8 @@ function rowToSalesDoc(r: any): SalesDoc {
     number: r.doc_number,
     type: r.doc_type as SalesDocType,
     status: r.status as SalesDocStatus,
+    invoiceStatus: (r.invoice_status || (r.issued_at ? "issued" : "draft")) as SalesDoc["invoiceStatus"],
+    issuedAt: r.issued_at || undefined,
     customerId: r.customer_id || undefined,
     customerName: r.customer_name || "",
     customerAddress: m.customerAddress,
@@ -307,6 +312,8 @@ async function upsertSalesCloud(doc: SalesDoc) {
     doc_number: doc.number,
     doc_type: doc.type,
     status: doc.isDeleted ? "cancelled" : doc.status,
+    invoice_status: doc.isDeleted ? "cancelled" : (doc.invoiceStatus || "draft"),
+    issued_at: doc.issuedAt || null,
     customer_id: doc.customerId && isUuid(doc.customerId) ? doc.customerId : null,
     customer_name: doc.customerName || null,
     date: doc.date,
@@ -348,11 +355,21 @@ async function upsertSalesCloud(doc: SalesDoc) {
       isDeleted: doc.isDeleted,
     },
   });
-  let { error } = await (supabase.from("sales_documents") as any).upsert(payload);
+  let { data, error } = await (supabase.from("sales_documents") as any)
+    .upsert(payload)
+    .select("*")
+    .single();
   if (error && isGeneratedColumnWriteError(error)) {
-    ({ error } = await (supabase.from("sales_documents") as any).upsert(sanitizeInvoiceGeneratedWritePayload(payload)));
+    ({ data, error } = await (supabase.from("sales_documents") as any)
+      .upsert(sanitizeInvoiceGeneratedWritePayload(payload))
+      .select("*")
+      .single());
   }
-  if (error) console.warn("[salesStore] cloud upsert failed", error);
+  if (error) {
+    console.warn("[salesStore] cloud upsert failed", error);
+    throw error;
+  }
+  return data ? rowToSalesDoc(data) : null;
 }
 
 function normalizePaymentMethodForCloud(method: string) {
@@ -461,6 +478,68 @@ export const salesStore = {
     if (!doc) throw new Error("الفاتورة غير موجودة");
     return updateSalesDocumentReferenceCloud(doc, reference);
   },
+  async saveDraft(doc: SalesDoc): Promise<SalesDoc> {
+    const draft: SalesDoc = doc.type === "invoice" && doc.invoiceStatus !== "issued"
+      ? { ...doc, number: "", status: "draft", invoiceStatus: "draft", issuedAt: undefined }
+      : doc;
+    const cloud = await upsertSalesCloud(draft);
+    const saved = cloud || draft;
+    write([saved, ...read().filter((item) => item.id !== saved.id)]);
+    return saved;
+  },
+  async issueInvoice(doc: SalesDoc): Promise<SalesDoc> {
+    if (doc.type !== "invoice") throw new Error("Only sales invoices can be issued");
+    if (doc.invoiceStatus === "issued" && doc.number) return doc;
+
+    const draft: SalesDoc = {
+      ...doc,
+      number: "",
+      status: "draft",
+      invoiceStatus: "draft",
+      issuedAt: undefined,
+    };
+    const cloudDraft = await upsertSalesCloud(draft);
+    if (!cloudDraft?.id || !isUuid(cloudDraft.id)) {
+      throw new Error("تعذر حفظ مسودة الفاتورة في Supabase قبل الإصدار");
+    }
+
+    const { data, error } = await (supabase.rpc as any)("issue_sales_document_invoice", {
+      p_source_id: cloudDraft.id,
+      p_issue_date: doc.date,
+    });
+    if (error) throw error;
+    const issueResult = Array.isArray(data) ? data[0] : data;
+    const issuedNumber = issueResult?.invoice_number;
+    if (issuedNumber && issueResult?.invoice_status !== "issued") {
+      // Pre-cutover numbered rows are historical locks. The database returns
+      // the original row without changing status or consuming a sequence.
+      const historical = await refreshSalesDocumentFromCloud(cloudDraft.id);
+      if (!historical || historical.number !== issuedNumber) {
+        throw new Error("تعذر تأكيد رقم الفاتورة التاريخية");
+      }
+      return historical;
+    }
+    if (!/^INV-\d{4}-\d{6,}$/.test(String(issuedNumber || ""))) {
+      throw new Error("لم يتم تخصيص رقم الفاتورة المركزي؛ تحقق من تفعيل Cutover للمؤسسة");
+    }
+
+    const issued = await refreshSalesDocumentFromCloud(cloudDraft.id);
+    if (!issued || issued.number !== issuedNumber) {
+      throw new Error("تعذر تأكيد رقم الفاتورة بعد الإصدار");
+    }
+    const { postSalesInvoice } = await import("./salesAccounting");
+    postSalesInvoice({
+      invoiceId: issued.id,
+      invoiceNumber: issued.number,
+      date: issued.date,
+      customerName: issued.customerName || "غير محدد",
+      subtotal: Number(issued.subtotal || 0),
+      vat: Number(issued.taxTotal || 0),
+      total: Number(issued.total || 0),
+      source: "sales_invoice",
+    });
+    return issued;
+  },
   list(filter?: { type?: SalesDocType; includeDeleted?: boolean }): SalesDoc[] {
     const all = read();
     return all
@@ -472,6 +551,9 @@ export const salesStore = {
     return read().find((d) => d.id === id);
   },
   nextNumber(type: SalesDocType): string {
+    // Official invoice numbers are allocated atomically by PostgreSQL only
+    // when a draft is issued. Other document types keep their own numbering.
+    if (type === "invoice") return "";
     const prefix = numberPrefix(type);
     const year = new Date().getFullYear();
     const yearStr = String(year);
@@ -502,10 +584,17 @@ export const salesStore = {
       all.unshift(finalDoc);
     }
     write([...all]);
-    void upsertSalesCloud(finalDoc);
+    void upsertSalesCloud(finalDoc).catch((error) => {
+      console.warn("[salesStore] cloud persistence failed", error);
+    });
     // ─── ترحيل محاسبي تلقائي لفواتير المبيعات ───
     try {
-      if (finalDoc.type === "invoice" && !finalDoc.isDeleted) {
+      if (
+        finalDoc.type === "invoice"
+        && finalDoc.invoiceStatus === "issued"
+        && /^INV-\d{4}-\d{6,}$/.test(finalDoc.number)
+        && !finalDoc.isDeleted
+      ) {
         // dynamic import لتجنب الدورات
         import("./salesAccounting").then(({ postSalesInvoice }) => {
           postSalesInvoice({
@@ -564,8 +653,10 @@ export const salesStore = {
     const copy: SalesDoc = {
       ...src,
       id: cryptoRandom(),
-      number: salesStore.nextNumber(src.type),
+      number: src.type === "invoice" ? "" : salesStore.nextNumber(src.type),
       status: "draft",
+      invoiceStatus: src.type === "invoice" ? "draft" : src.invoiceStatus,
+      issuedAt: src.type === "invoice" ? undefined : src.issuedAt,
       paidTotal: 0,
       balanceDue: src.total,
       payments: [],
@@ -730,9 +821,11 @@ export const salesStore = {
     const inv: SalesDoc = {
       ...q,
       id: cryptoRandom(),
-      number: salesStore.nextNumber("invoice"),
+      number: "",
       type: "invoice",
-      status: "unpaid",
+      status: "draft",
+      invoiceStatus: "draft",
+      issuedAt: undefined,
       fromDocId: q.id,
       fromDocType: "quote",
       paidTotal: 0,
@@ -799,9 +892,10 @@ export function makeEmptyDoc(type: SalesDocType): SalesDoc {
   const now = new Date().toISOString();
   return {
     id: cryptoRandom(),
-    number: salesStore.nextNumber(type),
+    number: type === "invoice" ? "" : salesStore.nextNumber(type),
     type,
-    status: type === "quote" ? "draft" : "unpaid",
+    status: type === "invoice" || type === "quote" ? "draft" : "unpaid",
+    invoiceStatus: type === "invoice" ? "draft" : undefined,
     customerName: "",
     date: now.slice(0, 10),
     dueDate: type === "invoice" ? new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10) : undefined,

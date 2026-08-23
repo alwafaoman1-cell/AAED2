@@ -326,7 +326,7 @@ export default function Dashboard() {
         <StatCard title={t("dashboard.stats.readyDelivery")} value={stats.readyDelivery} icon={CheckCircle} variant="success" to="/work-orders" />
         <StatCard title={t("dashboard.stats.openOrders")} value={stats.openOrders} icon={FileText} to="/work-orders" />
         <StatCard title={t("dashboard.stats.closedToday")} value={stats.closedToday} icon={ClipboardCheck} variant="success" to="/work-orders" />
-        <StatCard title={t("dashboard.stats.unpaidInvoices")} value={stats.unpaidInvoices} icon={AlertTriangle} variant="warning" to="/sales" />
+        <StatCard title={t("dashboard.stats.unpaidInvoices")} value={stats.unpaidInvoices} icon={AlertTriangle} variant="warning" to="/sales/invoices" />
       </div>
     ),
     charts: (

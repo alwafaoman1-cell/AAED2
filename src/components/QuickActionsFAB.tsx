@@ -134,7 +134,7 @@ export default function QuickActionsFAB() {
           description: order.diagnosis || order.description || "",
         }));
         toast.success(isRtl ? "تم التحضير" : "Prepared");
-        navigate(`/sales?new=${mode}&from=` + encodeURIComponent(order.id));
+        navigate(`${mode === "invoice" ? "/sales/invoices/new" : "/sales/quotes/new"}?fromWorkOrder=` + encodeURIComponent(order.id));
       } catch {
         toast.error(isRtl ? "تعذر التحضير" : "Failed");
       }

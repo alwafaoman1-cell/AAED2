@@ -92,7 +92,7 @@ export default function QuickActionsMenu() {
             ? `تم تحضير عرض سعر / تقدير تأمين لأمر العمل ${order.id}`
             : `تم تحضير فاتورة جديدة لأمر العمل ${order.id}`
         );
-        navigate(`/sales?new=${mode}&from=` + encodeURIComponent(order.id));
+        navigate(`${mode === "invoice" ? "/sales/invoices/new" : "/sales/quotes/new"}?fromWorkOrder=` + encodeURIComponent(order.id));
       } catch {
         toast.error("تعذّر تجهيز المستند");
       }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Plus, Trash2, Save, ArrowLeft, FileSearch, Car, ClipboardList, X,
@@ -66,6 +66,7 @@ function emptyItem(taxRate?: number): SalesLineItem {
 export default function SalesDocEditorPage({ type, title, backRoute, detailRoute }: Props) {
   const { id } = useParams();
   const [params] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { i18n } = useTranslation();
   const isAr = i18n.language === "ar";
@@ -84,6 +85,8 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
     const base = makeEmptyDoc(type);
     base.items = [emptyItem()]; // بند ثابت أول
     base.paymentTerms = "نقداً"; // افتراضي
+    const routeState = location.state as { prefillCustomer?: string } | null;
+    if (routeState?.prefillCustomer) base.customerName = routeState.prefillCustomer;
 
     // Pre-fill from a Work Order: ?fromWorkOrder=<id>
     const woId = params.get("fromWorkOrder");
@@ -96,6 +99,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [vehiclePickerOpen, setVehiclePickerOpen] = useState(false);
+  const [savingMode, setSavingMode] = useState<"draft" | "issue" | null>(null);
 
   useEffect(() => {
     const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
@@ -263,13 +267,13 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       ));
   }
 
-  function save() {
+  async function save(mode: "draft" | "issue" = "draft") {
     const trimmedNumber = doc.number.trim();
-    if (!trimmedNumber) {
+    if (type !== "invoice" && !trimmedNumber) {
       toast.error(isAr ? "أدخل رقم الفاتورة" : "Invoice number is required");
       return;
     }
-    const duplicate = findDuplicateNumber(trimmedNumber);
+    const duplicate = trimmedNumber ? findDuplicateNumber(trimmedNumber) : undefined;
     if (duplicate) {
       toast.error(
         isAr
@@ -294,7 +298,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
     customersStore.getOrCreateByName(doc.customerName);
     const previousNumber = id ? salesStore.get(doc.id)?.number : undefined;
     const numberChanged = !!previousNumber && previousNumber !== trimmedNumber;
-    const saved = salesStore.upsert({
+    const prepared: SalesDoc = {
       ...doc,
       number: trimmedNumber,
       items: validItems,
@@ -308,9 +312,33 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
             },
           ]
         : doc.activity,
-    });
-    toast.success(isAr ? "تم الحفظ" : "Saved");
-    navigate(detailRoute(saved.id));
+    };
+
+    setSavingMode(mode);
+    try {
+      let saved: SalesDoc;
+      if (type === "invoice" && prepared.invoiceStatus !== "issued") {
+        saved = mode === "issue"
+          ? await salesStore.issueInvoice(prepared)
+          : await salesStore.saveDraft(prepared);
+      } else {
+        saved = salesStore.upsert(prepared);
+      }
+      toast.success(
+        type === "invoice" && mode === "issue"
+          ? saved.invoiceStatus === "issued"
+            ? (isAr ? `تم إصدار الفاتورة ${saved.number}` : `Invoice issued: ${saved.number}`)
+            : (isAr ? `فاتورة تاريخية محفوظة برقمها الأصلي ${saved.number}` : `Historical invoice retained: ${saved.number}`)
+          : type === "invoice" && saved.invoiceStatus !== "issued"
+            ? (isAr ? "تم حفظ المسودة" : "Draft saved")
+            : (isAr ? "تم حفظ التعديلات" : "Changes saved")
+      );
+      navigate(detailRoute(saved.id));
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر حفظ الفاتورة" : "Invoice save failed"));
+    } finally {
+      setSavingMode(null);
+    }
   }
 
   const docTypeForTemplate = type === "quote" ? "quote" : "tax_invoice";
@@ -324,7 +352,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
           <Button variant="ghost" size="icon" onClick={() => navigate(backRoute)}>
             <ArrowLeft className={`h-4 w-4 ${isRtl ? "rotate-180" : ""}`} />
           </Button>
-          <h1 className="text-xl font-bold">{title} — {doc.number}</h1>
+          <h1 className="text-xl font-bold">{title} — {doc.number || (isAr ? "مسودة" : "Draft")}</h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           {/* Tax toggle */}
@@ -343,9 +371,20 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
             </ShadLabel>
           </div>
           <TemplatePicker docType={docTypeForTemplate as any} size="sm" />
-          <Button onClick={save} className="gap-2">
-            <Save className="h-4 w-4" /> {isAr ? "حفظ" : "Save"}
-          </Button>
+          {type === "invoice" && doc.invoiceStatus !== "issued" ? (
+            <>
+              <Button variant="outline" onClick={() => void save("draft")} disabled={savingMode !== null} className="gap-2">
+                <Save className="h-4 w-4" /> {isAr ? "حفظ مسودة" : "Save Draft"}
+              </Button>
+              <Button onClick={() => void save("issue")} disabled={savingMode !== null} className="gap-2">
+                <Save className="h-4 w-4" /> {isAr ? "إصدار الفاتورة" : "Issue Invoice"}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={() => void save("draft")} disabled={savingMode !== null} className="gap-2">
+              <Save className="h-4 w-4" /> {isAr ? "حفظ" : "Save"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -356,9 +395,15 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
           <Input
             value={doc.number}
             onChange={(e) => setDoc({ ...doc, number: e.target.value })}
-            placeholder={type === "invoice" ? "INV-2026-00001" : "00001"}
+            readOnly={type === "invoice" && (doc.invoiceStatus !== "issued" || /^INV-\d{4}-\d{6,}$/.test(doc.number))}
+            placeholder={type === "invoice" ? (isAr ? "يُخصص تلقائيًا عند الإصدار" : "Allocated automatically on issue") : "00001"}
             className="font-mono"
           />
+          {type === "invoice" && doc.invoiceStatus !== "issued" && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {isAr ? "المسودة لا تستهلك رقم فاتورة رسميًا." : "A draft does not consume an official invoice number."}
+            </p>
+          )}
         </div>
         <div>
           <Label>{isAr ? "العميل" : "Customer"} *</Label>

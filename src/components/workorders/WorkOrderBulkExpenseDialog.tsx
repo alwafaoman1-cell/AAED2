@@ -26,6 +26,7 @@ import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { logActivity } from "@/lib/auditLogStore";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { syncWorkOrderInvoiceFromExpenses } from "@/lib/workOrderInvoiceSync";
+import { salesStore } from "@/lib/salesStore";
 import SupplierPicker from "@/components/suppliers/SupplierPicker";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
@@ -295,7 +296,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       try {
         const result = syncWorkOrderInvoiceFromExpenses(order);
         if (result?.invoice) {
-          invMsg = ` • فاتورة ${result.invoice.number} ${result.created ? "أُنشئت" : "حُدّثت"}`;
+          const issued = await salesStore.issueInvoice(result.invoice);
+          invMsg = ` • فاتورة ${issued.number} ${result.created ? "أُنشئت" : "حُدّثت"}`;
         }
       } catch (e: any) {
         console.error("invoice sync failed", e);

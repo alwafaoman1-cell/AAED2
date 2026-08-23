@@ -10,6 +10,8 @@ import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { salesStore, SalesDoc, SalesDocType, SalesDocStatus, calculateTotals, cryptoRandom, makeEmptyDoc } from "@/lib/salesStore";
 import SalesStatusBadge from "./SalesStatusBadge";
 import { toast } from "sonner";
+import { findUnifiedInvoiceNumber, type UnifiedInvoiceSearchResult } from "@/lib/unifiedInvoiceSearch";
+import UnifiedInvoiceSearchResultsDialog from "./UnifiedInvoiceSearchResultsDialog";
 
 interface Props {
   type: SalesDocType;
@@ -36,6 +38,8 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [invoiceSearchBusy, setInvoiceSearchBusy] = useState(false);
+  const [invoiceMatches, setInvoiceMatches] = useState<UnifiedInvoiceSearchResult[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function toggle(id: string) {
@@ -134,6 +138,27 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
     navigate("/settings/print-templates");
   }
 
+  async function runUnifiedInvoiceSearch() {
+    if (!q.trim()) return;
+    setInvoiceSearchBusy(true);
+    try {
+      const matches = await findUnifiedInvoiceNumber(q);
+      if (matches.length === 1) {
+        navigate(matches[0].route);
+        return;
+      }
+      if (matches.length > 1) {
+        setInvoiceMatches(matches);
+        return;
+      }
+      toast.info(isAr ? "لم يتم العثور على فاتورة بهذا الرقم" : "No invoice found with this number");
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر البحث عن رقم الفاتورة" : "Invoice search failed"));
+    } finally {
+      setInvoiceSearchBusy(false);
+    }
+  }
+
   const items = useMemo(() => {
     const all = salesStore.list({ type });
     return all
@@ -175,7 +200,9 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
           </div>
           <div>
             <label className="text-xs text-muted-foreground">{isAr ? "رقم المستند" : "Number"}</label>
-            <Input value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => {
+              if (e.key === "Enter") void runUnifiedInvoiceSearch();
+            }} />
           </div>
           <div>
             <label className="text-xs text-muted-foreground">{isAr ? "الحالة" : "Status"}</label>
@@ -192,7 +219,9 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
             <Button variant="outline" size="sm" onClick={() => { setQ(""); setStatus("all"); }}>
               {isAr ? "إلغاء الفلتر" : "Reset"}
             </Button>
-            <Button size="sm" className="gap-2"><Search className="h-3 w-3" /> {isAr ? "بحث" : "Search"}</Button>
+            <Button size="sm" className="gap-2" onClick={() => void runUnifiedInvoiceSearch()} disabled={invoiceSearchBusy}>
+              <Search className="h-3 w-3" /> {invoiceSearchBusy ? (isAr ? "جاري البحث..." : "Searching...") : (isAr ? "بحث" : "Search")}
+            </Button>
           </div>
         </div>
       </div>
@@ -299,6 +328,17 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
           <Trash2 size={14} /> {isAr ? "حذف" : "Delete"}
         </Button>
       </BulkActionBar>
+
+      <UnifiedInvoiceSearchResultsDialog
+        open={invoiceMatches.length > 1}
+        onOpenChange={(open) => { if (!open) setInvoiceMatches([]); }}
+        results={invoiceMatches}
+        isAr={isAr}
+        onOpenResult={(result) => {
+          setInvoiceMatches([]);
+          navigate(result.route);
+        }}
+      />
     </div>
   );
 }

@@ -17,9 +17,9 @@ import {
   type VehicleDeliveryReceiptDraft,
 } from "@/lib/vehicleDeliveryReceipt";
 import { syncWorkOrderInvoiceFromExpenses, isInsuranceWorkOrder } from "@/lib/workOrderInvoiceSync";
+import { salesStore } from "@/lib/salesStore";
 import { supabase } from "@/integrations/supabase/client";
 import { ShieldCheck } from "lucide-react";
-import { postSalesInvoice } from "@/lib/salesAccounting";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { toast } from "sonner";
 
@@ -216,14 +216,14 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
    * - يربط الفاتورة تلقائياً بـ (العميل، اللوحة، الـVIN، شركة التأمين عبر notes)
    * - يُرحّل القيد المحاسبي فوراً
    */
-  function handleIssueInvoice() {
+  async function handleIssueInvoice() {
     try {
       const result = syncWorkOrderInvoiceFromExpenses(order);
       if (!result.invoice) {
         toast.error("لا توجد قطع غيار بسعر بيع لإصدار فاتورة. أضف بنوداً يدوياً من شاشة الفاتورة.");
         return;
       }
-      const inv = result.invoice;
+      let inv = result.invoice;
       // ربط شركة التأمين في الملاحظات (إن وُجدت)
       if (order.insurance && order.insurance !== "-") {
         const tag = `#INS:${order.insurance}`;
@@ -231,17 +231,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
           inv.notes = `${inv.notes || ""} ${tag}`.trim();
         }
       }
-      // ترحيل القيد المحاسبي تلقائياً
-      postSalesInvoice({
-        invoiceId: inv.id,
-        invoiceNumber: inv.number,
-        date: inv.date,
-        customerName: inv.customerName,
-        subtotal: inv.subtotal,
-        vat: inv.taxTotal,
-        total: inv.total,
-        source: "work_order_invoice",
-      });
+      inv = await salesStore.issueInvoice(inv);
       toast.success(
         result.created
           ? `تم إصدار الفاتورة الضريبية ${inv.number} (${result.partsCount} بند)`

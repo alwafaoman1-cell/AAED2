@@ -187,7 +187,9 @@ export async function generateOrderAndInvoiceForRow(row: DailyLogRow): Promise<{
   (inv as any).paidAmount = paid;
   inv.notes = `مستوردة من السجل اليومي — أمر العمل ${woNumber}`;
 
-  const saved = salesStore.upsert(inv);
+  // Historical import creates an official invoice through the same database
+  // allocator; the client never invents an invoice number.
+  const saved = await salesStore.issueInvoice(inv);
 
   // 4) مصروف تلقائي لشراء قطع الغيار بنفس تاريخ الصف
   let expenseId: string | undefined;

@@ -40,7 +40,6 @@ const WorkOrderDetail = lazy(() => import("./pages/WorkOrderDetail"));
 const Inspection = lazy(() => import("./pages/Inspection"));
 const InspectionReportPage = lazy(() => import("./pages/InspectionReportPage"));
 const InsuranceInspectionPage = lazy(() => import("./pages/InsuranceInspectionPage"));
-const Sales = lazy(() => import("./pages/Sales"));
 const InvoicesManagement = lazy(() => import("./pages/sales/InvoicesManagement"));
 const NewInvoice = lazy(() => import("./pages/sales/NewInvoice"));
 const EditInvoice = lazy(() => import("./pages/sales/EditInvoice"));
@@ -291,7 +290,7 @@ const App = () => (
               <Route path="/inspection" element={<Inspection />} />
               <Route path="/inspection/insurance/new" element={<InsuranceInspectionPage />} />
               <Route path="/inspection/:id/report" element={<InspectionReportPage />} />
-              <Route path="/sales" element={<Sales />} />
+              <Route path="/sales" element={<Navigate to="/sales/invoices" replace />} />
               <Route path="/sales/invoices" element={<InvoicesManagement />} />
               <Route path="/sales/invoices/new" element={<NewInvoice />} />
               <Route path="/sales/invoices/:id" element={<InvoiceDetail />} />
