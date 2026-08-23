@@ -31,6 +31,7 @@ with sales as (
       'updated_at', updated_at
     )::text, '|' order by id), '')) as dates_hash
   from public.sales_documents
+  where doc_type = 'invoice'
 ), insurance as (
   select
     count(*)::bigint as row_count,
