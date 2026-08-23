@@ -4309,5 +4309,7 @@
   "الفواتير غير المدفوعة تظهر ضمن المفوتر والمستحق، بينما يبقى التحصيل صفرًا حتى تسجيل دفعة فعلية.": "Unpaid invoices remain included in invoiced revenue and outstanding balances, while collections remain zero until an actual payment is recorded.",
   "جاري تحميل التقرير…": "Loading report…",
   "لا توجد حركة مالية مطابقة خلال الفترة.": "No matching financial activity in this period.",
-  "أساس الشهر: الفاتورة حسب تاريخها، التحصيل حسب تاريخ الدفعة، والمصروف حسب تاريخ السند. VAT لا يدخل في الربح.": "Monthly basis: invoices by invoice date, collections by payment date, and expenses by voucher date. VAT is excluded from profit."
+  "أساس الشهر: الفاتورة حسب تاريخها، التحصيل حسب تاريخ الدفعة، والمصروف حسب تاريخ السند. VAT لا يدخل في الربح.": "Monthly basis: invoices by invoice date, collections by payment date, and expenses by voucher date. VAT is excluded from profit.",
+  "تعذر البحث:": "Search failed:",
+  "الاسم أو الهاتف أو الرقم الضريبي — حرفان على الأقل": "Name, phone, or tax number — at least two characters"
 }

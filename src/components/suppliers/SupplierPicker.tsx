@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Plus, Search } from "lucide-react";
+import { Building2, Loader2, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -64,20 +64,28 @@ function mapLegacySupplier(row: Supplier): SupplierOption {
   };
 }
 
-async function loadTableSuppliers(): Promise<SupplierOption[]> {
+async function loadTableSuppliers(search: string, supplierId?: string): Promise<SupplierOption[]> {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return [];
 
-  const { data, error } = await (supabase.from("suppliers") as any)
+  const term = cleanOrFilterValue(search);
+  let query = (supabase.from("suppliers") as any)
     .select("id,name,phone,email,tax_number,category,notes,vehicle_brands,is_active")
     .eq("tenant_id", tenantId)
-    .eq("is_active", true)
-    .order("name", { ascending: true })
-    .limit(500);
+    .eq("is_active", true);
+
+  if (term.length >= 2) {
+    query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,tax_number.ilike.%${term}%,category.ilike.%${term}%`);
+  } else if (supplierId) {
+    query = query.eq("id", supplierId);
+  } else {
+    return [];
+  }
+
+  const { data, error } = await query.order("name", { ascending: true }).limit(20);
 
   if (error) {
-    console.warn("[SupplierPicker] suppliers table lookup failed", error);
-    return [];
+    throw error;
   }
 
   return (data || []).map(mapTableSupplier);
@@ -205,6 +213,7 @@ export default function SupplierPicker({
   onClear,
 }: SupplierPickerProps) {
   const [query, setQuery] = useState(supplierName || "");
+  const [debouncedQuery, setDebouncedQuery] = useState(supplierName || "");
   const [tableSuppliers, setTableSuppliers] = useState<SupplierOption[]>([]);
   const [legacySuppliers, setLegacySuppliers] = useState<SupplierOption[]>(() =>
     suppliersStore.getAll().map(mapLegacySupplier)
@@ -215,20 +224,44 @@ export default function SupplierPicker({
   const [newTaxNumber, setNewTaxNumber] = useState("");
   const [newVehicleBrands, setNewVehicleBrands] = useState("");
   const [saving, setSaving] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
 
   useEffect(() => suppliersStore.subscribe(() => {
     setLegacySuppliers(suppliersStore.getAll().map(mapLegacySupplier));
   }), []);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
     let cancelled = false;
-    void loadTableSuppliers().then((rows) => {
-      if (!cancelled) setTableSuppliers(rows);
-    });
+    setSearchError("");
+    setSearching(true);
+    void loadTableSuppliers(debouncedQuery, supplierId)
+      .then((rows) => {
+        if (cancelled) return;
+        setTableSuppliers(rows);
+        if (supplierId) {
+          const selected = rows.find((row) => row.id === supplierId);
+          if (selected) setQuery((current) => current.trim() ? current : selected.name);
+        }
+      })
+      .catch((error: any) => {
+        if (!cancelled) {
+          setTableSuppliers([]);
+          setSearchError(error?.message || "تعذر البحث في الموردين");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSearching(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [legacySuppliers]);
+  }, [debouncedQuery, supplierId]);
 
   useEffect(() => {
     setQuery(supplierName || "");
@@ -250,6 +283,10 @@ export default function SupplierPicker({
 
   const normalizedQuery = normalize(query);
   const filtered = useMemo(() => {
+    if (!normalizedQuery) {
+      return supplierId ? allSuppliers.filter((supplier) => supplier.id === supplierId) : [];
+    }
+    if (normalizedQuery.length < 2) return [];
     return allSuppliers
       .filter((supplier) => {
         if (!normalizedQuery) return true;
@@ -263,13 +300,7 @@ export default function SupplierPicker({
         ].some((value) => normalize(value).includes(normalizedQuery));
       })
       .slice(0, 8);
-  }, [allSuppliers, normalizedQuery]);
-
-  const exact = allSuppliers.find((supplier) =>
-    normalize(supplier.name) === normalizedQuery ||
-    (!!supplier.phone && normalize(supplier.phone) === normalizedQuery) ||
-    (!!supplier.taxNumber && normalize(supplier.taxNumber) === normalizedQuery)
-  );
+  }, [allSuppliers, normalizedQuery, supplierId]);
 
   const select = async (supplier: SupplierOption) => {
     try {
@@ -347,6 +378,7 @@ export default function SupplierPicker({
           placeholder={placeholder}
           className="pr-9"
         />
+        {searching && <Loader2 className="absolute left-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
       <div className="rounded-md border border-border bg-background">
         {filtered.length > 0 ? (
@@ -374,19 +406,21 @@ export default function SupplierPicker({
               </button>
             ))}
           </div>
+        ) : searchError ? (
+          <div className="px-3 py-2 text-xs text-destructive">تعذر البحث: {searchError}</div>
         ) : (
-          <div className="px-3 py-2 text-xs text-muted-foreground">لا يوجد مورد مطابق</div>
+          <div className="px-3 py-2 text-xs text-muted-foreground">
+            {normalizedQuery.length < 2 ? "اكتب حرفين على الأقل للبحث" : searching ? "جاري البحث..." : "لا يوجد مورد مطابق"}
+          </div>
         )}
-        {query.trim() && !exact && (
-          <button
-            type="button"
-            onClick={openAddDialog}
-            className="w-full px-3 py-2 text-xs text-right text-primary hover:bg-primary/10 flex items-center gap-2 border-t border-border"
-          >
-            <Plus size={13} />
-            + إضافة مورد جديد
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={openAddDialog}
+          className="w-full px-3 py-2 text-xs text-right text-primary hover:bg-primary/10 flex items-center gap-2 border-t border-border"
+        >
+          <Plus size={13} />
+          + إضافة مورد جديد
+        </button>
       </div>
       {supplierId && <p className="text-[10px] text-success">تم اختيار مورد محفوظ.</p>}
 
