@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       accounting_account_mappings: {
@@ -4419,6 +4394,195 @@ export type Database = {
             foreignKeyName: "inventory_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_number_audit_events: {
+        Row: {
+          details: Json
+          event_at: string
+          event_by: string | null
+          event_type: string
+          id: string
+          invoice_number: string
+          registry_id: string
+          source_id: string
+          source_table: string
+          tenant_id: string
+        }
+        Insert: {
+          details?: Json
+          event_at?: string
+          event_by?: string | null
+          event_type: string
+          id?: string
+          invoice_number: string
+          registry_id: string
+          source_id: string
+          source_table: string
+          tenant_id: string
+        }
+        Update: {
+          details?: Json
+          event_at?: string
+          event_by?: string | null
+          event_type?: string
+          id?: string
+          invoice_number?: string
+          registry_id?: string
+          source_id?: string
+          source_table?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_number_audit_events_registry_id_fkey"
+            columns: ["registry_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_number_registry"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_number_audit_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_number_registry: {
+        Row: {
+          created_at: string
+          id: string
+          invoice_number: string
+          invoice_type: string
+          invoice_year: number
+          issued_at: string
+          issued_by: string | null
+          sequence_number: number
+          source_id: string
+          source_table: string
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invoice_number: string
+          invoice_type: string
+          invoice_year: number
+          issued_at: string
+          issued_by?: string | null
+          sequence_number: number
+          source_id: string
+          source_table: string
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invoice_number?: string
+          invoice_type?: string
+          invoice_year?: number
+          issued_at?: string
+          issued_by?: string | null
+          sequence_number?: number
+          source_id?: string
+          source_table?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_number_registry_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_number_sequences: {
+        Row: {
+          invoice_year: number
+          next_value: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          invoice_year: number
+          next_value: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          invoice_year?: number
+          next_value?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_number_sequences_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_numbering_settings: {
+        Row: {
+          activated_at: string
+          activated_by: string | null
+          created_at: string
+          cutover_year: number
+          first_invoice_number: string | null
+          first_sequence: number
+          numbering_format: string
+          padding: number
+          prefix: string
+          start_year: number | null
+          starting_sequence: number | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          activated_at: string
+          activated_by?: string | null
+          created_at?: string
+          cutover_year: number
+          first_invoice_number?: string | null
+          first_sequence: number
+          numbering_format?: string
+          padding?: number
+          prefix?: string
+          start_year?: number | null
+          starting_sequence?: number | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          activated_at?: string
+          activated_by?: string | null
+          created_at?: string
+          cutover_year?: number
+          first_invoice_number?: string | null
+          first_sequence?: number
+          numbering_format?: string
+          padding?: number
+          prefix?: string
+          start_year?: number | null
+          starting_sequence?: number | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_numbering_settings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
             referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
@@ -9248,9 +9412,63 @@ export type Database = {
         }
         Returns: Json
       }
+      activate_unified_invoice_numbering: {
+        Args: { p_first_sequence: number; p_padding?: number; p_year: number }
+        Returns: {
+          activated_at: string
+          activated_by: string | null
+          created_at: string
+          cutover_year: number
+          first_invoice_number: string | null
+          first_sequence: number
+          numbering_format: string
+          padding: number
+          prefix: string
+          start_year: number | null
+          starting_sequence: number | null
+          tenant_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "invoice_numbering_settings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       admin_reopen_signature: {
         Args: { p_job_order_id: string }
         Returns: Json
+      }
+      allocate_invoice_number_internal: {
+        Args: {
+          p_invoice_type: string
+          p_issue_date: string
+          p_issued_at: string
+          p_issued_by: string
+          p_source_id: string
+          p_source_table: string
+          p_tenant_id: string
+        }
+        Returns: {
+          created_at: string
+          id: string
+          invoice_number: string
+          invoice_type: string
+          invoice_year: number
+          issued_at: string
+          issued_by: string | null
+          sequence_number: number
+          source_id: string
+          source_table: string
+          tenant_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "invoice_number_registry"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       apply_default_expense_category_template: { Args: never; Returns: number }
       approve_accounting_journal_entry: {
@@ -9364,6 +9582,20 @@ export type Database = {
       }
       extract_plate_digits: { Args: { p: string }; Returns: string }
       extract_plate_letters: { Args: { p: string }; Returns: string }
+      find_unified_invoice_number: {
+        Args: { p_invoice_number: string }
+        Returns: {
+          ambiguous_historical_number: boolean
+          invoice_date: string
+          invoice_number: string
+          invoice_type: string
+          is_historical: boolean
+          route: string
+          source_id: string
+          source_type: string
+          tenant_id: string
+        }[]
+      }
       find_vehicle_by_plate: {
         Args: { p_country?: string; p_digits: string; p_letters: string }
         Returns: {
@@ -9454,6 +9686,15 @@ export type Database = {
         Returns: boolean
       }
       is_platform_admin: { Args: never; Returns: boolean }
+      issue_sales_document_invoice: {
+        Args: { p_issue_date: string; p_source_id: string }
+        Returns: {
+          invoice_number: string
+          invoice_status: string
+          issued_at: string
+          source_id: string
+        }[]
+      }
       log_public_tracking_open: {
         Args: {
           p_result?: string
@@ -10040,6 +10281,10 @@ export type Database = {
         }
         Returns: Json
       }
+      unified_invoice_numbering_is_active: {
+        Args: { p_tenant_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role:
@@ -10187,9 +10432,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       app_role: [

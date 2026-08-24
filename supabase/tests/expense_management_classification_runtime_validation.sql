@@ -16,7 +16,13 @@ insert into auth.users(id,email,raw_user_meta_data) values
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"e9000000-0000-4000-8000-000000000011","role":"authenticated"}',true);
 select public.apply_default_expense_category_template();
-select pg_temp.assert_true('template_applied',(select count(*)=116 from public.expense_categories));
+select pg_temp.assert_true(
+  'template_applied',
+  (select count(*) from public.expense_categories) =
+  (select count(*) from public.expense_category_template_items)
+);
+select pg_temp.assert_true('template_has_complete_baseline',(select count(*)>=116 from public.expense_categories));
+select pg_temp.assert_true('template_has_subcategories',(select count(*)>0 from public.expense_categories where level=3 and category_type='subcategory'));
 select pg_temp.assert_true('template_bilingual',(select bool_and(name_ar<>'' and name_en<>'') from public.expense_categories));
 select pg_temp.assert_true('category_audit_written',(select count(*)>40 from public.expense_category_audit_logs));
 select pg_temp.assert_true('template_no_auto_expenses',(select count(*)=0 from public.expenses));
@@ -59,8 +65,30 @@ select pg_temp.expect_error('used_category_delete_blocked',$q$delete from public
 select pg_temp.assert_true('server_summary',(public.expense_management_rpc(1,50,'{"scope":"work_order"}'::jsonb)->'aggregates'->>'total')::numeric=315);
 select pg_temp.assert_true('export_all_page_count',(public.expense_management_rpc(1,500,'{}'::jsonb)->'pagination'->>'totalRows')::integer=4);
 
+insert into public.expenses(id,tenant_id,voucher_number,date,amount,subtotal,vat_amount,total,description,expense_scope,work_order_id,department_id,expense_category_id,payment_method,status)
+select 'e9000000-0000-4000-8000-000000000110','e9000000-0000-4000-8000-000000000001','EXP-CANCELLED',current_date,40,40,2,42,'cancelled expense',
+ 'work_order','e9000000-0000-4000-8000-000000000103',d.id,c.id,'cash','cancelled'
+from public.expense_categories d join public.expense_categories c on c.parent_id=d.id where d.code='PARTS' and c.code='PARTS_NEW';
+select pg_temp.assert_true('cancelled_expense_excluded',(select count(*)=0 from public.reports_expense_facts_v1 where voucher_number='EXP-CANCELLED'));
+
+insert into public.expenses(id,tenant_id,voucher_number,date,amount,subtotal,vat_amount,total,description,expense_scope,work_order_id,department_id,expense_category_id,payment_method,deleted_at)
+select 'e9000000-0000-4000-8000-000000000111','e9000000-0000-4000-8000-000000000001','EXP-DELETED',current_date,50,50,2.5,52.5,'deleted expense',
+ 'work_order','e9000000-0000-4000-8000-000000000103',d.id,c.id,'cash',now()
+from public.expense_categories d join public.expense_categories c on c.parent_id=d.id where d.code='PARTS' and c.code='PARTS_NEW';
+select pg_temp.assert_true('deleted_expense_excluded',(select count(*)=0 from public.reports_expense_facts_v1 where voucher_number='EXP-DELETED'));
+
+update public.insurance_claims set status='cancelled' where id='e9000000-0000-4000-8000-000000000106';
+select pg_temp.assert_true('cancelled_claim_expense_excluded',(select count(*)=0 from public.reports_expense_facts_v1 where voucher_number='EXP-INS-RUNTIME'));
+update public.insurance_claims set status='approved' where id='e9000000-0000-4000-8000-000000000106';
+
+update public.job_orders set deleted_at=now() where id='e9000000-0000-4000-8000-000000000103';
+select pg_temp.assert_true('deleted_work_order_expense_excluded',(select count(*)=0 from public.reports_expense_facts_v1 where voucher_number='EXP-RUNTIME-1'));
+update public.job_orders set deleted_at=null where id='e9000000-0000-4000-8000-000000000103';
+
+select pg_temp.assert_true('ineligible_rows_absent_from_server_export',(public.expense_management_rpc(1,500,'{}'::jsonb)->'pagination'->>'totalRows')::integer=4);
+
 select set_config('request.jwt.claims','{"sub":"e9000000-0000-4000-8000-000000000012","role":"authenticated"}',true);
-select pg_temp.assert_true('manager_can_read',(select count(*)=4 from public.expenses));
+select pg_temp.assert_true('manager_can_read',(select count(*)=6 from public.expenses));
 select set_config('request.jwt.claims','{"sub":"e9000000-0000-4000-8000-000000000013","role":"authenticated"}',true);
 select pg_temp.assert_true('unauthorized_hidden',(select count(*)=0 from public.expenses));
 select pg_temp.expect_error('unauthorized_category_manage',$q$insert into public.expense_categories(tenant_id,code,name,name_ar,name_en,category_type,expense_scope) values('e9000000-0000-4000-8000-000000000001','NOPE','لا','لا','No','category','both')$q$,'row-level security');

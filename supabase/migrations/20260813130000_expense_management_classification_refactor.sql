@@ -149,7 +149,8 @@ create table if not exists public.expense_category_template_items (
 );
 alter table public.expense_category_template_items enable row level security;
 drop policy if exists expense_template_read on public.expense_category_template_items;
-create policy expense_template_read on public.expense_category_template_items for select to authenticated using(true);
+create policy expense_template_read on public.expense_category_template_items for select to authenticated
+  using(auth.uid() is not null);
 grant select on public.expense_category_template_items to authenticated;
 
 insert into public.expense_category_template_items

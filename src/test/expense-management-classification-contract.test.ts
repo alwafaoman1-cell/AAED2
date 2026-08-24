@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const migration = read("supabase/migrations/20260813130000_expense_management_classification_refactor.sql");
 const workshopTemplate = read("supabase/migrations/20260822100000_expense_workshop_subcategory_template.sql");
+const templatePolicyHardening = read("supabase/migrations/20260824122000_expense_template_policy_hardening.sql");
 
 describe("expense management classification refactor", () => {
   it("is additive and never reclassifies historical expenses", () => {
@@ -108,5 +109,12 @@ describe("expense management classification refactor", () => {
     expect(workshopTemplate).toContain("v_parent.level<>v_level-1");
     expect(workshopTemplate).not.toMatch(/update\s+public\.expenses/i);
     expect(workshopTemplate).not.toMatch(/select\s+public\.apply_default_expense_category_template\s*\(/i);
+  });
+
+  it("keeps the shared template authenticated-only without permissive RLS", () => {
+    expect(migration).not.toMatch(/using\s*\(\s*true\s*\)/i);
+    expect(templatePolicyHardening).toContain("using (auth.uid() is not null)");
+    expect(templatePolicyHardening).toContain("revoke all on public.expense_category_template_items from public, anon");
+    expect(templatePolicyHardening).not.toMatch(/\b(insert|update|delete)\s+(into|public\.)?expenses\b/i);
   });
 });
