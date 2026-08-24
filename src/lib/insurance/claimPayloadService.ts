@@ -168,27 +168,20 @@ export async function prepareClaimPayload(input: PreparedClaimInput) {
   }
 
   const claimNumber = String(claim.claim_number || "").trim();
-  let { data: existing, error: existingError } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from("insurance_claims" as any)
-    .select("id,claim_number,deleted_at,archived_at")
+    .select("id,claim_number,status,deleted_at")
     .eq("tenant_id", claim.tenant_id)
     .ilike("claim_number", claimNumber)
     .limit(1)
     .maybeSingle();
-  if (existingError && isMissingColumnError(existingError)) {
-    ({ data: existing, error: existingError } = await supabase
-      .from("insurance_claims" as any)
-      .select("id,claim_number")
-      .eq("tenant_id", claim.tenant_id)
-      .ilike("claim_number", claimNumber)
-      .limit(1)
-      .maybeSingle());
-  }
   if (existingError) throw existingError;
   if ((existing as any)?.id) {
     const err = new Error("claim_number_exists");
     (err as any).existingClaimId = (existing as any).id;
-    (err as any).existingClaimInactive = !!((existing as any).deleted_at || (existing as any).archived_at);
+    (err as any).existingClaimInactive = !!(
+      (existing as any).deleted_at || (existing as any).status === "cancelled"
+    );
     throw err;
   }
 

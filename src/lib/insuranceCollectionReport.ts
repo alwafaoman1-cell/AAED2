@@ -173,7 +173,7 @@ function workshopDays(arrival: string | null, delivered: string | null): number 
 
 function isCancelledOrDeleted(claim: InsuranceClaim): boolean {
   const c = claim as any;
-  return claim.status === "cancelled" || !!c.deleted_at || !!c.archived_at;
+  return claim.status === "cancelled" || !!c.deleted_at;
 }
 
 export function buildInsuranceCollectionRows(options: BuildInsuranceCollectionRowsOptions): InsuranceCollectionRow[] {

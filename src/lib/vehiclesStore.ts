@@ -402,7 +402,7 @@ async function archiveVehicleOperationalLinks(tenantId: string, vehicle: Vehicle
     .eq("vehicle_id", cloudId));
 
   await safeUpdate("insurance_claims", (supabase.from("insurance_claims" as any) as any)
-    .update({ archived_at: archivedAt } as any)
+    .update({ status: "cancelled", deleted_at: archivedAt } as any)
     .eq("tenant_id", tenantId)
     .eq("vehicle_id", cloudId));
 

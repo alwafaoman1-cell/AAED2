@@ -132,7 +132,7 @@ export function useInsuranceClaims() {
   return useQuery({
     queryKey: queryKeys.insuranceClaims.all,
     queryFn: async () => {
-      let { data, error } = await supabase
+      const { data, error } = await supabase
         .from("insurance_claims" as any)
         .select(`
           *,
@@ -141,19 +141,7 @@ export function useInsuranceClaims() {
           job_order:job_orders!insurance_claims_job_order_id_fkey(order_number, status)
         `)
         .is("deleted_at", null)
-        .is("archived_at", null)
         .order("created_at", { ascending: false });
-      if (error && /deleted_at|archived_at|column/i.test(String((error as any).message || ""))) {
-        ({ data, error } = await supabase
-          .from("insurance_claims" as any)
-          .select(`
-            *,
-            customer:customers(name, phone),
-            vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
-            job_order:job_orders!insurance_claims_job_order_id_fkey(order_number, status)
-          `)
-          .order("created_at", { ascending: false }));
-      }
       if (error) throw error;
       return data as unknown as InsuranceClaim[];
     },
@@ -261,21 +249,14 @@ export function useUpdateClaimStatus() {
       approved_amount?: number;
       rejection_reason?: string;
     }) => {
-      let { data: current, error: currentError } = await supabase
+      const { data: current, error: currentError } = await supabase
         .from("insurance_claims" as any)
-        .select("id,tenant_id,status,approved_amount,rejection_reason,archived_at")
+        .select("id,tenant_id,status,approved_amount,rejection_reason,deleted_at")
         .eq("id", id)
         .maybeSingle();
-      if (currentError && /archived_at|column/i.test(String((currentError as any).message || ""))) {
-        ({ data: current, error: currentError } = await supabase
-          .from("insurance_claims" as any)
-          .select("id,tenant_id,status,approved_amount,rejection_reason")
-          .eq("id", id)
-          .maybeSingle());
-      }
       if (currentError) throw new Error(formatSupabaseNetworkError(currentError, "تعذر قراءة المطالبة قبل تحديث الحالة"));
       if (!(current as any)?.id) throw new Error("Claim was not found in Supabase");
-      if ((current as any).archived_at) throw new Error("Cannot update an archived claim");
+      if ((current as any).deleted_at) throw new Error("Cannot update a deleted claim");
 
       const updates: any = { status };
       if (status === "approved") {
@@ -408,6 +389,7 @@ export function useDeleteClaim() {
       const nextNotes = [String(c?.notes || "").trim(), archiveNote].filter(Boolean).join("\n");
       let updatePayload: any = {
         status: "cancelled",
+        deleted_at: archivedAt,
         rejection_reason: "Archived from UI without deleting related records",
         notes: nextNotes,
         updated_at: archivedAt,
@@ -431,7 +413,7 @@ export function useDeleteClaim() {
 
       await audit("claim_archived_non_destructive", {
         previous_status: c?.status,
-        archived_at: archivedAt,
+        deleted_at: archivedAt,
         financial_records_preserved: true,
         work_orders_archived: joIds,
       });
