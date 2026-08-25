@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Plus, Search, Filter, Eye, Edit, Printer, Car, FileText, Workflow, QrCode, Camera, Trash2, MoreHorizontal, Search as SearchIcon, Receipt, FilePlus2, FolderOpen, Package, MessageCircle, Shield, Copy, FileSpreadsheet, FilePlus, Phone, Send } from "lucide-react";
+import { Plus, Search, Filter, Eye, Edit, Printer, Car, FileText, Workflow, QrCode, Camera, Trash2, MoreHorizontal, Search as SearchIcon, Receipt, FilePlus2, FolderOpen, Package, MessageCircle, Shield, Copy, FileSpreadsheet, FilePlus, Phone, Send, SlidersHorizontal } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -76,6 +77,33 @@ const DURATION_BAR_TINT: Record<string, string> = {
   green: "",
 };
 const CLOSED_STATUSES = new Set(["تم التسليم", "مغلق"]);
+
+type WorkOrderColumnKey =
+  | "orderType"
+  | "orderNumber"
+  | "customer"
+  | "vehicle"
+  | "plate"
+  | "service"
+  | "technician"
+  | "status"
+  | "cost";
+
+const WORK_ORDER_COLUMNS: Array<{ key: WorkOrderColumnKey; ar: string; en: string }> = [
+  { key: "orderType", ar: "نوع الأمر", en: "Order Type" },
+  { key: "orderNumber", ar: "رقم الأمر", en: "Order Number" },
+  { key: "customer", ar: "العميل", en: "Customer" },
+  { key: "vehicle", ar: "السيارة", en: "Vehicle" },
+  { key: "plate", ar: "اللوحة", en: "Plate" },
+  { key: "service", ar: "الخدمة", en: "Service" },
+  { key: "technician", ar: "الفني", en: "Technician" },
+  { key: "status", ar: "الحالة", en: "Status" },
+  { key: "cost", ar: "التكلفة", en: "Cost" },
+];
+
+const DEFAULT_WORK_ORDER_COLUMNS = Object.fromEntries(
+  WORK_ORDER_COLUMNS.map(({ key }) => [key, true]),
+) as Record<WorkOrderColumnKey, boolean>;
 
 function getOrderDelayStyle(order: WorkOrder): { boxShadow?: string; backgroundColor?: string; days: number | null; level: string } {
   if (CLOSED_STATUSES.has(order.status)) return { days: null, level: "green" };
@@ -160,7 +188,8 @@ function buildWorkOrderHtml(order: WorkOrder) {
 }
 
 export default function WorkOrders() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const isArabic = i18n.language?.startsWith("ar") ?? true;
   const navigate = useNavigate();
   const [orders, setOrders] = useState<WorkOrder[]>(getWorkOrdersForAdminList());
   const [searchTerm, setSearchTerm] = useState("");
@@ -185,6 +214,10 @@ export default function WorkOrders() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePersistedState<number>("work_orders_page_size", 20);
+  const [visibleColumns, setVisibleColumns] = usePersistedState<Record<WorkOrderColumnKey, boolean>>(
+    "work_orders_visible_columns_v1",
+    DEFAULT_WORK_ORDER_COLUMNS,
+  );
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [deleteMode, setDeleteMode] = useState<DeleteMode>("archive_only");
   const [deleteReason, setDeleteReason] = useState("");
@@ -194,6 +227,26 @@ export default function WorkOrders() {
   const allowEdit = canEdit();
   const allowDelete = canDelete();
   const [searchParams] = useSearchParams();
+  const normalizedVisibleColumns = useMemo(
+    () => ({
+      ...DEFAULT_WORK_ORDER_COLUMNS,
+      ...(visibleColumns && typeof visibleColumns === "object" ? visibleColumns : {}),
+    }),
+    [visibleColumns],
+  );
+  const visibleColumnCount = WORK_ORDER_COLUMNS.filter(({ key }) => normalizedVisibleColumns[key] !== false).length;
+  const isColumnVisible = (key: WorkOrderColumnKey) => normalizedVisibleColumns[key] !== false;
+  const updateColumnVisibility = (key: WorkOrderColumnKey, checked: boolean) => {
+    if (!checked && visibleColumnCount === 1 && isColumnVisible(key)) {
+      toast.error(isArabic ? "يجب إبقاء عمود واحد على الأقل ظاهرًا" : "Keep at least one column visible");
+      return;
+    }
+    setVisibleColumns((current) => ({
+      ...DEFAULT_WORK_ORDER_COLUMNS,
+      ...(current && typeof current === "object" ? current : {}),
+      [key]: checked,
+    }));
+  };
 
   useEffect(() => {
     if (searchParams.get("parts") === "1") setPartsOnlyFilter(true);
@@ -593,6 +646,39 @@ export default function WorkOrders() {
         <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => {
           setSearchTerm(""); setStatusFilter("all"); setOwnershipFilter("all"); setTechnicianFilter("all"); setEntryFrom(""); setEntryTo(""); setArchiveFilter("all"); setPartsOnlyFilter(false);
         }}>مسح الفلاتر</Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs">
+              <SlidersHorizontal size={14} />
+              {isArabic ? "الأعمدة" : "Columns"} ({visibleColumnCount})
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64 bg-card border-border">
+            <DropdownMenuLabel>
+              {isArabic ? "اختر أعمدة أوامر العمل" : "Choose work order columns"}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault();
+                setVisibleColumns(DEFAULT_WORK_ORDER_COLUMNS);
+              }}
+            >
+              {isArabic ? "إظهار جميع الأعمدة" : "Show all columns"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {WORK_ORDER_COLUMNS.map((column) => (
+              <DropdownMenuCheckboxItem
+                key={column.key}
+                checked={isColumnVisible(column.key)}
+                onCheckedChange={(checked) => updateColumnVisibility(column.key, checked === true)}
+                onSelect={(event) => event.preventDefault()}
+              >
+                {isArabic ? column.ar : column.en}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="hidden md:block bg-card border border-border rounded-xl shadow-card overflow-hidden">
@@ -606,15 +692,11 @@ export default function WorkOrders() {
                     onCheckedChange={(v) => setSelectedIds(v ? new Set(filtered.map(o => o.id)) : new Set())}
                   />
                 </th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">Order Type</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">رقم الأمر</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">العميل</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs hidden md:table-cell">السيارة</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs hidden lg:table-cell">اللوحة</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs hidden lg:table-cell">الخدمة</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs hidden xl:table-cell">الفني</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">الحالة</th>
-                <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs hidden md:table-cell">التكلفة</th>
+                {WORK_ORDER_COLUMNS.map((column) => isColumnVisible(column.key) && (
+                  <th key={column.key} className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">
+                    {isArabic ? column.ar : column.en}
+                  </th>
+                ))}
                 <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">إجراءات</th>
               </tr>
             </thead>
@@ -644,7 +726,7 @@ export default function WorkOrders() {
                       }}
                     />
                   </td>
-                  <td className="py-3 px-4">
+                  {isColumnVisible("orderType") && <td className="py-3 px-4">
                     <WorkOrderTypeBadge
                       compact
                       workOrderType={order.workOrderType}
@@ -652,8 +734,8 @@ export default function WorkOrders() {
                       claimNumber={order.claimNumber}
                       insurance={order.insurance}
                     />
-                  </td>
-                  <td className="py-3 px-4 font-mono text-xs text-primary">
+                  </td>}
+                  {isColumnVisible("orderNumber") && <td className="py-3 px-4 font-mono text-xs text-primary">
                     <div className="flex items-center gap-1.5">
                       {isInsurance && (
                         <span
@@ -675,9 +757,9 @@ export default function WorkOrders() {
                         </span>
                       )}
                     </div>
-                  </td>
-                  <td className="py-3 px-4"><div><p className="text-foreground font-medium">{order.customer}</p><p className="text-[10px] text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>{toEnglishDigits(order.phone || "")}</p></div></td>
-                  <td className="py-3 px-4 text-muted-foreground hidden md:table-cell" style={{ fontFamily: "Inter, sans-serif" }}>
+                  </td>}
+                  {isColumnVisible("customer") && <td className="py-3 px-4"><div><p className="text-foreground font-medium">{order.customer}</p><p className="text-[10px] text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>{toEnglishDigits(order.phone || "")}</p></div></td>}
+                  {isColumnVisible("vehicle") && <td className="py-3 px-4 text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>
                     <div className="flex items-center gap-2">
                       <VehicleAvatar
                         size="sm"
@@ -691,11 +773,11 @@ export default function WorkOrders() {
                         <div className="text-[10px] text-muted-foreground lg:hidden font-mono" dir="ltr">{formatPlateLatin(order.plate)}</div>
                       </div>
                     </div>
-                  </td>
-                  <td className="py-3 px-4 text-muted-foreground font-mono hidden lg:table-cell" style={{ fontFamily: "Inter, monospace" }}>{formatPlateLatin(order.plate)}</td>
-                  <td className="py-3 px-4 text-muted-foreground hidden lg:table-cell">{order.serviceType}</td>
-                  <td className="py-3 px-4 text-muted-foreground hidden xl:table-cell">{order.technician}</td>
-                  <td className="py-3 px-4">
+                  </td>}
+                  {isColumnVisible("plate") && <td className="py-3 px-4 text-muted-foreground font-mono" style={{ fontFamily: "Inter, monospace" }}>{formatPlateLatin(order.plate)}</td>}
+                  {isColumnVisible("service") && <td className="py-3 px-4 text-muted-foreground">{order.serviceType}</td>}
+                  {isColumnVisible("technician") && <td className="py-3 px-4 text-muted-foreground">{order.technician}</td>}
+                  {isColumnVisible("status") && <td className="py-3 px-4">
                     <button
                       onClick={(e) => { e.stopPropagation(); openStatus(order); }}
                       className={`text-[10px] px-2 py-1 rounded-full font-medium hover:ring-2 hover:ring-primary/30 transition-all cursor-pointer ${workOrderStatusColor(order.status)}`}
@@ -703,8 +785,8 @@ export default function WorkOrders() {
                     >
                       {normalizeWorkOrderStatus(order.status)}
                     </button>
-                  </td>
-                  <td className="py-3 px-4 text-foreground font-medium hidden md:table-cell" style={{ fontFamily: "Inter, sans-serif", direction: "ltr", textAlign: "right" }} data-amount="true">{toEnglishDigits(order.totalCost.toLocaleString("en-US"))} OMR</td>
+                  </td>}
+                  {isColumnVisible("cost") && <td className="py-3 px-4 text-foreground font-medium" style={{ fontFamily: "Inter, sans-serif", direction: "ltr", textAlign: "right" }} data-amount="true">{toEnglishDigits(order.totalCost.toLocaleString("en-US"))} OMR</td>}
                   <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -923,9 +1005,15 @@ export default function WorkOrders() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-mono text-sm font-bold text-primary">{toEnglishDigits(order.id)}</p>
-                  <p className="mt-1 font-semibold text-foreground">{order.customer}</p>
-                  <p className="text-xs text-muted-foreground">{formatPlateLatin(order.plate)} · {order.vehicleType} {order.model}</p>
+                  {isColumnVisible("orderNumber") && <p className="font-mono text-sm font-bold text-primary">{toEnglishDigits(order.id)}</p>}
+                  {isColumnVisible("customer") && <p className="mt-1 font-semibold text-foreground">{order.customer}</p>}
+                  {(isColumnVisible("plate") || isColumnVisible("vehicle")) && (
+                    <p className="text-xs text-muted-foreground">
+                      {isColumnVisible("plate") ? formatPlateLatin(order.plate) : ""}
+                      {isColumnVisible("plate") && isColumnVisible("vehicle") ? " · " : ""}
+                      {isColumnVisible("vehicle") ? `${order.vehicleType} ${order.model}`.trim() : ""}
+                    </p>
+                  )}
                 </div>
                 <Checkbox
                   checked={selectedIds.has(order.id)}
@@ -939,19 +1027,25 @@ export default function WorkOrders() {
                 />
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <WorkOrderTypeBadge
+                {isColumnVisible("orderType") && <WorkOrderTypeBadge
                   workOrderType={order.workOrderType}
                   claimId={order.claimId}
                   claimNumber={order.claimNumber}
                   insurance={order.insurance}
-                />
-                <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${workOrderStatusColor(order.status)}`}>{normalizeWorkOrderStatus(order.status)}</span>
+                />}
+                {isColumnVisible("status") && <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${workOrderStatusColor(order.status)}`}>{normalizeWorkOrderStatus(order.status)}</span>}
                 {delay.level !== "green" && delay.days !== null && <span className="rounded-full bg-destructive/10 px-2 py-1 text-[10px] font-semibold text-destructive">{delay.days} يوم</span>}
               </div>
-              <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-xs">
-                <span className="text-muted-foreground">{order.technician || "غير مسند"}</span>
-                <span className="font-semibold text-foreground">{order.totalCost.toLocaleString("en-US")} OMR</span>
-              </div>
+              {(isColumnVisible("technician") || isColumnVisible("cost") || isColumnVisible("service")) && (
+                <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 text-xs">
+                  <span className="text-muted-foreground">
+                    {isColumnVisible("technician") ? (order.technician || (isArabic ? "غير مسند" : "Unassigned")) : ""}
+                    {isColumnVisible("technician") && isColumnVisible("service") ? " · " : ""}
+                    {isColumnVisible("service") ? order.serviceType : ""}
+                  </span>
+                  {isColumnVisible("cost") && <span className="font-semibold text-foreground">{order.totalCost.toLocaleString("en-US")} OMR</span>}
+                </div>
+              )}
             </article>
           );
         })}
