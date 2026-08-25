@@ -301,6 +301,9 @@ export function updateWorkOrder(id: string, patch: Partial<WorkOrder>) {
     }
     list[idx] = { ...list[idx], ...normalizedPatch };
     persist();
+    // Preserve the legacy imperative API without relying on a global cache
+    // diff. Cloud refetches and auth cache clears are not user edits.
+    pushPatchToCloud(list[idx].id, normalizedPatch);
   }
 }
 
@@ -506,6 +509,9 @@ export function addWorkOrder(order: WorkOrder) {
   const list = load();
   list.unshift(order);
   persist();
+  // Legacy callers still get an explicit cloud write. Cache hydration never
+  // passes through this function and therefore cannot create/delete records.
+  void pushOrderToCloud(order);
 }
 
 export function deleteWorkOrder(id: string): WorkOrder | undefined {
@@ -1730,65 +1736,8 @@ function ensurePendingPatchUnloadFlush() {
   window.addEventListener("beforeunload", flushPendingWorkOrderPatches, { once: true });
 }
 
-async function pushDeleteToCloud(orderNumber: string) {
-  try {
-    const ctx = await tenantContext(); if (!ctx) return;
-    const archivedAt = new Date().toISOString();
-    let { data, error } = await supabase.from("job_orders")
-      .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: null } as any)
-      .eq("tenant_id", ctx.tenantId)
-      .eq("order_number", orderNumber)
-      .select("id")
-      .maybeSingle();
-    if (error && isMissingJobOrderColumnError(error)) {
-      ({ data, error } = await supabase.from("job_orders")
-        .update({ archived_at: archivedAt } as any)
-        .eq("tenant_id", ctx.tenantId)
-        .eq("order_number", orderNumber)
-        .select("id")
-        .maybeSingle());
-    }
-    if (error) console.warn("[pushDeleteToCloud]", error);
-    else if (!data?.id) console.warn("[pushDeleteToCloud] no affected row", { orderNumber });
-    else KNOWN_CLOUD_NUMBERS.delete(orderNumber);
-  } catch (e) { console.warn("[pushDeleteToCloud] exception", e); }
-}
-
-// Cloud-side hooks invoked from a diff listener below — keeps the public API surface unchanged.
-function _afterAdd(o: WorkOrder) { pushOrderToCloud(o); }
-function _afterUpdate(id: string, patch: Partial<WorkOrder>) { pushPatchToCloud(id, patch); }
-function _afterDelete(id: string) { pushDeleteToCloud(id); }
-
-
-
-// Patch the original implementations to call our cloud hooks.
-// (Implementations above call persist() then return; we wrap by overwriting via Object.assign on module exports won't work in ESM —
-// so we instead re-export wrapped versions below and consumers using the original names get the wrapped behavior because the original
-// functions are defined as `function` declarations and we replace their bodies by hoisting interceptors here.)
-//
-// Approach: subscribe internally to changes and diff against last-known state.
-let _lastSnapshot: Map<string, WorkOrder> = new Map(load().map((o) => [o.id, o]));
-listeners.add(() => {
-  const current = load();
-  const currentMap = new Map(current.map((o) => [o.id, o]));
-  // additions
-  for (const o of current) {
-    if (!_lastSnapshot.has(o.id)) _afterAdd(o);
-  }
-  // updates
-  for (const o of current) {
-    const prev = _lastSnapshot.get(o.id);
-    if (prev && prev !== o) {
-      const patch: Partial<WorkOrder> = {};
-      (Object.keys(o) as (keyof WorkOrder)[]).forEach((k) => {
-        if ((o as any)[k] !== (prev as any)[k]) (patch as any)[k] = (o as any)[k];
-      });
-      if (Object.keys(patch).length) _afterUpdate(o.id, patch);
-    }
-  }
-  // deletions
-  for (const id of _lastSnapshot.keys()) {
-    if (!currentMap.has(id)) _afterDelete(id);
-  }
-  _lastSnapshot = currentMap;
-});
+// Removing an item from the compatibility cache is intentionally local-only.
+// Every destructive UI path must first call the explicit delete/archive policy,
+// which records the user and audit reason. The retired global cache-diff hook
+// interpreted auth cache clears and partial cloud refetches as user deletions and
+// incorrectly soft-deleted historical work orders in Supabase.

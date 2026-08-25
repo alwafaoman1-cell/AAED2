@@ -16,6 +16,7 @@ import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import { useInsuranceClaims, useDeleteClaim } from "@/hooks/useInsuranceClaims";
 import { getWorkOrders, subscribeWorkOrders, deleteWorkOrder, type WorkOrder } from "@/lib/workOrdersStore";
+import { archiveWorkOrder } from "@/lib/deletePolicy";
 import { toast } from "sonner";
 
 interface InsuranceWorkOrderRow {
@@ -141,19 +142,28 @@ export default function InsuranceWorkOrders() {
     open: filtered.filter((r) => !/تسليم|مدفوع|مكتمل/.test(r.status)).length,
   }), [filtered]);
 
-  function deleteOneRow(r: InsuranceWorkOrderRow) {
+  async function deleteOneRow(r: InsuranceWorkOrderRow) {
     if (r.claimId) {
       deleteClaim.mutate(r.claimId); // cascade
     } else if (r.workOrderId) {
+      const order = localOrders.find((item) =>
+        item.id === r.workOrderId || item.cloudId === r.workOrderId || item.displayNumber === r.workOrderNumber
+      );
+      if (!order) throw new Error("أمر العمل غير موجود في القائمة الحالية");
+      await archiveWorkOrder(order, "Archive from Insurance Work Orders page");
       deleteWorkOrder(r.workOrderId);
       toast.success("تم حذف أمر العمل");
     }
   }
 
-  function handleBulkDelete() {
-    bulk.selectedItems.forEach((r) => deleteOneRow(r));
-    bulk.clear();
-    setBulkConfirmOpen(false);
+  async function handleBulkDelete() {
+    try {
+      for (const row of bulk.selectedItems) await deleteOneRow(row);
+      bulk.clear();
+      setBulkConfirmOpen(false);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حذف أمر العمل من Supabase");
+    }
   }
 
   function handleBulkExport() {
@@ -371,7 +381,15 @@ export default function InsuranceWorkOrders() {
             <AlertDialogCancel>إلغاء</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { if (deleteRow) deleteOneRow(deleteRow); setDeleteRow(null); }}
+              onClick={async () => {
+                if (!deleteRow) return;
+                try {
+                  await deleteOneRow(deleteRow);
+                  setDeleteRow(null);
+                } catch (error: any) {
+                  toast.error(error?.message || "تعذر حذف أمر العمل من Supabase");
+                }
+              }}
             >حذف</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

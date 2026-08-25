@@ -40,6 +40,17 @@ describe("work order visible save contract", () => {
     expect(store).toContain("patch: { parts_required: partsNeeded }");
   });
 
+  it("never converts cache replacement or auth cache clearing into cloud deletion", () => {
+    const store = read("src/lib/workOrdersStore.ts");
+    const insuranceList = read("src/pages/insurance/InsuranceWorkOrders.tsx");
+    expect(store).not.toContain("function pushDeleteToCloud");
+    expect(store).not.toContain("_afterDelete");
+    expect(store).not.toContain("for (const id of _lastSnapshot.keys())");
+    expect(store).not.toContain("deleted_by: null } as any");
+    expect(store).toContain("Every destructive UI path must first call the explicit delete/archive policy");
+    expect(insuranceList).toContain("await archiveWorkOrder(order");
+  });
+
   it("does not require vehicle model when creating or linking a vehicle", () => {
     const identity = read("src/lib/vehicleIdentity.ts");
     const form = read("src/components/workorders/WorkOrderForm.tsx");
