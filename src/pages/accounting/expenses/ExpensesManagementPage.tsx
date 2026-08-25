@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { FileDown, FileSpreadsheet, Loader2, Plus, Printer, RefreshCw, Search, Settings2, Trash2 } from "lucide-react";
+import { FileDown, FileSpreadsheet, Loader2, Plus, Printer, RefreshCw, Search, Settings2, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { queryKeys } from "@/lib/queryKeys";
 import { formatOMR } from "@/lib/money";
 import {
@@ -23,17 +24,45 @@ import {
 } from "@/lib/expenses/expenseClassificationService";
 import { exportReportRowsToPdf, exportReportRowsToXlsx, printReportRows, type ReportExportRequest } from "@/lib/reports-center/reportExportService";
 
-const columns = [
-  { key: "voucher_number", label: "رقم السند / Voucher" }, { key: "date", label: "التاريخ / Date", type: "date" as const },
-  { key: "expense_scope", label: "النطاق / Scope" }, { key: "work_order_channel", label: "القناة / Channel" },
-  { key: "department_ar", label: "القسم AR" }, { key: "department_en", label: "Department EN" },
-  { key: "category_ar", label: "التصنيف AR" }, { key: "category_en", label: "Category EN" },
-  { key: "subcategory_ar", label: "الفرعي AR" }, { key: "subcategory_en", label: "Subcategory EN" },
-  { key: "order_number", label: "أمر العمل / Work Order" }, { key: "plate", label: "المركبة / Vehicle" },
-  { key: "claim_number", label: "المطالبة / Claim" }, { key: "supplier_name", label: "المورد / Supplier" },
-  { key: "description", label: "البيان / Description" }, { key: "subtotal", label: "قبل الضريبة / Subtotal", type: "money" as const },
-  { key: "vat_amount", label: "VAT", type: "money" as const }, { key: "total", label: "الإجمالي / Total", type: "money" as const },
-  { key: "payment_method", label: "طريقة الدفع / Payment" }, { key: "cost_center_en", label: "Cost Center" },
+type ExpenseColumn = {
+  key: string;
+  ar: string;
+  en: string;
+  type?: "text" | "money" | "date" | "number" | "percentage";
+};
+
+const columns: ExpenseColumn[] = [
+  { key: "voucher_number", ar: "رقم السند", en: "Voucher No." },
+  { key: "date", ar: "تاريخ المصروف", en: "Expense Date", type: "date" },
+  { key: "supplier_name", ar: "اسم المورد", en: "Supplier Name" },
+  { key: "supplier_tax_number", ar: "الرقم الضريبي للمورد", en: "Supplier Tax No." },
+  { key: "supplier_invoice_number", ar: "رقم فاتورة المورد", en: "Supplier Invoice No." },
+  { key: "supplier_invoice_date", ar: "تاريخ فاتورة المورد", en: "Supplier Invoice Date", type: "date" },
+  { key: "expense_scope", ar: "نطاق المصروف", en: "Expense Scope" },
+  { key: "work_order_channel", ar: "قناة أمر العمل", en: "Work Order Channel" },
+  { key: "department_ar", ar: "القسم (عربي)", en: "Department (Arabic)" },
+  { key: "department_en", ar: "القسم (إنجليزي)", en: "Department (English)" },
+  { key: "category_ar", ar: "التصنيف (عربي)", en: "Category (Arabic)" },
+  { key: "category_en", ar: "التصنيف (إنجليزي)", en: "Category (English)" },
+  { key: "subcategory_ar", ar: "التصنيف الفرعي (عربي)", en: "Subcategory (Arabic)" },
+  { key: "subcategory_en", ar: "التصنيف الفرعي (إنجليزي)", en: "Subcategory (English)" },
+  { key: "order_number", ar: "رقم أمر العمل", en: "Work Order No." },
+  { key: "plate", ar: "رقم اللوحة", en: "Plate No." },
+  { key: "plate_letters", ar: "حروف اللوحة", en: "Plate Letters" },
+  { key: "make", ar: "الماركة", en: "Make" },
+  { key: "model", ar: "الموديل", en: "Model" },
+  { key: "customer_name", ar: "اسم العميل", en: "Customer Name" },
+  { key: "claim_number", ar: "رقم المطالبة", en: "Claim No." },
+  { key: "insurance_company", ar: "شركة التأمين", en: "Insurance Company" },
+  { key: "description", ar: "البيان", en: "Description" },
+  { key: "reference_number", ar: "المرجع", en: "Reference" },
+  { key: "subtotal", ar: "المبلغ قبل الضريبة", en: "Subtotal", type: "money" },
+  { key: "vat_amount", ar: "ضريبة القيمة المضافة", en: "VAT", type: "money" },
+  { key: "total", ar: "الإجمالي شامل الضريبة", en: "Total Incl. VAT", type: "money" },
+  { key: "payment_method", ar: "طريقة الدفع", en: "Payment Method" },
+  { key: "cost_center_ar", ar: "مركز التكلفة (عربي)", en: "Cost Center (Arabic)" },
+  { key: "cost_center_en", ar: "مركز التكلفة (إنجليزي)", en: "Cost Center (English)" },
+  { key: "classification_status", ar: "حالة التصنيف", en: "Classification Status" },
 ];
 
 const filterNames: Array<keyof ExpenseManagementFilters> = ["search", "from", "to", "scope", "channel", "work_order", "claim", "vehicle", "customer", "insurance_company", "department_id", "category_id", "subcategory_id", "supplier", "payment_method", "cost_center_id", "amount_from", "amount_to", "vat", "classification_status"];
@@ -47,6 +76,7 @@ export default function ExpensesManagementPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(params.get("search") || "");
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | "print" | null>(null);
+  const [selectedExportColumns, setSelectedExportColumns] = useState<string[]>(() => columns.map((column) => column.key));
   const filters = useMemo<ExpenseManagementFilters>(() => Object.fromEntries(filterNames.map((key) => [key, params.get(key) || ""])) as ExpenseManagementFilters, [params]);
   const query = useQuery({ queryKey: queryKeys.expenseManagement.list({ tenantId, page, filters }), enabled: !!tenantId, queryFn: () => listExpenses(page, 50, filters), staleTime: 30_000 });
   const categories = useQuery({ queryKey: queryKeys.expenseManagement.categories({ tenantId, active: true }), enabled: !!tenantId, queryFn: () => listExpenseCategories(tenantId, false) });
@@ -67,12 +97,15 @@ export default function ExpensesManagementPage() {
     setPage(1); setParams(next);
   };
   const clearFilters = () => { setSearch(""); setPage(1); setParams(new URLSearchParams()); };
+  const exportColumns = columns
+    .filter((column) => selectedExportColumns.includes(column.key))
+    .map((column) => ({ key: column.key, label: isAr ? column.ar : column.en, type: column.type }));
   const buildExport = (allRows: any[]): ReportExportRequest<any> => ({
     fileName: `expenses-${new Date().toISOString().slice(0, 10)}`,
     sheetName: "Expenses",
     title: isAr ? "إدارة المصروفات" : "Expense Management",
     filters: filterNames.filter((key) => filters[key]).map((key) => ({ label: key, value: String(filters[key]) })),
-    columns,
+    columns: exportColumns,
     rows: allRows,
     language: isAr ? "ar" : "en",
     generatedBy: user?.email || "Authenticated user",
@@ -80,6 +113,7 @@ export default function ExpensesManagementPage() {
   const runExport = async (kind: "xlsx" | "pdf" | "print") => {
     setExporting(kind);
     try {
+      if (!exportColumns.length) throw new Error(isAr ? "اختر عمودًا واحدًا على الأقل للتصدير" : "Select at least one export column");
       const allRows = await listAllExpenses(filters);
       if (!allRows.length) throw new Error(isAr ? "لا توجد سجلات للتصدير" : "No rows to export");
       const request = buildExport(allRows);
@@ -108,12 +142,12 @@ export default function ExpensesManagementPage() {
       <Select value={value("payment_method") || "all"} onValueChange={(v) => update("payment_method", v === "all" ? "" : v)}><SelectTrigger><SelectValue placeholder="طريقة الدفع"/></SelectTrigger><SelectContent><SelectItem value="all">الكل</SelectItem><SelectItem value="cash">Cash</SelectItem><SelectItem value="bank">Bank</SelectItem><SelectItem value="card">Card</SelectItem><SelectItem value="credit">Credit</SelectItem></SelectContent></Select>
       <Select value={value("cost_center_id") || "all"} onValueChange={(v) => update("cost_center_id", v === "all" ? "" : v)}><SelectTrigger><SelectValue placeholder="مركز التكلفة"/></SelectTrigger><SelectContent><SelectItem value="all">كل مراكز التكلفة</SelectItem>{(centers.data || []).map((row: any) => <SelectItem key={row.id} value={row.id}>{row.code} — {isAr ? row.name_ar : row.name_en}</SelectItem>)}</SelectContent></Select>
       <Input inputMode="decimal" value={value("amount_from")} onChange={(e) => update("amount_from", e.target.value)} placeholder="Amount From"/><Input inputMode="decimal" value={value("amount_to")} onChange={(e) => update("amount_to", e.target.value)} placeholder="Amount To"/>
-      <Select value={value("vat") || "all"} onValueChange={(v) => update("vat", v === "all" ? "" : v)}><SelectTrigger><SelectValue placeholder="VAT"/></SelectTrigger><SelectContent><SelectItem value="all">VAT + Non-VAT</SelectItem><SelectItem value="vat">VAT</SelectItem><SelectItem value="non_vat">Non-VAT</SelectItem></SelectContent></Select>
+      <Select value={value("vat") || "all"} onValueChange={(v) => update("vat", v === "all" ? "" : v)}><SelectTrigger><SelectValue placeholder={isAr ? "حالة الضريبة" : "VAT Status"}/></SelectTrigger><SelectContent><SelectItem value="all">{isAr ? "كل المصروفات" : "All expenses"}</SelectItem><SelectItem value="vat">{isAr ? "مصروفات عليها ضريبة" : "Expenses with VAT"}</SelectItem><SelectItem value="non_vat">{isAr ? "مصروفات بدون ضريبة" : "Expenses without VAT"}</SelectItem></SelectContent></Select>
       <Select value={value("classification_status") || "all"} onValueChange={(v) => update("classification_status", v === "all" ? "" : v)}><SelectTrigger><SelectValue placeholder="حالة التصنيف"/></SelectTrigger><SelectContent><SelectItem value="all">كل الحالات</SelectItem><SelectItem value="classified">Classified</SelectItem><SelectItem value="needs_classification">Needs Classification</SelectItem></SelectContent></Select>
-      <div className="flex flex-wrap gap-2 md:col-span-2 lg:col-span-4 xl:col-span-6"><Button variant="outline" onClick={() => query.refetch()}><RefreshCw className="h-4 w-4"/> تحديث</Button><Button variant="outline" onClick={clearFilters}>مسح الفلاتر</Button><Button variant="outline" disabled={!!exporting} onClick={() => runExport("xlsx")}>{exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin"/> : <FileSpreadsheet className="h-4 w-4"/>} Excel</Button><Button variant="outline" disabled={!!exporting} onClick={() => runExport("pdf")}>{exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin"/> : <FileDown className="h-4 w-4"/>} PDF</Button><Button variant="outline" disabled={!!exporting} onClick={() => runExport("print")}>{exporting === "print" ? <Loader2 className="h-4 w-4 animate-spin"/> : <Printer className="h-4 w-4"/>} طباعة</Button></div>
+      <div className="flex flex-wrap gap-2 md:col-span-2 lg:col-span-4 xl:col-span-6"><Button variant="outline" onClick={() => query.refetch()}><RefreshCw className="h-4 w-4"/> {isAr ? "تحديث" : "Refresh"}</Button><Button variant="outline" onClick={clearFilters}>{isAr ? "مسح الفلاتر" : "Clear filters"}</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline"><SlidersHorizontal className="h-4 w-4"/> {isAr ? "أعمدة التصدير" : "Export columns"} ({selectedExportColumns.length})</Button></DropdownMenuTrigger><DropdownMenuContent className="max-h-[65vh] w-72 overflow-y-auto" align="end"><DropdownMenuLabel>{isAr ? "اختر الأعمدة قبل التصدير" : "Choose columns before export"}</DropdownMenuLabel><DropdownMenuSeparator/><DropdownMenuCheckboxItem checked={selectedExportColumns.length === columns.length} onCheckedChange={(checked) => setSelectedExportColumns(checked ? columns.map((column) => column.key) : [])}>{isAr ? "تحديد الكل" : "Select all"}</DropdownMenuCheckboxItem><DropdownMenuSeparator/>{columns.map((column) => <DropdownMenuCheckboxItem key={column.key} checked={selectedExportColumns.includes(column.key)} onCheckedChange={(checked) => setSelectedExportColumns((current) => checked ? [...new Set([...current, column.key])] : current.filter((key) => key !== column.key))}>{isAr ? column.ar : column.en}</DropdownMenuCheckboxItem>)}</DropdownMenuContent></DropdownMenu><Button variant="outline" disabled={!!exporting || selectedExportColumns.length === 0} onClick={() => runExport("xlsx")}>{exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin"/> : <FileSpreadsheet className="h-4 w-4"/>} Excel</Button><Button variant="outline" disabled={!!exporting || selectedExportColumns.length === 0} onClick={() => runExport("pdf")}>{exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin"/> : <FileDown className="h-4 w-4"/>} PDF</Button><Button variant="outline" disabled={!!exporting || selectedExportColumns.length === 0} onClick={() => runExport("print")}>{exporting === "print" ? <Loader2 className="h-4 w-4 animate-spin"/> : <Printer className="h-4 w-4"/>} {isAr ? "طباعة" : "Print"}</Button></div>
     </CardContent></Card>
-    <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table><TableHeader><TableRow>{columns.slice(0, 18).map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.label}</TableHead>)}<TableHead>الإجراءات</TableHead></TableRow></TableHeader><TableBody>
-      {query.isLoading ? <TableRow><TableCell colSpan={19} className="text-center">جاري التحميل...</TableCell></TableRow> : query.isError ? <TableRow><TableCell colSpan={19} className="text-center text-destructive">{(query.error as Error).message}</TableCell></TableRow> : rows.length === 0 ? <TableRow><TableCell colSpan={19} className="text-center">لا توجد مصروفات مطابقة</TableCell></TableRow> : rows.map((row: any) => <TableRow key={row.id}>{columns.slice(0, 18).map((column) => <TableCell key={column.key} className="whitespace-nowrap">{column.key === "expense_scope" || column.key === "work_order_channel" ? <Badge variant="outline">{String(row[column.key] ?? "—")}</Badge> : column.type === "money" ? formatOMR(row[column.key] || 0) : String(row[column.key] ?? "—")}</TableCell>)}<TableCell><div className="flex gap-1"><Button size="sm" variant="outline" asChild><Link to={`/accounting/expenses/${row.id}/edit`}>تعديل</Link></Button><Button size="icon" variant="ghost" disabled={remove.isPending} onClick={() => { if (confirm("حذف المصروف؟")) remove.mutate(row.id); }}><Trash2 className="h-4 w-4 text-destructive"/></Button></div></TableCell></TableRow>)}
+    <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table><TableHeader><TableRow>{columns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{isAr ? column.ar : column.en}</TableHead>)}<TableHead>{isAr ? "الإجراءات" : "Actions"}</TableHead></TableRow></TableHeader><TableBody>
+      {query.isLoading ? <TableRow><TableCell colSpan={columns.length + 1} className="text-center">{isAr ? "جاري التحميل..." : "Loading..."}</TableCell></TableRow> : query.isError ? <TableRow><TableCell colSpan={columns.length + 1} className="text-center text-destructive">{(query.error as Error).message}</TableCell></TableRow> : rows.length === 0 ? <TableRow><TableCell colSpan={columns.length + 1} className="text-center">{isAr ? "لا توجد مصروفات مطابقة" : "No matching expenses"}</TableCell></TableRow> : rows.map((row: any) => <TableRow key={row.id}>{columns.map((column) => <TableCell key={column.key} className="whitespace-nowrap">{column.key === "expense_scope" || column.key === "work_order_channel" ? <Badge variant="outline">{String(row[column.key] ?? "—")}</Badge> : column.type === "money" ? formatOMR(row[column.key] || 0) : column.type === "date" && row[column.key] ? String(row[column.key]).slice(0, 10) : String(row[column.key] ?? "—")}</TableCell>)}<TableCell><div className="flex gap-1"><Button size="sm" variant="outline" asChild><Link to={`/accounting/expenses/${row.id}/edit`}>{isAr ? "تعديل" : "Edit"}</Link></Button><Button size="icon" variant="ghost" disabled={remove.isPending} onClick={() => { if (confirm(isAr ? "حذف المصروف؟" : "Delete expense?")) remove.mutate(row.id); }}><Trash2 className="h-4 w-4 text-destructive"/></Button></div></TableCell></TableRow>)}
     </TableBody></Table></div><div className="flex items-center justify-between p-3"><span className="text-sm">{query.data?.pagination?.totalRows || 0} سجل</span><div className="flex gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>السابق</Button><span className="px-3 py-2">{page} / {query.data?.pagination?.totalPages || 1}</span><Button variant="outline" disabled={page >= (query.data?.pagination?.totalPages || 1)} onClick={() => setPage((current) => current + 1)}>التالي</Button></div></div></CardContent></Card>
   </div>;
 }

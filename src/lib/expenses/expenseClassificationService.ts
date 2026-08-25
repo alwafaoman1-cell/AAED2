@@ -57,11 +57,21 @@ export interface ExpenseManagementFilters {
   vehicle?: string; customer?: string; supplier?: string;
 }
 
+export interface ExpenseManagementRow extends Record<string, unknown> {
+  id: string;
+  voucher_number: string;
+  date: string;
+  supplier_name?: string | null;
+  supplier_tax_number?: string | null;
+  supplier_invoice_number?: string | null;
+  supplier_invoice_date?: string | null;
+}
+
 export interface ExpenseInput {
   tenant_id: string; date: string; expense_scope: ExpenseScope; work_order_id?: string | null;
   linked_work_order_id?: string | null; department_id: string; expense_category_id: string;
   subcategory_id?: string | null; cost_center_id?: string | null; supplier_id?: string | null;
-  supplier_invoice_number?: string | null; payment_method: string; description: string;
+  supplier_invoice_number?: string | null; supplier_invoice_date?: string | null; payment_method: string; description: string;
   notes?: string | null; reference_number?: string | null; subtotal: number; vat_amount: number;
   total: number; is_vat_applicable: boolean; attachments?: unknown[];
 }
@@ -118,7 +128,26 @@ export async function applyDefaultCategoryTemplate() {
 export async function listExpenses(page: number, pageSize: number, filters: ExpenseManagementFilters) {
   const clean = Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== "" && value != null));
   const { data, error } = await (supabase.rpc as any)("expense_management_rpc", { p_page: page, p_page_size: pageSize, p_filters: clean });
-  if (error) fail(error); return data as { rows: any[]; aggregates: Record<string, number>; pagination: any };
+  if (error) fail(error);
+  const result = data as { rows: ExpenseManagementRow[]; aggregates: Record<string, number>; pagination: any };
+  const supplierIds = [...new Set((result.rows || []).map((row: any) => row.supplier_id).filter(Boolean))] as string[];
+  if (!supplierIds.length) return result;
+  const { data: suppliers, error: suppliersError } = await (supabase.from("suppliers") as any)
+    .select("id,name,tax_number")
+    .in("id", supplierIds);
+  if (suppliersError) fail(suppliersError);
+  const suppliersById = new Map((suppliers || []).map((supplier: any) => [supplier.id, supplier]));
+  return {
+    ...result,
+    rows: (result.rows || []).map((row: any) => {
+      const supplier: any = suppliersById.get(row.supplier_id);
+      return {
+        ...row,
+        supplier_name: row.supplier_name || supplier?.name || null,
+        supplier_tax_number: row.supplier_tax_number || supplier?.tax_number || null,
+      };
+    }),
+  };
 }
 
 export async function listAllExpenses(filters: ExpenseManagementFilters) {

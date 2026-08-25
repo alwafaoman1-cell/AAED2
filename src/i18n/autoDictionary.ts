@@ -540,6 +540,8 @@ const CURATED_AR_TO_EN: Record<string, string> = {
   "رقم الهيكل VIN": "Chassis Number VIN",
   "رقم خارجي": "External Number",
   "رقم فاتورة المورد": "Supplier Invoice Number",
+  "تاريخ فاتورة المورد": "Supplier Invoice Date",
+  "أعمدة التصدير": "Export Columns",
   "تم حذف القطعة نهائيًا من أمر العمل": "The required part was permanently removed from the work order",
   "تعذر تحديث حالة القطعة في Supabase": "Could not update the part status in Supabase",
   "تعذر حذف القطعة من Supabase": "Could not delete the part from Supabase",

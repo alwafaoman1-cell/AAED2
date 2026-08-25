@@ -23,6 +23,8 @@ select pg_temp.assert_true(
 );
 select pg_temp.assert_true('template_has_complete_baseline',(select count(*)>=116 from public.expense_categories));
 select pg_temp.assert_true('template_has_subcategories',(select count(*)>0 from public.expense_categories where level=3 and category_type='subcategory'));
+select pg_temp.assert_true('template_has_thirteen_departments',(select count(*)=13 from public.expense_categories where level=1 and category_type='department'));
+select pg_temp.assert_true('fines_nested_under_government',(select count(*)=1 from public.expense_categories fines join public.expense_categories gov on gov.id=fines.parent_id and gov.tenant_id=fines.tenant_id where fines.code='FINES' and fines.level=2 and fines.category_type='category' and gov.code='GOV'));
 select pg_temp.assert_true('template_bilingual',(select bool_and(name_ar<>'' and name_en<>'') from public.expense_categories));
 select pg_temp.assert_true('category_audit_written',(select count(*)>40 from public.expense_category_audit_logs));
 select pg_temp.assert_true('template_no_auto_expenses',(select count(*)=0 from public.expenses));

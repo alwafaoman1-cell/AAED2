@@ -6,6 +6,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8"
 const migration = read("supabase/migrations/20260813130000_expense_management_classification_refactor.sql");
 const workshopTemplate = read("supabase/migrations/20260822100000_expense_workshop_subcategory_template.sql");
 const templatePolicyHardening = read("supabase/migrations/20260824122000_expense_template_policy_hardening.sql");
+const templateDepartmentCorrection = read("supabase/migrations/20260825100000_expense_template_department_count_correction.sql");
 
 describe("expense management classification refactor", () => {
   it("is additive and never reclassifies historical expenses", () => {
@@ -116,5 +117,13 @@ describe("expense management classification refactor", () => {
     expect(templatePolicyHardening).toContain("using (auth.uid() is not null)");
     expect(templatePolicyHardening).toContain("revoke all on public.expense_category_template_items from public, anon");
     expect(templatePolicyHardening).not.toMatch(/\b(insert|update|delete)\s+(into|public\.)?expenses\b/i);
+  });
+
+  it("keeps fines under government and exactly thirteen template departments", () => {
+    expect(templateDepartmentCorrection).toContain("parent_code = 'GOV'");
+    expect(templateDepartmentCorrection).toContain("category_type = 'category'");
+    expect(templateDepartmentCorrection).toContain("<> 13");
+    expect(templateDepartmentCorrection).not.toMatch(/update\s+public\.expense_categories/i);
+    expect(templateDepartmentCorrection).not.toMatch(/\b(insert|update|delete)\s+(into|public\.)?expenses\b/i);
   });
 });

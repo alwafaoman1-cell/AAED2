@@ -3247,6 +3247,7 @@ export type Database = {
           subcategory_id: string | null
           subtotal: number
           supplier_id: string | null
+          supplier_invoice_date: string | null
           supplier_invoice_number: string | null
           supplier_tax_number: string | null
           tenant_id: string
@@ -3298,6 +3299,7 @@ export type Database = {
           subcategory_id?: string | null
           subtotal?: number
           supplier_id?: string | null
+          supplier_invoice_date?: string | null
           supplier_invoice_number?: string | null
           supplier_tax_number?: string | null
           tenant_id: string
@@ -3349,6 +3351,7 @@ export type Database = {
           subcategory_id?: string | null
           subtotal?: number
           supplier_id?: string | null
+          supplier_invoice_date?: string | null
           supplier_invoice_number?: string | null
           supplier_tax_number?: string | null
           tenant_id?: string
