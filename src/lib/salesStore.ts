@@ -354,6 +354,7 @@ async function upsertSalesCloud(doc: SalesDoc) {
       headerLines: doc.headerLines,
       isDeleted: doc.isDeleted,
     },
+    deleted_at: doc.isDeleted ? (doc.updatedAt || new Date().toISOString()) : null,
   });
   let { data, error } = await (supabase.from("sales_documents") as any)
     .upsert(payload)
@@ -612,34 +613,41 @@ export const salesStore = {
     } catch {}
     return finalDoc;
   },
-  remove(id: string) {
-    const all = read().map((d) => (d.id === id ? {
-      ...d,
+  async remove(id: string) {
+    const current = read().find((d) => d.id === id);
+    if (!current) throw new Error("الفاتورة غير موجودة");
+    const removed: SalesDoc = {
+      ...current,
       isDeleted: true,
+      status: "cancelled",
+      invoiceStatus: "cancelled",
       payments: [],
       paidTotal: 0,
-      balanceDue: Number(d.total || 0),
-    } : d));
-    write(all);
-    const removed = all.find((d) => d.id === id);
-    if (removed) void upsertSalesCloud(removed);
-    // إزالة القيود المحاسبية المرتبطة للحفاظ على تطابق الأرصدة
-    try {
-      import("./salesAccounting").then(({ removeSalesInvoiceJournal }) => {
-        removeSalesInvoiceJournal(id, "sales_invoice");
-        removeSalesInvoiceJournal(id, "work_order_invoice");
-      });
-    } catch {}
+      balanceDue: Number(current.total || 0),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Supabase is authoritative. The database trigger reverses posted entries and
+    // removes linked receipts/payments atomically before the UI is updated.
+    await upsertSalesCloud(removed);
+    write(read().map((d) => (d.id === id ? removed : d)));
+
+    const { removeSalesInvoiceJournal, removeCustomerPaymentJournal } = await import("./salesAccounting");
+    removeSalesInvoiceJournal(id, "sales_invoice");
+    removeSalesInvoiceJournal(id, "work_order_invoice");
+    current.payments.forEach((payment) => removeCustomerPaymentJournal(`${id}::${payment.id}`));
   },
-  hardRemove(id: string) {
+  async hardRemove(id: string) {
+    const current = read().find((d) => d.id === id);
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) throw new Error("تعذّر تحديد المؤسسة");
+    const { error } = await supabase.from("sales_documents").delete().eq("tenant_id", tenantId).eq("id", id);
+    if (error) throw error;
     write(read().filter((d) => d.id !== id));
-    void supabase.from("sales_documents").delete().eq("id", id);
-    try {
-      import("./salesAccounting").then(({ removeSalesInvoiceJournal }) => {
-        removeSalesInvoiceJournal(id, "sales_invoice");
-        removeSalesInvoiceJournal(id, "work_order_invoice");
-      });
-    } catch {}
+    const { removeSalesInvoiceJournal, removeCustomerPaymentJournal } = await import("./salesAccounting");
+    removeSalesInvoiceJournal(id, "sales_invoice");
+    removeSalesInvoiceJournal(id, "work_order_invoice");
+    current?.payments.forEach((payment) => removeCustomerPaymentJournal(`${id}::${payment.id}`));
   },
   restore(id: string) {
     const next = read().map((d) => (d.id === id ? { ...d, isDeleted: false } : d));

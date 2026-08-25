@@ -4311,5 +4311,19 @@
   "لا توجد حركة مالية مطابقة خلال الفترة.": "No matching financial activity in this period.",
   "أساس الشهر: الفاتورة حسب تاريخها، التحصيل حسب تاريخ الدفعة، والمصروف حسب تاريخ السند. VAT لا يدخل في الربح.": "Monthly basis: invoices by invoice date, collections by payment date, and expenses by voucher date. VAT is excluded from profit.",
   "تعذر البحث:": "Search failed:",
-  "الاسم أو الهاتف أو الرقم الضريبي — حرفان على الأقل": "Name, phone, or tax number — at least two characters"
+  "الاسم أو الهاتف أو الرقم الضريبي — حرفان على الأقل": "Name, phone, or tax number — at least two characters",
+  "تم حذف الفاتورة وسندات القبض المرتبطة": "Invoice and linked receipts deleted",
+  "تم حذف الفواتير وسندات القبض المرتبطة": "Invoices and linked receipts deleted",
+  "تعذر حذف الفاتورة وسنداتها": "Unable to delete invoice and receipts",
+  "المحاسبة / التقرير الشهري": "Accounting / Monthly Report",
+  "التقرير الشهري الشامل للورشة": "Comprehensive Monthly Workshop Report",
+  "تقرير دائم من البيانات السحابية: الكاش والتأمين وربحية المركبات والرواتب والمصروفات التشغيلية، دون استيراد ملفات.": "A permanent cloud report for cash, insurance, vehicle profitability, payroll, and operating expenses, without file imports.",
+  "ملخص الربح والخسارة للشهر — الكاش والتأمين منفصلان": "Monthly Profit and Loss Summary — Cash and Insurance Separated",
+  "المصروفات حسب القسم والتصنيف": "Expenses by Department and Category",
+  "لا توجد مصروفات تشغيلية خلال الفترة.": "No operating expenses were recorded during this period.",
+  "الفرعي": "Subcategory",
+  "قبل VAT": "Before VAT",
+  "تفاصيل الرواتب والأجور المسجلة كمصروفات": "Payroll and Wage Expense Details",
+  "لا توجد سندات رواتب مصنفة خلال الفترة.": "No classified payroll vouchers were recorded during this period.",
+  "الموظف/المستفيد": "Employee / Beneficiary"
 }

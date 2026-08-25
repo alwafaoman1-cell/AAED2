@@ -444,7 +444,7 @@ const App = () => (
               <Route path="/reports/center" element={<ReportsLegacyRedirect to="/reports-center" />} />
               <Route path="/reports/work-orders-statement" element={<ReportsLegacyRedirect to="/reports-center?report=work-orders&category=operations" />} />
               <Route path="/reports/parts-profit" element={<ReportsLegacyRedirect to="/reports-center?report=gross-profitability&category=profitability" />} />
-              <Route path="/reports/monthly" element={<ReportsLegacyRedirect to="/reports-center?report=all-company-invoices&groupBy=month" />} />
+              <Route path="/reports/monthly" element={<ReportsLegacyRedirect to="/accounting/reports/monthly-vehicle-profitability" />} />
               <Route path="/reports/completed-without-invoice" element={<ReportsLegacyRedirect to="/reports-center?report=completed-without-invoice&category=invoices" />} />
               <Route path="/reports/overdue-invoices" element={<ReportsLegacyRedirect to="/reports-center?report=delivered-awaiting-collection&category=invoices" />} />
               <Route path="/reports/vehicles-over-30-days" element={<ReportsLegacyRedirect to="/reports-center?report=workshop-duration&category=performance" />} />

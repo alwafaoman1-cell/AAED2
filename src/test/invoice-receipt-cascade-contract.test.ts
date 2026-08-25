@@ -23,4 +23,24 @@ describe("invoice receipt cascade contract", () => {
     expect(sales).toContain("payments: []");
     expect(sales).toContain("paidTotal: 0");
   });
+
+  it("reverses cloud postings and waits for atomic Supabase cleanup before local success", () => {
+    const migration = read("supabase/migrations/20260825125000_sales_invoice_financial_delete_integrity.sql");
+    const store = read("src/lib/salesStore.ts");
+    const removeBlock = store.slice(store.indexOf("async remove(id: string)"), store.indexOf("async hardRemove(id: string)"));
+    const detail = read("src/components/sales/SalesDocDetailPage.tsx");
+    const list = read("src/components/sales/SalesDocList.tsx");
+
+    expect(migration).toContain("reverse_accounting_journal_entry");
+    expect(migration).toContain("source_type = 'sales_payment'");
+    expect(migration).toContain("source_type in ('sales_invoice', 'cash_invoice')");
+    expect(migration).toContain("delete from public.accounting_receipts");
+    expect(migration).toContain("delete from public.sales_payments");
+    expect(migration).toContain("repair_deleted_sales_invoice_financials");
+    expect(migration).not.toMatch(/delete from public\.accounting_journal_(entries|lines)/i);
+    expect(removeBlock.indexOf("await upsertSalesCloud(removed)")).toBeLessThan(removeBlock.indexOf("write(read().map"));
+    expect(store).toContain("removeCustomerPaymentJournal(`${id}::${payment.id}`)");
+    expect(detail).toContain("await salesStore.remove(doc.id)");
+    expect(list).toContain("Promise.allSettled(ids.map((id) => salesStore.remove(id)))");
+  });
 });

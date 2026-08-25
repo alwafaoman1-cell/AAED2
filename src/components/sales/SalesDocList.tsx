@@ -319,11 +319,18 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
         }}>
           <FileSpreadsheet size={14} /> {isAr ? "تصدير" : "Export"}
         </Button>
-        <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={() => {
+        <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={async () => {
           if (!confirm(isAr ? `حذف ${selected.size} مستند؟` : `Delete ${selected.size}?`)) return;
-          selected.forEach((id) => salesStore.remove(id));
-          toast.success(isAr ? "تم الحذف" : "Deleted");
-          setSelected(new Set());
+          const ids = Array.from(selected);
+          const results = await Promise.allSettled(ids.map((id) => salesStore.remove(id)));
+          const failedIds = ids.filter((_, index) => results[index].status === "rejected");
+          if (failedIds.length === 0) {
+            toast.success(isAr ? "تم حذف الفواتير وسندات القبض المرتبطة" : "Invoices and linked receipts deleted");
+            setSelected(new Set());
+          } else {
+            toast.error(isAr ? `تعذر حذف ${failedIds.length} مستند` : `Failed to delete ${failedIds.length} document(s)`);
+            setSelected(new Set(failedIds));
+          }
         }}>
           <Trash2 size={14} /> {isAr ? "حذف" : "Delete"}
         </Button>

@@ -73,10 +73,14 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
   const doc = useMemo(() => salesStore.get(id), [id, tick]);
 
-  function doDelete() {
-    salesStore.remove(doc.id);
-    toast.success(isAr ? "تم النقل للمحذوفات" : "Moved to trash");
-    navigate(listRoute);
+  async function doDelete() {
+    try {
+      await salesStore.remove(doc.id);
+      toast.success(isAr ? "تم حذف الفاتورة وسندات القبض المرتبطة" : "Invoice and linked receipts deleted");
+      navigate(listRoute);
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر حذف الفاتورة وسنداتها" : "Unable to delete invoice and receipts"));
+    }
   }
   function doDuplicate() {
     const c = salesStore.duplicate(doc.id);
