@@ -1,4 +1,4 @@
-// محرر فاتورة تأمين قابلة للتعديل (بنود + L.P.O + ملاحظات يدوية + حالة + مدفوع)
+// محرر فاتورة تأمين قابلة للتعديل. التحصيل يُسجّل حصراً كسند دفعة مستقل.
 import { useEffect, useState } from "react";
 import {
   ResponsiveDialog,
@@ -45,7 +45,6 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [status, setStatus] = useState<InsuranceInvoice["status"]>("issued");
-  const [paid, setPaid] = useState(0);
 
   useEffect(() => {
     if (!invoice) return;
@@ -71,7 +70,6 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
     setNotes(invoice.notes || "");
     setDueDate(invoice.due_date || "");
     setStatus(invoice.status);
-    setPaid(Number(invoice.paid_amount) || 0);
   }, [invoice]);
 
   const subtotal = items.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
@@ -134,7 +132,6 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
         notes: notes.trim() || null,
         due_date: dueDate || null,
         status,
-        paid_amount: paid,
       } as any,
     });
     if (invoiceDateChanged) {
@@ -196,8 +193,8 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="issued">صادرة</SelectItem>
-                  <SelectItem value="partial">جزئية</SelectItem>
-                  <SelectItem value="paid">مدفوعة</SelectItem>
+                  <SelectItem value="partial" disabled>جزئية — تُحسب من الدفعات</SelectItem>
+                  <SelectItem value="paid" disabled>مدفوعة — تُحسب من الدفعات</SelectItem>
                   <SelectItem value="overdue">متأخرة</SelectItem>
                   <SelectItem value="cancelled">ملغاة</SelectItem>
                 </SelectContent>
@@ -284,18 +281,19 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
             </div>
           </div>
 
-          {/* Paid + Notes */}
+          {/* Collection is read-only here; claim_payments is the SSOT. */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
-              <Label className="text-xs">المبلغ المدفوع</Label>
+              <Label className="text-xs">المبلغ المحصل</Label>
               <Input
-                type="number"
-                min={0}
-                step={0.001}
-                value={paid}
-                onChange={(e) => setPaid(Number(e.target.value) || 0)}
+                value={Number(invoice?.paid_amount || 0).toFixed(3)}
+                readOnly
+                disabled
                 dir="ltr"
               />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                يُحدّث تلقائيًا من سندات الدفعات الفعلية ولا يُعدّل من الفاتورة.
+              </p>
             </div>
             <div className="md:col-span-2">
               <Label className="text-xs">ملاحظات (يدوية)</Label>

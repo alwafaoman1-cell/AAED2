@@ -63,6 +63,11 @@ export const queryKeys = {
     vehiclesOverStayAll: ["reports", "vehicles_over_stay"] as const,
     vehiclesOverStay: (age?: number | string) => ["reports", "vehicles_over_stay", age ?? "all"] as const,
   },
+  monthlyVehicleProfitability: {
+    all: ["monthly-vehicle-profitability"] as const,
+    report: (tenantId?: string | null, filters?: unknown) =>
+      ["monthly-vehicle-profitability", tenantId ?? "", filters ?? ""] as const,
+  },
   expenseManagement: {
     all: ["expense_management"] as const,
     list: (filters?: unknown) => ["expense_management", "list", filters ?? ""] as const,

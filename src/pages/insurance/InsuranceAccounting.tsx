@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { buildPublicUrl } from "@/lib/publicAccessSettingsStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { Search, Download, Eye, Trash2, Pencil, Plus, Filter, Receipt, AlertTriangle, CheckCircle2, FileSpreadsheet, FolderArchive } from "lucide-react";
+import { Search, Download, Eye, Trash2, Pencil, Plus, Filter, Receipt, AlertTriangle, CheckCircle2, FileSpreadsheet, FolderArchive, Wallet } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -28,6 +28,8 @@ import { formatDateLatin } from "@/lib/numberUtils";
 import { toast } from "sonner";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
+import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
+import type { PaymentTarget } from "@/lib/paymentTargets";
 
 const STATUS_LABEL: Record<string, string> = {
   issued: "صادرة",
@@ -67,6 +69,7 @@ export default function InsuranceAccounting() {
   const [showPreview, setShowPreview] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editInvoice, setEditInvoice] = useState<InsuranceInvoice | null>(null);
+  const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
 
   // ── أرشيف كل المستندات (تقديرات + عروض + فواتير + ملخصات) من claim_audit_logs ──
   const [allDocs, setAllDocs] = useState<Array<{
@@ -113,6 +116,32 @@ export default function InsuranceAccounting() {
   }, [claims]);
 
   const allowDelete = hasRole("admin", "manager");
+
+  const openInvoicePayment = (invoice: InsuranceInvoice) => {
+    const remaining = Math.max(0, Number(invoice.total || 0) - Number(invoice.paid_amount || 0));
+    if (remaining <= 0.001) {
+      toast.info("الفاتورة محصلة بالكامل");
+      return;
+    }
+    const claim = (claims || []).find((row) => row.id === invoice.claim_id) as any;
+    setPaymentTarget({
+      kind: "insurance_claim",
+      id: invoice.id,
+      number: invoice.invoice_number,
+      customerId: claim?.customer_id || null,
+      customerName: claim?.customer_name || invoice.insurance_company_name || "—",
+      vehicleId: claim?.vehicle_id || null,
+      vehiclePlate: invoice.vehicle_plate || claim?.vehicle_plate || null,
+      workOrderId: claim?.job_order_id || claim?.auto_job_order_id || null,
+      claimId: invoice.claim_id,
+      invoiceId: invoice.id,
+      insuranceCompanyId: invoice.insurance_company_id || null,
+      insuranceCompany: invoice.insurance_company_name || claim?.insurance_company || "—",
+      total: Number(invoice.total || 0),
+      paid: Number(invoice.paid_amount || 0),
+      remaining,
+    });
+  };
 
   const filteredDocs = useMemo(() => {
     return allDocs.filter((d) => {
@@ -382,6 +411,9 @@ export default function InsuranceAccounting() {
                       <Button size="sm" variant="ghost" className="flex-1 h-8 text-xs text-info" onClick={() => setEditInvoice(inv)}>
                         <Pencil size={14} className="ml-1" /> تعديل
                       </Button>
+                      <Button size="sm" variant="ghost" className="flex-1 h-8 text-xs text-success" onClick={() => openInvoicePayment(inv)}>
+                        <Wallet size={14} className="ml-1" /> إضافة دفعة
+                      </Button>
                       {allowDelete && (
                         <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(inv.id)}>
                           <Trash2 size={14} />
@@ -438,6 +470,9 @@ export default function InsuranceAccounting() {
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 text-info hover:text-info" onClick={() => setEditInvoice(inv)} title="تعديل">
                                 <Pencil size={14} />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-success hover:text-success" onClick={() => openInvoicePayment(inv)} title="إضافة دفعة">
+                                <Wallet size={14} />
                               </Button>
                               {inv.pdf_url && (
                                 <Button variant="ghost" size="icon" className="h-7 w-7" asChild title="تحميل PDF">
@@ -557,6 +592,13 @@ export default function InsuranceAccounting() {
         invoice={editInvoice}
         open={!!editInvoice}
         onOpenChange={(o) => !o && setEditInvoice(null)}
+      />
+
+      <UnifiedAddPaymentDialog
+        open={!!paymentTarget}
+        onOpenChange={(open) => !open && setPaymentTarget(null)}
+        initialTarget={paymentTarget}
+        lockInitialTarget
       />
 
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>

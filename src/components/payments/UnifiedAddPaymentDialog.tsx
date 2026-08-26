@@ -305,6 +305,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
         queryClient.invalidateQueries({ queryKey: queryKeys.claimPayments.all }),
         queryClient.invalidateQueries({ queryKey: queryKeys.reportCenter.all }),
         queryClient.invalidateQueries({ queryKey: queryKeys.reports.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.monthlyVehicleProfitability.all }),
         queryClient.invalidateQueries({ queryKey: ["sales_documents"] }),
         queryClient.invalidateQueries({ queryKey: ["sales_payments"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),

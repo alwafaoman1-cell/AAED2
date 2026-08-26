@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { queryKeys } from "@/lib/queryKeys";
 
 export type MonthlyBusinessType = "cash" | "insurance";
 
@@ -41,11 +42,7 @@ export interface MonthlyVehicleProfitabilityResult {
   generatedAt: string;
 }
 
-export const monthlyVehicleProfitabilityKeys = {
-  all: ["monthly-vehicle-profitability"] as const,
-  report: (tenantId: string | undefined, filters: MonthlyVehicleProfitabilityFilters) =>
-    ["monthly-vehicle-profitability", tenantId, filters] as const,
-};
+export const monthlyVehicleProfitabilityKeys = queryKeys.monthlyVehicleProfitability;
 
 export async function fetchMonthlyVehicleProfitability(
   filters: MonthlyVehicleProfitabilityFilters,

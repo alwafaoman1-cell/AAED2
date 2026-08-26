@@ -145,6 +145,7 @@ export function useCreateClaimPayment() {
       qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
       qc.invalidateQueries({ queryKey: queryKeys.claimActiveInvoice() });
       qc.invalidateQueries({ queryKey: queryKeys.unifiedRevenueInsuranceInvoices });
+      qc.invalidateQueries({ queryKey: queryKeys.monthlyVehicleProfitability.all });
       toast.success("تم تسجيل الدفعة");
     },
     onError: (e: any) => toast.error(e.message),
@@ -190,6 +191,7 @@ export function useUpdateClaimPayment() {
       qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
       qc.invalidateQueries({ queryKey: queryKeys.claimActiveInvoice() });
       qc.invalidateQueries({ queryKey: queryKeys.unifiedRevenueInsuranceInvoices });
+      qc.invalidateQueries({ queryKey: queryKeys.monthlyVehicleProfitability.all });
       toast.success("تم حفظ التعديلات");
     },
     onError: (e: any) => toast.error(e.message),
@@ -213,6 +215,7 @@ export function useDeleteClaimPayment() {
       qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
       qc.invalidateQueries({ queryKey: queryKeys.claimActiveInvoice() });
       qc.invalidateQueries({ queryKey: queryKeys.unifiedRevenueInsuranceInvoices });
+      qc.invalidateQueries({ queryKey: queryKeys.monthlyVehicleProfitability.all });
       toast.success("تم حذف الدفعة");
     },
     onError: (e: any) => toast.error(e.message),
