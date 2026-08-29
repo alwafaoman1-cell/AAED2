@@ -194,9 +194,8 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
     setUploading(null);
   };
 
-  async function handleSave(markDelivered: boolean) {
+  async function handleSave() {
     setSaving(true);
-    // Use the chosen delivery date (at noon local) when marking delivered, otherwise persist date if it was changed.
     const deliveredAtIso = (() => {
       if (!deliveryDate) return null;
       const d = new Date(deliveryDate + "T12:00:00");
@@ -210,12 +209,6 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
       receiver_id_number: receiverIdNumber || null,
       delivery_notes: notes || null,
     };
-    if (markDelivered) {
-      payload.delivered_at = deliveredAtIso ?? new Date().toISOString();
-    } else if (initial?.delivered_at && deliveredAtIso) {
-      // allow editing the existing delivered_at without re-marking
-      payload.delivered_at = deliveredAtIso;
-    }
     const { error } = await supabase
       .from("insurance_claims")
       .update(payload as never)
@@ -231,10 +224,10 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
         tenant_id: tenant as string,
         claim_id: claimId,
         vehicle_id: vehicleId || null,
-        action: markDelivered ? "delivery_confirmed" : "delivery_saved",
+        action: "delivery_draft_media_saved",
         category: "delivery",
         details: {
-          delivered_at: payload.delivered_at || deliveredAtIso,
+          intended_delivery_at: deliveredAtIso,
           receiver_name: receiverName || null,
           receiver_id_number: receiverIdNumber || null,
           delivery_photos_count: deliveryPhotos.length,
@@ -243,7 +236,7 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
         },
       } as any);
     }
-    toast.success(markDelivered ? "تم تسجيل التسليم" : "تم حفظ بيانات التسليم");
+    toast.success("تم حفظ صور وملاحظات مسودة التسليم");
     onSaved?.();
   }
 
@@ -295,7 +288,7 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
             className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             {loadingWo ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSignature className="w-4 h-4" />}
-            إقرار استلام السيارة من الورشة
+            نموذج خروج وتسليم المركبة
           </Button>
           <Button
             type="button"
@@ -450,13 +443,13 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
         </div>
 
         <div className="flex gap-2 pt-2 border-t">
-          <Button variant="outline" onClick={() => handleSave(false)} disabled={saving}>
+          <Button variant="outline" onClick={() => handleSave()} disabled={saving}>
             {saving && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
             حفظ المسودة
           </Button>
-          <Button onClick={() => handleSave(true)} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700">
+          <Button onClick={() => void openReceiptDialog()} disabled={saving || loadingWo || !workOrderId} className="bg-emerald-600 hover:bg-emerald-700">
             <CheckCircle2 className="w-4 h-4 ml-2" />
-            تأكيد التسليم
+            متابعة واعتماد الخروج والتسليم
           </Button>
         </div>
       </CardContent>
@@ -468,10 +461,16 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
           order={woForDialog}
           deliveryDraft={{
             date: deliveryDate,
+            receiverType: "customer",
             receiverName,
             receiverIdNumber,
             satisfactionNotes: notes,
             idPhotoDataUrl: receiverIdPhoto,
+            deliveryPhotoUrls: deliveryPhotos,
+          }}
+          onFinalized={() => {
+            setReceiptOpen(false);
+            onSaved?.();
           }}
         />
       )}

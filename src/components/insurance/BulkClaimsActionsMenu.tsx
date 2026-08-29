@@ -82,7 +82,7 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
     }
   }
 
-  async function handleStatusChange(status: "approved" | "paid" | "cancelled" | "delivered") {
+  async function handleStatusChange(status: "approved" | "paid" | "cancelled") {
     setBusy(true);
     try {
       const res = await bulkUpdateStatus(selected.map((c) => c.id), status);
@@ -199,9 +199,6 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
                   <Archive size={14} className="text-muted-foreground" /> أرشفة (إلغاء)
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => handleStatusChange("delivered")} className="gap-2">
-                  <RefreshCw size={14} /> تحويل إلى "تم التسليم"
-                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => handleStatusChange("approved")} className="gap-2">
                   <RefreshCw size={14} /> تحويل إلى "جاهزة للفوترة" (معتمدة)
                 </DropdownMenuItem>

@@ -34,6 +34,10 @@ export function AccountingReportsCenterPage(){
       <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-lg"><BookOpen size={19}/>{en?"Comprehensive monthly workshop report":"التقرير الشهري الشامل للورشة"}</CardTitle></CardHeader>
       <CardContent><p className="mb-3 text-sm text-muted-foreground">{en?"A cloud monthly report separating cash and insurance, with vehicle profitability, payroll, operating expenses, and a workshop profit and loss summary.":"تقرير سحابي يفصل الكاش عن التأمين ويعرض ربحية كل سيارة والرواتب والمصروفات التشغيلية وملخص ربح وخسارة الورشة."}</p><Button asChild><Link to="/accounting/reports/monthly-vehicle-profitability">{en?"Open monthly report":"فتح التقرير الشهري"}</Link></Button></CardContent>
     </Card>
+    <Card className="border-amber-300 bg-gradient-to-l from-amber-50 to-white dark:from-amber-950/30 dark:to-background">
+      <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-lg"><FileSpreadsheet size={19}/>{en?"Monthly expense report":"تقرير المصروفات الشهرية"}</CardTitle></CardHeader>
+      <CardContent><p className="mb-3 text-sm text-muted-foreground">{en?"Actual expense vouchers with automatic payroll and fixed-cost accruals, without double counting.":"سندات المصروف الفعلية مع سحب الرواتب والتكاليف الثابتة تلقائيًا ودون احتساب مزدوج."}</p><Button asChild><Link to="/accounting/reports/monthly-expenses">{en?"Open expense report":"فتح تقرير المصروفات"}</Link></Button></CardContent>
+    </Card>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{ACCOUNTING_REPORTS.map(r=><Card key={r.key}><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><BookOpen size={17}/>{en?r.titleEn:r.titleAr}</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-muted-foreground">{en?r.descriptionEn:r.descriptionAr}</p><Button asChild size="sm"><Link to={`/accounting/reports/${r.path}`}>{en?"Open report":"فتح التقرير"}</Link></Button></CardContent></Card>)}</div>
   </main>
 }

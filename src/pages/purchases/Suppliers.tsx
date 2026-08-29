@@ -1,250 +1,62 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Phone, ArrowRight, Building2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Edit, Eye, Phone, Plus, Search, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import StatCard from "@/components/StatCard";
-import { suppliersStore, type Supplier } from "@/lib/suppliersStore";
-import {
-  purchaseInvoicesStore,
-  getPurchaseTotals,
-} from "@/lib/purchaseInvoicesStore";
-import { canDelete, canEdit } from "@/lib/permissions";
-import { moveToTrash } from "@/lib/trashStore";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
-import { toast } from "sonner";
 import SupplierFormDialog from "@/components/purchases/SupplierFormDialog";
 import ImportSuppliersFromExcelButton from "@/components/purchases/ImportSuppliersFromExcelButton";
+import { canDelete, canEdit } from "@/lib/permissions";
+import { formatOMR } from "@/lib/money";
+import { queryKeys } from "@/lib/queryKeys";
+import { deactivateSupplier, fetchSupplierAccounts, fetchSupplierDirectorySummary, type CloudSupplier } from "@/lib/purchases/supplierAccountService";
 
 export default function Suppliers() {
-  const [suppliers, setSuppliers] = useState<Supplier[]>(suppliersStore.getAll());
-  const [invoices, setInvoices] = useState(purchaseInvoicesStore.getAll());
+  const { i18n } = useTranslation();
+  const english = i18n.resolvedLanguage?.startsWith("en") ?? false;
+  const { profile } = useAuth();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState<Supplier | null>(null);
-  const [deleting, setDeleting] = useState<Supplier | null>(null);
+  const [editing, setEditing] = useState<CloudSupplier | null>(null);
+  const [deleting, setDeleting] = useState<CloudSupplier | null>(null);
   const allowEdit = canEdit();
   const allowDelete = canDelete();
-
-  useEffect(() => suppliersStore.subscribe(() => setSuppliers([...suppliersStore.getAll()])), []);
-  useEffect(() => purchaseInvoicesStore.subscribe(() => setInvoices([...purchaseInvoicesStore.getAll()])), []);
-
-  const balanceMap = useMemo(() => {
-    const m: Record<string, { total: number; paid: number; due: number }> = {};
-    invoices.forEach((i) => {
-      const cur = m[i.supplierId] || { total: 0, paid: 0, due: 0 };
-      const t = getPurchaseTotals(i).total;
-      cur.total += t;
-      cur.paid += i.paidAmount || 0;
-      cur.due = cur.total - cur.paid;
-      m[i.supplierId] = cur;
-    });
-    return m;
-  }, [invoices]);
-
-  const allBrands = useMemo(() => {
-    const set = new Set<string>();
-    suppliers.forEach((s) => (s.vehicleBrands || []).forEach((b) => set.add(b)));
-    return Array.from(set).sort();
-  }, [suppliers]);
-  const [brandFilter, setBrandFilter] = useState<string>("");
-
-  const filtered = suppliers.filter((s) => {
-    const matchesSearch =
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.phone.includes(search) ||
-      (s.vehicleBrands || []).some((b) => b.toLowerCase().includes(search.toLowerCase()));
-    const matchesBrand =
-      !brandFilter ||
-      (s.vehicleBrands || []).some(
-        (b) => b === brandFilter || b.includes("جميع"),
-      );
-    return matchesSearch && matchesBrand;
+  useEffect(() => { const timer = window.setTimeout(() => { setAppliedSearch(search.trim()); setPage(1); }, 350); return () => window.clearTimeout(timer); }, [search]);
+  const directory = useQuery({
+    queryKey: queryKeys.suppliers.list({ tenantId: profile?.tenant_id, search: appliedSearch, page, pageSize: 25 }),
+    queryFn: () => fetchSupplierAccounts({ tenantId: profile!.tenant_id, search: appliedSearch, page, pageSize: 25 }),
+    enabled: Boolean(profile?.tenant_id), staleTime: 60_000, gcTime: 600_000, refetchOnWindowFocus: false,
   });
-
-  function tryDelete(s: Supplier) {
-    const linkedInvoices = invoices.filter((i) => i.supplierId === s.id);
-    if (linkedInvoices.length) {
-      toast.error(`لا يمكن حذف "${s.name}" — يرتبط بـ ${linkedInvoices.length} فاتورة شراء. احذف الفواتير أولاً.`);
-      return;
-    }
-    setDeleting(s);
-  }
-
-  function handleDelete() {
-    if (!deleting) return;
-    const r = suppliersStore.remove(deleting.id);
-    if (r) {
-      moveToTrash({
-        type: "supplier" as never,
-        entityId: r.id,
-        label: r.name,
-        payload: r,
-      });
-      toast.success("تم النقل للمهملات");
-    }
-    setDeleting(null);
-  }
-
-  const totalDue = Object.values(balanceMap).reduce((s, b) => s + b.due, 0);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-            <Link to="/inventory" className="hover:text-foreground flex items-center gap-1">
-              <ArrowRight size={14} /> المخزون
-            </Link>
-            <span>/</span>
-            <span className="text-foreground">الموردين</span>
-          </div>
-          <h1 className="text-2xl font-bold text-foreground">إدارة الموردين</h1>
-          <p className="text-sm text-muted-foreground">قاعدة بيانات الموردين وأرصدتهم</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {allowEdit && <ImportSuppliersFromExcelButton />}
-          {allowEdit && (
-            <Button onClick={() => { setEditing(null); setShowForm(true); }} className="gradient-gold text-primary-foreground shadow-gold gap-2">
-              <Plus size={18} /> مورد جديد
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <StatCard title="عدد الموردين" value={suppliers.length} icon={Building2} variant="info" />
-        <StatCard title="الفواتير الإجمالية" value={invoices.length} icon={Building2} variant="gold" />
-        <StatCard title="إجمالي المستحق" value={`${totalDue.toFixed(3)} ر.ع`} icon={Building2} variant="warning" />
-      </div>
-
-      <div className="flex flex-col md:flex-row gap-3 md:items-center">
-        <div className="relative max-w-md flex-1">
-          <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="بحث بالاسم أو الهاتف أو ماركة سيارة..."
-            className="pr-9 bg-card border-border"
-          />
-        </div>
-        {allBrands.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="text-xs text-muted-foreground ml-1">تصفية بالماركة:</span>
-            <button
-              type="button"
-              onClick={() => setBrandFilter("")}
-              className={`text-[10px] px-2 py-0.5 rounded-full border transition ${
-                !brandFilter
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-secondary text-muted-foreground border-border hover:border-primary/50"
-              }`}
-            >
-              الكل
-            </button>
-            {allBrands.map((b) => (
-              <button
-                key={b}
-                type="button"
-                onClick={() => setBrandFilter(b === brandFilter ? "" : b)}
-                className={`text-[10px] px-2 py-0.5 rounded-full border transition ${
-                  brandFilter === b
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-secondary text-muted-foreground border-border hover:border-primary/50"
-                }`}
-              >
-                {b}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-secondary/30 text-xs text-muted-foreground">
-                <th className="text-right py-3 px-4 font-medium">المورد</th>
-                <th className="text-right py-3 px-4 font-medium">الهاتف</th>
-                <th className="text-right py-3 px-4 font-medium hidden md:table-cell">الرقم الضريبي</th>
-                <th className="text-right py-3 px-4 font-medium hidden xl:table-cell">العنوان</th>
-                <th className="text-right py-3 px-4 font-medium hidden md:table-cell">الفئة / الماركات</th>
-                <th className="text-right py-3 px-4 font-medium">إجمالي المشتريات</th>
-                <th className="text-right py-3 px-4 font-medium">الرصيد المستحق</th>
-                <th className="text-right py-3 px-4 font-medium">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((s) => {
-                const bal = balanceMap[s.id] || { total: 0, paid: 0, due: 0 };
-                return (
-                  <tr key={s.id} className="border-b border-border/50 hover:bg-secondary/20">
-                    <td className="py-3 px-4">
-                      <div className="text-foreground font-medium">{s.name}</div>
-                      <div className="text-[10px] text-muted-foreground font-mono">{s.id}</div>
-                    </td>
-                    <td className="py-3 px-4 text-muted-foreground font-mono text-xs">{s.phone}</td>
-                    <td className="py-3 px-4 text-muted-foreground font-mono text-xs hidden md:table-cell">{s.taxNumber || "-"}</td>
-                    <td className="py-3 px-4 text-muted-foreground hidden xl:table-cell">{s.address || "-"}</td>
-                    <td className="py-3 px-4 hidden md:table-cell">
-                      {s.category && (
-                        <div className="text-[11px] text-muted-foreground mb-1">{s.category}</div>
-                      )}
-                      <div className="flex flex-wrap gap-1 max-w-[260px]">
-                        {(s.vehicleBrands || []).slice(0, 6).map((b) => (
-                          <span
-                            key={b}
-                            className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20"
-                          >
-                            {b}
-                          </span>
-                        ))}
-                        {(s.vehicleBrands || []).length > 6 && (
-                          <span className="text-[10px] text-muted-foreground">+{(s.vehicleBrands || []).length - 6}</span>
-                        )}
-                        {!(s.vehicleBrands || []).length && (
-                          <span className="text-[10px] text-muted-foreground">-</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-foreground font-mono">{bal.total.toFixed(3)}</td>
-                    <td className={`py-3 px-4 font-mono font-semibold ${bal.due > 0 ? "text-destructive" : "text-success"}`}>{bal.due.toFixed(3)}</td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-1">
-                        {s.phone && (
-                          <a href={`tel:${s.phone}`} className="p-1.5 rounded hover:bg-secondary text-success" title="اتصال">
-                            <Phone size={14} />
-                          </a>
-                        )}
-                        {allowEdit && (
-                          <button onClick={() => { setEditing(s); setShowForm(true); }} className="p-1.5 rounded hover:bg-secondary text-info" title="تعديل">
-                            <Edit size={14} />
-                          </button>
-                        )}
-                        {allowDelete && (
-                          <button onClick={() => tryDelete(s)} className="p-1.5 rounded hover:bg-destructive/10 text-destructive" title="حذف">
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <SupplierFormDialog open={showForm} onOpenChange={setShowForm} editing={editing} />
-      <ConfirmDeleteDialog
-        open={!!deleting}
-        onOpenChange={(o) => !o && setDeleting(null)}
-        onConfirm={handleDelete}
-        title={`حذف ${deleting?.name || ""}`}
-        description="سيتم نقل المورد إلى سلة المهملات."
-      />
-    </div>
-  );
+  const summary = useQuery({
+    queryKey: queryKeys.suppliers.summary(profile?.tenant_id), queryFn: () => fetchSupplierDirectorySummary(profile!.tenant_id),
+    enabled: Boolean(profile?.tenant_id), staleTime: 120_000, gcTime: 600_000, refetchOnWindowFocus: false,
+  });
+  const deactivate = useMutation({
+    mutationFn: (supplierId: string) => deactivateSupplier(profile!.tenant_id, supplierId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.suppliers.all });
+      toast.success(english ? "Supplier deactivated. Historical purchases were preserved." : "تم تعطيل المورد مع الحفاظ على كل مشترياته السابقة.");
+      setDeleting(null);
+    }, onError: (error) => toast.error((error as Error).message),
+  });
+  const Back = english ? ArrowLeft : ArrowRight;
+  return <main className="space-y-6" dir={english ? "ltr" : "rtl"}>
+    <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><div className="mb-1 flex items-center gap-2 text-sm text-muted-foreground"><Link to="/inventory" className="flex items-center gap-1 hover:text-foreground"><Back size={14}/>{english ? "Inventory" : "المخزون"}</Link><span>/</span><span>{english ? "Suppliers" : "الموردون"}</span></div><h1 className="text-2xl font-bold">{english ? "Supplier Accounts" : "حسابات الموردين"}</h1><p className="text-sm text-muted-foreground">{english ? "Canonical cloud purchases, payments and outstanding balances." : "المشتريات والدفعات والأرصدة الفعلية من قاعدة البيانات السحابية."}</p></div><div className="flex flex-wrap gap-2">{allowEdit && <ImportSuppliersFromExcelButton/>}{allowEdit && <Button onClick={() => { setEditing(null); setShowForm(true); }}><Plus size={17}/>{english ? "New supplier" : "مورد جديد"}</Button>}</div></header>
+    <section className="grid grid-cols-2 gap-3 lg:grid-cols-4"><StatCard title={english ? "Suppliers" : "عدد الموردين"} value={summary.data?.supplierCount || 0} icon={Building2} variant="info"/><StatCard title={english ? "Purchases" : "إجمالي المشتريات"} value={formatOMR(summary.data?.purchases || 0)} icon={Building2} variant="gold"/><StatCard title={english ? "Payments" : "إجمالي المدفوع"} value={formatOMR(summary.data?.payments || 0)} icon={Building2} variant="success"/><StatCard title={english ? "Outstanding" : "إجمالي المستحق"} value={formatOMR(summary.data?.outstanding || 0)} icon={Building2} variant="warning"/></section>
+    <Card><CardContent className="pt-4"><div className="relative max-w-xl"><Search size={16} className="absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground"/><Input className="ps-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={english ? "Search by supplier, phone or category…" : "بحث باسم المورد أو الهاتف أو التصنيف…"}/></div></CardContent></Card>
+    <Card><CardContent className="p-0">{directory.isLoading ? <div className="p-16 text-center">{english ? "Loading suppliers…" : "جاري تحميل الموردين…"}</div> : directory.isError ? <div className="p-12 text-center text-destructive">{(directory.error as Error).message}</div> : !directory.data?.rows.length ? <div className="p-16 text-center text-muted-foreground">{english ? "No suppliers found." : "لا يوجد موردون مطابقون."}</div> : <div className="overflow-x-auto"><Table className="min-w-[1050px]"><TableHeader><TableRow><TableHead>{english ? "Supplier" : "المورد"}</TableHead><TableHead>{english ? "Phone" : "الهاتف"}</TableHead><TableHead>{english ? "Tax No." : "الرقم الضريبي"}</TableHead><TableHead>{english ? "Category / Brands" : "التصنيف / الماركات"}</TableHead><TableHead>{english ? "Purchases" : "المشتريات"}</TableHead><TableHead>{english ? "Paid" : "المدفوع"}</TableHead><TableHead>{english ? "Outstanding" : "المستحق"}</TableHead><TableHead>{english ? "Actions" : "إجراءات"}</TableHead></TableRow></TableHeader><TableBody>{directory.data.rows.map((supplier) => <TableRow key={supplier.id}><TableCell><Link className="font-semibold text-primary hover:underline" to={`/inventory/suppliers/${supplier.id}`}>{supplier.name}</Link><p className="text-[10px] text-muted-foreground">{supplier.contact_person || supplier.email || "—"}</p></TableCell><TableCell dir="ltr">{supplier.phone || "—"}</TableCell><TableCell dir="ltr">{supplier.tax_number || "—"}</TableCell><TableCell><p className="text-xs">{supplier.category || "—"}</p><div className="mt-1 flex max-w-[260px] flex-wrap gap-1">{(supplier.vehicle_brands || []).slice(0, 5).map((brand) => <span key={brand} className="rounded-full border bg-primary/5 px-1.5 py-0.5 text-[10px]">{brand}</span>)}</div></TableCell><TableCell dir="ltr">{formatOMR(supplier.purchases)}</TableCell><TableCell dir="ltr" className="text-emerald-600">{formatOMR(supplier.payments)}</TableCell><TableCell dir="ltr" className={supplier.outstanding > 0 ? "font-bold text-destructive" : "text-emerald-600"}>{formatOMR(supplier.outstanding)}</TableCell><TableCell><div className="flex gap-1"><Button asChild size="icon" variant="ghost"><Link to={`/inventory/suppliers/${supplier.id}`} title={english ? "Open account" : "فتح الحساب"}><Eye size={15}/></Link></Button>{supplier.phone && <Button asChild size="icon" variant="ghost"><a href={`tel:${supplier.phone}`} title={english ? "Call" : "اتصال"}><Phone size={15}/></a></Button>}{allowEdit && <Button size="icon" variant="ghost" onClick={() => { setEditing(supplier); setShowForm(true); }}><Edit size={15}/></Button>}{allowDelete && <Button size="icon" variant="ghost" className="text-destructive" onClick={() => setDeleting(supplier)}><Trash2 size={15}/></Button>}</div></TableCell></TableRow>)}</TableBody></Table></div>}</CardContent></Card>
+    <div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">{english ? "Total" : "الإجمالي"}: {directory.data?.total || 0}</span><div className="flex items-center gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{english ? "Previous" : "السابق"}</Button><span dir="ltr">{page} / {directory.data?.totalPages || 1}</span><Button variant="outline" disabled={page >= (directory.data?.totalPages || 1)} onClick={() => setPage((value) => value + 1)}>{english ? "Next" : "التالي"}</Button></div></div>
+    <SupplierFormDialog open={showForm} onOpenChange={setShowForm} editing={editing}/>
+    <ConfirmDeleteDialog open={Boolean(deleting)} onOpenChange={(open) => !open && setDeleting(null)} onConfirm={() => deleting && deactivate.mutate(deleting.id)} title={english ? `Deactivate ${deleting?.name || ""}` : `تعطيل ${deleting?.name || ""}`} description={english ? "The supplier will be hidden, while purchases, payments and history remain unchanged." : "سيختفي المورد من القائمة مع بقاء جميع المشتريات والدفعات والسجل دون حذف."}/>
+  </main>;
 }

@@ -81,6 +81,7 @@ import { upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
 import { markClean, markDirty } from "@/lib/unsavedWork";
 import { ensureVehicleEntryForClaim, getVehicleEntryByClaimId } from "@/lib/vehicleEntryService";
 import { buildCancelledClaimVehicleHandoverHtml } from "@/lib/cancelledClaimVehicleHandover";
+import { cancelLatestFinalizedVehicleHandover } from "@/lib/vehicleDeliveryReceipt";
 
 
 const insuranceCompanies = [
@@ -1305,6 +1306,10 @@ export default function InsuranceClaimDetail() {
       toast.error("احفظ المطالبة أولاً قبل تغيير المرحلة");
       return;
     }
+    if (step.key === "delivered") {
+      toast.info("اعتماد التسليم يتم من قسم تسليم المركبة عبر نموذج الخروج وتوقيع المستلم");
+      return;
+    }
     setStageDialog({ key: step.key, label: step.label });
     setStageDate(dateOnly(new Date().toISOString()));
     setStageNote("");
@@ -1312,6 +1317,11 @@ export default function InsuranceClaimDetail() {
 
   const handleConfirmStageChange = async () => {
     if (!stageDialog || !id || isNew) return;
+    if (stageDialog.key === "delivered") {
+      toast.error("لا يمكن اعتماد التسليم من شريط المراحل. استخدم نموذج خروج وتسليم المركبة.");
+      setStageDialog(null);
+      return;
+    }
     const changedAt = stageDate || dateOnly(new Date().toISOString());
     const updates: Record<string, any> = {};
 
@@ -2056,6 +2066,14 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         (existing as any)?.job_order_id,
         (existing as any)?.auto_job_order_id,
       ].find((value) => value && isUuid(String(value))) || null;
+
+      // Preserve the finalized handover document as cancelled history before
+      // reopening the vehicle. The record is never deleted or overwritten.
+      await cancelLatestFinalizedVehicleHandover({
+        workOrderId: workOrderCloudId,
+        claimId: id,
+        reason,
+      });
 
       // Update the shared operational record first so the claim and its linked
       // work order observe the same delivery state.

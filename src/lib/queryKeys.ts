@@ -32,6 +32,12 @@ export const queryKeys = {
     byClaim: (claimId?: string | null) => ["vehicle_entries", "claim", claimId ?? ""] as const,
     media: (id?: string | null) => ["vehicle_entries", "media", id ?? ""] as const,
   },
+  vehicleHandovers: {
+    all: ["vehicle_handover_records"] as const,
+    byWorkOrder: (workOrderId?: string | null) => ["vehicle_handover_records", "work_order", workOrderId ?? ""] as const,
+    byClaim: (claimId?: string | null) => ["vehicle_handover_records", "claim", claimId ?? ""] as const,
+    byVehicle: (vehicleId?: string | null) => ["vehicle_handover_records", "vehicle", vehicleId ?? ""] as const,
+  },
   vehicleMedia: {
     avatar: (vehicleId?: string | null) => ["vehicle_media", "avatar", vehicleId ?? ""] as const,
     claim: (claimId?: string | null, workOrderId?: string | null, vehicleId?: string | null) =>
@@ -78,6 +84,12 @@ export const queryKeys = {
     workOrders: (search?: string) => ["expense_management", "work_orders", search ?? ""] as const,
     suppliers: (search?: string) => ["expense_management", "suppliers", search ?? ""] as const,
     costCenters: ["expense_management", "cost_centers"] as const,
+  },
+  suppliers: {
+    all: ["suppliers"] as const,
+    list: (filters?: unknown) => ["suppliers", "list", filters ?? ""] as const,
+    summary: (tenantId?: string | null) => ["suppliers", "summary", tenantId ?? ""] as const,
+    detail: (supplierId?: string | null, filters?: unknown) => ["suppliers", "detail", supplierId ?? "", filters ?? ""] as const,
   },
   reportCenter: {
     all: ["report_center"] as const,

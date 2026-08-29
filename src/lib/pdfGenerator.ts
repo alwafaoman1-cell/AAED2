@@ -2124,8 +2124,11 @@ export interface VehicleDeliveryReceiptData {
   customerName: string;
   customerPhone?: string;
   customerIdNumber?: string;
+  recipientType?: string;
   receiverName?: string;
+  receiverPhone?: string;
   receiverIdNumber?: string;
+  receiverRelationship?: string;
   vehicleType: string;
   model?: string;
   year?: number | string;
@@ -2133,16 +2136,30 @@ export interface VehicleDeliveryReceiptData {
   vin?: string;
   color?: string;
   mileageOut?: string;
+  vehicleCondition?: string;
+  workshopRepresentative?: string;
   workSummary?: string;
   partsReplaced?: string;
   warrantyNotes?: string;
   satisfactionNotes?: string;
+  declarationAr?: string;
+  declarationEn?: string;
+  deliveryPhotoUrls?: string[];
   signatureDataUrl?: string;
   idPhotoDataUrl?: string;
 }
 
 export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData): string {
   const s = getTemplateSettings();
+  const recipientLabels: Record<string, string> = {
+    customer: "العميل / Customer",
+    owner: "المالك / Owner",
+    representative: "مندوب عن العميل / Representative",
+    driver: "سائق / Driver",
+    tow_truck: "سائق رافعة / Tow-truck Driver",
+    insurance_representative: "مندوب التأمين / Insurance Representative",
+  };
+  const recipientType = recipientLabels[data.recipientType || "customer"] || data.recipientType || "العميل / Customer";
   const deliveryCompactStyles = `
     <style>
       .vehicle-delivery-page{padding:9mm 11mm 13mm!important;font-size:8.5px!important;line-height:1.28!important}
@@ -2159,14 +2176,12 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
     </style>`;
   const body = `${deliveryCompactStyles}<div class="page vehicle-delivery-page">
     ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
-    ${headerHtml(s, 'إقرار استلام سيارة', 'VEHICLE DELIVERY RECEIPT', data.receiptNumber, data.date, 'background:linear-gradient(135deg,#059669,#047857);')}
+    ${headerHtml(s, 'نموذج خروج وتسليم المركبة', 'VEHICLE EXIT & HANDOVER FORM', data.receiptNumber, data.date, 'background:linear-gradient(135deg,#059669,#047857);')}
 
     <div style="background:#f0fdf4;border:1.5px solid #10b981;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:9px;line-height:1.45;">
-      <strong style="color:#047857;">إقرار استلام:</strong>
-      أقرّ أنا الموقّع أدناه بأنني استلمت سيارتي الموصوفة بياناتها أدناه من
-      <strong>${s.companyName}</strong> بحالة جيدة وسليمة وقمت بمعاينتها معاينة كاملة،
-      وأنه تم تنفيذ الأعمال المطلوبة على أكمل وجه، ولا يحق لي مطالبة الورشة بأي مطالبات لاحقة بخصوص الأعمال المنفذة
-      عدا ما هو مشمول بالضمان الموضح أدناه.
+      <strong style="color:#047857;">إقرار الخروج والاستلام:</strong>
+      ${data.declarationAr || 'أقرّ أنا الموقّع أدناه بأنني عاينت المركبة واستلمتها من الورشة بالحالة الموضحة.'}
+      <br/><span dir="ltr" style="display:block;text-align:left;color:#334155;margin-top:2px;">${data.declarationEn || ''}</span>
       ${data.workOrderNumber ? `<br/>أمر العمل المرجعي: <strong>${data.workOrderNumber}</strong>` : ''}
     </div>
 
@@ -2178,16 +2193,20 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
       <div class="info-row">${lbl('رقم الهيكل:', 'VIN')}<span class="value">${data.vin || '-'}</span></div>
       <div class="info-row">${lbl('اللون:', 'Color')}<span class="value">${data.color || '-'}</span></div>
       <div class="info-row">${lbl('قراءة العداد عند التسليم:', 'Mileage Out')}<span class="value">${data.mileageOut || '-'}</span></div>
+      <div class="info-row">${lbl('حالة المركبة عند الخروج:', 'Exit Condition')}<span class="value">${data.vehicleCondition || 'تمت المعاينة / Inspected'}</span></div>
     </div>
 
-    ${sectionTitle('بيانات العميل/المستلم', 'Customer / Receiver')}
+    ${sectionTitle('بيانات المستلم وعملية الخروج', 'Recipient & Exit Details')}
     <div class="info-grid">
       <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${data.customerName}</span></div>
       <div class="info-row">${lbl('هاتف العميل:', 'Phone')}<span class="value">${data.customerPhone || '-'}</span></div>
-      <div class="info-row">${lbl('رقم هوية العميل:', 'Customer ID Number')}<span class="value">${data.customerIdNumber || '-'}</span></div>
+      <div class="info-row">${lbl('صفة المستلم:', 'Recipient Type')}<span class="value">${recipientType}</span></div>
       <div class="info-row">${lbl('اسم المستلم:', 'Receiver')}<span class="value">${data.receiverName || data.customerName}</span></div>
+      <div class="info-row">${lbl('هاتف المستلم:', 'Receiver Phone')}<span class="value">${data.receiverPhone || data.customerPhone || '-'}</span></div>
       <div class="info-row">${lbl('رقم هوية المستلم:', 'Receiver ID')}<span class="value">${data.receiverIdNumber || '-'}</span></div>
+      <div class="info-row">${lbl('العلاقة/الصفة:', 'Relationship')}<span class="value">${data.receiverRelationship || '-'}</span></div>
       <div class="info-row">${lbl('تاريخ التسليم:', 'Delivery Date')}<span class="value">${data.date}</span></div>
+      <div class="info-row">${lbl('موظف الخروج:', 'Workshop Representative')}<span class="value">${data.workshopRepresentative || '-'}</span></div>
     </div>
 
     ${data.workSummary ? `${sectionTitle('ملخص الأعمال المنفذة', 'Work Summary')}
@@ -2208,6 +2227,13 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
       </div>
     ` : ''}
 
+    ${(data.deliveryPhotoUrls || []).length ? `
+      ${sectionTitle('صور المركبة عند الخروج', 'Vehicle Photos at Exit')}
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:5px 0;break-inside:avoid;page-break-inside:avoid;">
+        ${(data.deliveryPhotoUrls || []).slice(0, 4).map((url) => `<img src="${url}" alt="exit" style="width:100%;height:58px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;"/>`).join('')}
+      </div>
+    ` : ''}
+
     <div style="margin-top:14px;display:flex;justify-content:space-between;gap:14px;break-inside:avoid;page-break-inside:avoid;">
       <div style="text-align:center;flex:1;">
         ${data.signatureDataUrl ? `<img src="${data.signatureDataUrl}" alt="sig" style="max-height:32px;display:block;margin:0 auto 3px;" />` : ''}
@@ -2217,7 +2243,7 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
       </div>
       <div style="text-align:center;flex:1;">
         <div style="border-top:1px solid #444;padding-top:4px;font-size:8.5px;color:#444;font-weight:600;margin-top:16px;">
-          مندوب الورشة<br/><span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;">Workshop Representative</span>
+          ${data.workshopRepresentative || 'مندوب الورشة'}<br/><span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;">Workshop Representative</span>
         </div>
       </div>
     </div>
@@ -2225,5 +2251,5 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
     ${stampSignatureHtml(s, "voucher")}
     ${footerHtml(s)}
   </div>`;
-  return wrapHtml(`Delivery Receipt ${data.receiptNumber}`, getBaseStyles(s), body);
+  return wrapHtml(`Vehicle Handover ${data.receiptNumber}`, getBaseStyles(s), body);
 }

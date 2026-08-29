@@ -68,6 +68,7 @@ const CashboxTopup = lazy(() => import("./pages/accounting/CashboxTopup"));
 const Inventory = lazy(() => import("./pages/Inventory"));
 const PurchaseInvoices = lazy(() => import("./pages/purchases/PurchaseInvoices"));
 const Suppliers = lazy(() => import("./pages/purchases/Suppliers"));
+const SupplierDetailPage = lazy(() => import("./pages/purchases/SupplierDetailPage"));
 const SupplierPayments = lazy(() => import("./pages/purchases/SupplierPayments"));
 const PurchaseReturns = lazy(() => import("./pages/purchases/PurchaseReturns"));
 const SupplierBalanceReport = lazy(() => import("./pages/purchases/SupplierBalanceReport"));
@@ -186,6 +187,7 @@ const JournalEntryDetailPage = accountingReportsPage("JournalEntryDetailPage");
 const GeneralLedgerAccountPage = accountingReportsPage("GeneralLedgerAccountPage");
 const VehicleProfitLossDetailPage = accountingReportsPage("VehicleProfitLossDetailPage");
 const MonthlyVehicleProfitabilityPage = lazy(() => import("./pages/accounting/reports/MonthlyVehicleProfitabilityPage"));
+const MonthlyExpensesReportPage = lazy(() => import("./pages/accounting/reports/MonthlyExpensesReportPage"));
 
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
 import { useAutoTranslate } from "@/i18n/autoTranslate";
@@ -383,12 +385,14 @@ const App = () => (
               <Route path="/accounting/reports/vehicle-profit-loss" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><AccountingReportPage reportKey="vehicle-profit-loss" /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/vehicle-profit-loss/:operationId" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><VehicleProfitLossDetailPage /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/monthly-vehicle-profitability" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><MonthlyVehicleProfitabilityPage /></AccountingReportsRouteGuard>} />
+              <Route path="/accounting/reports/monthly-expenses" element={<AccountingReportsRouteGuard permission="accounting_reports.vehicle_profit_loss"><MonthlyExpensesReportPage /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/cost-centers" element={<AccountingReportsRouteGuard permission="accounting_reports.cost_centers"><AccountingReportPage reportKey="cost-centers" /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/audit-exceptions" element={<AccountingReportsRouteGuard permission="accounting_reports.audit"><AccountingReportPage reportKey="audit-exceptions" /></AccountingReportsRouteGuard>} />
               <Route path="/accounting/reports/unposted-documents" element={<AccountingReportsRouteGuard permission="accounting_reports.audit"><AccountingReportPage reportKey="unposted-documents" /></AccountingReportsRouteGuard>} />
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/inventory/purchase-invoices" element={<PurchaseInvoices />} />
               <Route path="/inventory/suppliers" element={<Suppliers />} />
+              <Route path="/inventory/suppliers/:supplierId" element={<SupplierDetailPage />} />
               <Route path="/inventory/supplier-payments" element={<SupplierPayments />} />
               <Route path="/inventory/purchase-returns" element={<PurchaseReturns />} />
               <Route path="/inventory/supplier-balance" element={<SupplierBalanceReport />} />

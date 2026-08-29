@@ -118,17 +118,10 @@ export async function bulkUpdateStatus(
   status: "pending" | "approved" | "rejected" | "paid" | "cancelled" | "delivered",
 ): Promise<{ updated: number; errors: number }> {
   const now = new Date().toISOString();
-  // Pseudo-status "delivered" → set delivered_at while keeping main status as approved
+  // Delivery requires one signed handover record per vehicle and cannot be a bulk action.
   if (status === "delivered") {
-    const { error, count } = await supabase
-      .from("insurance_claims" as any)
-      .update({ delivered_at: now, updated_at: now }, { count: "exact" })
-      .in("id", claimIds);
-    if (error) {
-      toast.error(error.message);
-      return { updated: 0, errors: claimIds.length };
-    }
-    return { updated: count ?? claimIds.length, errors: 0 };
+    toast.error("تسليم المركبة يتطلب نموذج خروج وتوقيعًا مستقلًا لكل مطالبة");
+    return { updated: 0, errors: claimIds.length };
   }
 
   const updates: any = { status };

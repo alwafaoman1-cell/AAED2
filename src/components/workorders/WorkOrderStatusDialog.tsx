@@ -15,6 +15,7 @@ interface Props {
   onOpenChange: (o: boolean) => void;
   cloudJobOrderId?: string | null;
   onUpdated?: () => void;
+  onRequestHandover?: () => void;
 }
 
 const statusColor: Record<string, string> = {
@@ -100,7 +101,7 @@ function defaultMessage(status: string, customer: string, orderNo: string): stri
   return greet + (map[status] || `تم تحديث حالة أمر العمل إلى: ${status}`) + tail;
 }
 
-export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloudJobOrderId, onUpdated }: Props) {
+export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloudJobOrderId, onUpdated, onRequestHandover }: Props) {
   const [selected, setSelected] = useState<string>(order?.status || "");
   const [message, setMessage] = useState("");
   const [pendingPhotos, setPendingPhotos] = useState<StagePhoto[]>([]);
@@ -183,6 +184,18 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   }
 
   async function persist(): Promise<boolean> {
+    const targetStatus = normalizeWorkOrderStatus(selected);
+    if (
+      statusChanged
+      && (targetStatus === "تم التسليم" || targetStatus === "مغلق")
+      && normalizedOrderStatus !== "تم التسليم"
+      && normalizedOrderStatus !== "مغلق"
+    ) {
+      toast.error("اعتماد التسليم يتم فقط من نموذج خروج وتسليم المركبة مع توقيع المستلم");
+      onOpenChange(false);
+      onRequestHandover?.();
+      return false;
+    }
     const patch: Partial<WorkOrder> = {};
     if (statusChanged) patch.status = normalizeWorkOrderStatus(selected);
     if (requiresClosingReview) {
@@ -268,7 +281,15 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
                   <button
                     key={s}
                     type="button"
-                    onClick={() => setSelected(s)}
+                    onClick={() => {
+                      if ((s === "تم التسليم" || s === "مغلق") && normalizedOrderStatus !== "تم التسليم" && normalizedOrderStatus !== "مغلق") {
+                        toast.info("استخدم نموذج خروج وتسليم المركبة لاعتماد الحالة النهائية");
+                        onOpenChange(false);
+                        onRequestHandover?.();
+                        return;
+                      }
+                      setSelected(s);
+                    }}
                     className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg border transition-all text-right ${
                       isSelected
                         ? `${getStatusColor(s)} ring-2 ring-primary/40`

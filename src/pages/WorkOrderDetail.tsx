@@ -1025,7 +1025,7 @@ export default function WorkOrderDetail() {
               onClick={() => setDeliveryReceiptOpen(true)}
               className="h-9 gap-1.5 border-success/40 text-success hover:bg-success/10"
             >
-              <FileText size={14} /> إقرار استلام
+              <FileText size={14} /> خروج وتسليم المركبة
             </Button>
 
             <Button
@@ -1593,7 +1593,13 @@ export default function WorkOrderDetail() {
         </DialogContent>
       </Dialog>
 
-      <WorkOrderStatusDialog order={statusOpen ? order : null} open={statusOpen} onOpenChange={setStatusOpen} cloudJobOrderId={cloudJobOrderId} />
+      <WorkOrderStatusDialog
+        order={statusOpen ? order : null}
+        open={statusOpen}
+        onOpenChange={setStatusOpen}
+        cloudJobOrderId={cloudJobOrderId}
+        onRequestHandover={() => setDeliveryReceiptOpen(true)}
+      />
       <StagePhotosDialog
         orderId={photosOpen ? order.id : null}
         open={photosOpen}
@@ -1649,6 +1655,12 @@ export default function WorkOrderDetail() {
         open={deliveryReceiptOpen}
         onOpenChange={setDeliveryReceiptOpen}
         order={order}
+        onFinalized={() => {
+          setDeliveryReceiptOpen(false);
+          void fetchWorkOrderFromCloudByIdentifier(id).then((fresh) => {
+            if (fresh) setOrder(fresh);
+          });
+        }}
       />
       <WorkOrderExpenseDialog
         order={editingExpense ? order : null}

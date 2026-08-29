@@ -6,6 +6,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8"
 
 describe("insurance payment SSOT and monthly collection contract", () => {
   const migration = read("supabase/migrations/20260826100000_insurance_payment_ssot_and_monthly_collection.sql");
+  const verifiedPaymentMigration = read("supabase/migrations/20260827100000_verified_payment_date_monthly_reporting.sql");
   const monthly = read("supabase/migrations/20260813100000_monthly_vehicle_profitability_report.sql");
   const editor = read("src/components/insurance/EditInsuranceInvoiceDialog.tsx");
   const accounting = read("src/pages/insurance/InsuranceAccounting.tsx");
@@ -48,5 +49,21 @@ describe("insurance payment SSOT and monthly collection contract", () => {
     expect(monthly).toContain("reports_payment_facts_v1");
     expect(monthly).toContain("p.business_type = p_business_type");
     expect(payments).toContain("queryKeys.monthlyVehicleProfitability.all");
+  });
+
+  it("does not treat inferred legacy amounts as real monthly collection", () => {
+    expect(verifiedPaymentMigration).toContain("status = 'pending'::public.claim_payment_status");
+    expect(verifiedPaymentMigration).toContain("not like 'LEGACY-PAID:%'");
+    expect(verifiedPaymentMigration).toContain("LEGACY_INFERRED_PAYMENT_REQUIRES_REAL_VOUCHER");
+    expect(verifiedPaymentMigration).not.toContain("delete from public.claim_payments");
+  });
+
+  it("keeps linked invoice references visible without moving invoice revenue between months", () => {
+    expect(verifiedPaymentMigration).toContain("monthly_vehicle_profitability_v2_rpc");
+    expect(verifiedPaymentMigration).toContain("monthly_vehicle_profitability_rpc(");
+    expect(verifiedPaymentMigration).toContain("invoice_numbers");
+    expect(verifiedPaymentMigration).toContain("invoice_dates");
+    expect(read("src/lib/accounting/monthlyVehicleProfitability.ts"))
+      .toContain('monthly_vehicle_profitability_v2_rpc');
   });
 });

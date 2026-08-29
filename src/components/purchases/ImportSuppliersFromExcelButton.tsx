@@ -3,7 +3,10 @@ import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, Download } from "lucide-react";
 import { toast } from "sonner";
-import { suppliersStore, type Supplier } from "@/lib/suppliersStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/queryKeys";
+import { importSupplierRows, type CloudSupplier } from "@/lib/purchases/supplierAccountService";
 
 /**
  * استيراد قائمة موردين من ملف Excel / CSV.
@@ -22,6 +25,8 @@ import { suppliersStore, type Supplier } from "@/lib/suppliersStore";
  */
 export default function ImportSuppliersFromExcelButton() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const { profile } = useAuth();
+  const queryClient = useQueryClient();
 
   function pick() { inputRef.current?.click(); }
 
@@ -80,54 +85,30 @@ export default function ImportSuppliersFromExcelButton() {
       const brandsKeys = ["ماركاتالسيارات","الماركات","السيارات","ماركات","brands","vehicles","vehiclebrands","makes","cars"];
       const notesKeys = ["ملاحظات","ملاحظة","notes","note","remarks"];
 
-      const existing = suppliersStore.getAll();
-      const existingByName = new Map(existing.map((s) => [s.name.trim().toLowerCase(), s]));
-      let added = 0;
-      let updated = 0;
-      const startIdx = existing.length + 1;
-      let counter = 0;
+      if (!profile?.tenant_id) throw new Error("تعذر تحديد المؤسسة");
+      const parsed: Array<Partial<CloudSupplier> & { name: string }> = [];
 
       for (const r of rows) {
         const name = pickField(r, nameKeys);
         if (!name) continue;
-        const patch: Partial<Supplier> = {
+        const patch: Partial<CloudSupplier> & { name: string } = {
           name: String(name).trim(),
           phone: String(pickField(r, phoneKeys) ?? "").trim(),
           email: String(pickField(r, emailKeys) ?? "").trim() || undefined,
           address: String(pickField(r, addrKeys) ?? "").trim() || undefined,
-          taxNumber: String(pickField(r, taxKeys) ?? "").trim() || undefined,
+          tax_number: String(pickField(r, taxKeys) ?? "").trim() || undefined,
           category: String(pickField(r, catKeys) ?? "").trim() || undefined,
-          vehicleBrands: splitBrands(pickField(r, brandsKeys)),
+          vehicle_brands: splitBrands(pickField(r, brandsKeys)),
           notes: String(pickField(r, notesKeys) ?? "").trim() || undefined,
         };
-
-        const hit = existingByName.get(patch.name!.toLowerCase());
-        if (hit) {
-          suppliersStore.update(hit.id, patch);
-          updated++;
-        } else {
-          counter++;
-          const id = `SUP-${String(startIdx + counter).padStart(3, "0")}`;
-          suppliersStore.add({
-            id,
-            name: patch.name!,
-            phone: patch.phone || "",
-            email: patch.email,
-            address: patch.address,
-            taxNumber: patch.taxNumber,
-            category: patch.category,
-            vehicleBrands: patch.vehicleBrands,
-            notes: patch.notes,
-            createdAt: new Date().toISOString(),
-          });
-          added++;
-        }
+        parsed.push(patch);
       }
-
+      const { added, updated } = await importSupplierRows(profile.tenant_id, parsed);
       if (!added && !updated) {
         toast.error("لم يتم العثور على موردين صالحين (تأكد من وجود عمود الاسم)");
         return;
       }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.suppliers.all });
       toast.success(`تم استيراد ${added} مورد جديد${updated ? ` وتحديث ${updated}` : ""}`);
     } catch (err: any) {
       console.error(err);

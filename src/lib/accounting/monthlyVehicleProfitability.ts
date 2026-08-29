@@ -48,7 +48,7 @@ export async function fetchMonthlyVehicleProfitability(
   filters: MonthlyVehicleProfitabilityFilters,
   signal?: AbortSignal,
 ): Promise<MonthlyVehicleProfitabilityResult> {
-  const result = await supabase.rpc("monthly_vehicle_profitability_rpc" as never, {
+  const result = await supabase.rpc("monthly_vehicle_profitability_v2_rpc" as never, {
     p_from: filters.from,
     p_to: filters.to,
     p_business_type: filters.businessType,
