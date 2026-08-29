@@ -38,6 +38,23 @@ describe("vehicle delivery receipt persistence contract", () => {
     expect(migration).not.toContain("delete from public.vehicle_handover_records");
   });
 
+  it("removes direct delete and sequence write privileges from application roles", () => {
+    const hardening = read("supabase/migrations/20260829103000_vehicle_handover_privilege_hardening.sql");
+
+    expect(hardening).toContain(
+      "revoke all on table public.vehicle_handover_records from anon, authenticated",
+    );
+    expect(hardening).toContain(
+      "grant select, insert, update on table public.vehicle_handover_records to authenticated",
+    );
+    expect(hardening).toContain(
+      "revoke all on table public.vehicle_handover_sequences from anon, authenticated",
+    );
+    expect(hardening).toContain(
+      "grant select on table public.vehicle_handover_sequences to authenticated",
+    );
+  });
+
   it("prevents the old status controls from bypassing the signed handover", () => {
     const statusDialog = read("src/components/workorders/WorkOrderStatusDialog.tsx");
     const claimDetail = read("src/pages/insurance/InsuranceClaimDetail.tsx");
