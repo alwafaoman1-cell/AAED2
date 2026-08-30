@@ -206,14 +206,15 @@ export async function saveVehicleDeliveryReceiptDraft(
     updated_by: authData.user?.id || null,
   };
 
-  const existingId = draft.recordId || (await supabase
+  const existingDraftRow = draft.recordId ? null : await supabase
     .from("vehicle_handover_records" as any)
     .select("id")
     .eq("tenant_id", row.tenant_id)
     .eq("work_order_id", row.id)
     .eq("status", "draft")
     .limit(1)
-    .maybeSingle()).data?.id;
+    .maybeSingle();
+  const existingId = draft.recordId || (existingDraftRow?.data as any)?.id;
 
   const handover = existingId
     ? await supabase.from("vehicle_handover_records" as any).update(payload).eq("id", existingId).eq("status", "draft").select("*").single()

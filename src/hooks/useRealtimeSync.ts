@@ -2,23 +2,26 @@ import { useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 const TABLES_TO_KEYS: Record<string, string[]> = {
-  insurance_claims: ["insurance_claims", "insurance_invoices", "work_order_financials"],
-  insurance_invoices: ["insurance_invoices", "work_order_financials"],
-  job_orders: ["job_orders", "insurance_claims", "invoices", "work_order_financials"],
+  insurance_claims: ["insurance_claims", "insurance_invoices", "work_order_financials", "vehicle_360"],
+  insurance_invoices: ["insurance_invoices", "work_order_financials", "vehicle_360"],
+  job_orders: ["job_orders", "insurance_claims", "invoices", "work_order_financials", "vehicle_360"],
   invoices: ["invoices"],
-  claim_payments: ["claim_payments", "insurance_claims", "work_order_financials"],
+  claim_payments: ["claim_payments", "insurance_claims", "work_order_financials", "vehicle_360"],
   customers: ["customers"],
-  vehicles: ["vehicles", "customers"],
-  vehicle_media: ["vehicle_media", "vehicles"],
+  vehicles: ["vehicles", "customers", "vehicle_360"],
+  vehicle_media: ["vehicle_media", "vehicles", "vehicle_360"],
+  vehicle_entries: ["vehicle_entries", "vehicle_360"],
+  vehicle_handover_records: ["vehicle_handover_records", "vehicle_360"],
   inventory: ["inventory"],
-  job_order_parts: ["job_order_parts", "inventory", "job_orders"],
+  job_order_parts: ["job_order_parts", "inventory", "job_orders", "vehicle_360"],
   insurance_companies: ["insurance_companies"],
   daily_tasks: ["daily_tasks"],
   sms_logs: ["sms_logs"],
   tenant_sms_settings: ["tenant_sms_settings"],
-  claim_audit_logs: ["claim_audit_logs", "insurance_claims"],
+  claim_audit_logs: ["claim_audit_logs", "insurance_claims", "vehicle_360"],
   inspections: ["inspections"],
   damage_markers: ["damage_markers", "inspections"],
   job_order_logs: ["job_order_logs", "job_orders"],
@@ -26,9 +29,9 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   profiles: ["profiles"],
   vehicle_makes: ["vehicle_makes"],
   vehicle_models: ["vehicle_models"],
-  expenses: ["expenses", "journal_entries"],
-  sales_documents: ["sales_documents", "invoices", "work_order_financials"],
-  sales_payments: ["sales_payments", "sales_documents", "work_order_financials"],
+  expenses: ["expenses", "journal_entries", "vehicle_360"],
+  sales_documents: ["sales_documents", "invoices", "work_order_financials", "vehicle_360"],
+  sales_payments: ["sales_payments", "sales_documents", "work_order_financials", "vehicle_360"],
   journal_entries: ["journal_entries"],
   journal_lines: ["journal_lines", "journal_entries"],
 };
@@ -75,8 +78,13 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
     tables: ["insurance_claims"],
   },
   {
-    scope: "vehicles",
-    test: (path) => path.startsWith("/vehicles"),
+    scope: "vehicle_detail",
+    test: (path) => /^\/vehicles\/[^/]+/.test(path),
+    tables: ["vehicles", "vehicle_media", "vehicle_entries", "vehicle_handover_records", "job_orders", "job_order_parts", "insurance_claims", "claim_audit_logs", "insurance_invoices", "claim_payments", "expenses", "sales_documents", "sales_payments"],
+  },
+  {
+    scope: "vehicles_list",
+    test: (path) => path === "/vehicles",
     tables: ["vehicles", "vehicle_media"],
   },
   {
@@ -102,6 +110,7 @@ function getRealtimeScope(pathname: string) {
 
 export function useRealtimeSync() {
   const qc = useQueryClient();
+  const { profile } = useAuth();
   const { pathname } = useLocation();
   const realtimeScope = useMemo(() => getRealtimeScope(pathname), [pathname]);
 
@@ -152,7 +161,12 @@ export function useRealtimeSync() {
     for (const table of realtimeScope.tables) {
       const keys = TABLES_TO_KEYS[table];
       if (!keys) continue;
-      channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, (payload) => {
+      channel = channel.on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table,
+        ...(profile?.tenant_id ? { filter: `tenant_id=eq.${profile.tenant_id}` } : {}),
+      }, (payload) => {
         // Work-order screens still consume the compatibility store. Apply the
         // changed row directly so another device is reflected immediately;
         // query invalidation alone does not update that store.
@@ -185,5 +199,5 @@ export function useRealtimeSync() {
       }
       void supabase.removeChannel(channel);
     };
-  }, [qc, realtimeScope]);
+  }, [profile?.tenant_id, qc, realtimeScope]);
 }
