@@ -184,8 +184,11 @@ export async function fetchVehicle360Snapshot(tenantId: string, vehicleId: strin
     rows((supabase.from("expenses") as any).select("id,voucher_number,date,created_at,updated_at,status,expense_type,expense_scope,work_order_channel,description,category_name,total,amount,vat_amount,vehicle_id,linked_vehicle_plate,work_order_id,linked_work_order_id,claim_id,supplier_id,archived_at,deleted_at").eq("tenant_id", tenantId).eq("vehicle_id", vehicleId)),
     rows((supabase.from("vehicle_media") as any).select("id,media_type,category,caption,file_name,public_url,storage_bucket,storage_path,stage,source,vehicle_id,work_order_id,claim_id,vehicle_entry_id,uploaded_at,created_at,deleted_at").eq("tenant_id", tenantId).eq("vehicle_id", vehicleId).is("deleted_at", null).order("uploaded_at", { ascending: false })),
     rows((supabase.from("claim_audit_logs") as any).select("id,claim_id,vehicle_id,action,category,details,user_id,created_at").eq("tenant_id", tenantId).eq("vehicle_id", vehicleId).order("created_at", { ascending: false }).limit(250)),
-    (supabase.from("public_tracking_logs" as any) as any).select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("vehicle_id", vehicleId).eq("result", "success"),
-    (supabase.from("public_tracking_logs" as any) as any).select("opened_at").eq("tenant_id", tenantId).eq("vehicle_id", vehicleId).eq("result", "success").order("opened_at", { ascending: false }).limit(1).maybeSingle(),
+    // public_tracking_logs intentionally has no tenant_id column. The vehicle
+    // UUID is the scoped reference exposed by its RLS policy, so adding a
+    // tenant filter here causes a Production HTTP 400 and aborts the snapshot.
+    (supabase.from("public_tracking_logs" as any) as any).select("id", { count: "exact", head: true }).eq("vehicle_id", vehicleId).eq("result", "success"),
+    (supabase.from("public_tracking_logs" as any) as any).select("opened_at").eq("vehicle_id", vehicleId).eq("result", "success").order("opened_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
 
   if (trackingCount.error && !/public_tracking_logs|schema cache|relation/i.test(String(trackingCount.error.message || ""))) throw trackingCount.error;

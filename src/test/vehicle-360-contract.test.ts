@@ -24,6 +24,7 @@ describe("vehicle 360 cloud record", () => {
     ]) expect(service).toContain(`from("${table}`);
     expect(service).toContain('.eq("tenant_id", tenantId)');
     expect(service).toContain('.eq("vehicle_id", vehicleId)');
+    expect(service).not.toContain('from("public_tracking_logs" as any) as any).select("id", { count: "exact", head: true }).eq("tenant_id"');
   });
 
   it("keeps the vehicle route on one tenant-filtered realtime channel", () => {
