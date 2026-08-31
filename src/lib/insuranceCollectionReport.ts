@@ -198,7 +198,6 @@ export function filterInsuranceCollectionRows(
     case "pending_collection":
       return rows.filter((row) => (
         row.invoiceId !== null
-        && row.deliveredAt !== "—"
         && row.remainingAmount > 0.001
         && (row.collectionStatus === "غير مدفوع" || row.collectionStatus === "مدفوع جزئيًا")
       ));

@@ -31,7 +31,7 @@ const row = (index: number, patch: Partial<InsuranceCollectionRow> = {}): Insura
 });
 
 describe("insurance company report SSOT", () => {
-  it("keeps only delivered, invoiced, outstanding rows in pending collection", () => {
+  it("keeps every invoiced outstanding row in pending collection regardless of delivery", () => {
     const rows = [
       row(1),
       row(2, { paidAmount: 50, remainingAmount: 55, collectionStatus: "مدفوع جزئيًا" }),
@@ -47,7 +47,7 @@ describe("insurance company report SSOT", () => {
 
     const pending = filterInsuranceCollectionRows(rows, "pending_collection");
     expect(rows).toHaveLength(11);
-    expect(pending.map((item) => item.claimId)).toEqual(["claim-1", "claim-2", "claim-3"]);
+    expect(pending.map((item) => item.claimId)).toEqual(["claim-1", "claim-2", "claim-3", "claim-5"]);
   });
 
   it("uses the same filtered rows for the button, preview and Excel export", () => {
