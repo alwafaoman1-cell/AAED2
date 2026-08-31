@@ -25,7 +25,12 @@ import JournalPreview, { entryToPreviewLine } from "@/components/accounting/Jour
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import InsuranceEmployeesManager from "@/components/insurance/InsuranceEmployeesManager";
 import { calculateVatExclusive } from "@/lib/money";
-import { buildInsuranceCollectionRows, exportInsuranceCollectionRowsToXlsx } from "@/lib/insuranceCollectionReport";
+import {
+  buildInsuranceCollectionRows,
+  exportInsuranceCollectionRowsToXlsx,
+  filterInsuranceCollectionRows,
+  type InsuranceCollectionReportFilter,
+} from "@/lib/insuranceCollectionReport";
 import { toast } from "sonner";
 
 const CLAIM_STATUS_AR: Record<string, string> = {
@@ -159,8 +164,7 @@ export default function InsuranceCompanyDetail() {
   // ── فترة من/إلى + فلتر الحالة المتقدّم ──
   const [periodFrom, setPeriodFrom] = useState<string>("");
   const [periodTo, setPeriodTo] = useState<string>("");
-  type ReportFilter = "all" | "in_garage" | "delivered" | "paid" | "pending_collection" | "overdue";
-  const [reportFilter, setReportFilter] = useState<ReportFilter>("all");
+  const [reportFilter, setReportFilter] = useState<InsuranceCollectionReportFilter>("all");
 
   const inRange = (iso: string) => {
     const t = new Date(iso).getTime();
@@ -196,43 +200,34 @@ export default function InsuranceCompanyDetail() {
   const [workshopPickerOpen, setWorkshopPickerOpen] = useState(false);
   const [reportColumns, setReportColumns] = useState<Record<WorkshopColumnKey, boolean>>(DEFAULT_WORKSHOP_COLUMNS);
 
-  const filteredClaims = useMemo(
-    () => claims.filter((c) => inRange(c.approved_at ?? c.created_at)),
-    [claims, periodFrom, periodTo],
-  );
-
-  // المطالبات بعد تطبيق فلتر التقرير المتقدّم (يستخدم لتقرير عمليات الورشة فقط).
-  const reportClaims = useMemo(() => {
-    return filteredClaims.filter((c) => {
-      const delivered = (c as any).delivered_at ?? null;
-      const cPays = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
-      const paid = cPays.reduce((s, p) => s + Number(p.amount), 0);
-      const approved = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
-      const remaining = approved - paid;
-      const startMs = new Date(c.created_at).getTime();
-      const endMs = delivered ? new Date(delivered).getTime() : Date.now();
-      const days = Math.max(0, Math.round((endMs - startMs) / 86_400_000));
-      switch (reportFilter) {
-        case "in_garage":           return !delivered;
-        case "delivered":           return !!delivered;
-        case "paid":                return approved > 0 && remaining <= 0.01;
-        case "pending_collection":  return !!delivered && remaining > 0.01;
-        case "overdue":             return days > 30 && remaining > 0.01;
-        default: return true;
-      }
-    });
-  }, [filteredClaims, accountingPayments, reportFilter]);
-
-  const collectionExportRows = useMemo(() => buildInsuranceCollectionRows({
-    claims: reportClaims,
+  const allCollectionRows = useMemo(() => buildInsuranceCollectionRows({
+    claims,
     invoices: companyInvoices,
     payments: accountingPayments,
     companyId: company?.id,
     companyName: company?.name,
     periodFrom: periodFrom || undefined,
     periodTo: periodTo || undefined,
-    pendingCollectionOnly: reportFilter === "pending_collection",
-  }), [reportClaims, companyInvoices, accountingPayments, company, periodFrom, periodTo, reportFilter]);
+    pendingCollectionOnly: false,
+  }), [claims, companyInvoices, accountingPayments, company, periodFrom, periodTo]);
+
+  // SSOT: the button count, workshop preview and Excel export use these exact rows.
+  const collectionExportRows = useMemo(
+    () => filterInsuranceCollectionRows(allCollectionRows, reportFilter),
+    [allCollectionRows, reportFilter],
+  );
+  const reportClaimIds = useMemo(
+    () => new Set(collectionExportRows.map((row) => row.claimId)),
+    [collectionExportRows],
+  );
+  const reportClaims = useMemo(
+    () => claims.filter((claim) => reportClaimIds.has(claim.id)),
+    [claims, reportClaimIds],
+  );
+  const collectionRowByClaimId = useMemo(
+    () => new Map(collectionExportRows.map((row) => [row.claimId, row])),
+    [collectionExportRows],
+  );
 
   const statementHtml = useMemo(() => {
     if (!company || !statementOpen) return "";
@@ -292,7 +287,8 @@ export default function InsuranceCompanyDetail() {
     const rows: WorkshopReportRow[] = reportClaims.map((c) => {
       const cPayments = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
       const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
-      const approved = Number(c.approved_amount) || 0;
+      const collectionRow = collectionRowByClaimId.get(c.id);
+      const approved = (collectionRow?.approvedBeforeVat ?? Number(c.approved_amount)) || 0;
       const estimated = Number(c.estimated_amount) || 0;
       const delivered = (c as any).delivered_at ?? null;
       const reported = c.created_at;
@@ -301,9 +297,12 @@ export default function InsuranceCompanyDetail() {
       const startMs = new Date(startRef).getTime();
       const endMs = delivered ? new Date(delivered).getTime() : Date.now();
       const days = Math.max(0, Math.round((endMs - startMs) / (1000 * 60 * 60 * 24)));
-      const remaining = approved - paid;
+      const remaining = collectionRow?.remainingAmount ?? approved - paid;
       const collectionStatus: import("@/lib/insuranceWorkshopReport").CollectionStatus =
-        approved <= 0 ? "n/a"
+        collectionRow?.collectionStatus === "مدفوع بالكامل" ? "paid"
+        : collectionRow?.collectionStatus === "مدفوع جزئيًا" ? "partial"
+        : collectionRow?.collectionStatus === "غير مدفوع" ? (days > 30 ? "overdue" : "pending")
+        : approved <= 0 ? "n/a"
         : remaining <= 0.01 ? "paid"
         : paid > 0 ? "partial"
         : days > 30 ? "overdue"
@@ -333,7 +332,7 @@ export default function InsuranceCompanyDetail() {
         inWorkshopDays: days,
         estimatedAmount: estimated,
         approvedAmount: approved,
-        paidAmount: paid,
+        paidAmount: collectionRow?.paidAmount ?? paid,
         deliveredDate: delivered,
         collectionStatus,
       };
@@ -350,7 +349,7 @@ export default function InsuranceCompanyDetail() {
       vatRate,
       columns: reportColumns,
     });
-  }, [company, workshopOpen, reportClaims, accountingPayments, periodFrom, periodTo, claimInvoiceMap, vatRate, reportColumns]);
+  }, [company, workshopOpen, reportClaims, accountingPayments, periodFrom, periodTo, claimInvoiceMap, vatRate, reportColumns, collectionRowByClaimId]);
 
 
   const handleExportClaimsExcel = async () => {
@@ -456,7 +455,7 @@ export default function InsuranceCompanyDetail() {
               <FileSpreadsheet size={16} /> Excel
             </Button>
             <Button variant="outline" onClick={() => setWorkshopPickerOpen(true)} className="gap-2">
-              <ClipboardList size={16} /> تقرير عمليات الورشة ({reportClaims.length})
+              <ClipboardList size={16} /> تقرير عمليات الورشة ({collectionExportRows.length})
             </Button>
             <Button onClick={() => setStatementOpen(true)} className="gap-2">
               <FileDown size={16} /> كشف PDF

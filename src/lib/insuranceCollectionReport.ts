@@ -32,6 +32,14 @@ export type InsuranceCollectionStatus =
   | "مدفوع جزئيًا"
   | "مدفوع بالكامل";
 
+export type InsuranceCollectionReportFilter =
+  | "all"
+  | "in_garage"
+  | "delivered"
+  | "paid"
+  | "pending_collection"
+  | "overdue";
+
 export interface InsuranceCollectionRow {
   claimId: string;
   invoiceId: string | null;
@@ -176,6 +184,31 @@ function isCancelledOrDeleted(claim: InsuranceClaim): boolean {
   return claim.status === "cancelled" || !!c.deleted_at;
 }
 
+export function filterInsuranceCollectionRows(
+  rows: InsuranceCollectionRow[],
+  filter: InsuranceCollectionReportFilter,
+): InsuranceCollectionRow[] {
+  switch (filter) {
+    case "in_garage":
+      return rows.filter((row) => row.deliveredAt === "—");
+    case "delivered":
+      return rows.filter((row) => row.deliveredAt !== "—");
+    case "paid":
+      return rows.filter((row) => row.collectionStatus === "مدفوع بالكامل");
+    case "pending_collection":
+      return rows.filter((row) => (
+        row.invoiceId !== null
+        && row.deliveredAt !== "—"
+        && row.remainingAmount > 0.001
+        && (row.collectionStatus === "غير مدفوع" || row.collectionStatus === "مدفوع جزئيًا")
+      ));
+    case "overdue":
+      return rows.filter((row) => row.workshopDays > 30 && row.remainingAmount > 0.001);
+    default:
+      return rows;
+  }
+}
+
 export function buildInsuranceCollectionRows(options: BuildInsuranceCollectionRowsOptions): InsuranceCollectionRow[] {
   const {
     claims,
@@ -197,7 +230,7 @@ export function buildInsuranceCollectionRows(options: BuildInsuranceCollectionRo
     invoiceMap.set(invoice.claim_id, list);
   });
 
-  return claims
+  const rows = claims
     .filter((claim) => {
       if (!includeCancelled && isCancelledOrDeleted(claim)) return false;
       if (companyId && claim.insurance_company_id && claim.insurance_company_id !== companyId) return false;
@@ -246,21 +279,16 @@ export function buildInsuranceCollectionRows(options: BuildInsuranceCollectionRo
         remainingAmount: remaining,
       } satisfies InsuranceCollectionRow;
     })
-    .filter((row) => {
-      if (!inRange(row.sortDate, periodFrom, periodTo)) return false;
-      if (!pendingCollectionOnly) return true;
-      return (
-        row.invoiceId !== null &&
-        row.deliveredAt !== "—" &&
-        row.remainingAmount > 0.001 &&
-        (row.collectionStatus === "غير مدفوع" || row.collectionStatus === "مدفوع جزئيًا")
-      );
-    })
+    .filter((row) => inRange(row.sortDate, periodFrom, periodTo))
     .sort((a, b) => {
       const ad = dateForRange(a.sortDate);
       const bd = dateForRange(b.sortDate);
       return bd - ad || a.claimNumber.localeCompare(b.claimNumber);
     });
+
+  return pendingCollectionOnly
+    ? filterInsuranceCollectionRows(rows, "pending_collection")
+    : rows;
 }
 
 export function insuranceCollectionRowToArray(row: InsuranceCollectionRow): Array<string | number> {
