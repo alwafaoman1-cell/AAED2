@@ -1,10 +1,18 @@
 import { useMemo, useState, useEffect } from "react";
 import { buildPublicUrl } from "@/lib/publicAccessSettingsStore";
 import { useAuth } from "@/contexts/AuthContext";
-import { Search, Download, Eye, Trash2, Pencil, Plus, Filter, Receipt, AlertTriangle, CheckCircle2, FileSpreadsheet, FolderArchive, Wallet } from "lucide-react";
+import { Search, Download, Eye, Trash2, Pencil, Plus, Filter, Receipt, AlertTriangle, CheckCircle2, FileSpreadsheet, FolderArchive, Wallet, Columns3, ArrowUpDown, RotateCcw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import StatCard from "@/components/StatCard";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
@@ -30,6 +38,14 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
 import type { PaymentTarget } from "@/lib/paymentTargets";
+import {
+  buildInsuranceInvoiceReportRows,
+  exportInsuranceInvoiceRowsToXlsx,
+  filterAndSortInsuranceInvoiceRows,
+  INSURANCE_INVOICE_REPORT_COLUMNS,
+  type InsuranceInvoiceReportColumnKey,
+  type InsuranceInvoiceSortKey,
+} from "@/lib/insuranceInvoiceReport";
 
 const STATUS_LABEL: Record<string, string> = {
   issued: "صادرة",
@@ -49,6 +65,10 @@ const STATUS_COLORS: Record<string, string> = {
 const insuranceInvoiceDate = (invoice: Pick<InsuranceInvoice, "invoice_date" | "issued_at" | "created_at">) =>
   invoice.invoice_date || invoice.issued_at?.slice(0, 10) || invoice.created_at?.slice(0, 10) || "";
 
+const DEFAULT_VISIBLE_COLUMNS = Object.fromEntries(
+  INSURANCE_INVOICE_REPORT_COLUMNS.map((column) => [column.key, true]),
+) as Record<InsuranceInvoiceReportColumnKey, boolean>;
+
 export default function InsuranceAccounting() {
   const { hasRole } = useAuth();
   const { data: invoices, isLoading } = useInsuranceInvoices();
@@ -58,11 +78,22 @@ export default function InsuranceAccounting() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [collectionFilter, setCollectionFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [dueFilter, setDueFilter] = useState("all");
+  const [lpoFilter, setLpoFilter] = useState("all");
+  const [amountMin, setAmountMin] = useState("");
+  const [amountMax, setAmountMax] = useState("");
+  const [sortKey, setSortKey] = useState<InsuranceInvoiceSortKey>("invoiceDate");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePersistedState<number>("insurance_invoices_page_size", 20);
+  const [visibleColumns, setVisibleColumns] = usePersistedState<Record<InsuranceInvoiceReportColumnKey, boolean>>(
+    "insurance_invoice_report_columns_v1",
+    DEFAULT_VISIBLE_COLUMNS,
+  );
 
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewTitle, setPreviewTitle] = useState("");
@@ -156,52 +187,77 @@ export default function InsuranceAccounting() {
   const now = new Date();
   const ageDays = (iso: string) => Math.floor((now.getTime() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
 
+  const reportRows = useMemo(
+    () => buildInsuranceInvoiceReportRows(invoices || [], claims || []),
+    [invoices, claims],
+  );
+
   const companies = useMemo(() => {
     const set = new Set<string>();
-    (invoices || []).forEach((i) => i.insurance_company_name && set.add(i.insurance_company_name));
-    return Array.from(set).sort();
-  }, [invoices]);
+    reportRows.forEach((row) => row.insuranceCompany !== "—" && set.add(row.insuranceCompany));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ar"));
+  }, [reportRows]);
 
-  const filtered = useMemo(() => {
-    return (invoices || []).filter((inv) => {
-      if (statusFilter !== "all" && inv.status !== statusFilter) return false;
-      if (companyFilter !== "all" && inv.insurance_company_name !== companyFilter) return false;
-      const visibleDate = insuranceInvoiceDate(inv);
-      if (dateFrom && visibleDate < dateFrom) return false;
-      if (dateTo && visibleDate > dateTo) return false;
-      if (!search) return true;
-      const s = search.toLowerCase();
-      return (
-        inv.invoice_number.toLowerCase().includes(s) ||
-        inv.insurance_company_name.toLowerCase().includes(s) ||
-        (inv.vehicle_plate || "").toLowerCase().includes(s) ||
-        ((inv.vehicle_make || "") + " " + (inv.vehicle_model || "")).toLowerCase().includes(s)
-      );
-    });
-  }, [invoices, search, statusFilter, companyFilter, dateFrom, dateTo]);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginatedInvoices = useMemo(
-    () => filtered.slice((page - 1) * pageSize, page * pageSize),
-    [filtered, page, pageSize],
+  const filteredRows = useMemo(() => filterAndSortInsuranceInvoiceRows(reportRows, {
+    search,
+    company: companyFilter,
+    collectionStatus: collectionFilter,
+    invoiceStatus: statusFilter,
+    dateFrom,
+    dateTo,
+    dueState: dueFilter,
+    lpoState: lpoFilter,
+    amountMin,
+    amountMax,
+  }, sortKey, sortDirection), [
+    reportRows,
+    search,
+    companyFilter,
+    collectionFilter,
+    statusFilter,
+    dateFrom,
+    dateTo,
+    dueFilter,
+    lpoFilter,
+    amountMin,
+    amountMax,
+    sortKey,
+    sortDirection,
+  ]);
+  const invoicesById = useMemo(() => new Map((invoices || []).map((invoice) => [invoice.id, invoice])), [invoices]);
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const paginatedRows = useMemo(
+    () => filteredRows.slice((page - 1) * pageSize, page * pageSize),
+    [filteredRows, page, pageSize],
+  );
+  const normalizedVisibleColumns = useMemo(() => ({
+    ...DEFAULT_VISIBLE_COLUMNS,
+    ...(visibleColumns && typeof visibleColumns === "object" ? visibleColumns : {}),
+  }), [visibleColumns]);
+  const selectedColumnKeys = useMemo(
+    () => INSURANCE_INVOICE_REPORT_COLUMNS
+      .map((column) => column.key)
+      .filter((key) => normalizedVisibleColumns[key]),
+    [normalizedVisibleColumns],
   );
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, companyFilter, dateFrom, dateTo, pageSize]);
+  }, [search, statusFilter, collectionFilter, companyFilter, dateFrom, dateTo, dueFilter, lpoFilter, amountMin, amountMax, sortKey, sortDirection, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
   // KPIs
-  const totalIssued = filtered.reduce((s, i) => s + Number(i.total || 0), 0);
-  const totalPaid = filtered.reduce((s, i) => s + Number(i.paid_amount || 0), 0);
+  const totalIssued = filteredRows.reduce((sum, row) => sum + row.total, 0);
+  const totalPaid = filteredRows.reduce((sum, row) => sum + row.paidAmount, 0);
   const totalOutstanding = totalIssued - totalPaid;
-  const aging = filtered.reduce(
-    (acc, i) => {
-      const out = Number(i.total || 0) - Number(i.paid_amount || 0);
+  const aging = filteredRows.reduce(
+    (acc, row) => {
+      const out = row.remainingAmount;
       if (out <= 0) return acc;
-      const a = ageDays(insuranceInvoiceDate(i));
+      const a = ageDays(row.invoiceDate);
       if (a > 90) acc.over90 += out;
       else if (a > 60) acc.over60 += out;
       else if (a > 30) acc.over30 += out;
@@ -222,7 +278,9 @@ export default function InsuranceAccounting() {
       if (fresh && (fresh as any).invoice_number) {
         inv = { ...inv, ...(fresh as any) } as InsuranceInvoice;
       }
-    } catch {}
+    } catch {
+      // Continue with the cached invoice when the freshness check is unavailable.
+    }
     const claim = claims?.find((c) => c.id === inv.claim_id);
     const company = companiesList?.find((c) => c.id === inv.insurance_company_id);
     // استخدام البنود المخزّنة إن وجدت، وإلا بند افتراضي من المجموع
@@ -270,34 +328,46 @@ export default function InsuranceAccounting() {
     setShowPreview(true);
   }
 
-  function exportCsv() {
-    if (!filtered.length) {
+  function exportExcel() {
+    if (!filteredRows.length) {
       toast.error("لا توجد بيانات للتصدير");
       return;
     }
-    const headers = ["رقم الفاتورة", "تاريخ الإصدار", "شركة التأمين", "المركبة", "اللوحة", "الإجمالي", "المدفوع", "المتبقي", "الحالة", "الاستحقاق"];
-    const rows = filtered.map((i) => [
-      i.invoice_number,
-      insuranceInvoiceDate(i),
-      i.insurance_company_name,
-      `${i.vehicle_make || ""} ${i.vehicle_model || ""}`.trim(),
-      i.vehicle_plate || "",
-      Number(i.total).toFixed(3),
-      Number(i.paid_amount).toFixed(3),
-      (Number(i.total) - Number(i.paid_amount)).toFixed(3),
-      STATUS_LABEL[i.status] || i.status,
-      i.due_date || "",
-    ]);
-    const csv = [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `insurance-invoices-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("تم تصدير الملف");
+    try {
+      exportInsuranceInvoiceRowsToXlsx(
+        filteredRows,
+        selectedColumnKeys,
+        `insurance-invoices-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      toast.success(`تم تصدير ${filteredRows.length} فاتورة`);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تصدير Excel");
+    }
   }
+
+  const renderInvoiceCell = (row: (typeof filteredRows)[number], key: InsuranceInvoiceReportColumnKey) => {
+    if (["subtotal", "vat", "total", "paidAmount", "remainingAmount"].includes(key)) {
+      return <span dir="ltr" className="font-medium">{Number(row[key] || 0).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</span>;
+    }
+    if (["invoiceDate", "dueDate", "lastPaymentDate"].includes(key)) {
+      return <span dir="ltr">{row[key] ? formatDateLatin(String(row[key])) : "—"}</span>;
+    }
+    if (key === "collectionStatusLabel") {
+      const colors = row.collectionStatus === "paid"
+        ? "bg-success/15 text-success"
+        : row.collectionStatus === "partial"
+          ? "bg-warning/15 text-warning"
+          : row.collectionStatus === "cancelled"
+            ? "bg-muted text-muted-foreground"
+            : "bg-destructive/15 text-destructive";
+      return <span className={`text-[10px] px-2 py-1 rounded-full font-medium whitespace-nowrap ${colors}`}>{row.collectionStatusLabel}</span>;
+    }
+    if (key === "invoiceStatusLabel") {
+      return <span className={`text-[10px] px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLORS[row.invoiceStatus] || ""}`}>{row.invoiceStatusLabel}</span>;
+    }
+    const mono = ["invoiceNumber", "claimNumber", "lpoNumber", "plateNumber", "vin"].includes(key);
+    return <span className={`${mono ? "font-mono" : ""} ${key === "itemsDescription" || key === "notes" ? "block min-w-[220px] whitespace-normal" : "whitespace-nowrap"}`}>{String(row[key] ?? "—") || "—"}</span>;
+  };
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -307,8 +377,41 @@ export default function InsuranceAccounting() {
           <p className="text-xs md:text-sm text-muted-foreground">جميع الفواتير الصادرة لشركات التأمين مع المعاينة والتحميل</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={exportCsv} className="gap-2 w-full md:w-auto">
-            <FileSpreadsheet size={16} /> تصدير CSV
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <Columns3 size={16} /> الأعمدة ({selectedColumnKeys.length})
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 max-h-[70vh] overflow-y-auto">
+              <DropdownMenuLabel>أعمدة الجدول وExcel</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {INSURANCE_INVOICE_REPORT_COLUMNS.map((column) => (
+                <DropdownMenuCheckboxItem
+                  key={column.key}
+                  checked={normalizedVisibleColumns[column.key]}
+                  onCheckedChange={(checked) => setVisibleColumns((current) => ({
+                    ...DEFAULT_VISIBLE_COLUMNS,
+                    ...(current || {}),
+                    [column.key]: checked === true,
+                  }))}
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  {column.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+              <DropdownMenuSeparator />
+              <button
+                type="button"
+                className="w-full px-2 py-1.5 text-sm text-right hover:bg-accent rounded-sm"
+                onClick={() => setVisibleColumns(DEFAULT_VISIBLE_COLUMNS)}
+              >
+                تحديد كل الأعمدة
+              </button>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="outline" onClick={exportExcel} className="gap-2 w-full md:w-auto">
+            <FileSpreadsheet size={16} /> تصدير Excel
           </Button>
         </div>
       </div>
@@ -318,7 +421,7 @@ export default function InsuranceAccounting() {
         <StatCard title="إجمالي الفواتير" value={`${totalIssued.toLocaleString()} ر.ع`} icon={Receipt} variant="info" />
         <StatCard title="المُحصّل" value={`${totalPaid.toLocaleString()} ر.ع`} icon={CheckCircle2} variant="success" />
         <StatCard title="المتبقي" value={`${totalOutstanding.toLocaleString()} ر.ع`} icon={AlertTriangle} variant="warning" />
-        <StatCard title="عدد الفواتير" value={filtered.length} icon={Filter} variant="gold" />
+        <StatCard title="عدد الفواتير" value={filteredRows.length} icon={Filter} variant="gold" />
       </div>
 
       {/* Aging panel */}
@@ -341,11 +444,28 @@ export default function InsuranceAccounting() {
         </div>
       </div>
 
-      {/* Filters — تتدفق على الجوال */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2">
-        <div className="relative sm:col-span-2 md:col-span-1">
+      {/* Filters — تطبق على الجدول وExcel بالكامل */}
+      <div className="bg-card border border-border rounded-xl p-3 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold"><Filter size={16} /> فلاتر الفواتير</div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-1"
+            onClick={() => {
+              setSearch(""); setCompanyFilter("all"); setCollectionFilter("all"); setStatusFilter("all");
+              setDateFrom(""); setDateTo(""); setDueFilter("all"); setLpoFilter("all");
+              setAmountMin(""); setAmountMax(""); setSortKey("invoiceDate"); setSortDirection("desc");
+            }}
+          >
+            <RotateCcw size={14} /> مسح الفلاتر
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2">
+        <div className="relative sm:col-span-2">
           <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="بحث برقم الفاتورة، الشركة، اللوحة..." value={search} onChange={(e) => setSearch(e.target.value)} className="pr-9" />
+          <Input placeholder="فاتورة، مطالبة، LPO، لوحة، عميل، VIN أو بند..." value={search} onChange={(e) => setSearch(e.target.value)} className="pr-9" />
         </div>
         <Select value={companyFilter} onValueChange={setCompanyFilter}>
           <SelectTrigger><SelectValue placeholder="شركة التأمين" /></SelectTrigger>
@@ -354,15 +474,62 @@ export default function InsuranceAccounting() {
             {companies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger><SelectValue placeholder="الحالة" /></SelectTrigger>
+        <Select value={collectionFilter} onValueChange={setCollectionFilter}>
+          <SelectTrigger><SelectValue placeholder="حالة التحصيل" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">كل الحالات</SelectItem>
+            <SelectItem value="all">كل حالات التحصيل</SelectItem>
+            <SelectItem value="unpaid">غير مدفوعة</SelectItem>
+            <SelectItem value="partial">مدفوعة جزئيًا</SelectItem>
+            <SelectItem value="paid">مدفوعة بالكامل</SelectItem>
+            <SelectItem value="cancelled">ملغاة</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger><SelectValue placeholder="حالة الفاتورة" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">كل حالات الفاتورة</SelectItem>
             {Object.entries(STATUS_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} placeholder="من" />
-        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} placeholder="إلى" />
+        <Select value={lpoFilter} onValueChange={setLpoFilter}>
+          <SelectTrigger><SelectValue placeholder="رقم LPO" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">مع/بدون LPO</SelectItem>
+            <SelectItem value="with">لها LPO</SelectItem>
+            <SelectItem value="without">بدون LPO</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={dueFilter} onValueChange={setDueFilter}>
+          <SelectTrigger><SelectValue placeholder="الاستحقاق" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">كل الاستحقاقات</SelectItem>
+            <SelectItem value="overdue">متأخرة ومستحقة</SelectItem>
+            <SelectItem value="current">غير متأخرة</SelectItem>
+            <SelectItem value="no_due">بدون تاريخ استحقاق</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="space-y-1"><span className="text-[10px] text-muted-foreground">من تاريخ الفاتورة</span><Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
+        <div className="space-y-1"><span className="text-[10px] text-muted-foreground">إلى تاريخ الفاتورة</span><Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
+        <Input type="number" min="0" step="0.001" value={amountMin} onChange={(e) => setAmountMin(e.target.value)} placeholder="أقل إجمالي" />
+        <Input type="number" min="0" step="0.001" value={amountMax} onChange={(e) => setAmountMax(e.target.value)} placeholder="أعلى إجمالي" />
+        <Select value={sortKey} onValueChange={(value) => setSortKey(value as InsuranceInvoiceSortKey)}>
+          <SelectTrigger><SelectValue placeholder="الفرز حسب" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="invoiceDate">تاريخ الفاتورة</SelectItem>
+            <SelectItem value="invoiceNumber">رقم الفاتورة</SelectItem>
+            <SelectItem value="insuranceCompany">شركة التأمين</SelectItem>
+            <SelectItem value="claimNumber">رقم المطالبة</SelectItem>
+            <SelectItem value="total">الإجمالي</SelectItem>
+            <SelectItem value="paidAmount">المدفوع</SelectItem>
+            <SelectItem value="remainingAmount">المتبقي</SelectItem>
+            <SelectItem value="dueDate">تاريخ الاستحقاق</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button type="button" variant="outline" className="gap-2" onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>
+          <ArrowUpDown size={15} /> {sortDirection === "asc" ? "تصاعدي" : "تنازلي"}
+        </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">النتيجة: {filteredRows.length} فاتورة — يُصدّر Excel جميع النتائج المطابقة، وليس الصفحة الحالية فقط.</p>
       </div>
 
       {/* Tabs: Invoices / All documents archive */}
@@ -375,7 +542,7 @@ export default function InsuranceAccounting() {
         <TabsContent value="invoices" className="mt-4">
           {isLoading ? (
             <div className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground">جاري التحميل...</div>
-          ) : !filtered.length ? (
+          ) : !filteredRows.length ? (
             <div className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground">
               لا توجد فواتير. أصدر فاتورة من تفاصيل المطالبة بعد اعتمادها.
             </div>
@@ -383,25 +550,25 @@ export default function InsuranceAccounting() {
             <>
               {/* Mobile cards */}
               <div className="md:hidden space-y-2">
-                {paginatedInvoices.map((inv) => (
-                  <div key={inv.id} className="bg-card border border-border rounded-xl p-3 space-y-2">
+                {paginatedRows.map((row) => {
+                  const inv = invoicesById.get(row.invoiceId);
+                  if (!inv) return null;
+                  return <div key={inv.id} className="bg-card border border-border rounded-xl p-3 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="font-mono text-xs text-primary truncate">{inv.invoice_number}</div>
-                        <div className="text-sm font-semibold truncate">{inv.insurance_company_name}</div>
+                        <div className="font-mono text-xs text-primary truncate">{row.invoiceNumber}</div>
+                        <div className="text-sm font-semibold truncate">{row.insuranceCompany}</div>
+                        <div className="font-mono text-xs text-muted-foreground truncate">{row.claimNumber} • LPO: {row.lpoNumber}</div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {`${inv.vehicle_make || ""} ${inv.vehicle_model || ""}`.trim() || "—"}
-                          {inv.vehicle_plate ? <> • <span className="font-mono">{inv.vehicle_plate}</span></> : null}
+                          {`${row.vehicleMake} ${row.vehicleModel}`.trim()} • <span className="font-mono">{row.plateNumber}</span>
                         </div>
                       </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${STATUS_COLORS[inv.status] || ""}`}>
-                        {STATUS_LABEL[inv.status] || inv.status}
-                      </span>
+                      {renderInvoiceCell(row, "collectionStatusLabel")}
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground" dir="ltr">{formatDateLatin(insuranceInvoiceDate(inv))}</span>
+                      <span className="text-muted-foreground" dir="ltr">{formatDateLatin(row.invoiceDate)}</span>
                       <span className="font-bold" dir="ltr">
-                        {Number(inv.total).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} OMR
+                        {row.total.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} OMR
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 pt-1 border-t border-border">
@@ -420,8 +587,8 @@ export default function InsuranceAccounting() {
                         </Button>
                       )}
                     </div>
-                  </div>
-                ))}
+                  </div>;
+                })}
               </div>
 
               {/* Desktop table */}
@@ -430,40 +597,21 @@ export default function InsuranceAccounting() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border bg-secondary/30">
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">رقم الفاتورة</th>
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">التاريخ</th>
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">شركة التأمين</th>
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">المركبة</th>
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">اللوحة</th>
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">الإجمالي</th>
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">المدفوع</th>
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">الحالة</th>
-                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs">إجراءات</th>
+                        {INSURANCE_INVOICE_REPORT_COLUMNS.filter((column) => normalizedVisibleColumns[column.key]).map((column) => (
+                          <th key={column.key} className="text-right py-3 px-4 text-muted-foreground font-medium text-xs whitespace-nowrap">{column.label}</th>
+                        ))}
+                        <th className="text-right py-3 px-4 text-muted-foreground font-medium text-xs sticky left-0 bg-secondary">إجراءات</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {paginatedInvoices.map((inv) => (
-                        <tr key={inv.id} className="border-b border-border/50 hover:bg-secondary/20">
-                          <td className="py-3 px-4 font-mono text-xs text-primary">{inv.invoice_number}</td>
-                          <td className="py-3 px-4 text-muted-foreground" dir="ltr">
-                            <div className="flex flex-col gap-0.5">
-                              <span title="تاريخ إصدار الفاتورة">📄 {formatDateLatin(insuranceInvoiceDate(inv))}</span>
-                              {(inv as any).last_payment_date && (
-                                <span className="text-[10px] text-success" title="تاريخ آخر تحصيل">💵 {formatDateLatin((inv as any).last_payment_date)}</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-foreground">{inv.insurance_company_name}</td>
-                          <td className="py-3 px-4 text-muted-foreground">{`${inv.vehicle_make || ""} ${inv.vehicle_model || ""}`.trim() || "—"}</td>
-                          <td className="py-3 px-4 text-muted-foreground font-mono">{inv.vehicle_plate || "—"}</td>
-                          <td className="py-3 px-4 text-foreground font-medium" dir="ltr">{Number(inv.total).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} OMR</td>
-                          <td className="py-3 px-4 text-success" dir="ltr">{Number(inv.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-                          <td className="py-3 px-4">
-                            <span className={`text-[10px] px-2 py-1 rounded-full font-medium ${STATUS_COLORS[inv.status] || ""}`}>
-                              {STATUS_LABEL[inv.status] || inv.status}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
+                      {paginatedRows.map((row) => {
+                        const inv = invoicesById.get(row.invoiceId);
+                        if (!inv) return null;
+                        return <tr key={row.invoiceId} className="border-b border-border/50 hover:bg-secondary/20">
+                          {INSURANCE_INVOICE_REPORT_COLUMNS.filter((column) => normalizedVisibleColumns[column.key]).map((column) => (
+                            <td key={column.key} className="py-3 px-4 text-foreground align-top">{renderInvoiceCell(row, column.key)}</td>
+                          ))}
+                          <td className="py-3 px-4 sticky left-0 bg-card">
                             <div className="flex items-center gap-1">
                               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handlePreview(inv)} title="معاينة">
                                 <Eye size={14} />
@@ -488,8 +636,8 @@ export default function InsuranceAccounting() {
                               )}
                             </div>
                           </td>
-                        </tr>
-                      ))}
+                        </tr>;
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -497,7 +645,7 @@ export default function InsuranceAccounting() {
               <TablePaginationControls
                 page={page}
                 pageSize={pageSize}
-                totalItems={filtered.length}
+                totalItems={filteredRows.length}
                 onPageChange={setPage}
                 onPageSizeChange={setPageSize}
               />
