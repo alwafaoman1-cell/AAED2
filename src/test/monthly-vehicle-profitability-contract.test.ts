@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 const root = process.cwd();
 const migration = readFileSync(resolve(root, "supabase/migrations/20260813100000_monthly_vehicle_profitability_report.sql"), "utf8");
 const monthlyDetailsMigration = readFileSync(resolve(root, "supabase/migrations/20260825130000_monthly_workshop_report_details.sql"), "utf8");
+const expenseLinkageMigration = readFileSync(resolve(root, "supabase/migrations/20260901120000_monthly_vehicle_profitability_expense_linkage.sql"), "utf8");
+const lifetimeCostMigration = readFileSync(resolve(root, "supabase/migrations/20260901123000_monthly_vehicle_profitability_lifetime_direct_costs.sql"), "utf8");
+const revenueCompositionMigration = readFileSync(resolve(root, "supabase/migrations/20260902100000_monthly_vehicle_profitability_revenue_composition.sql"), "utf8");
 const page = readFileSync(resolve(root, "src/pages/accounting/reports/MonthlyVehicleProfitabilityPage.tsx"), "utf8");
 const service = readFileSync(resolve(root, "src/lib/accounting/monthlyWorkshopReport.ts"), "utf8");
 
@@ -59,5 +62,51 @@ describe("monthly vehicle profitability report contract", () => {
     expect(monthlyDetailsMigration).toContain("e.deleted_at is null");
     expect(monthlyDetailsMigration).toContain("e.archived_at is null");
     expect(monthlyDetailsMigration).toContain("'cancelled','canceled','void','invalid','deleted'");
+  });
+
+  it("restores linked legacy work-order expenses without mutating historical rows", () => {
+    expect(expenseLinkageMigration).toContain("e.expense_scope is null");
+    expect(expenseLinkageMigration).toContain("e.linked_work_order_id");
+    expect(expenseLinkageMigration).toContain("e.meta->>'sourceWorkOrderId'");
+    expect(expenseLinkageMigration).toContain("e.vehicle_id is not null");
+    expect(expenseLinkageMigration).toContain("case when r.is_direct_vehicle_cost then 'work_order'");
+    expect(expenseLinkageMigration).not.toMatch(/update\s+public\.expenses/i);
+  });
+
+  it("uses accounting mapping for parts and keeps archived work orders reportable", () => {
+    expect(expenseLinkageMigration).toContain("nullif(r.accounting_mapping_key, '')");
+    expect(expenseLinkageMigration).toContain("parts_direct_cost");
+    expect(expenseLinkageMigration).not.toContain("resolved_work_order_archived_at");
+    expect(expenseLinkageMigration).toContain("resolved_work_order_deleted_at is null");
+    expect(expenseLinkageMigration).toContain("r.expense_scope = 'operating' then 'workshop_general'");
+  });
+
+  it("uses lifetime direct costs for vehicles active in the period while keeping overhead monthly", () => {
+    expect(lifetimeCostMigration).toContain("eligible_expenses as (");
+    expect(lifetimeCostMigration).toContain("eligible_period_expenses as (");
+    expect(lifetimeCostMigration).toContain("direct_expenses as (");
+    expect(lifetimeCostMigration).toContain("direct_period_expenses as (");
+    expect(lifetimeCostMigration).toContain("expense_lifetime as (");
+    expect(lifetimeCostMigration).toContain("from direct_expenses e");
+    expect(lifetimeCostMigration).toContain("join activity_operations a");
+    expect(lifetimeCostMigration).toContain("from eligible_period_expenses e");
+    expect(lifetimeCostMigration).toContain("direct vehicle costs are lifetime per operation");
+  });
+
+  it("separates billed labor and parts revenue from actual direct costs without double counting", () => {
+    expect(revenueCompositionMigration).toContain("invoice_line_amounts as (");
+    expect(revenueCompositionMigration).toContain("public.sales_documents");
+    expect(revenueCompositionMigration).toContain("public.insurance_invoices");
+    expect(revenueCompositionMigration).toContain("pg_input_is_valid");
+    expect(revenueCompositionMigration).toContain("parts_revenue");
+    expect(revenueCompositionMigration).toContain("labor_revenue");
+    expect(revenueCompositionMigration).toContain("external_direct_cost");
+    expect(revenueCompositionMigration).toContain("coalesce(im.invoiced_ex_vat,0)-coalesce(em.parts_cost,0)-coalesce(em.labor_cost,0)-coalesce(em.operating_cost,0)");
+    expect(revenueCompositionMigration).not.toContain("coalesce(im.invoiced_ex_vat,0)+coalesce(im.labor_revenue,0)");
+    expect(page).toContain("أجرة العمل/الخدمة المفوترة");
+    expect(page).toContain("تكلفة عمالة خارجية");
+    expect(service).toContain("row.labor_revenue");
+    expect(service).toContain("row.parts_revenue");
+    expect(service).toContain("row.external_direct_cost");
   });
 });

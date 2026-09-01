@@ -4321,6 +4321,7 @@
   "جاري تحميل التقرير…": "Loading report…",
   "لا توجد حركة مالية مطابقة خلال الفترة.": "No matching financial activity in this period.",
   "أساس الشهر: الفاتورة حسب تاريخها، التحصيل حسب تاريخ الدفعة، والمصروف حسب تاريخ السند. VAT لا يدخل في الربح.": "Monthly basis: invoices by invoice date, collections by payment date, and expenses by voucher date. VAT is excluded from profit.",
+  "أساس الشهر: أجرة العمل وبيع القطع إيراد مفوتر، وشراء القطع والعمالة الخارجية تكاليف فعلية. التحصيل حسب تاريخ الدفعة والمصروف حسب تاريخ السند، وVAT لا يدخل في الربح.": "Monthly basis: billed labor and parts sales are revenue, while parts purchases and outsourced labor are actual costs. Collections follow the payment date, expenses follow the voucher date, and VAT is excluded from profit.",
   "تعذر البحث:": "Search failed:",
   "الاسم أو الهاتف أو الرقم الضريبي — حرفان على الأقل": "Name, phone, or tax number — at least two characters",
   "تم حذف الفاتورة وسندات القبض المرتبطة": "Invoice and linked receipts deleted",

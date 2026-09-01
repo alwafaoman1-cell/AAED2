@@ -61,11 +61,18 @@ select pg_temp.assert_true('vehicle_pnl_excludes_operating',(select count(*)=0 f
 
 insert into public.expenses(id,tenant_id,voucher_number,amount,category_name,payment_method) values('e9000000-0000-4000-8000-000000000105','e9000000-0000-4000-8000-000000000001','EXP-LEGACY',50,'Legacy','cash');
 select pg_temp.assert_true('legacy_needs_classification',(select classification_status='needs_classification' and expense_scope is null from public.expenses where voucher_number='EXP-LEGACY'));
+insert into public.expenses(id,tenant_id,voucher_number,date,amount,subtotal,vat_amount,total,category_name,expense_type,payment_method,linked_work_order_id,vehicle_id,meta)
+values('e9000000-0000-4000-8000-000000000112','e9000000-0000-4000-8000-000000000001','EXP-LEGACY-WO',current_date,75,75,3.75,78.75,'قطع غيار المركبات','cash_vehicle_parts','cash','WO-EXP-RUNTIME','e9000000-0000-4000-8000-000000000102','{"sourceWorkOrderId":"e9000000-0000-4000-8000-000000000103","partName":"Legacy Part"}'::jsonb);
+select pg_temp.assert_true('legacy_work_order_row_not_mutated',(select classification_status='needs_classification' and expense_scope is null from public.expenses where voucher_number='EXP-LEGACY-WO'));
+select pg_temp.assert_true('legacy_work_order_cost_restored_in_read_model',(select expense_scope='work_order' and work_order_id='e9000000-0000-4000-8000-000000000103' and vehicle_id='e9000000-0000-4000-8000-000000000102' and expense_type='cash_vehicle_parts' from public.reports_expense_facts_v1 where voucher_number='EXP-LEGACY-WO'));
+update public.job_orders set archived_at=now() where id='e9000000-0000-4000-8000-000000000103';
+select pg_temp.assert_true('archived_work_order_cost_remains_reportable',(select count(*)=1 from public.reports_expense_facts_v1 where voucher_number='EXP-LEGACY-WO'));
+update public.job_orders set archived_at=null where id='e9000000-0000-4000-8000-000000000103';
 select pg_temp.expect_error('operating_rejects_work_order',$q$insert into public.expenses(tenant_id,voucher_number,amount,expense_scope,work_order_id,linked_work_order_id,department_id,expense_category_id,description) select 'e9000000-0000-4000-8000-000000000001','BAD-OP',1,'operating','e9000000-0000-4000-8000-000000000103','WO-EXP-RUNTIME',d.id,c.id,'bad' from public.expense_categories d join public.expense_categories c on c.parent_id=d.id where d.code='ADMIN' and c.code='ADMIN_OTHER'$q$,'OPERATING_EXPENSE_WORK_ORDER_NOT_ALLOWED');
 select pg_temp.expect_error('cycle_blocked',$q$update public.expense_categories set parent_id=(select id from public.expense_categories where code='PARTS_NEW') where code='PARTS'$q$,'EXPENSE_CATEGORY_CYCLE');
 select pg_temp.expect_error('used_category_delete_blocked',$q$delete from public.expense_categories where code='PARTS_NEW'$q$,'EXPENSE_CATEGORY_IN_USE_DISABLE_INSTEAD');
 select pg_temp.assert_true('server_summary',(public.expense_management_rpc(1,50,'{"scope":"work_order"}'::jsonb)->'aggregates'->>'total')::numeric=315);
-select pg_temp.assert_true('export_all_page_count',(public.expense_management_rpc(1,500,'{}'::jsonb)->'pagination'->>'totalRows')::integer=4);
+select pg_temp.assert_true('export_all_page_count',(public.expense_management_rpc(1,500,'{}'::jsonb)->'pagination'->>'totalRows')::integer=5);
 
 insert into public.expenses(id,tenant_id,voucher_number,date,amount,subtotal,vat_amount,total,description,expense_scope,work_order_id,department_id,expense_category_id,payment_method,status)
 select 'e9000000-0000-4000-8000-000000000110','e9000000-0000-4000-8000-000000000001','EXP-CANCELLED',current_date,40,40,2,42,'cancelled expense',
@@ -87,10 +94,10 @@ update public.job_orders set deleted_at=now() where id='e9000000-0000-4000-8000-
 select pg_temp.assert_true('deleted_work_order_expense_excluded',(select count(*)=0 from public.reports_expense_facts_v1 where voucher_number='EXP-RUNTIME-1'));
 update public.job_orders set deleted_at=null where id='e9000000-0000-4000-8000-000000000103';
 
-select pg_temp.assert_true('ineligible_rows_absent_from_server_export',(public.expense_management_rpc(1,500,'{}'::jsonb)->'pagination'->>'totalRows')::integer=4);
+select pg_temp.assert_true('ineligible_rows_absent_from_server_export',(public.expense_management_rpc(1,500,'{}'::jsonb)->'pagination'->>'totalRows')::integer=5);
 
 select set_config('request.jwt.claims','{"sub":"e9000000-0000-4000-8000-000000000012","role":"authenticated"}',true);
-select pg_temp.assert_true('manager_can_read',(select count(*)=6 from public.expenses));
+select pg_temp.assert_true('manager_can_read',(select count(*)=7 from public.expenses));
 select set_config('request.jwt.claims','{"sub":"e9000000-0000-4000-8000-000000000013","role":"authenticated"}',true);
 select pg_temp.assert_true('unauthorized_hidden',(select count(*)=0 from public.expenses));
 select pg_temp.expect_error('unauthorized_category_manage',$q$insert into public.expense_categories(tenant_id,code,name,name_ar,name_en,category_type,expense_scope) values('e9000000-0000-4000-8000-000000000001','NOPE','لا','لا','No','category','both')$q$,'row-level security');

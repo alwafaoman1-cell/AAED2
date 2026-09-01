@@ -7,6 +7,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8"
 describe("vehicle P&L and filtered expense exports", () => {
   const migration = read("supabase/migrations/20260813130000_expense_management_classification_refactor.sql");
   const eligibility = read("supabase/migrations/20260824120000_expense_classification_eligibility_hardening.sql");
+  const linkage = read("supabase/migrations/20260901120000_monthly_vehicle_profitability_expense_linkage.sql");
   const runtime = read("supabase/tests/expense_management_classification_runtime_validation.sql");
   const service = read("src/lib/expenses/expenseClassificationService.ts");
   const page = read("src/pages/accounting/expenses/ExpensesManagementPage.tsx");
@@ -24,6 +25,11 @@ describe("vehicle P&L and filtered expense exports", () => {
     expect(runtime).toContain("deleted_expense_excluded");
     expect(runtime).toContain("cancelled_claim_expense_excluded");
     expect(runtime).toContain("deleted_work_order_expense_excluded");
+    expect(linkage).toContain("is_direct_vehicle_cost");
+    expect(linkage).toContain("nullif(r.accounting_mapping_key, '')");
+    expect(linkage).not.toContain("resolved_work_order_archived_at");
+    expect(runtime).toContain("legacy_work_order_cost_restored_in_read_model");
+    expect(runtime).toContain("archived_work_order_cost_remains_reportable");
   });
 
   it("exports every filtered page with the same URL-backed filters", () => {

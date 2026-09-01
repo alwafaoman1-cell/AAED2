@@ -52,13 +52,15 @@ const COLUMNS: Column[] = [
   { key: "invoice_numbers", ar: "أرقام الفواتير", en: "Invoice Numbers", default: true },
   { key: "invoice_dates", ar: "تواريخ الفواتير", en: "Invoice Dates", default: true },
   { key: "invoiced_ex_vat", ar: "المفوتر قبل الضريبة", en: "Invoiced Ex. VAT", type: "money", default: true },
+  { key: "labor_revenue", ar: "أجرة العمل/الخدمة المفوترة", en: "Billed Labor/Service", type: "money", default: true },
+  { key: "parts_revenue", ar: "إيراد قطع الغيار", en: "Parts Revenue", type: "money", default: true },
   { key: "vat", ar: "ضريبة VAT", en: "VAT", type: "money", default: true },
   { key: "invoiced_total", ar: "الإجمالي شامل الضريبة", en: "Total Incl. VAT", type: "money" },
   { key: "collected", ar: "المبلغ المحصل", en: "Collected", type: "money", default: true },
   { key: "outstanding", ar: "المبلغ المستحق", en: "Outstanding", type: "money", default: true },
-  { key: "parts_cost", ar: "تكلفة قطع الغيار", en: "Parts Cost", type: "money", default: true },
-  { key: "labor_cost", ar: "تكلفة العمالة", en: "Labor Cost", type: "money" },
-  { key: "operating_cost", ar: "تشغيل مباشر", en: "Direct Operating", type: "money" },
+  { key: "parts_cost", ar: "تكلفة شراء قطع الغيار", en: "Parts Purchase Cost", type: "money", default: true },
+  { key: "labor_cost", ar: "تكلفة عمالة خارجية", en: "External Labor Cost", type: "money", default: true },
+  { key: "external_direct_cost", ar: "تكاليف خارجية مباشرة", en: "Other External Direct Costs", type: "money", default: true },
   { key: "direct_cost", ar: "إجمالي التكلفة المباشرة", en: "Total Direct Cost", type: "money", default: true },
   { key: "gross_profit", ar: "ربح/خسارة السيارة", en: "Vehicle Profit/Loss", type: "money", default: true },
   { key: "profit_margin", ar: "هامش الربح %", en: "Profit Margin %", type: "percentage", default: true },
@@ -156,6 +158,7 @@ export default function MonthlyVehicleProfitabilityPage() {
 
   const kpis = [
     ["الإيراد المفوتر قبل VAT", aggregates?.invoiced_ex_vat, "text-blue-600"], ["المبلغ المحصل", aggregates?.collected, "text-emerald-600"],
+    ["أجرة العمل/الخدمة المفوترة", aggregates?.labor_revenue, "text-blue-600"], ["إيراد قطع الغيار", aggregates?.parts_revenue, "text-blue-600"],
     ["المبلغ المستحق", aggregates?.outstanding, "text-amber-600"], ["التكلفة المباشرة", aggregates?.direct_cost, "text-rose-600"],
     ["ربح السيارات المباشر", aggregates?.gross_profit, Number(aggregates?.gross_profit || 0) >= 0 ? "text-emerald-600" : "text-rose-600"],
     ["المصروفات العامة (غير موزعة)", overheadReport.data?.summary.subtotal ?? overheads?.total, "text-slate-700"],
@@ -181,7 +184,7 @@ export default function MonthlyVehicleProfitabilityPage() {
       <div className="flex flex-wrap items-center gap-2"><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline"><SlidersHorizontal size={15}/>الأعمدة ({visible.length})</Button></DropdownMenuTrigger><DropdownMenuContent className="max-h-[65vh] w-64 overflow-y-auto" align="end"><DropdownMenuLabel>أعمدة العرض والتصدير</DropdownMenuLabel><DropdownMenuSeparator/><DropdownMenuCheckboxItem checked={visible.length === COLUMNS.length} onCheckedChange={(checked) => setVisible(checked ? COLUMNS.map((c) => c.key) : COLUMNS.filter((c) => c.default).map((c) => c.key))}>تحديد الكل / الافتراضي</DropdownMenuCheckboxItem>{COLUMNS.map((column) => <DropdownMenuCheckboxItem key={column.key} checked={visible.includes(column.key)} onCheckedChange={(checked) => setVisible((current) => checked ? [...new Set([...current, column.key])] : current.filter((key) => key !== column.key))}>{column.ar}</DropdownMenuCheckboxItem>)}</DropdownMenuContent></DropdownMenu><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("xlsx")}><FileSpreadsheet size={15}/>Excel</Button><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("pdf")}><FileDown size={15}/>PDF</Button><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("print")}><Printer size={15}/>طباعة</Button></div>
     </div>
 
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{kpis.map(([title, amount, color]) => <Card key={title}><CardContent className="p-4"><p className="text-xs text-muted-foreground">{title}</p><p className={`mt-2 font-mono text-lg font-bold ${color}`} dir="ltr">{formatOMR(Number(amount || 0))}</p></CardContent></Card>)}</section>
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">{kpis.map(([title, amount, color]) => <Card key={title}><CardContent className="p-4"><p className="text-xs text-muted-foreground">{title}</p><p className={`mt-2 font-mono text-lg font-bold ${color}`} dir="ltr">{formatOMR(Number(amount || 0))}</p></CardContent></Card>)}</section>
 
     <Card className="border-blue-200 bg-blue-50/40 dark:border-blue-900 dark:bg-blue-950/20"><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><BarChart3 size={18}/>ملخص الربح والخسارة للشهر — الكاش والتأمين منفصلان</CardTitle></CardHeader><CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
       {[
@@ -202,6 +205,6 @@ export default function MonthlyVehicleProfitabilityPage() {
 
     <Card><CardHeader className="flex-row items-center justify-between"><div><CardTitle className="flex items-center gap-2"><Car size={19}/>تفاصيل ربح وخسارة كل سيارة</CardTitle><p className="mt-1 text-xs text-muted-foreground">الفواتير غير المدفوعة تظهر ضمن المفوتر والمستحق، بينما يبقى التحصيل صفرًا حتى تسجيل دفعة فعلية.</p></div><span className="text-sm text-muted-foreground">{report.data?.pagination.totalRows || 0} سجل</span></CardHeader><CardContent className="p-0">{report.isLoading ? <div className="p-16 text-center">جاري تحميل التقرير…</div> : report.isError ? <div className="p-10 text-center text-destructive">{(report.error as Error).message}</div> : !report.data?.rows.length ? <div className="p-16 text-center text-muted-foreground">لا توجد حركة مالية مطابقة خلال الفترة.</div> : <div className="overflow-x-auto"><Table className="min-w-max"><TableHeader className="sticky top-0 z-10 bg-muted"><TableRow>{selectedColumns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.ar}</TableHead>)}</TableRow></TableHeader><TableBody>{report.data.rows.map((row, index) => <TableRow key={String(row.operation_id || index)}>{selectedColumns.map((column) => <TableCell key={column.key} className={`max-w-[260px] whitespace-nowrap ${column.key === "gross_profit" ? Number(row[column.key] || 0) >= 0 ? "font-bold text-emerald-600" : "font-bold text-rose-600" : ""}`} dir={column.type === "money" || column.type === "number" || column.type === "percentage" ? "ltr" : undefined}>{display(row[column.key], column)}</TableCell>)}</TableRow>)}</TableBody></Table></div>}</CardContent></Card>
 
-    <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-sm md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-2 text-muted-foreground"><CalendarRange size={16}/><span>أساس الشهر: الفاتورة حسب تاريخها، التحصيل حسب تاريخ الدفعة، والمصروف حسب تاريخ السند. VAT لا يدخل في الربح.</span></div><div className="flex items-center gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>السابق</Button><span dir="ltr">{page} / {report.data?.pagination.totalPages || 1}</span><Button variant="outline" disabled={page >= (report.data?.pagination.totalPages || 1)} onClick={() => setPage((value) => value + 1)}>التالي</Button></div></div>
+    <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-sm md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-2 text-muted-foreground"><CalendarRange size={16}/><span>أساس الشهر: أجرة العمل وبيع القطع إيراد مفوتر، وشراء القطع والعمالة الخارجية تكاليف فعلية. التحصيل حسب تاريخ الدفعة والمصروف حسب تاريخ السند، وVAT لا يدخل في الربح.</span></div><div className="flex items-center gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>السابق</Button><span dir="ltr">{page} / {report.data?.pagination.totalPages || 1}</span><Button variant="outline" disabled={page >= (report.data?.pagination.totalPages || 1)} onClick={() => setPage((value) => value + 1)}>التالي</Button></div></div>
   </main>;
 }

@@ -18,6 +18,8 @@ export interface MonthlyVehicleProfitabilityResult {
   rows: MonthlyVehicleProfitabilityRow[];
   aggregates: {
     invoiced_ex_vat: number;
+    labor_revenue: number;
+    parts_revenue: number;
     vat: number;
     invoiced_total: number;
     collected: number;
@@ -25,6 +27,7 @@ export interface MonthlyVehicleProfitabilityResult {
     parts_cost: number;
     labor_cost: number;
     operating_cost: number;
+    external_direct_cost: number;
     direct_cost: number;
     gross_profit: number;
     vehicles: number;
