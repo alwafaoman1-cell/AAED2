@@ -22,6 +22,7 @@ import ReceptionIntakePanel from "@/components/workorders/ReceptionIntakePanel";
 import { toE164 } from "@/lib/phoneUtils";
 import { ensureVehicleForCustomer, findExistingVehicle, normalizeVehiclePlate, normalizeVin, type VehicleIdentityMatch } from "@/lib/vehicleIdentity";
 import { isUuid } from "@/lib/uuid";
+import { isSupportedWorkOrderNumber } from "@/lib/workOrderNumber";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
@@ -538,8 +539,8 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
     }
     const targetOrderNumber = isEdit ? normalizeWorkOrderNumberInput(form.id || form.displayNumber || initial?.id || "") : nextWorkOrderNumber();
     if (isEdit) {
-      if (!/^WO-\d{4}-\d+$/i.test(targetOrderNumber)) {
-        toast.error("رقم أمر العمل يجب أن يكون بصيغة WO-YYYY-0001");
+      if (!isSupportedWorkOrderNumber(targetOrderNumber)) {
+        toast.error("رقم أمر العمل غير صالح");
         return;
       }
       const localDuplicate = getWorkOrders({ includeArchived: true }).find((order) => {
@@ -614,15 +615,12 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
           <Input
             dir="ltr"
             value={form.id || form.displayNumber || ""}
-            onChange={(event) => {
-              const next = normalizeWorkOrderNumberInput(event.target.value);
-              setForm((prev) => ({ ...prev, id: next, displayNumber: next }));
-            }}
-            placeholder="WO-2026-0001"
+            readOnly
+            placeholder="WO-00001"
             className="mt-1 bg-card border-border font-mono text-left"
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
-            يمكن تعديل رقم العرض فقط. العلاقات الداخلية تبقى على UUID ولا تتغير.
+            رقم ثابت يُنشأ تلقائيًا من قاعدة البيانات ولا يتغير بعد الحفظ.
           </p>
         </div>
       )}

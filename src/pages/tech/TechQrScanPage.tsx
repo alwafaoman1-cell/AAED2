@@ -22,7 +22,7 @@ export default function TechQrScanPage() {
       if (handledRef.current) return;
       const raw = (text || "").trim();
       if (!raw) return;
-      // Robust lookup handles: raw WO-YYYY-NNN, full URLs (/track/<id>, /work-orders/<id>), UUIDs, displayNumber
+      // Robust lookup handles current/legacy WO numbers, full URLs, UUIDs and displayNumber.
       const found = getWorkOrderById(raw);
       if (!found) {
         console.warn("[QR Scan] No work order matched payload:", raw);

@@ -8428,6 +8428,32 @@ export type Database = {
         }
         Relationships: []
       }
+      work_order_number_counters: {
+        Row: {
+          next_value: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          next_value?: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          next_value?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_order_number_counters_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_order_number_renumber_audit: {
         Row: {
           id: string
@@ -9442,6 +9468,10 @@ export type Database = {
       admin_reopen_signature: {
         Args: { p_job_order_id: string }
         Returns: Json
+      }
+      allocate_work_order_number: {
+        Args: { p_tenant_id: string }
+        Returns: string
       }
       allocate_invoice_number_internal: {
         Args: {

@@ -8,7 +8,8 @@ const read = (path: string) => readFileSync(resolve(root(), path), "utf8");
 describe("work order visible save contract", () => {
   it("does not update a deleted order when creating a new work order number", () => {
     const store = read("src/lib/workOrdersStore.ts");
-    expect(store).toContain("allocateVisibleOrderNumber");
+    expect(store).not.toContain("allocateVisibleOrderNumber");
+    expect(store).toContain("database BEFORE INSERT trigger atomically allocates");
     expect(store).toContain("deleted_at,archived_at");
     expect(store).toContain("Work order is deleted in Supabase");
     expect(store).toContain(".is(\"deleted_at\", null)");
@@ -62,15 +63,17 @@ describe("work order visible save contract", () => {
     expect(form).not.toContain("أدخل ماركة وموديل المركبة قبل حفظ أمر العمل");
   });
 
-  it("uses four-digit work-order numbers and keeps a safe renumber audit migration", () => {
+  it("uses immutable five-digit global work-order numbers and a safe audit migration", () => {
     const numbering = read("src/lib/numberingSettings.ts");
     const helper = read("src/lib/numbering.ts");
-    const migration = read("supabase/migrations/20260718090000_renumber_work_orders_four_digits.sql");
-    expect(numbering).toContain('WO:        { label: "أوامر العمل",            prefix: "WO",      startFrom: 1, padding: 4 }');
-    expect(helper).toContain("WO-YYYY-NNNN");
+    const migration = read("supabase/migrations/20260901100000_work_order_global_five_digit_numbering.sql");
+    expect(numbering).toContain('WO:        { label: "أوامر العمل",            prefix: "WO",      startFrom: 1, padding: 5 }');
+    expect(helper).toContain("WO-NNNNN");
     expect(migration).toContain("work_order_number_renumber_audit");
-    expect(migration).toContain("lpad(rn::text, 4, '0')");
-    expect(migration).toContain("setval('public.job_order_seq'");
+    expect(migration).toContain("where jo.deleted_at is null");
+    expect(migration).toContain("lpad(sequence_number::text, 5, '0')");
+    expect(migration).toContain("allocate_work_order_number");
+    expect(migration).toContain("before insert on public.job_orders");
     expect(migration).not.toMatch(/\bDELETE\s+FROM\b/i);
     expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
   });

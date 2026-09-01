@@ -11,6 +11,7 @@ import { vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import { inventoryStore, type Part } from "@/lib/inventoryStore";
 import { staffStore, type Technician } from "@/lib/staffStore";
 import { inspectionsStore, type InspectionRecord } from "@/lib/inspectionsStore";
+import { extractWorkOrderNumber } from "@/lib/workOrderNumber";
 
 let registered = false;
 
@@ -21,7 +22,7 @@ export function useTrashRestoreHandlers() {
     registerRestoreHandler("work_order", async (p, item) => {
       const payload = p as WorkOrder;
       const cloudId = payload.cloudId || (isUuid(item.entityId) ? item.entityId : undefined);
-      const labelOrderNumber = item.label.match(/WO-\d{4}-\d+/)?.[0];
+      const labelOrderNumber = extractWorkOrderNumber(item.label);
       await restoreWorkOrderFromTrash({
         ...payload,
         id: labelOrderNumber || payload.id,

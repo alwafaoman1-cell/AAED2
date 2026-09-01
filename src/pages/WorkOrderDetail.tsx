@@ -74,6 +74,7 @@ import SendStageNotificationButton from "@/components/workorders/SendStageNotifi
 import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 import SmartCustomerSendBar from "@/components/workorders/SmartCustomerSendBar";
 import { isUuid } from "@/lib/uuid";
+import { extractWorkOrderNumber } from "@/lib/workOrderNumber";
 // PortalNotesPending moved to /messages
 import VehicleDeliveryReceiptDialog from "@/components/workorders/VehicleDeliveryReceiptDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -171,9 +172,9 @@ export default function WorkOrderDetail() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const candidate = order?.id || id;
+      const candidate = order?.cloudId || order?.id || id;
       if (candidate && UUID_RE.test(candidate)) { setCloudJobOrderId(candidate); return; }
-      const woNo = (order?.displayNumber || id || "").match(/WO-\d{4}-\d+/i)?.[0];
+      const woNo = extractWorkOrderNumber(order?.displayNumber || id || "");
       if (!woNo) { setCloudJobOrderId(null); return; }
       const { data } = await supabase.from("job_orders").select("id").ilike("order_number", woNo).maybeSingle();
       if (!cancelled) setCloudJobOrderId((data as any)?.id || null);
@@ -247,9 +248,9 @@ export default function WorkOrderDetail() {
     setOrder(local);
     const unsub = subscribeWorkOrders(() => setOrder((prev) => getWorkOrderById(id) || prev));
 
-    // Fallback: if not found locally, fetch from Supabase job_orders by UUID or by order_number (WO-YYYY-NNNN)
+    // Fallback: resolve UUID, current WO-00001 numbers and legacy WO-YYYY-NNNN aliases.
     const isUuid = UUID_RE.test(id);
-    const woMatch = id.match(/WO-\d{4}-\d+/i);
+    const woMatch = extractWorkOrderNumber(id);
     if (!local && id && (isUuid || woMatch)) {
       setLoadingRemote(true);
       (async () => {
@@ -266,7 +267,7 @@ export default function WorkOrderDetail() {
           `);
         let { data, error } = isUuid
           ? await q.eq("id", id).maybeSingle()
-          : await q.ilike("order_number", woMatch![0]).maybeSingle();
+          : await q.ilike("order_number", woMatch!).maybeSingle();
         if (error || !data) {
           const baseQuery = supabase
             .from("job_orders")
@@ -279,9 +280,18 @@ export default function WorkOrderDetail() {
             `);
           const baseResult = isUuid
             ? await baseQuery.eq("id", id).maybeSingle()
-            : await baseQuery.ilike("order_number", woMatch![0]).maybeSingle();
+            : await baseQuery.ilike("order_number", woMatch!).maybeSingle();
           data = baseResult.data as any;
           error = baseResult.error as any;
+        }
+        if ((error || !data) && !isUuid && woMatch) {
+          const aliased = await fetchWorkOrderFromCloudByIdentifier(woMatch).catch(() => null);
+          if (aliased) {
+            setOrder(aliased);
+            setCloudJobOrderId(aliased.cloudId || null);
+            setLoadingRemote(false);
+            return;
+          }
         }
         if (!error && data) {
           let claimInfo: { approvedAmount?: number | null; estimatedAmount?: number | null; estimationType?: string | null } | null = null;
@@ -555,7 +565,7 @@ export default function WorkOrderDetail() {
     }
     return Array.from(byKey.values());
   })();
-  // رقم العرض الاحترافي للأمر (WO-YYYY-NNNNN). يُستخدم في كل الواجهات والـPDF بدل الـUUID.
+  // رقم العرض الاحترافي للأمر (WO-NNNNN). يُستخدم في كل الواجهات والـPDF بدل الـUUID.
   const displayNo = order.displayNumber || (UUID_RE.test(order.id) ? `WO-${order.id.slice(0, 8).toUpperCase()}` : order.id);
   const effectiveLinkedClaim = linkedClaim || (order.claimId && UUID_RE.test(order.claimId)
     ? { id: order.claimId, claim_number: order.claimNumber && order.claimNumber !== "-" ? order.claimNumber : "مطالبة مرتبطة" }

@@ -1,5 +1,6 @@
 ﻿import { classifyWorkOrderCosts, type ClaimApprovalMode, type ClaimApprovalInfo } from "@/lib/workOrderCosting";
 import { addUnifiedVehicleMedia, upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
+import { extractWorkOrderNumber, isSupportedWorkOrderNumber, normalizeWorkOrderNumber } from "@/lib/workOrderNumber";
 
 // Shared in-memory store for Work Orders so other modules (Inspection) can read & sync them.
 // This is a temporary client-side store until backend wiring is added.
@@ -59,7 +60,7 @@ export interface WorkOrder {
   id: string;
   /** UUID الداخلي في Supabase. لا يُستخدم في الروابط العامة. */
   cloudId?: string;
-  /** رقم عرض احترافي للأمر (مثل WO-2026-00012). إن لم يُحدّد يُستخدم id كرقم. */
+  /** رقم عرض احترافي للأمر (مثل WO-00012). إن لم يُحدّد يُستخدم id كرقم. */
   displayNumber?: string;
   workOrderType?: import("@/lib/workOrderType").WorkOrderType;
   claimId?: string;
@@ -212,7 +213,7 @@ function isActiveWorkOrder(order: WorkOrder): boolean {
 }
 
 export function getWorkOrders(options: { includeArchived?: boolean } = {}): WorkOrder[] {
-  // الأحدث أولاً: حسب entryDate ثم الـ id (بصفته يبدأ بالسنة WO-YYYY-####)
+  // الأحدث أولاً: حسب تاريخ الدخول ثم رقم العرض.
   return load().filter((order) => (options.includeArchived ? !order.deletedAt : isActiveWorkOrder(order))).sort((a, b) => {
     const da = (a.entryDate || "").localeCompare(b.entryDate || "");
     if (da !== 0) return -da;
@@ -236,10 +237,9 @@ export function getWorkOrderById(id: string): WorkOrder | undefined {
     o.displayNumber?.toLowerCase() === lower
   );
   if (found) return found;
-  // 3) Extract WO-YYYY-NNN pattern from a URL or longer string
-  const m = raw.match(/WO-\d{4}-\d+/i);
-  if (m) {
-    const code = m[0].toUpperCase();
+  // 3) Extract current or legacy visible number from a URL/longer string.
+  const code = extractWorkOrderNumber(raw);
+  if (code) {
     found = list.find(o => o.id?.toUpperCase() === code || o.displayNumber?.toUpperCase() === code);
     if (found) return found;
   }
@@ -265,9 +265,8 @@ function findWorkOrderIndex(id: string): number {
     o.displayNumber?.toLowerCase() === lower
   );
   if (idx >= 0) return idx;
-  const m = raw.match(/WO-\d{4}-\d+/i);
-  if (m) {
-    const code = m[0].toUpperCase();
+  const code = extractWorkOrderNumber(raw);
+  if (code) {
     idx = list.findIndex(o => o.id?.toUpperCase() === code || o.displayNumber?.toUpperCase() === code);
     if (idx >= 0) return idx;
   }
@@ -803,45 +802,6 @@ let cloudFetchInFlight: Promise<void> | null = null;
 let lastCloudFetchFailureAt = 0;
 const KNOWN_CLOUD_NUMBERS = new Set<string>();
 const CLOUD_FETCH_FAILURE_COOLDOWN_MS = 15_000;
-
-function parseWorkOrderNumber(value: string) {
-  const m = String(value || "").trim().match(/^([A-Z]+)-(\d{4})-(\d+)$/i);
-  if (!m) return null;
-  return { prefix: m[1].toUpperCase(), year: m[2], sequence: Number(m[3]), padding: m[3].length };
-}
-
-async function allocateVisibleOrderNumber(tenantId: string, requested: string): Promise<string> {
-  const parsed = parseWorkOrderNumber(requested);
-  if (!parsed) return requested;
-  const { data, error } = await supabase
-    .from("job_orders")
-    .select("order_number")
-    .eq("tenant_id", tenantId)
-    .ilike("order_number", `${parsed.prefix}-${parsed.year}-%`)
-    .limit(10000);
-  if (error) throw error;
-
-  const used = new Set<string>();
-  let max = 0;
-  for (const row of (data || []) as Array<{ order_number: string | null }>) {
-    const n = String(row.order_number || "").trim().toUpperCase();
-    const p = parseWorkOrderNumber(n);
-    if (!p || p.prefix !== parsed.prefix || p.year !== parsed.year) continue;
-    used.add(n);
-    if (Number.isFinite(p.sequence) && p.sequence > max) max = p.sequence;
-  }
-
-  const normalizedRequested = requested.trim().toUpperCase();
-  if (!used.has(normalizedRequested)) return requested;
-
-  let next = Math.max(max + 1, parsed.sequence + 1);
-  let candidate = `${parsed.prefix}-${parsed.year}-${String(next).padStart(parsed.padding, "0")}`;
-  while (used.has(candidate)) {
-    next += 1;
-    candidate = `${parsed.prefix}-${parsed.year}-${String(next).padStart(parsed.padding, "0")}`;
-  }
-  return candidate;
-}
 
 async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise<void> {
   if (!options.throwOnError && Date.now() - lastCloudFetchFailureAt < CLOUD_FETCH_FAILURE_COOLDOWN_MS) return;
@@ -1413,6 +1373,23 @@ async function saveNeededPartsToCloud(order: WorkOrder, partsNeeded: NeededPart[
   return saved;
 }
 
+async function resolveWorkOrderAliasJobOrderId(tenantId: string, oldNumber: string): Promise<string | null> {
+  const { data, error } = await (supabase.from("work_order_number_renumber_audit" as any) as any)
+    .select("job_order_id")
+    .eq("tenant_id", tenantId)
+    .ilike("old_order_number", oldNumber)
+    .order("renumbered_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    // Compatibility for environments where the forward migration is not yet applied.
+    const message = String((error as any)?.message || "").toLowerCase();
+    if (message.includes("does not exist") || message.includes("schema cache") || (error as any)?.code === "42P01") return null;
+    throw error;
+  }
+  return isUuid((data as any)?.job_order_id || "") ? (data as any).job_order_id : null;
+}
+
 export async function fetchWorkOrderFromCloudByIdentifier(identifier: string): Promise<WorkOrder | null> {
   const raw = String(identifier || "").trim();
   if (!raw) return null;
@@ -1420,8 +1397,7 @@ export async function fetchWorkOrderFromCloudByIdentifier(identifier: string): P
   if (!ctx) return null;
 
   const segment = raw.split(/[/?#]/).filter(Boolean).pop() || raw;
-  const woMatch = segment.match(/WO-\d{4}-\d+/i);
-  const lookup = woMatch?.[0] || segment;
+  const lookup = extractWorkOrderNumber(segment) || segment;
   const lookupIsUuid = isUuid(lookup);
 
   let query = supabase
@@ -1434,8 +1410,23 @@ export async function fetchWorkOrderFromCloudByIdentifier(identifier: string): P
     ? query.eq("id", lookup)
     : query.ilike("order_number", lookup);
 
-  const { data, error } = await query.maybeSingle();
+  let { data, error } = await query.maybeSingle();
   if (error) throw error;
+  if (!data?.id && !lookupIsUuid) {
+    const aliasId = await resolveWorkOrderAliasJobOrderId(ctx.tenantId, lookup);
+    if (aliasId) {
+      const aliasResult = await supabase
+        .from("job_orders")
+        .select("*")
+        .eq("tenant_id", ctx.tenantId)
+        .eq("id", aliasId)
+        .limit(1)
+        .maybeSingle();
+      data = aliasResult.data as any;
+      error = aliasResult.error as any;
+      if (error) throw error;
+    }
+  }
   if (!data?.id) return null;
 
   const saved = await mapSavedJobOrder(data);
@@ -1471,23 +1462,14 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
       throw new Error("Work order is deleted in Supabase and cannot be updated from this form");
     }
     previousOrderNumber = (existing as any).order_number || order.id;
-    finalOrderNumber = String(order.id || previousOrderNumber || "").trim().toUpperCase();
-    if (!/^WO-\d{4}-\d+$/i.test(finalOrderNumber)) {
-      throw new Error("Work order number must use WO-YYYY-0001 format");
-    }
-    if (previousOrderNumber && finalOrderNumber.toLowerCase() !== previousOrderNumber.toLowerCase()) {
-      const { data: duplicate, error: duplicateError } = await supabase
-        .from("job_orders")
-        .select("id,order_number")
-        .eq("tenant_id", ctx.tenantId)
-        .ilike("order_number", finalOrderNumber)
-        .neq("id", existingId)
-        .maybeSingle();
-      if (duplicateError) throw duplicateError;
-      if ((duplicate as any)?.id) throw new Error(`Work order number ${finalOrderNumber} already exists`);
-    }
+    // Visible numbers are immutable after allocation. Keeping the UUID and the
+    // original number together prevents broken invoices, claims and old links.
+    finalOrderNumber = normalizeWorkOrderNumber(previousOrderNumber || order.id || "");
+    if (!isSupportedWorkOrderNumber(finalOrderNumber)) throw new Error("Invalid work order number");
   } else {
-    finalOrderNumber = await allocateVisibleOrderNumber(ctx.tenantId, order.id);
+    // Optimistic only: the database BEFORE INSERT trigger atomically allocates
+    // the authoritative WO-00001 number for the current tenant.
+    finalOrderNumber = normalizeWorkOrderNumber(order.id);
   }
 
   const normalizedStatus = normalizeWorkOrderStatus(order.status);
