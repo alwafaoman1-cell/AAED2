@@ -77,4 +77,13 @@ describe("work order visible save contract", () => {
     expect(migration).not.toMatch(/\bDELETE\s+FROM\b/i);
     expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
   });
+
+  it("keeps the desktop work-order workspace compact without changing the mobile flow", () => {
+    const detail = read("src/pages/WorkOrderDetail.tsx");
+    expect(detail).toContain('grid grid-cols-1 items-start gap-4 lg:grid-cols-2');
+    expect(detail).toContain("<NeededPartsManager");
+    expect(detail).toContain("<CustomerPortalLink");
+    expect(detail).toContain("<SmartCustomerSendBar");
+    expect(detail.indexOf("<NeededPartsManager")).toBeLessThan(detail.indexOf("<CustomerPortalLink"));
+  });
 });

@@ -46,6 +46,19 @@ describe("work-order expense persistence and profitability", () => {
     expect(detail).toContain("الإيراد الرسمي قبل الضريبة");
     expect(detail).toContain("الربح الفعلي حتى الآن");
     expect(detail).toContain("actualRevenue - vouchersTotal");
+    expect(detail).toContain("displayedPartsCost = expensesReady");
+    expect(detail).toContain("? partsExpenseTotal");
+    expect(detail).toContain("linkedInvoiceTotal");
+    expect(detail).toContain("إجمالي الفواتير شامل الضريبة");
+  });
+
+  it("updates labor charges with a focused cloud write and refreshes the local cache", () => {
+    const detail = read("src/pages/WorkOrderDetail.tsx");
+    expect(detail).toContain("saveLaborCharges");
+    expect(detail).toContain('.update({ labor_cost: amount, updated_at: new Date().toISOString() })');
+    expect(detail).toContain('.is("deleted_at", null)');
+    expect(detail).toContain("setOrder(upsertWorkOrderInCache(updatedOrder))");
+    expect(detail).toContain("تعديل أجرة العمل");
   });
 
   it("allows an authorized user to edit the same linked voucher from work-order detail", () => {

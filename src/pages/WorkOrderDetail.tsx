@@ -226,6 +226,9 @@ export default function WorkOrderDetail() {
   const [paymentInvoice, setPaymentInvoice] = useState<WorkOrderLinkedInvoice | null>(null);
   const [expenseTick, setExpenseTick] = useState(0);
   const [expensesReady, setExpensesReady] = useState(() => expensesStore.isHydrated());
+  const [laborEditOpen, setLaborEditOpen] = useState(false);
+  const [laborDraft, setLaborDraft] = useState(0);
+  const [savingLabor, setSavingLabor] = useState(false);
   const financialQuery = useWorkOrderFinancials(order);
 
   const allowEdit = canEdit();
@@ -572,14 +575,64 @@ export default function WorkOrderDetail() {
     : null);
   const insuranceApprovedBreakdown = splitVatInclusiveAmount(order.insuranceApprovedAmount || 0, 0.05);
   const hasInsuranceApprovedAmount = insuranceApprovedBreakdown.totalIncludingVat > 0;
+  const linkedInvoiceTotal = Number(financialQuery.data?.total || 0);
+  const hasLinkedInvoiceTotal = linkedInvoiceTotal > 0;
   const displayedClaimTotal =
-    hasInsuranceApprovedAmount
+    hasLinkedInvoiceTotal
+      ? linkedInvoiceTotal
+      : hasInsuranceApprovedAmount
       ? insuranceApprovedBreakdown.totalIncludingVat
       : Number(order.totalCost) || 0;
   const displayedLaborCharges =
     Number(order.laborCost) > 0
       ? Number(order.laborCost)
       : 0;
+  const displayedPartsCost = expensesReady
+    ? partsExpenseTotal
+    : Number(order.partsCost) || 0;
+
+  function openLaborEditor() {
+    setLaborDraft(displayedLaborCharges);
+    setLaborEditOpen(true);
+  }
+
+  async function saveLaborCharges() {
+    if (!order.cloudId || !isUuid(order.cloudId)) {
+      toast.error("تعذر تحديد أمر العمل في قاعدة البيانات");
+      return;
+    }
+    const amount = Number(laborDraft);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error("أدخل أجرة عمل صحيحة");
+      return;
+    }
+
+    setSavingLabor(true);
+    try {
+      const { data, error } = await (supabase.from("job_orders") as any)
+        .update({ labor_cost: amount, updated_at: new Date().toISOString() })
+        .eq("id", order.cloudId)
+        .is("deleted_at", null)
+        .select("id,labor_cost")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data?.id) throw new Error("أمر العمل غير موجود أو محذوف");
+
+      const savedLabor = Number(data.labor_cost || 0);
+      const updatedOrder: WorkOrder = {
+        ...order,
+        laborCost: savedLabor,
+        totalCost: savedLabor + Number(order.partsCost || 0),
+      };
+      setOrder(upsertWorkOrderInCache(updatedOrder));
+      setLaborEditOpen(false);
+      toast.success("تم تحديث أجرة العمل");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تحديث أجرة العمل");
+    } finally {
+      setSavingLabor(false);
+    }
+  }
 
   async function handlePrintWorkOrder() {
     // Pre-build tracking QR into the cache before sync HTML render
@@ -1224,8 +1277,18 @@ export default function WorkOrderDetail() {
             <Row label="Lump Sum" value="Lump Sum approval, not itemized" />
           )}
           <Row label="Labor Charges" value={formatCurrencyEnglish(displayedLaborCharges, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "OMR")} amount />
-          <Row label="قطع الغيار" value={formatCurrencyEnglish(order.partsCost ?? 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")} amount />
-          <Row label="Total Including VAT" value={formatCurrencyEnglish(displayedClaimTotal, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "OMR")} highlight amount />
+          {allowEdit && (
+            <Button type="button" size="sm" variant="outline" className="h-7 w-full gap-1 text-[11px]" onClick={openLaborEditor}>
+              <Edit size={12} /> تعديل أجرة العمل
+            </Button>
+          )}
+          <Row label="تكلفة قطع الغيار الفعلية" value={formatCurrencyEnglish(displayedPartsCost, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "ر.ع")} amount />
+          <Row
+            label={hasLinkedInvoiceTotal ? "إجمالي الفواتير شامل الضريبة" : "Total Including VAT"}
+            value={formatCurrencyEnglish(displayedClaimTotal, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, "OMR")}
+            highlight
+            amount
+          />
         </Section>
       </div>
 
@@ -1236,49 +1299,56 @@ export default function WorkOrderDetail() {
         </div>
       )}
 
-      {/* Needed parts — standalone manager (independent additions) */}
-      <NeededPartsManager
-        order={order}
-        onPrintRequest={handlePrintNeededParts}
-        onSendWhatsApp={() => { setWaTab("templates"); setWaOpen(true); }}
-        onSendToSuppliers={() => { setWaTab("suppliers"); setWaOpen(true); }}
-        onConvertToExpense={(part) => {
-          if (part.convertedToExpense) {
-            toast.error("هذه القطعة محولة إلى مصروف مسبقاً");
-            return;
-          }
-          setConvertPart(part);
-        }}
-        onOpenExpense={(expenseId) => {
-          const rec = expensesStore.getById(expenseId);
-          if (rec) setPreviewExpense(rec);
-          else toast.error("لم يتم العثور على المصروف المرتبط");
-        }}
-        allowEdit={allowEdit}
-      />
+      {/* Desktop workspace: two balanced columns; mobile remains a single readable flow. */}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+        {/* Needed parts — standalone manager (independent additions) */}
+        <NeededPartsManager
+          order={order}
+          onPrintRequest={handlePrintNeededParts}
+          onSendWhatsApp={() => { setWaTab("templates"); setWaOpen(true); }}
+          onSendToSuppliers={() => { setWaTab("suppliers"); setWaOpen(true); }}
+          onConvertToExpense={(part) => {
+            if (part.convertedToExpense) {
+              toast.error("هذه القطعة محولة إلى مصروف مسبقاً");
+              return;
+            }
+            setConvertPart(part);
+          }}
+          onOpenExpense={(expenseId) => {
+            const rec = expensesStore.getById(expenseId);
+            if (rec) setPreviewExpense(rec);
+            else toast.error("لم يتم العثور على المصروف المرتبط");
+          }}
+          allowEdit={allowEdit}
+        />
 
-      {/* Customer-facing tracking portal link (safe — no financials) */}
-      {cloudJobOrderId && (
-        <div className="space-y-2">
-          <CustomerPortalLink
-            jobOrderId={cloudJobOrderId}
-            customerPhone={order.phone}
-            orderNumber={order.id}
-            localOrderId={order.id}
-            customerName={order.customer}
-          />
-          <SmartCustomerSendBar
-            jobOrderId={cloudJobOrderId}
-            orderNumber={displayNo}
-            status={normalizeWorkOrderStatus(order.status)}
-            customerName={order.customer}
-            customerPhone={order.phone}
-          />
-          <div className="flex justify-end">
-            <SendStageNotificationButton jobOrderId={cloudJobOrderId} status={normalizeWorkOrderStatus(order.status)} />
+        {/* Customer-facing links and updates share one compact desktop column. */}
+        {cloudJobOrderId ? (
+          <div className="space-y-3">
+            <CustomerPortalLink
+              jobOrderId={cloudJobOrderId}
+              customerPhone={order.phone}
+              orderNumber={order.id}
+              localOrderId={order.id}
+              customerName={order.customer}
+            />
+            <SmartCustomerSendBar
+              jobOrderId={cloudJobOrderId}
+              orderNumber={displayNo}
+              status={normalizeWorkOrderStatus(order.status)}
+              customerName={order.customer}
+              customerPhone={order.phone}
+            />
+            <div className="flex justify-end rounded-lg border border-border/60 bg-card px-3 py-2">
+              <SendStageNotificationButton jobOrderId={cloudJobOrderId} status={normalizeWorkOrderStatus(order.status)} />
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="rounded-xl border border-dashed border-border bg-card p-4 text-center text-xs text-muted-foreground">
+            روابط العميل وإرسال التحديثات غير متاحة — هذا الأمر غير مزامن مع السحابة بعد.
+          </div>
+        )}
+      </div>
 
       {/* ملاحظات العملاء من بوابة QR تظهر الآن في صفحة /messages "المراسلات" */}
 
@@ -1600,6 +1670,33 @@ export default function WorkOrderDetail() {
             <DialogTitle>تعديل أمر العمل {displayNo}</DialogTitle>
           </DialogHeader>
           <WorkOrderForm initial={order} onClose={() => setEditOpen(false)} />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={laborEditOpen} onOpenChange={(open) => !savingLabor && setLaborEditOpen(open)}>
+        <DialogContent className="max-w-sm bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>تعديل أجرة العمل</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="work-order-labor-charge">أجرة العمل (ر.ع)</Label>
+            <Input
+              id="work-order-labor-charge"
+              type="number"
+              min="0"
+              step="0.001"
+              value={laborDraft}
+              onChange={(event) => setLaborDraft(Number(event.target.value))}
+              disabled={savingLabor}
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setLaborEditOpen(false)} disabled={savingLabor}>إلغاء</Button>
+            <Button type="button" onClick={() => void saveLaborCharges()} disabled={savingLabor}>
+              {savingLabor ? "جاري الحفظ…" : "حفظ"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

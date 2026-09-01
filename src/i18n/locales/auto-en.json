@@ -1781,6 +1781,14 @@
   "تعذر التحقق من المركبة في Supabase": "Unable to verify vehicle in Supabase",
   "تعذر التحقق من ربط المركبة بالعميل": "Unable to verify that the vehicle is linked to the customer",
   "تعذر التحقق من رقم أمر العمل": "The work order number could not be verified",
+  "تعذر تحديد أمر العمل في قاعدة البيانات": "The work order could not be identified in the database",
+  "تعذر تحديث أجرة العمل": "Unable to update labor charges",
+  "أدخل أجرة عمل صحيحة": "Enter valid labor charges",
+  "أجرة العمل (ر.ع)": "Labor charges (OMR)",
+  "إجمالي الفواتير شامل الضريبة": "Total invoiced including VAT",
+  "تكلفة قطع الغيار الفعلية": "Actual spare parts cost",
+  "تعديل أجرة العمل": "Edit labor charges",
+  "تم تحديث أجرة العمل": "Labor charges updated",
   "رقم ثابت يُنشأ تلقائيًا من قاعدة البيانات ولا يتغير بعد الحفظ.": "A permanent number generated automatically by the database and unchanged after saving.",
   "مثال: WO-00001 أو أحمد محمد أو أ ب ج 1234": "Example: WO-00001, Ahmed Mohammed, or A B C 1234",
   "تعذر التحليل باستخدام الحصة المجانية لـ Gemini. يرجى المحاولة لاحقًا أو إدخال البيانات يدويًا.": "Unable to parse using Gemini free quota. Please try later or enter data manually.",
@@ -4355,5 +4363,6 @@
   "اعتماد الخروج والتسليم": "Finalize Vehicle Exit and Handover",
   "استخدم نموذج خروج وتسليم المركبة لاعتماد الحالة النهائية": "Use the Vehicle Exit & Handover Form to finalize the status",
   "خروج وتسليم المركبة": "Vehicle Exit & Handover",
-  "خروج وتسليم المركبة:": "Vehicle Exit & Handover:"
+  "خروج وتسليم المركبة:": "Vehicle Exit & Handover:",
+  "روابط العميل وإرسال التحديثات غير متاحة — هذا الأمر غير مزامن مع السحابة بعد.": "Customer links and updates are unavailable because this work order has not been synced to the cloud yet."
 }
