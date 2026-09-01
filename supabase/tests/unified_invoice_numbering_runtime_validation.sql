@@ -89,7 +89,7 @@ select pg_temp.uin_assert('draft_did_not_consume_sequence',
 -- Cash #50, Insurance #51, Cash #52 prove the shared sequence.
 select * from public.issue_sales_document_invoice('f2000000-0000-4000-8000-000000000010', '2026-08-23');
 select pg_temp.uin_assert('first_cash_number',
-  (select doc_number = 'INV-2026-000050' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000010'));
+  (select doc_number = 'INV-26-000050' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000010'));
 
 reset role;
 insert into public.insurance_invoices(
@@ -105,7 +105,7 @@ set local role authenticated;
 select set_config('request.jwt.claims',
   '{"sub":"f1000000-0000-4000-8000-000000000011","role":"authenticated"}', true);
 select pg_temp.uin_assert('second_insurance_number',
-  (select invoice_number = 'INV-2026-000051' from public.insurance_invoices where id = 'f3000000-0000-4000-8000-000000000010'));
+  (select invoice_number = 'INV-26-000051' from public.insurance_invoices where id = 'f3000000-0000-4000-8000-000000000010'));
 
 insert into public.sales_documents(
   id, tenant_id, doc_number, doc_type, date, subtotal, tax_total, total, status, invoice_status, created_at
@@ -115,7 +115,7 @@ insert into public.sales_documents(
 );
 select * from public.issue_sales_document_invoice('f2000000-0000-4000-8000-000000000011', '2026-08-23');
 select pg_temp.uin_assert('third_cash_number',
-  (select doc_number = 'INV-2026-000052' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000011'));
+  (select doc_number = 'INV-26-000052' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000011'));
 select pg_temp.uin_assert('shared_sequence_types',
   (select string_agg(invoice_type, ',' order by sequence_number) = 'cash,insurance,cash'
    from public.invoice_number_registry
@@ -129,7 +129,7 @@ select pg_temp.uin_assert('registry_unique_count',
 -- Retry is idempotent and consumes no second number.
 select * from public.issue_sales_document_invoice('f2000000-0000-4000-8000-000000000010', '2026-08-23');
 select pg_temp.uin_assert('retry_same_number',
-  (select doc_number = 'INV-2026-000050' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000010'));
+  (select doc_number = 'INV-26-000050' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000010'));
 select pg_temp.uin_assert('retry_did_not_consume_number',
   (select next_value = 53 from public.invoice_number_sequences
    where tenant_id = 'f1000000-0000-4000-8000-000000000001' and invoice_year = 2026));
@@ -138,9 +138,9 @@ select pg_temp.uin_assert('retry_did_not_consume_number',
 update public.sales_documents set status = 'cancelled'
 where id = 'f2000000-0000-4000-8000-000000000010';
 select pg_temp.uin_assert('cancelled_number_retained',
-  (select doc_number = 'INV-2026-000050' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000010'));
+  (select doc_number = 'INV-26-000050' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000010'));
 select pg_temp.uin_assert('cancelled_number_registry_retained',
-  exists (select 1 from public.invoice_number_registry where invoice_number = 'INV-2026-000050'));
+  exists (select 1 from public.invoice_number_registry where invoice_number = 'INV-26-000050'));
 select pg_temp.uin_assert('cancelled_event_audited',
   exists (select 1 from public.invoice_number_audit_events
           where source_id = 'f2000000-0000-4000-8000-000000000010' and event_type = 'cancelled'));
@@ -148,7 +148,7 @@ select pg_temp.uin_assert('cancelled_event_audited',
 update public.sales_documents set status = 'void'
 where id = 'f2000000-0000-4000-8000-000000000011';
 select pg_temp.uin_assert('void_number_retained',
-  (select doc_number = 'INV-2026-000052' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000011'));
+  (select doc_number = 'INV-26-000052' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000011'));
 select pg_temp.uin_assert('void_event_audited',
   exists (select 1 from public.invoice_number_audit_events
           where source_id = 'f2000000-0000-4000-8000-000000000011' and event_type = 'void'));
@@ -156,7 +156,7 @@ select pg_temp.uin_assert('void_event_audited',
 update public.insurance_invoices set status = 'reversed'
 where id = 'f3000000-0000-4000-8000-000000000010';
 select pg_temp.uin_assert('reversed_insurance_number_retained',
-  (select invoice_number = 'INV-2026-000051' from public.insurance_invoices where id = 'f3000000-0000-4000-8000-000000000010'));
+  (select invoice_number = 'INV-26-000051' from public.insurance_invoices where id = 'f3000000-0000-4000-8000-000000000010'));
 select pg_temp.uin_assert('reversal_event_audited',
   exists (select 1 from public.invoice_number_audit_events
           where source_id = 'f3000000-0000-4000-8000-000000000010' and event_type = 'reversed'));
@@ -169,7 +169,7 @@ insert into public.sales_documents(
 );
 select * from public.issue_sales_document_invoice('f2000000-0000-4000-8000-000000000013', '2026-08-24');
 select pg_temp.uin_assert('terminal_numbers_never_reused',
-  (select doc_number = 'INV-2026-000053' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000013'));
+  (select doc_number = 'INV-26-000053' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000013'));
 
 -- Year resets from issue date, not browser time.
 insert into public.sales_documents(
@@ -180,7 +180,7 @@ insert into public.sales_documents(
 );
 select * from public.issue_sales_document_invoice('f2000000-0000-4000-8000-000000000012', '2027-01-02');
 select pg_temp.uin_assert('year_rollover',
-  (select doc_number = 'INV-2027-000001' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000012'));
+  (select doc_number = 'INV-27-000001' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000012'));
 
 -- Tenant B has its own sequence and cannot see Tenant A's registry.
 select set_config('request.jwt.claims',
@@ -194,7 +194,7 @@ insert into public.sales_documents(
 );
 select * from public.issue_sales_document_invoice('f2000000-0000-4000-8000-000000000021', '2026-08-23');
 select pg_temp.uin_assert('tenant_b_own_sequence',
-  (select doc_number = 'INV-2026-000001' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000021'));
+  (select doc_number = 'INV-26-000001' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000021'));
 select pg_temp.uin_assert('tenant_b_cannot_read_tenant_a_registry',
   not exists (select 1 from public.invoice_number_registry where tenant_id = 'f1000000-0000-4000-8000-000000000001'));
 select pg_temp.uin_expect_error('wrong_tenant_issue_denied',
@@ -222,7 +222,7 @@ select pg_temp.uin_expect_error('anonymous_issue_denied',
 
 reset role;
 select pg_temp.uin_expect_error('registry_is_immutable',
-  $$delete from public.invoice_number_registry where invoice_number = 'INV-2026-000050'$$,
+  $$delete from public.invoice_number_registry where invoice_number = 'INV-26-000050'$$,
   'official invoice number registry records are immutable');
 select pg_temp.uin_assert('historical_cash_number_unchanged',
   (select doc_number = 'INV-OLD-CASH-77' from public.sales_documents where id = 'f2000000-0000-4000-8000-000000000001'));
@@ -243,7 +243,7 @@ select pg_temp.uin_assert('search_returns_cash_source',
    from public.find_unified_invoice_number('inv-2026-000052')));
 select pg_temp.uin_assert('search_returns_insurance_source',
   (select source_type = 'insurance_invoices' and invoice_type = 'insurance'
-   from public.find_unified_invoice_number('INV-2026-000051')));
+   from public.find_unified_invoice_number('INV-26-000051')));
 
 reset role;
 select jsonb_build_object(

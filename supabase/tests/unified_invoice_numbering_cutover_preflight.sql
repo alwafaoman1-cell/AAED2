@@ -20,10 +20,13 @@ with invoice_numbers as (
     invoice_number,
     case
       when invoice_number is null then 'blank/draft'
-      when invoice_number ~ '^INV-[0-9]{4}-[0-9]{6,}$' then 'INV-YYYY-NNNNNN'
+      when invoice_number ~ '^INV-[0-9]{2}-[0-9]{6,}$' then 'INV-YY-NNNNNN'
+      when invoice_number ~ '^INV-[0-9]{4}-[0-9]{6,}$' then 'INV-YYYY-NNNNNN (legacy official)'
       else 'legacy/other'
     end as existing_format,
     case
+      when invoice_number ~ '^INV-[0-9]{2}-[0-9]{6,}$'
+        then substring(invoice_number from '^INV-[0-9]{2}-([0-9]+)$')::bigint
       when invoice_number ~ '^INV-[0-9]{4}-[0-9]{6,}$'
         then substring(invoice_number from '^INV-[0-9]{4}-([0-9]+)$')::bigint
       else null

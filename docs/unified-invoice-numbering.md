@@ -3,7 +3,14 @@
 Official customer invoices issued after the per-tenant cutover use one shared,
 atomic sequence for cash and insurance sources:
 
-`INV-YYYY-NNNNNN`
+`INV-YY-NNNNNN`
+
+The central sequence keeps the full four-digit year internally. Only the
+official display reference uses the final two year digits (for example,
+`INV-26-000153`). Registry-backed 2026 invoices were converted atomically from
+`INV-2026-NNNNNN`; their prior references remain searchable through immutable
+allocation audit events. Historical invoices outside the registry are not
+renumbered.
 
 - Cash source: `public.sales_documents`
 - Insurance source: `public.insurance_invoices`

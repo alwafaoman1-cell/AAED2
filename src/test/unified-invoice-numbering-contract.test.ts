@@ -9,6 +9,10 @@ const hardeningMigration = readFileSync(
   "supabase/migrations/20260823110000_unified_invoice_numbering_cutover_hardening.sql",
   "utf8",
 );
+const shortYearMigration = readFileSync(
+  "supabase/migrations/20260831100000_unified_invoice_short_year_format.sql",
+  "utf8",
+);
 const unifiedSearch = readFileSync("src/lib/unifiedInvoiceSearch.ts", "utf8");
 const invoiceList = readFileSync("src/components/sales/SalesDocList.tsx", "utf8");
 const salesStore = readFileSync("src/lib/salesStore.ts", "utf8");
@@ -128,5 +132,26 @@ describe("unified invoice numbering contract", () => {
   it("documents the dormant legacy source without deleting or activating it", () => {
     expect(hardeningMigration).toContain("Legacy / dormant customer invoice source");
     expect(hardeningMigration).not.toMatch(/drop\s+table\s+(if\s+exists\s+)?public\.invoices/i);
+  });
+
+  it("uses the approved short-year format without changing sequence identity", () => {
+    expect(shortYearMigration).toContain("'INV-YY-NNNNNN'");
+    expect(shortYearMigration).toContain("right(v_year::text, 2)");
+    expect(shortYearMigration).toContain("regexp_replace(r.invoice_number, '^INV-2026-', 'INV-26-')");
+    expect(shortYearMigration).toContain("r.invoice_year = 2026");
+    expect(shortYearMigration).toContain("set invoice_number = m.new_number");
+    expect(shortYearMigration).not.toMatch(/update\s+public\.invoice_number_sequences/i);
+  });
+
+  it("renames both official sources atomically and preserves the old lookup alias", () => {
+    expect(shortYearMigration).toContain("update public.sales_documents sd");
+    expect(shortYearMigration).toContain("update public.insurance_invoices ii");
+    expect(shortYearMigration).toContain("event_type = 'allocated'");
+    expect(shortYearMigration).toContain("Old official number remains a lookup alias");
+    expect(shortYearMigration).toContain("INVOICE_SHORT_YEAR_NUMBER_COLLISION");
+  });
+
+  it("accepts short and historical official formats in the cash issuance client", () => {
+    expect(salesStore).toContain("/^INV-(?:\\d{2}|\\d{4})-\\d{6,}$/");
   });
 });

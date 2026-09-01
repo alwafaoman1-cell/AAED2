@@ -520,7 +520,7 @@ export const salesStore = {
       }
       return historical;
     }
-    if (!/^INV-\d{4}-\d{6,}$/.test(String(issuedNumber || ""))) {
+    if (!/^INV-(?:\d{2}|\d{4})-\d{6,}$/.test(String(issuedNumber || ""))) {
       throw new Error("لم يتم تخصيص رقم الفاتورة المركزي؛ تحقق من تفعيل Cutover للمؤسسة");
     }
 
@@ -593,7 +593,7 @@ export const salesStore = {
       if (
         finalDoc.type === "invoice"
         && finalDoc.invoiceStatus === "issued"
-        && /^INV-\d{4}-\d{6,}$/.test(finalDoc.number)
+        && /^INV-(?:\d{2}|\d{4})-\d{6,}$/.test(finalDoc.number)
         && !finalDoc.isDeleted
       ) {
         // dynamic import لتجنب الدورات

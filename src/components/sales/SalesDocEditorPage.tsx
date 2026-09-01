@@ -395,7 +395,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
           <Input
             value={doc.number}
             onChange={(e) => setDoc({ ...doc, number: e.target.value })}
-            readOnly={type === "invoice" && (doc.invoiceStatus !== "issued" || /^INV-\d{4}-\d{6,}$/.test(doc.number))}
+            readOnly={type === "invoice" && (doc.invoiceStatus !== "issued" || /^INV-(?:\d{2}|\d{4})-\d{6,}$/.test(doc.number))}
             placeholder={type === "invoice" ? (isAr ? "يُخصص تلقائيًا عند الإصدار" : "Allocated automatically on issue") : "00001"}
             className="font-mono"
           />

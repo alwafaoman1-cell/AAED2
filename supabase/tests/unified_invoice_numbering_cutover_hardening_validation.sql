@@ -76,8 +76,8 @@ select public.activate_unified_invoice_numbering(2026::smallint,140::bigint,6::s
 select pg_temp.uin_ok('start_140_accepted',
   (select next_value=140 from public.invoice_number_sequences where tenant_id='fb000000-0000-4000-8000-000000000001' and invoice_year=2026));
 select pg_temp.uin_ok('activation_metadata',
-  (select start_year=2026 and starting_sequence=140 and first_invoice_number='INV-2026-000140'
-     and numbering_format='INV-YYYY-NNNNNN' and activated_by=auth.uid()
+  (select start_year=2026 and starting_sequence=140 and first_invoice_number='INV-26-000140'
+     and numbering_format='INV-YY-NNNNNN' and activated_by=auth.uid()
    from public.invoice_numbering_settings where tenant_id='fb000000-0000-4000-8000-000000000001'));
 
 select * from public.issue_sales_document_invoice('fb100000-0000-4000-8000-000000000001','2026-08-23');
@@ -111,7 +111,7 @@ select pg_temp.uin_ok('new_draft_number_blank',
   (select doc_number='' from public.sales_documents where id='fb100000-0000-4000-8000-000000000010'));
 select * from public.issue_sales_document_invoice('fb100000-0000-4000-8000-000000000010','2026-08-23');
 select pg_temp.uin_ok('new_cash_140',
-  (select doc_number='INV-2026-000140' from public.sales_documents where id='fb100000-0000-4000-8000-000000000010'));
+  (select doc_number='INV-26-000140' from public.sales_documents where id='fb100000-0000-4000-8000-000000000010'));
 
 reset role;
 insert into public.insurance_invoices(
@@ -123,7 +123,7 @@ set local role authenticated;
 select set_config('request.jwt.claims',
   '{"sub":"fb000000-0000-4000-8000-000000000011","role":"authenticated"}', true);
 select pg_temp.uin_ok('new_insurance_141',
-  (select invoice_number='INV-2026-000141' from public.insurance_invoices where id='fb200000-0000-4000-8000-000000000010'));
+  (select invoice_number='INV-26-000141' from public.insurance_invoices where id='fb200000-0000-4000-8000-000000000010'));
 select pg_temp.uin_ok('shared_sequence_cash_insurance',
   (select string_agg(invoice_type,',' order by sequence_number)='cash,insurance'
    from public.invoice_number_registry where tenant_id='fb000000-0000-4000-8000-000000000001'));
@@ -133,16 +133,16 @@ select pg_temp.uin_ok('retry_idempotent',
   (select next_value=142 from public.invoice_number_sequences where tenant_id='fb000000-0000-4000-8000-000000000001' and invoice_year=2026));
 select pg_temp.uin_ok('registry_search_new_cash',
   (select count(*)=1 and bool_and(source_type='sales_documents') and bool_and(not is_historical)
-   from public.find_unified_invoice_number('inv-2026-000140')));
+   from public.find_unified_invoice_number('inv-26-000140')));
 
 update public.sales_documents set doc_number='ILLEGAL-CHANGE',status='cancelled'
 where id='fb100000-0000-4000-8000-000000000010';
 select pg_temp.uin_ok('cancel_retains_registry_number',
-  (select doc_number='INV-2026-000140' from public.sales_documents where id='fb100000-0000-4000-8000-000000000010'));
+  (select doc_number='INV-26-000140' from public.sales_documents where id='fb100000-0000-4000-8000-000000000010'));
 update public.insurance_invoices set invoice_number='ILLEGAL-CHANGE',status='reversed'
 where id='fb200000-0000-4000-8000-000000000010';
 select pg_temp.uin_ok('reversal_retains_registry_number',
-  (select invoice_number='INV-2026-000141' from public.insurance_invoices where id='fb200000-0000-4000-8000-000000000010'));
+  (select invoice_number='INV-26-000141' from public.insurance_invoices where id='fb200000-0000-4000-8000-000000000010'));
 
 insert into public.sales_documents(
   id,tenant_id,doc_number,doc_type,date,subtotal,tax_total,total,status,invoice_status,created_at
@@ -150,12 +150,12 @@ insert into public.sales_documents(
   '','invoice','2027-01-02',10,.5,10.5,'draft','draft',clock_timestamp());
 select * from public.issue_sales_document_invoice('fb100000-0000-4000-8000-000000000011','2027-01-02');
 select pg_temp.uin_ok('year_rollover_starts_one',
-  (select doc_number='INV-2027-000001' from public.sales_documents where id='fb100000-0000-4000-8000-000000000011'));
+  (select doc_number='INV-27-000001' from public.sales_documents where id='fb100000-0000-4000-8000-000000000011'));
 
 select set_config('request.jwt.claims',
   '{"sub":"fb000000-0000-4000-8000-000000000021","role":"authenticated"}', true);
 select pg_temp.uin_ok('cross_tenant_search_denied',
-  not exists(select 1 from public.find_unified_invoice_number('INV-2026-000140')));
+  not exists(select 1 from public.find_unified_invoice_number('INV-26-000140')));
 select pg_temp.uin_error('wrong_tenant_issue_denied',
   $$select * from public.issue_sales_document_invoice('fb100000-0000-4000-8000-000000000010','2026-08-23')$$,
   'sales invoice not found');
@@ -170,7 +170,7 @@ reset role;
 set local role anon;
 select set_config('request.jwt.claims','{"role":"anon"}',true);
 select pg_temp.uin_error('anonymous_search_denied',
-  $$select * from public.find_unified_invoice_number('INV-2026-000140')$$,
+  $$select * from public.find_unified_invoice_number('INV-26-000140')$$,
   'permission denied');
 
 reset role;
