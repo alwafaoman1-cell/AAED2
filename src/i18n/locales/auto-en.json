@@ -4368,5 +4368,7 @@
   "روابط العميل وإرسال التحديثات غير متاحة — هذا الأمر غير مزامن مع السحابة بعد.": "Customer links and updates are unavailable because this work order has not been synced to the cloud yet.",
   "شهر التقرير": "Report Month",
   "يعتمد التقرير على الدفعات والمصروفات الفعلية داخل الشهر المحدد فقط؛ لا تُرحّل الإيرادات أو تكاليف المركبة بين الأشهر.": "The report uses only actual payments and expenses within the selected month; vehicle revenue and costs are not carried between months.",
-  "أساس الشهر: الإيراد من الدفعات المحصلة في الشهر بعد استبعاد VAT، والتكلفة من سندات مصروف الشهر نفسه فقط. لا يوجد ترحيل بين الأشهر.": "Monthly basis: revenue comes from payments collected during the month after excluding VAT, and costs come only from expense vouchers dated in the same month. There is no carryover between months."
+  "أساس الشهر: الإيراد من الدفعات المحصلة في الشهر بعد استبعاد VAT، والتكلفة من سندات مصروف الشهر نفسه فقط. لا يوجد ترحيل بين الأشهر.": "Monthly basis: revenue comes from payments collected during the month after excluding VAT, and costs come only from expense vouchers dated in the same month. There is no carryover between months.",
+  "يعتمد التقرير على دفعات الشهر ويطابق معها التكلفة الحقيقية للسيارة حتى لو كان سند المصروف بتاريخ مختلف.": "The report uses the month's payments and matches them with the vehicle's actual cost even when the expense voucher has a different date.",
+  "أساس الشهر: الإيراد من الدفعات المحصلة بعد استبعاد VAT، وتُطابق معه تكلفة السيارة الحقيقية بنسبة التحصيل دون تكرار التكلفة بين دفعات الأشهر.": "Monthly basis: revenue comes from collected payments after excluding VAT, and actual vehicle cost is matched proportionally without duplicating cost across payment months."
 }

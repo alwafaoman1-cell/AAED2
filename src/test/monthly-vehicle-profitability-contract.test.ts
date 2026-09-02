@@ -9,6 +9,7 @@ const expenseLinkageMigration = readFileSync(resolve(root, "supabase/migrations/
 const lifetimeCostMigration = readFileSync(resolve(root, "supabase/migrations/20260901123000_monthly_vehicle_profitability_lifetime_direct_costs.sql"), "utf8");
 const revenueCompositionMigration = readFileSync(resolve(root, "supabase/migrations/20260902100000_monthly_vehicle_profitability_revenue_composition.sql"), "utf8");
 const paymentMonthMigration = readFileSync(resolve(root, "supabase/migrations/20260902110000_monthly_vehicle_profitability_payment_month_basis.sql"), "utf8");
+const matchedCostMigration = readFileSync(resolve(root, "supabase/migrations/20260902120000_monthly_vehicle_profitability_matched_cost_basis.sql"), "utf8");
 const page = readFileSync(resolve(root, "src/pages/accounting/reports/MonthlyVehicleProfitabilityPage.tsx"), "utf8");
 const service = readFileSync(resolve(root, "src/lib/accounting/monthlyWorkshopReport.ts"), "utf8");
 
@@ -124,6 +125,17 @@ describe("monthly vehicle profitability report contract", () => {
     expect(paymentMonthMigration).toContain("no revenue or vehicle cost is carried between months");
     expect(page).toContain('type="month"');
     expect(page).not.toContain('type="date" value={from}');
-    expect(page).toContain("لا يوجد ترحيل بين الأشهر");
+    expect(page).toContain("شهر التقرير");
+  });
+
+  it("matches real lifetime vehicle costs to payment revenue without duplicate cost recognition", () => {
+    expect(matchedCostMigration).toContain("expense_lifetime as (");
+    expect(matchedCostMigration).toContain("from direct_expenses e");
+    expect(matchedCostMigration).toContain("matched_cost_month as (");
+    expect(matchedCostMigration).toContain("pr.recognized_revenue_ex_vat");
+    expect(matchedCostMigration).toContain("cx.total_invoice_subtotal");
+    expect(matchedCostMigration).toContain("without duplicating costs across payment months");
+    expect(matchedCostMigration).not.toContain("from direct_period_expenses e");
+    expect(page).toContain("حتى لو كان سند المصروف بتاريخ مختلف");
   });
 });

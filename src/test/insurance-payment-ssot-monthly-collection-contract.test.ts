@@ -8,6 +8,7 @@ describe("insurance payment SSOT and monthly collection contract", () => {
   const migration = read("supabase/migrations/20260826100000_insurance_payment_ssot_and_monthly_collection.sql");
   const verifiedPaymentMigration = read("supabase/migrations/20260827100000_verified_payment_date_monthly_reporting.sql");
   const paymentMonthMigration = read("supabase/migrations/20260902110000_monthly_vehicle_profitability_payment_month_basis.sql");
+  const matchedCostMigration = read("supabase/migrations/20260902120000_monthly_vehicle_profitability_matched_cost_basis.sql");
   const monthly = read("supabase/migrations/20260813100000_monthly_vehicle_profitability_report.sql");
   const editor = read("src/components/insurance/EditInsuranceInvoiceDialog.tsx");
   const accounting = read("src/pages/insurance/InsuranceAccounting.tsx");
@@ -74,5 +75,11 @@ describe("insurance payment SSOT and monthly collection contract", () => {
     expect(paymentMonthMigration).toContain("recognized_revenue_ex_vat");
     expect(paymentMonthMigration).toContain("net of VAT and capped at linked invoice total");
     expect(paymentMonthMigration).not.toContain("period_invoices as (");
+  });
+
+  it("matches historical vehicle costs proportionally to actual payment-month revenue", () => {
+    expect(matchedCostMigration).toContain("expense_lifetime as (");
+    expect(matchedCostMigration).toContain("matched_cost_month as (");
+    expect(matchedCostMigration).toContain("least(coalesce(pr.recognized_revenue_ex_vat,0) / nullif(cx.total_invoice_subtotal,0),1)");
   });
 });
