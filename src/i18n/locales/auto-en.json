@@ -4365,5 +4365,8 @@
   "استخدم نموذج خروج وتسليم المركبة لاعتماد الحالة النهائية": "Use the Vehicle Exit & Handover Form to finalize the status",
   "خروج وتسليم المركبة": "Vehicle Exit & Handover",
   "خروج وتسليم المركبة:": "Vehicle Exit & Handover:",
-  "روابط العميل وإرسال التحديثات غير متاحة — هذا الأمر غير مزامن مع السحابة بعد.": "Customer links and updates are unavailable because this work order has not been synced to the cloud yet."
+  "روابط العميل وإرسال التحديثات غير متاحة — هذا الأمر غير مزامن مع السحابة بعد.": "Customer links and updates are unavailable because this work order has not been synced to the cloud yet.",
+  "شهر التقرير": "Report Month",
+  "يعتمد التقرير على الدفعات والمصروفات الفعلية داخل الشهر المحدد فقط؛ لا تُرحّل الإيرادات أو تكاليف المركبة بين الأشهر.": "The report uses only actual payments and expenses within the selected month; vehicle revenue and costs are not carried between months.",
+  "أساس الشهر: الإيراد من الدفعات المحصلة في الشهر بعد استبعاد VAT، والتكلفة من سندات مصروف الشهر نفسه فقط. لا يوجد ترحيل بين الأشهر.": "Monthly basis: revenue comes from payments collected during the month after excluding VAT, and costs come only from expense vouchers dated in the same month. There is no carryover between months."
 }

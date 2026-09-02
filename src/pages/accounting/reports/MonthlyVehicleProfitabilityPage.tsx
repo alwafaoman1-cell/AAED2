@@ -51,7 +51,7 @@ const COLUMNS: Column[] = [
   { key: "work_order_status", ar: "حالة أمر العمل", en: "Work Order Status" },
   { key: "invoice_numbers", ar: "أرقام الفواتير", en: "Invoice Numbers", default: true },
   { key: "invoice_dates", ar: "تواريخ الفواتير", en: "Invoice Dates", default: true },
-  { key: "invoiced_ex_vat", ar: "المفوتر قبل الضريبة", en: "Invoiced Ex. VAT", type: "money", default: true },
+  { key: "invoiced_ex_vat", ar: "الإيراد المحقق قبل الضريبة", en: "Recognized Revenue Ex. VAT", type: "money", default: true },
   { key: "labor_revenue", ar: "أجرة العمل/الخدمة المفوترة", en: "Billed Labor/Service", type: "money", default: true },
   { key: "parts_revenue", ar: "إيراد قطع الغيار", en: "Parts Revenue", type: "money", default: true },
   { key: "vat", ar: "ضريبة VAT", en: "VAT", type: "money", default: true },
@@ -67,10 +67,15 @@ const COLUMNS: Column[] = [
   { key: "accounting_status", ar: "اكتمال البيانات", en: "Accounting Completeness" },
 ];
 
-function monthBounds() {
+function currentMonth() {
   const now = new Date();
-  const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthBounds(month: string) {
+  const [year, monthIndex] = month.split("-").map(Number);
+  const first = new Date(year, monthIndex - 1, 1);
+  const last = new Date(year, monthIndex, 0);
   const iso = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
   return { from: iso(first), to: iso(last) };
 }
@@ -85,10 +90,9 @@ function display(value: unknown, column: Column) {
 
 export default function MonthlyVehicleProfitabilityPage() {
   const { profile } = useAuth();
-  const bounds = useMemo(monthBounds, []);
   const [businessType, setBusinessType] = useState<MonthlyBusinessType>("cash");
-  const [from, setFrom] = useState(bounds.from);
-  const [to, setTo] = useState(bounds.to);
+  const [month, setMonth] = useState(currentMonth);
+  const { from, to } = useMemo(() => monthBounds(month), [month]);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -157,7 +161,7 @@ export default function MonthlyVehicleProfitabilityPage() {
   }
 
   const kpis = [
-    ["الإيراد المفوتر قبل VAT", aggregates?.invoiced_ex_vat, "text-blue-600"], ["المبلغ المحصل", aggregates?.collected, "text-emerald-600"],
+    ["الإيراد المحقق قبل VAT", aggregates?.recognized_revenue_ex_vat ?? aggregates?.invoiced_ex_vat, "text-blue-600"], ["المبلغ المحصل", aggregates?.collected, "text-emerald-600"],
     ["أجرة العمل/الخدمة المفوترة", aggregates?.labor_revenue, "text-blue-600"], ["إيراد قطع الغيار", aggregates?.parts_revenue, "text-blue-600"],
     ["المبلغ المستحق", aggregates?.outstanding, "text-amber-600"], ["التكلفة المباشرة", aggregates?.direct_cost, "text-rose-600"],
     ["ربح السيارات المباشر", aggregates?.gross_profit, Number(aggregates?.gross_profit || 0) >= 0 ? "text-emerald-600" : "text-rose-600"],
@@ -180,7 +184,7 @@ export default function MonthlyVehicleProfitabilityPage() {
 
     <div className="grid gap-3 lg:grid-cols-[auto_1fr_auto]">
       <div className="flex rounded-xl border bg-card p-1"><Button variant={businessType === "cash" ? "default" : "ghost"} onClick={() => { setBusinessType("cash"); setPage(1); }}><Wallet size={16}/>زبائن الكاش</Button><Button variant={businessType === "insurance" ? "default" : "ghost"} onClick={() => { setBusinessType("insurance"); setPage(1); }}><ShieldCheck size={16}/>شركات التأمين</Button></div>
-      <Card><CardContent className="grid gap-2 p-3 md:grid-cols-[1fr_1fr_2fr_auto]"><label className="text-xs">من<Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }}/></label><label className="text-xs">إلى<Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }}/></label><label className="text-xs">بحث<div className="relative"><Search className="absolute right-3 top-3" size={15}/><Input className="pr-9" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { setAppliedSearch(search); setPage(1); } }} placeholder="العميل، اللوحة، VIN، أمر العمل، المطالبة أو الفاتورة"/></div></label><Button className="self-end" onClick={() => { setAppliedSearch(search); setPage(1); }}><Filter size={15}/>تطبيق</Button></CardContent></Card>
+      <Card><CardContent className="grid gap-2 p-3 md:grid-cols-[1fr_2fr_auto]"><label className="text-xs">شهر التقرير<Input type="month" value={month} onChange={(e) => { if (e.target.value) setMonth(e.target.value); setPage(1); }}/></label><label className="text-xs">بحث<div className="relative"><Search className="absolute right-3 top-3" size={15}/><Input className="pr-9" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { setAppliedSearch(search); setPage(1); } }} placeholder="العميل، اللوحة، VIN، أمر العمل، المطالبة أو الفاتورة"/></div></label><Button className="self-end" onClick={() => { setAppliedSearch(search); setPage(1); }}><Filter size={15}/>تطبيق</Button></CardContent></Card>
       <div className="flex flex-wrap items-center gap-2"><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline"><SlidersHorizontal size={15}/>الأعمدة ({visible.length})</Button></DropdownMenuTrigger><DropdownMenuContent className="max-h-[65vh] w-64 overflow-y-auto" align="end"><DropdownMenuLabel>أعمدة العرض والتصدير</DropdownMenuLabel><DropdownMenuSeparator/><DropdownMenuCheckboxItem checked={visible.length === COLUMNS.length} onCheckedChange={(checked) => setVisible(checked ? COLUMNS.map((c) => c.key) : COLUMNS.filter((c) => c.default).map((c) => c.key))}>تحديد الكل / الافتراضي</DropdownMenuCheckboxItem>{COLUMNS.map((column) => <DropdownMenuCheckboxItem key={column.key} checked={visible.includes(column.key)} onCheckedChange={(checked) => setVisible((current) => checked ? [...new Set([...current, column.key])] : current.filter((key) => key !== column.key))}>{column.ar}</DropdownMenuCheckboxItem>)}</DropdownMenuContent></DropdownMenu><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("xlsx")}><FileSpreadsheet size={15}/>Excel</Button><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("pdf")}><FileDown size={15}/>PDF</Button><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("print")}><Printer size={15}/>طباعة</Button></div>
     </div>
 
@@ -203,8 +207,8 @@ export default function MonthlyVehicleProfitabilityPage() {
       <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Users size={18}/>تفاصيل الرواتب والأجور — سند فعلي أو استحقاق HR تلقائي</CardTitle></CardHeader><CardContent className="p-0">{overheadReport.isLoading ? <div className="p-10 text-center">جاري التحميل…</div> : !overheadReport.data?.payrollRows.length ? <div className="p-10 text-center text-muted-foreground">لا توجد بيانات رواتب أو إعداد راتب افتراضي خلال الفترة.</div> : <div className="max-h-[420px] overflow-auto"><Table><TableHeader className="sticky top-0 bg-muted"><TableRow><TableHead>التاريخ</TableHead><TableHead>السند/الاستحقاق</TableHead><TableHead>الموظف/المستفيد</TableHead><TableHead>البيان</TableHead><TableHead>المبلغ</TableHead></TableRow></TableHeader><TableBody>{overheadReport.data.payrollRows.map((row, index) => <TableRow key={String(row.id || index)}><TableCell>{String(row.date || "—")}</TableCell><TableCell>{String(row.voucher_number || "—")}</TableCell><TableCell>{String(row.beneficiary || row.supplier_name || "—")}</TableCell><TableCell className="max-w-[280px]">{String(row.description || "—")}</TableCell><TableCell dir="ltr">{formatOMR(Number(row.subtotal || 0))}</TableCell></TableRow>)}</TableBody></Table></div>}</CardContent></Card>
     </div>
 
-    <Card><CardHeader className="flex-row items-center justify-between"><div><CardTitle className="flex items-center gap-2"><Car size={19}/>تفاصيل ربح وخسارة كل سيارة</CardTitle><p className="mt-1 text-xs text-muted-foreground">الفواتير غير المدفوعة تظهر ضمن المفوتر والمستحق، بينما يبقى التحصيل صفرًا حتى تسجيل دفعة فعلية.</p></div><span className="text-sm text-muted-foreground">{report.data?.pagination.totalRows || 0} سجل</span></CardHeader><CardContent className="p-0">{report.isLoading ? <div className="p-16 text-center">جاري تحميل التقرير…</div> : report.isError ? <div className="p-10 text-center text-destructive">{(report.error as Error).message}</div> : !report.data?.rows.length ? <div className="p-16 text-center text-muted-foreground">لا توجد حركة مالية مطابقة خلال الفترة.</div> : <div className="overflow-x-auto"><Table className="min-w-max"><TableHeader className="sticky top-0 z-10 bg-muted"><TableRow>{selectedColumns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.ar}</TableHead>)}</TableRow></TableHeader><TableBody>{report.data.rows.map((row, index) => <TableRow key={String(row.operation_id || index)}>{selectedColumns.map((column) => <TableCell key={column.key} className={`max-w-[260px] whitespace-nowrap ${column.key === "gross_profit" ? Number(row[column.key] || 0) >= 0 ? "font-bold text-emerald-600" : "font-bold text-rose-600" : ""}`} dir={column.type === "money" || column.type === "number" || column.type === "percentage" ? "ltr" : undefined}>{display(row[column.key], column)}</TableCell>)}</TableRow>)}</TableBody></Table></div>}</CardContent></Card>
+    <Card><CardHeader className="flex-row items-center justify-between"><div><CardTitle className="flex items-center gap-2"><Car size={19}/>تفاصيل ربح وخسارة كل سيارة</CardTitle><p className="mt-1 text-xs text-muted-foreground">يعتمد التقرير على الدفعات والمصروفات الفعلية داخل الشهر المحدد فقط؛ لا تُرحّل الإيرادات أو تكاليف المركبة بين الأشهر.</p></div><span className="text-sm text-muted-foreground">{report.data?.pagination.totalRows || 0} سجل</span></CardHeader><CardContent className="p-0">{report.isLoading ? <div className="p-16 text-center">جاري تحميل التقرير…</div> : report.isError ? <div className="p-10 text-center text-destructive">{(report.error as Error).message}</div> : !report.data?.rows.length ? <div className="p-16 text-center text-muted-foreground">لا توجد حركة مالية مطابقة خلال الفترة.</div> : <div className="overflow-x-auto"><Table className="min-w-max"><TableHeader className="sticky top-0 z-10 bg-muted"><TableRow>{selectedColumns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.ar}</TableHead>)}</TableRow></TableHeader><TableBody>{report.data.rows.map((row, index) => <TableRow key={String(row.operation_id || index)}>{selectedColumns.map((column) => <TableCell key={column.key} className={`max-w-[260px] whitespace-nowrap ${column.key === "gross_profit" ? Number(row[column.key] || 0) >= 0 ? "font-bold text-emerald-600" : "font-bold text-rose-600" : ""}`} dir={column.type === "money" || column.type === "number" || column.type === "percentage" ? "ltr" : undefined}>{display(row[column.key], column)}</TableCell>)}</TableRow>)}</TableBody></Table></div>}</CardContent></Card>
 
-    <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-sm md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-2 text-muted-foreground"><CalendarRange size={16}/><span>أساس الشهر: أجرة العمل وبيع القطع إيراد مفوتر، وشراء القطع والعمالة الخارجية تكاليف فعلية. التحصيل حسب تاريخ الدفعة والمصروف حسب تاريخ السند، وVAT لا يدخل في الربح.</span></div><div className="flex items-center gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>السابق</Button><span dir="ltr">{page} / {report.data?.pagination.totalPages || 1}</span><Button variant="outline" disabled={page >= (report.data?.pagination.totalPages || 1)} onClick={() => setPage((value) => value + 1)}>التالي</Button></div></div>
+    <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-sm md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-2 text-muted-foreground"><CalendarRange size={16}/><span>أساس الشهر: الإيراد من الدفعات المحصلة في الشهر بعد استبعاد VAT، والتكلفة من سندات مصروف الشهر نفسه فقط. لا يوجد ترحيل بين الأشهر.</span></div><div className="flex items-center gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>السابق</Button><span dir="ltr">{page} / {report.data?.pagination.totalPages || 1}</span><Button variant="outline" disabled={page >= (report.data?.pagination.totalPages || 1)} onClick={() => setPage((value) => value + 1)}>التالي</Button></div></div>
   </main>;
 }

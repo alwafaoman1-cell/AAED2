@@ -17,6 +17,7 @@ export type MonthlyVehicleProfitabilityRow = Record<string, unknown>;
 export interface MonthlyVehicleProfitabilityResult {
   rows: MonthlyVehicleProfitabilityRow[];
   aggregates: {
+    recognized_revenue_ex_vat: number;
     invoiced_ex_vat: number;
     labor_revenue: number;
     parts_revenue: number;

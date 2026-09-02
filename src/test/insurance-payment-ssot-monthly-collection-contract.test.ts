@@ -7,6 +7,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8"
 describe("insurance payment SSOT and monthly collection contract", () => {
   const migration = read("supabase/migrations/20260826100000_insurance_payment_ssot_and_monthly_collection.sql");
   const verifiedPaymentMigration = read("supabase/migrations/20260827100000_verified_payment_date_monthly_reporting.sql");
+  const paymentMonthMigration = read("supabase/migrations/20260902110000_monthly_vehicle_profitability_payment_month_basis.sql");
   const monthly = read("supabase/migrations/20260813100000_monthly_vehicle_profitability_report.sql");
   const editor = read("src/components/insurance/EditInsuranceInvoiceDialog.tsx");
   const accounting = read("src/pages/insurance/InsuranceAccounting.tsx");
@@ -65,5 +66,13 @@ describe("insurance payment SSOT and monthly collection contract", () => {
     expect(verifiedPaymentMigration).toContain("invoice_dates");
     expect(read("src/lib/accounting/monthlyVehicleProfitability.ts"))
       .toContain('monthly_vehicle_profitability_v2_rpc');
+  });
+
+  it("supersedes invoice-date profitability with capped payment-month recognition", () => {
+    expect(paymentMonthMigration).toContain("period_payment_recognition as (");
+    expect(paymentMonthMigration).toContain("linked_invoice_id");
+    expect(paymentMonthMigration).toContain("recognized_revenue_ex_vat");
+    expect(paymentMonthMigration).toContain("net of VAT and capped at linked invoice total");
+    expect(paymentMonthMigration).not.toContain("period_invoices as (");
   });
 });

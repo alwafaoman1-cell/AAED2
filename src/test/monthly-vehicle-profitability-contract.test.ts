@@ -8,6 +8,7 @@ const monthlyDetailsMigration = readFileSync(resolve(root, "supabase/migrations/
 const expenseLinkageMigration = readFileSync(resolve(root, "supabase/migrations/20260901120000_monthly_vehicle_profitability_expense_linkage.sql"), "utf8");
 const lifetimeCostMigration = readFileSync(resolve(root, "supabase/migrations/20260901123000_monthly_vehicle_profitability_lifetime_direct_costs.sql"), "utf8");
 const revenueCompositionMigration = readFileSync(resolve(root, "supabase/migrations/20260902100000_monthly_vehicle_profitability_revenue_composition.sql"), "utf8");
+const paymentMonthMigration = readFileSync(resolve(root, "supabase/migrations/20260902110000_monthly_vehicle_profitability_payment_month_basis.sql"), "utf8");
 const page = readFileSync(resolve(root, "src/pages/accounting/reports/MonthlyVehicleProfitabilityPage.tsx"), "utf8");
 const service = readFileSync(resolve(root, "src/lib/accounting/monthlyWorkshopReport.ts"), "utf8");
 
@@ -108,5 +109,21 @@ describe("monthly vehicle profitability report contract", () => {
     expect(service).toContain("row.labor_revenue");
     expect(service).toContain("row.parts_revenue");
     expect(service).toContain("row.external_direct_cost");
+  });
+
+  it("uses one strict month for recognized payment revenue and direct costs without carryover", () => {
+    expect(paymentMonthMigration).toContain("p.payment_date between p_from and p_to");
+    expect(paymentMonthMigration).toContain("e.date between p_from and p_to");
+    expect(paymentMonthMigration).toContain("direct_period_expenses as (");
+    expect(paymentMonthMigration).toContain("from direct_period_expenses e");
+    expect(paymentMonthMigration).not.toContain("expense_lifetime as (");
+    expect(paymentMonthMigration).toContain("recognized_revenue_ex_vat");
+    expect(paymentMonthMigration).toContain("least(p.amount, greatest(p.invoice_total - p.paid_before, 0))");
+    expect(paymentMonthMigration).toContain("p.invoice_id is null");
+    expect(paymentMonthMigration).toContain("i.operation_invoice_count = 1");
+    expect(paymentMonthMigration).toContain("no revenue or vehicle cost is carried between months");
+    expect(page).toContain('type="month"');
+    expect(page).not.toContain('type="date" value={from}');
+    expect(page).toContain("لا يوجد ترحيل بين الأشهر");
   });
 });

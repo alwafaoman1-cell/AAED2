@@ -249,7 +249,7 @@ export function exportMonthlyWorkshopWorkbook(input: {
   const overhead = Number(overheads.summary.subtotal || 0);
   XLSX.utils.book_append_sheet(wb, sheet([
     ["البيان", "الكاش", "التأمين", "الإجمالي"],
-    ["الإيراد المفوتر قبل الضريبة", cashSummary.invoiced_ex_vat || 0, insuranceSummary.invoiced_ex_vat || 0, Number(cashSummary.invoiced_ex_vat || 0) + Number(insuranceSummary.invoiced_ex_vat || 0)],
+    ["الإيراد المحقق من دفعات الشهر قبل الضريبة", cashSummary.recognized_revenue_ex_vat || cashSummary.invoiced_ex_vat || 0, insuranceSummary.recognized_revenue_ex_vat || insuranceSummary.invoiced_ex_vat || 0, Number(cashSummary.recognized_revenue_ex_vat || cashSummary.invoiced_ex_vat || 0) + Number(insuranceSummary.recognized_revenue_ex_vat || insuranceSummary.invoiced_ex_vat || 0)],
     ["أجرة العمل/الخدمة المفوترة", cashSummary.labor_revenue || 0, insuranceSummary.labor_revenue || 0, Number(cashSummary.labor_revenue || 0) + Number(insuranceSummary.labor_revenue || 0)],
     ["إيراد قطع الغيار", cashSummary.parts_revenue || 0, insuranceSummary.parts_revenue || 0, Number(cashSummary.parts_revenue || 0) + Number(insuranceSummary.parts_revenue || 0)],
     ["الضريبة", cashSummary.vat || 0, insuranceSummary.vat || 0, Number(cashSummary.vat || 0) + Number(insuranceSummary.vat || 0)],
@@ -260,7 +260,7 @@ export function exportMonthlyWorkshopWorkbook(input: {
     ["صافي ربح/خسارة الشهر", "", "", cashGross + insuranceGross - overhead],
   ], [34, 18, 18, 18]), "الملخص");
 
-  const vehicleHeaders = ["النوع","أمر العمل","المطالبة","العميل","الهاتف","اللوحة","الماركة","الموديل","الفواتير","قبل الضريبة","أجرة العمل/الخدمة المفوترة","إيراد قطع الغيار","VAT","المحصل","المستحق","تكلفة شراء قطع الغيار","تكلفة عمالة خارجية","تكاليف خارجية مباشرة","التكلفة المباشرة","الربح/الخسارة"];
+  const vehicleHeaders = ["النوع","أمر العمل","المطالبة","العميل","الهاتف","اللوحة","الماركة","الموديل","الفواتير","الإيراد المحقق قبل الضريبة","أجرة العمل/الخدمة المحققة","إيراد قطع الغيار المحقق","VAT المحقق","المحصل","المستحق","تكلفة شراء قطع الغيار","تكلفة عمالة خارجية","تكاليف خارجية مباشرة","التكلفة المباشرة للشهر","الربح/الخسارة للشهر"];
   const vehicleData = (kind: string, rows: MonthlyVehicleProfitabilityRow[]) => rows.map((row) => [kind,row.work_order_number,row.claim_number,row.customer_name,row.customer_phone,`${row.plate_number || ""} ${row.plate_letters || ""}`.trim(),row.brand,row.model,row.invoice_numbers,row.invoiced_ex_vat,row.labor_revenue,row.parts_revenue,row.vat,row.collected,row.outstanding,row.parts_cost,row.labor_cost,row.external_direct_cost,row.direct_cost,row.gross_profit]);
   XLSX.utils.book_append_sheet(wb, sheet([vehicleHeaders,...vehicleData("كاش",cashRows),...vehicleData("تأمين",insuranceRows)], [12,18,22,28,16,16,16,18,24,16,22,18,14,16,16,22,20,22,18,18]), "ربحية السيارات");
 
