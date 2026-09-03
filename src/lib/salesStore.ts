@@ -182,7 +182,10 @@ function rowToSalesDoc(r: any): SalesDoc {
     fromDocId: linkedWorkOrderId || m.fromDocId || r.converted_invoice_id,
     fromDocType: m.fromDocType,
     documentReference: m.documentReference,
-    payments: Array.isArray(m.payments) ? m.payments : [],
+    // sales_payments is the sole source of truth. Older metadata snapshots are
+    // intentionally ignored because they can survive after a real receipt was
+    // removed and create an undeletable "ghost" payment in the invoice UI.
+    payments: [],
     attachments: Array.isArray(m.attachments) ? m.attachments : [],
     noteEntries: Array.isArray(m.noteEntries) ? m.noteEntries : [],
     appointments: Array.isArray(m.appointments) ? m.appointments : [],
@@ -250,7 +253,7 @@ async function refreshSalesFromCloud() {
   cache = documentRows.map((row: any) => {
     const doc = rowToSalesDoc(row);
     const cloudPayments = paymentsByDocument.get(doc.id);
-    return cloudPayments ? { ...doc, payments: cloudPayments } : doc;
+    return { ...doc, payments: cloudPayments || [] };
   });
   lastCloudRefreshFailureAt = 0;
   notify();
@@ -346,7 +349,6 @@ async function upsertSalesCloud(doc: SalesDoc) {
       fromDocId: doc.fromDocId,
       fromDocType: doc.fromDocType,
       documentReference: doc.documentReference,
-      payments: doc.payments,
       attachments: doc.attachments,
       noteEntries: doc.noteEntries,
       appointments: doc.appointments,
@@ -423,8 +425,31 @@ async function insertSalesPaymentCloud(doc: SalesDoc, payment: Omit<SalesPayment
 async function deleteSalesPaymentCloud(docId: string, paymentId: string): Promise<SalesDoc> {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذّر تحديد المؤسسة");
-  if (!isUuid(docId) || !isUuid(paymentId)) {
+  if (!isUuid(docId)) {
     throw new Error("لا يمكن حذف دفعة غير محفوظة في السحابة");
+  }
+
+  // Atomic database path: deletes a real payment, or reconciles an old
+  // metadata-only payment that has no receipt row. The RPC also reverses any
+  // posted payment journal and recalculates the invoice from sales_payments.
+  const { error: rpcError } = await (supabase.rpc as any)("delete_sales_payment_or_reconcile", {
+    p_document_id: docId,
+    p_payment_reference: paymentId,
+  });
+  if (!rpcError) {
+    const refreshed = await refreshSalesDocumentFromCloud(docId);
+    if (!refreshed) throw new Error("تم حذف الدفعة ولكن تعذّر تحديث الفاتورة");
+    return refreshed;
+  }
+
+  // Compatibility while the database migration is rolling out. This path is
+  // valid only for a real UUID payment row; metadata-only payments require the
+  // atomic RPC so they cannot be reported as successfully deleted by mistake.
+  const rpcMissing = rpcError.code === "PGRST202" || rpcError.code === "42883"
+    || String(rpcError.message || "").includes("delete_sales_payment_or_reconcile");
+  if (!rpcMissing) throw rpcError;
+  if (!isUuid(paymentId)) {
+    throw new Error("هذه دفعة قديمة غير مرتبطة بسند قبض فعلي وتحتاج مزامنة قاعدة البيانات");
   }
 
   const { data, error } = await (supabase.from("sales_payments") as any)
@@ -436,7 +461,7 @@ async function deleteSalesPaymentCloud(docId: string, paymentId: string): Promis
     .maybeSingle();
   if (error) throw error;
   if (!data?.id) {
-    throw new Error("لم يتم حذف الدفعة من Supabase. تحقق من الصلاحيات ثم أعد المحاولة");
+    throw new Error("هذه الدفعة غير موجودة في سندات القبض وتحتاج مزامنة قاعدة البيانات");
   }
 
   // The database trigger recalculates paid_amount, balance_due and invoice status.

@@ -7,7 +7,13 @@ const store = readFileSync(resolve(root, "src/lib/salesStore.ts"), "utf8");
 const detail = readFileSync(resolve(root, "src/components/sales/SalesDocDetailPage.tsx"), "utf8");
 
 describe("sales payment deletion persistence contract", () => {
-  it("deletes the tenant-scoped cloud row and requires returned-row confirmation", () => {
+  it("uses the atomic tenant-scoped deletion and reconciliation RPC", () => {
+    expect(store).toContain('"delete_sales_payment_or_reconcile"');
+    expect(store).toContain("p_document_id: docId");
+    expect(store).toContain("p_payment_reference: paymentId");
+  });
+
+  it("keeps a compatibility delete for a real payment while the RPC rolls out", () => {
     expect(store).toContain('supabase.from("sales_payments")');
     expect(store).toContain('.eq("sales_document_id", docId)');
     expect(store).toContain('.eq("id", paymentId)');
@@ -22,6 +28,22 @@ describe("sales payment deletion persistence contract", () => {
     expect(store).toContain("await refreshSalesDocumentFromCloud(docId)");
     expect(removePaymentBody).not.toContain("salesStore.upsert");
     expect(removePaymentBody).not.toContain("write(");
+  });
+
+  it("never restores metadata-only ghost payments into the invoice cache", () => {
+    expect(store).toContain("payments: []");
+    expect(store).toContain("payments: cloudPayments || []");
+    expect(store).not.toContain("payments: doc.payments,");
+  });
+
+  it("migration reverses accounting and recalculates invoice totals atomically", () => {
+    const sql = readFileSync(resolve(root, "supabase/migrations/20260903110000_sales_payment_ssot_reconciliation.sql"), "utf8");
+    expect(sql).toContain("delete_sales_payment_or_reconcile");
+    expect(sql).toContain("reverse_accounting_journal_entry");
+    expect(sql).toContain("delete from public.sales_payments");
+    expect(sql).toContain("legacy_metadata_reconciled");
+    expect(sql).toContain("public.get_user_tenant_id()");
+    expect(sql).toContain("('admin', 'manager')");
   });
 
   it("shows success only after the asynchronous delete succeeds", () => {
