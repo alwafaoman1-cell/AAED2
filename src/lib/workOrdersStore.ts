@@ -1,6 +1,7 @@
 ﻿import { classifyWorkOrderCosts, type ClaimApprovalMode, type ClaimApprovalInfo } from "@/lib/workOrderCosting";
 import { addUnifiedVehicleMedia, upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
 import { extractWorkOrderNumber, isSupportedWorkOrderNumber, normalizeWorkOrderNumber } from "@/lib/workOrderNumber";
+import { buildWorkOrderActualCostMap, type WorkOrderExpenseCostRow } from "@/lib/workOrderActualCosts";
 
 // Shared in-memory store for Work Orders so other modules (Inspection) can read & sync them.
 // This is a temporary client-side store until backend wiring is added.
@@ -92,6 +93,8 @@ export interface WorkOrder {
   serviceType: string;
   status: string;
   totalCost: number;
+  /** Actual linked expense vouchers including recorded VAT. */
+  actualExpenseCost?: number;
   description?: string;
   diagnosis?: string;
   laborCost?: number;
@@ -702,6 +705,7 @@ function mapCloudRow(
   custMap: Map<string, { name: string; phone?: string | null }>,
   vehMap: Map<string, { plate?: string | null; brand?: string | null; model?: string | null; year?: number | null; vin?: string | null; color?: string | null; imageUrl?: string | null; thumbnailUrl?: string | null }>,
   claimMap: Map<string, ClaimApprovalInfo> = new Map(),
+  actualExpenseCosts: Map<string, number> = new Map(),
 ): WorkOrder {
   const c = r.customer_id ? custMap.get(r.customer_id) : undefined;
   const v = r.vehicle_id ? vehMap.get(r.vehicle_id) : undefined;
@@ -765,6 +769,7 @@ function mapCloudRow(
     serviceType: r.service_type || "صيانة",
     status: cloudStatusToLocal(r.status),
     totalCost: costs.totalCost,
+    actualExpenseCost: actualExpenseCosts.get(r.id) || 0,
     description: r.description || undefined,
     diagnosis: r.diagnosis || r.diagnosis_notes || undefined,
     laborCost: costs.laborCost,
@@ -803,6 +808,46 @@ let lastCloudFetchFailureAt = 0;
 const KNOWN_CLOUD_NUMBERS = new Set<string>();
 const CLOUD_FETCH_FAILURE_COOLDOWN_MS = 15_000;
 
+function chunks<T>(values: T[], size = 100): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
+}
+
+async function fetchActualExpenseCostsForOrders(tenantId: string, rows: CloudRow[]): Promise<Map<string, number>> {
+  if (!tenantId || rows.length === 0) return new Map();
+  const ids = Array.from(new Set(rows.map((row) => String(row.id || "").trim()).filter(Boolean)));
+  const numbers = Array.from(new Set(rows.map((row) => String(row.order_number || "").trim()).filter(Boolean)));
+  const requests: PromiseLike<any>[] = [];
+  const select = "id,work_order_id,linked_work_order_id,amount,total,status";
+
+  for (const batch of chunks(ids)) {
+    requests.push((supabase.from("expenses") as any)
+      .select(select)
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
+      .is("archived_at", null)
+      .in("work_order_id", batch));
+  }
+  const legacyLinkedIds = ids.map((id) => `WO-${id}`);
+  for (const batch of chunks([...ids, ...legacyLinkedIds, ...numbers])) {
+    requests.push((supabase.from("expenses") as any)
+      .select(select)
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
+      .is("archived_at", null)
+      .in("linked_work_order_id", batch));
+  }
+
+  const results = await Promise.all(requests);
+  const expenses: WorkOrderExpenseCostRow[] = [];
+  for (const result of results) {
+    if (result.error) throw result.error;
+    expenses.push(...(result.data || []));
+  }
+  return buildWorkOrderActualCostMap(rows, expenses);
+}
+
 async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise<void> {
   if (!options.throwOnError && Date.now() - lastCloudFetchFailureAt < CLOUD_FETCH_FAILURE_COOLDOWN_MS) return;
   if (cloudFetchInFlight) return cloudFetchInFlight;
@@ -821,6 +866,8 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       if (options.throwOnError) throw new Error("جلسة الدخول غير جاهزة بعد. أعد المحاولة خلال لحظات.");
       return;
     }
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) throw new Error("تعذّر تحديد المؤسسة عند احتساب تكاليف أوامر العمل");
 
     let ordersResult = await supabase
       .from("job_orders")
@@ -865,14 +912,21 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
         .in("id", claimIds)
         .limit(10000)
       : Promise.resolve({ data: [], error: null } as any);
+    const expenseCostsQuery = fetchActualExpenseCostsForOrders(tenantId, rows)
+      .catch((error) => {
+        console.warn("[workOrdersStore] actual expense costs lookup skipped:", error);
+        return new Map<string, number>();
+      });
     const [
       { data: custs, error: custError },
       { data: vehs, error: vehError },
       { data: claims, error: claimError },
+      actualExpenseCosts,
     ] = await Promise.all([
       customerQuery,
       Promise.resolve(vehicleQuery),
       claimQuery,
+      expenseCostsQuery,
     ]);
     if (custError) {
       // Customer names/phones are display metadata. A temporary RLS/schema issue
@@ -914,7 +968,7 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
     }));
 
     const cloudOrders: WorkOrder[] = rows.map((r) => {
-      const mapped = mapCloudRow(r, custMap, vehMap, claimMap);
+      const mapped = mapCloudRow(r, custMap, vehMap, claimMap, actualExpenseCosts);
       const pendingPatch = _pendingPatches.get(mapped.id);
       return pendingPatch ? { ...mapped, ...pendingPatch } : mapped;
     });

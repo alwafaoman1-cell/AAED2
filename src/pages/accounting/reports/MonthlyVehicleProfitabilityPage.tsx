@@ -21,7 +21,6 @@ import {
   type MonthlyVehicleProfitabilityRow,
 } from "@/lib/accounting/monthlyVehicleProfitability";
 import {
-  exportMonthlyWorkshopWorkbook,
   fetchMonthlyWorkshopOverheads,
   monthlyWorkshopReportKeys,
 } from "@/lib/accounting/monthlyWorkshopReport";
@@ -56,12 +55,11 @@ const COLUMNS: Column[] = [
   { key: "invoice_dates", ar: "تواريخ الفواتير", en: "Invoice Dates", default: true },
   { key: "invoiced_ex_vat", ar: "الإيراد المحقق قبل الضريبة", en: "Recognized Revenue Ex. VAT", type: "money", default: true },
   { key: "labor_revenue", ar: "أجرة العمل/الخدمة المفوترة", en: "Billed Labor/Service", type: "money", default: true },
-  { key: "parts_revenue", ar: "إيراد قطع الغيار", en: "Parts Revenue", type: "money", default: true },
+  { key: "parts_cost", ar: "مصروفات قطع الغيار", en: "Spare Parts Expenses", type: "money", default: true },
   { key: "vat", ar: "ضريبة VAT", en: "VAT", type: "money", default: true },
   { key: "invoiced_total", ar: "الإجمالي شامل الضريبة", en: "Total Incl. VAT", type: "money" },
   { key: "collected", ar: "المبلغ المحصل", en: "Collected", type: "money", default: true },
   { key: "outstanding", ar: "المبلغ المستحق", en: "Outstanding", type: "money", default: true },
-  { key: "parts_cost", ar: "تكلفة شراء قطع الغيار", en: "Parts Purchase Cost", type: "money", default: true },
   { key: "labor_cost", ar: "تكلفة عمالة خارجية", en: "External Labor Cost", type: "money", default: true },
   { key: "external_direct_cost", ar: "تكاليف خارجية مباشرة", en: "Other External Direct Costs", type: "money", default: true },
   { key: "direct_cost", ar: "إجمالي التكلفة المباشرة", en: "Total Direct Cost", type: "money", default: true },
@@ -189,25 +187,11 @@ export default function MonthlyVehicleProfitabilityPage() {
       if (!selectedColumns.length) throw new Error("اختر عمودًا واحدًا على الأقل قبل إنشاء المستخرج");
       const permission = kind === "xlsx" ? "accounting_reports.export_excel" : kind === "pdf" ? "accounting_reports.export_pdf" : "accounting_reports.print";
       if (!await hasAccountingPermission(permission)) throw new Error("لا تملك صلاحية إنشاء هذا المستخرج");
-      if (kind === "xlsx") {
-        const cashFilters = { ...filters, businessType: "cash" as const };
-        const insuranceFilters = { ...filters, businessType: "insurance" as const };
-        const [cashRows, insuranceRows, cashResult, insuranceResult, overheads] = await Promise.all([
-          fetchAllMonthlyVehicleProfitabilityRows(cashFilters),
-          fetchAllMonthlyVehicleProfitabilityRows(insuranceFilters),
-          fetchMonthlyVehicleProfitability({ ...cashFilters, page: 1, pageSize: 1 }),
-          fetchMonthlyVehicleProfitability({ ...insuranceFilters, page: 1, pageSize: 1 }),
-          fetchMonthlyWorkshopOverheads(from, to),
-        ]);
-        if (!cashRows.length && !insuranceRows.length && !overheads.expenseRows.length) throw new Error("لا توجد سجلات مطابقة للتصدير");
-        exportMonthlyWorkshopWorkbook({ from, to, cashRows, insuranceRows, overheads, cashSummary: cashResult.aggregates, insuranceSummary: insuranceResult.aggregates });
-        toast.success("تم إنشاء ملف Excel الشهري بأربع أوراق");
-        return;
-      }
       const rows = await fetchAllMonthlyVehicleProfitabilityRows(filters);
       if (!rows.length) throw new Error("لا توجد سجلات مطابقة للتصدير");
       const request = exportRequest(rows);
-      if (kind === "pdf") await exportReportRowsToPdf(request);
+      if (kind === "xlsx") await exportReportRowsToXlsx(request);
+      else if (kind === "pdf") await exportReportRowsToPdf(request);
       else await printReportRows(request);
       toast.success("تم إنشاء المستخرج بنجاح");
     } catch (error) { toast.error((error as Error).message); }
@@ -216,7 +200,7 @@ export default function MonthlyVehicleProfitabilityPage() {
 
   const kpis = [
     ["الإيراد المحقق قبل VAT", aggregates?.recognized_revenue_ex_vat ?? aggregates?.invoiced_ex_vat, "text-blue-600"], ["المبلغ المحصل", aggregates?.collected, "text-emerald-600"],
-    ["أجرة العمل/الخدمة المفوترة", aggregates?.labor_revenue, "text-blue-600"], ["إيراد قطع الغيار", aggregates?.parts_revenue, "text-blue-600"],
+    ["أجرة العمل/الخدمة المفوترة", aggregates?.labor_revenue, "text-blue-600"], ["مصروفات قطع الغيار", aggregates?.parts_cost, "text-rose-600"],
     ["المبلغ المستحق", aggregates?.outstanding, "text-amber-600"], ["التكلفة المباشرة", aggregates?.direct_cost, "text-rose-600"],
     ["ربح السيارات المباشر", aggregates?.gross_profit, Number(aggregates?.gross_profit || 0) >= 0 ? "text-emerald-600" : "text-rose-600"],
     ["المصروفات العامة (غير موزعة)", overheadReport.data?.summary.subtotal ?? overheads?.total, "text-slate-700"],
@@ -242,7 +226,7 @@ export default function MonthlyVehicleProfitabilityPage() {
       rows = [
         { metric: "الإيراد المحقق قبل الضريبة", cash: metric(cash, "recognized_revenue_ex_vat", "invoiced_ex_vat"), insurance: metric(insurance, "recognized_revenue_ex_vat", "invoiced_ex_vat"), total: metric(cash, "recognized_revenue_ex_vat", "invoiced_ex_vat") + metric(insurance, "recognized_revenue_ex_vat", "invoiced_ex_vat") },
         { metric: "أجرة العمل/الخدمة المفوترة", cash: cash.labor_revenue || 0, insurance: insurance.labor_revenue || 0, total: total("labor_revenue") },
-        { metric: "إيراد قطع الغيار", cash: cash.parts_revenue || 0, insurance: insurance.parts_revenue || 0, total: total("parts_revenue") },
+        { metric: "مصروفات قطع الغيار", cash: cash.parts_cost || 0, insurance: insurance.parts_cost || 0, total: total("parts_cost") },
         { metric: "الضريبة", cash: cash.vat || 0, insurance: insurance.vat || 0, total: total("vat") },
         { metric: "المبلغ المحصل", cash: cash.collected || 0, insurance: insurance.collected || 0, total: total("collected") },
         { metric: "التكلفة المباشرة", cash: cash.direct_cost || 0, insurance: insurance.direct_cost || 0, total: total("direct_cost") },

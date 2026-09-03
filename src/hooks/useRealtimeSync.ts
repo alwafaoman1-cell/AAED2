@@ -29,7 +29,7 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   profiles: ["profiles"],
   vehicle_makes: ["vehicle_makes"],
   vehicle_models: ["vehicle_models"],
-  expenses: ["expenses", "journal_entries", "vehicle_360"],
+  expenses: ["expenses", "job_orders", "journal_entries", "vehicle_360"],
   sales_documents: ["sales_documents", "invoices", "work_order_financials", "vehicle_360"],
   sales_payments: ["sales_payments", "sales_documents", "work_order_financials", "vehicle_360"],
   journal_entries: ["journal_entries"],
@@ -50,7 +50,7 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   {
     scope: "work_orders_list",
     test: (path) => path === "/work-orders",
-    tables: ["job_orders"],
+    tables: ["job_orders", "expenses"],
   },
   {
     scope: "supervisor",
@@ -174,6 +174,11 @@ export function useRealtimeSync() {
           void import("@/lib/workOrdersStore")
             .then(({ applyWorkOrderRealtimeChange }) => applyWorkOrderRealtimeChange(payload))
             .catch((error) => console.warn("[realtime:job_orders]", error));
+        }
+        if (table === "expenses" && realtimeScope.scope === "work_orders_list") {
+          void import("@/lib/workOrdersStore")
+            .then(({ refreshWorkOrdersFromCloud }) => refreshWorkOrdersFromCloud())
+            .catch((error) => console.warn("[realtime:work-order-costs]", error));
         }
         schedule(keys);
       });

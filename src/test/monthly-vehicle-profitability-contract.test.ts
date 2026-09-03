@@ -37,9 +37,19 @@ describe("monthly vehicle profitability report contract", () => {
 
   it("uses the selected columns for screen and all exports", () => {
     expect(page).toContain("selectedColumns.map");
+    expect(page).toContain("exportReportRowsToXlsx(request)");
     expect(page).toContain('runExport("xlsx")');
     expect(page).toContain('runExport("pdf")');
     expect(page).toContain('runExport("print")');
+  });
+
+  it("exports the filtered vehicle rows with the same selected columns as PDF and labels real parts expenses correctly", () => {
+    expect(page).toContain("const rows = await fetchAllMonthlyVehicleProfitabilityRows(filters)");
+    expect(page).toContain("const request = exportRequest(rows)");
+    expect(page).toContain('key: "parts_cost", ar: "مصروفات قطع الغيار"');
+    expect(page).not.toContain("إيراد قطع الغيار");
+    expect(service).toContain('["مصروفات قطع الغيار", cashSummary.parts_cost');
+    expect(service).not.toContain("إيراد قطع الغيار");
   });
 
   it("builds the permanent monthly report from cloud data without importing the reference workbook", () => {
@@ -108,7 +118,7 @@ describe("monthly vehicle profitability report contract", () => {
     expect(page).toContain("أجرة العمل/الخدمة المفوترة");
     expect(page).toContain("تكلفة عمالة خارجية");
     expect(service).toContain("row.labor_revenue");
-    expect(service).toContain("row.parts_revenue");
+    expect(service).toContain("row.parts_cost");
     expect(service).toContain("row.external_direct_cost");
   });
 

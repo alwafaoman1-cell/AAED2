@@ -98,12 +98,23 @@ const WORK_ORDER_COLUMNS: Array<{ key: WorkOrderColumnKey; ar: string; en: strin
   { key: "service", ar: "الخدمة", en: "Service" },
   { key: "technician", ar: "الفني", en: "Technician" },
   { key: "status", ar: "الحالة", en: "Status" },
-  { key: "cost", ar: "التكلفة", en: "Cost" },
+  { key: "cost", ar: "التكلفة الفعلية", en: "Actual Cost" },
 ];
 
 const DEFAULT_WORK_ORDER_COLUMNS = Object.fromEntries(
   WORK_ORDER_COLUMNS.map(({ key }) => [key, true]),
 ) as Record<WorkOrderColumnKey, boolean>;
+
+function actualWorkOrderCost(order: WorkOrder): number {
+  return Number(order.actualExpenseCost || 0);
+}
+
+function formatActualWorkOrderCost(order: WorkOrder): string {
+  return actualWorkOrderCost(order).toLocaleString("en-US", {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  });
+}
 
 function getOrderDelayStyle(order: WorkOrder): { boxShadow?: string; backgroundColor?: string; days: number | null; level: string } {
   if (CLOSED_STATUSES.has(order.status)) return { days: null, level: "green" };
@@ -786,7 +797,7 @@ export default function WorkOrders() {
                       {normalizeWorkOrderStatus(order.status)}
                     </button>
                   </td>}
-                  {isColumnVisible("cost") && <td className="py-3 px-4 text-foreground font-medium" style={{ fontFamily: "Inter, sans-serif", direction: "ltr", textAlign: "right" }} data-amount="true">{toEnglishDigits(order.totalCost.toLocaleString("en-US"))} OMR</td>}
+                  {isColumnVisible("cost") && <td title={isArabic ? "سندات الصرف الفعلية المرتبطة شامل الضريبة" : "Actual linked expense vouchers including VAT"} className="py-3 px-4 text-foreground font-medium" style={{ fontFamily: "Inter, sans-serif", direction: "ltr", textAlign: "right" }} data-amount="true">{toEnglishDigits(formatActualWorkOrderCost(order))} OMR</td>}
                   <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -1043,7 +1054,7 @@ export default function WorkOrders() {
                     {isColumnVisible("technician") && isColumnVisible("service") ? " · " : ""}
                     {isColumnVisible("service") ? order.serviceType : ""}
                   </span>
-                  {isColumnVisible("cost") && <span className="font-semibold text-foreground">{order.totalCost.toLocaleString("en-US")} OMR</span>}
+                  {isColumnVisible("cost") && <span title={isArabic ? "سندات الصرف الفعلية المرتبطة شامل الضريبة" : "Actual linked expense vouchers including VAT"} className="font-semibold text-foreground">{formatActualWorkOrderCost(order)} OMR</span>}
                 </div>
               )}
             </article>
@@ -1170,7 +1181,7 @@ export default function WorkOrders() {
             const ids = Array.from(selectedIds);
             const ords = orders.filter((o) => ids.includes(o.id));
             const headers = ["رقم الأمر","العميل","اللوحة","المركبة","الحالة","الفني","التكلفة"];
-            const rows = ords.map((o) => [o.id, o.customer, o.plate, `${o.vehicleType} ${o.model}`, o.status, o.technician || "", o.totalCost]);
+            const rows = ords.map((o) => [o.id, o.customer, o.plate, `${o.vehicleType} ${o.model}`, o.status, o.technician || "", actualWorkOrderCost(o).toFixed(3)]);
             const csv = "\uFEFF" + [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
             const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
             const url = URL.createObjectURL(blob);
