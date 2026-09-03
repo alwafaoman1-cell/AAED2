@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft, Save, Camera, Trash2, Plus, Phone, Mail, MapPin, IdCard,
-  Briefcase, Calendar, Wallet, FileText, Award, Clock, Coins, AlertTriangle, Star,
+  Briefcase, Calendar, Wallet, FileText, Award, Clock, Coins, AlertTriangle, Star, Printer, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   hrStore, type Employee, type Advance, type Deduction, type Bonus, type Leave,
@@ -22,6 +23,11 @@ import {
   HR_DEPARTMENTS_AR, HR_POSITIONS_AR,
 } from "@/lib/hrStore";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
+import { printAttendanceMonth, printEmployeeHrExtract, printPayslip, type EmployeeHrReportSection } from "@/lib/employeeHrReports";
+
+function runHrPrint(task: Promise<void>, isAr: boolean) {
+  void task.catch((error) => toast.error((error as Error)?.message || (isAr ? "تعذرت طباعة المستخرج" : "Failed to print extract")));
+}
 
 export default function EmployeeDetail() {
   const { id = "" } = useParams();
@@ -99,7 +105,19 @@ export default function EmployeeDetail() {
             <div className="text-xs text-muted-foreground">{draft.position || "—"}</div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button variant="outline" className="gap-2"><Printer className="h-4 w-4" />{isAr ? "طباعة مستخرج" : "Print extract"}</Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-[70vh] overflow-y-auto">
+              <DropdownMenuItem onClick={() => runHrPrint(printEmployeeHrExtract(draft, "all", isAr), isAr)}>{isAr ? "الملف الكامل" : "Complete file"}</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {(["profile", "contract", "salary", "advances", "adjustments", "payslips", "leaves", "attendance", "documents", "performance"] as EmployeeHrReportSection[]).map((section) => (
+                <DropdownMenuItem key={section} onClick={() => runHrPrint(printEmployeeHrExtract(draft, section, isAr), isAr)}>
+                  {{ profile: isAr ? "الملف الشخصي" : "Profile", contract: isAr ? "العقد والوظيفة" : "Contract & Employment", salary: isAr ? "الراتب والمالية" : "Salary & Finance", advances: isAr ? "السلف" : "Advances", adjustments: isAr ? "الخصومات والمكافآت" : "Deductions & Bonuses", payslips: isAr ? "كشوف الرواتب" : "Payslips", leaves: isAr ? "الإجازات" : "Leaves", attendance: isAr ? "الحضور والغياب" : "Attendance & Absence", documents: isAr ? "المستندات" : "Documents", performance: isAr ? "الأداء" : "Performance" }[section]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={() => setConfirmDel(true)} className="text-destructive">
             <Trash2 className="h-4 w-4 me-2" /> {isAr ? "حذف" : "Delete"}
           </Button>
@@ -529,26 +547,37 @@ function DeductionsBonusesTab({ employeeId, isAr }: { employeeId: string; isAr: 
 /* ====================== PAYSLIPS ====================== */
 function PayslipsTab({ employee, isAr }: { employee: Employee; isAr: boolean }) {
   const slips = hrStore.listPayslips(employee.id);
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const selectedSlip = slips.find((slip) => slip.month === month);
+  useEffect(() => {
+    if (selectedSlip?.paidAt) setPaidAt(selectedSlip.paidAt.slice(0, 10));
+  }, [selectedSlip?.id, selectedSlip?.paidAt]);
   function generate() {
-    const month = new Date().toISOString().slice(0, 7);
-    if (slips.find((s) => s.month === month)) { toast.error(isAr ? "موجود لهذا الشهر" : "Already exists"); return; }
+    if (!month) { toast.error(isAr ? "اختر شهر الراتب" : "Select salary month"); return; }
     const allowances = (employee.housingAllowance || 0) + (employee.transportAllowance || 0) + (employee.otherAllowances || 0);
     const summary = hrStore.summary(employee.id, month);
     const net = (employee.baseSalary || 0) + allowances + summary.monthBonuses - summary.monthDeductions - summary.advanceMonthlyRepay;
     hrStore.savePayslip({
-      id: hrStore.uid(), employeeId: employee.id, month,
+      id: selectedSlip?.id || hrStore.uid(), employeeId: employee.id, month,
       baseSalary: employee.baseSalary || 0,
       allowances, bonuses: summary.monthBonuses, overtimeAmount: 0,
       deductions: summary.monthDeductions, advanceDeduction: summary.advanceMonthlyRepay,
-      netSalary: net, createdAt: hrStore.nowIso(),
+      netSalary: net, paidAt: paidAt || undefined,
+      paymentMethod: selectedSlip?.paymentMethod, notes: selectedSlip?.notes,
+      createdAt: selectedSlip?.createdAt || hrStore.nowIso(),
     });
-    toast.success(isAr ? "تم إنشاء كشف الراتب" : "Payslip created");
+    toast.success(selectedSlip ? (isAr ? "تم تحديث كشف الراتب وتاريخ الصرف" : "Payslip and payment date updated") : (isAr ? "تم إنشاء كشف الراتب" : "Payslip created"));
   }
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 rounded-lg border p-3 md:flex-row md:items-end md:justify-between">
         <div className="text-sm text-muted-foreground">{isAr ? "كشوف الرواتب الشهرية" : "Monthly payslips"}</div>
-        <Button size="sm" onClick={generate} className="gap-2"><Plus className="h-3 w-3" /> {isAr ? "إنشاء كشف الشهر" : "Generate this month"}</Button>
+        <div className="grid gap-2 sm:grid-cols-[170px_170px_auto]">
+          <div><Label>{isAr ? "شهر الراتب" : "Salary month"}</Label><Input type="month" value={month} onChange={(e) => { const next = e.target.value; setMonth(next); const existing = slips.find((slip) => slip.month === next); setPaidAt(existing?.paidAt?.slice(0, 10) || `${next}-01`); }} /></div>
+          <div><Label>{isAr ? "تاريخ الصرف" : "Payment date"}</Label><Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></div>
+          <Button size="sm" onClick={generate} className="gap-2 self-end"><Plus className="h-3 w-3" /> {selectedSlip ? (isAr ? "تحديث الكشف" : "Update payslip") : (isAr ? "إنشاء كشف" : "Create payslip")}</Button>
+        </div>
       </div>
       <Card className="divide-y">
         {slips.length === 0 && <div className="text-center py-8 text-muted-foreground text-sm">{isAr ? "لا توجد كشوف" : "No payslips"}</div>}
@@ -556,7 +585,7 @@ function PayslipsTab({ employee, isAr }: { employee: Employee; isAr: boolean }) 
           <div key={p.id} className="p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold">{p.month}</div>
-              <span className="font-mono font-bold text-lg">{p.netSalary.toFixed(3)} ر.ع</span>
+              <div className="flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">{isAr ? "صرف:" : "Paid:"} {p.paidAt?.slice(0, 10) || "—"}</span><Button size="sm" variant="outline" onClick={() => { setMonth(p.month); setPaidAt(p.paidAt?.slice(0, 10) || `${p.month}-01`); }}><Pencil className="h-3 w-3" />{isAr ? "تعديل" : "Edit"}</Button><Button size="sm" variant="outline" onClick={() => runHrPrint(printPayslip(employee, p, isAr), isAr)}><Printer className="h-3 w-3" />{isAr ? "طباعة" : "Print"}</Button><span className="font-mono font-bold text-lg">{p.netSalary.toFixed(3)} ر.ع</span></div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
               <div className="p-2 bg-muted/30 rounded"><div className="text-muted-foreground">{isAr ? "أساسي" : "Base"}</div><div className="font-mono">{p.baseSalary.toFixed(3)}</div></div>
@@ -677,7 +706,7 @@ function AttendanceTab({ employeeId, isAr }: { employeeId: string; isAr: boolean
     <div className="space-y-3">
       <div className="flex justify-between items-center">
         <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-44" />
-        <Button size="sm" onClick={() => { setForm(emptyAttendance(employeeId)); setOpen(true); }} className="gap-2"><Plus className="h-3 w-3" /> {isAr ? "تسجيل" : "Add"}</Button>
+        <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => { const employee = hrStore.getEmployee(employeeId); if (employee) runHrPrint(printAttendanceMonth(employee, month, records, isAr), isAr); }}><Printer className="h-3 w-3" />{isAr ? "طباعة التقرير الشهري" : "Print monthly report"}</Button><Button size="sm" onClick={() => { setForm(emptyAttendance(employeeId)); setOpen(true); }} className="gap-2"><Plus className="h-3 w-3" /> {isAr ? "تسجيل" : "Add"}</Button></div>
       </div>
       <div className="grid grid-cols-3 gap-2">
         <Card className="p-3 text-center"><div className="text-xs text-muted-foreground">{isAr ? "حضور" : "Present"}</div><div className="text-xl font-bold text-success">{totals.present}</div></Card>
