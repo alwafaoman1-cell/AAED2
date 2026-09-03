@@ -78,6 +78,27 @@ export interface ExpenseInput {
 
 function fail(error: any): never { throw new Error(error?.message || "تعذر تنفيذ العملية"); }
 
+function expenseNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? roundMoney(parsed) : 0;
+}
+
+/**
+ * Older expense rows keep their authoritative value in `amount`. The newer
+ * subtotal/total columns can still be zero for those rows. Normalize reads so
+ * the management page, edit form and exports show the stored historical value
+ * without rewriting financial data in Supabase.
+ */
+export function normalizeLegacyExpenseAmounts<T extends Record<string, any>>(row: T): T {
+  const amount = expenseNumber(row.amount);
+  const storedSubtotal = expenseNumber(row.subtotal);
+  const vatAmount = expenseNumber(row.vat_amount);
+  const storedTotal = expenseNumber(row.total);
+  const subtotal = storedSubtotal !== 0 ? storedSubtotal : amount;
+  const total = storedTotal !== 0 ? storedTotal : roundMoney(subtotal + vatAmount);
+  return { ...row, amount, subtotal, vat_amount: vatAmount, total };
+}
+
 export async function listExpenseCategories(tenantId: string, includeInactive = true) {
   let q = (supabase.from("expense_categories") as any).select("*").eq("tenant_id", tenantId)
     .order("level").order("sort_order").order("name_en");
@@ -130,8 +151,9 @@ export async function listExpenses(page: number, pageSize: number, filters: Expe
   const { data, error } = await (supabase.rpc as any)("expense_management_rpc", { p_page: page, p_page_size: pageSize, p_filters: clean });
   if (error) fail(error);
   const result = data as { rows: ExpenseManagementRow[]; aggregates: Record<string, number>; pagination: any };
-  const supplierIds = [...new Set((result.rows || []).map((row: any) => row.supplier_id).filter(Boolean))] as string[];
-  if (!supplierIds.length) return result;
+  const normalizedRows = (result.rows || []).map((row: any) => normalizeLegacyExpenseAmounts(row));
+  const supplierIds = [...new Set(normalizedRows.map((row: any) => row.supplier_id).filter(Boolean))] as string[];
+  if (!supplierIds.length) return { ...result, rows: normalizedRows };
   const { data: suppliers, error: suppliersError } = await (supabase.from("suppliers") as any)
     .select("id,name,tax_number")
     .in("id", supplierIds);
@@ -139,7 +161,7 @@ export async function listExpenses(page: number, pageSize: number, filters: Expe
   const suppliersById = new Map((suppliers || []).map((supplier: any) => [supplier.id, supplier]));
   return {
     ...result,
-    rows: (result.rows || []).map((row: any) => {
+    rows: normalizedRows.map((row: any) => {
       const supplier: any = suppliersById.get(row.supplier_id);
       return {
         ...row,
@@ -162,7 +184,7 @@ export async function listAllExpenses(filters: ExpenseManagementFilters) {
 
 export async function getExpense(tenantId: string, id: string) {
   const { data, error } = await (supabase.from("expenses") as any).select("*").eq("tenant_id", tenantId).eq("id", id).single();
-  if (error) fail(error); return data;
+  if (error) fail(error); return normalizeLegacyExpenseAmounts(data || {});
 }
 
 export async function searchExpenseWorkOrders(search: string) {
