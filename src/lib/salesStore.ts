@@ -2,7 +2,7 @@
 // (الفواتير، عروض الأسعار، الإشعارات الدائنة، الفواتير المرتجعة، الفواتير الدورية، دفعات العملاء)
 import { resolveSeriesByPrefix } from "@/lib/numberingSettings";
 import { supabase } from "@/integrations/supabase/client";
-import { isUuid } from "@/lib/uuid";
+import { createUuid, isUuid } from "@/lib/uuid";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload, stripUndefined } from "@/lib/supabasePayload";
 
@@ -177,7 +177,9 @@ function rowToSalesDoc(r: any): SalesDoc {
     paidTotal: Number(r.paid_amount || 0),
     balanceDue: Number(r.balance_due || 0),
     costCenter: m.costCenter,
-    fromDocId: m.fromDocId || linkedWorkOrderId || r.converted_invoice_id,
+    // The relational column is authoritative after a cloud save. Metadata can
+    // contain an older local work-order reference from pre-cloud invoices.
+    fromDocId: linkedWorkOrderId || m.fromDocId || r.converted_invoice_id,
     fromDocType: m.fromDocType,
     documentReference: m.documentReference,
     payments: Array.isArray(m.payments) ? m.payments : [],
@@ -304,10 +306,14 @@ async function upsertSalesCloud(doc: SalesDoc) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return;
   const fromDocId = doc.fromDocId || "";
-  const linkedWorkOrderId = fromDocId.startsWith("WO-") ? fromDocId.slice(3) : null;
+  const workOrderCandidate = fromDocId.startsWith("WO-") ? fromDocId.slice(3) : "";
+  const linkedWorkOrderId = isUuid(workOrderCandidate) ? workOrderCandidate : null;
   const convertedInvoiceId = fromDocId && isUuid(fromDocId) ? fromDocId : null;
+  // Older/restricted webviews used to create compact local ids. Upgrade those
+  // drafts before they reach PostgreSQL UUID columns.
+  const cloudDocumentId = isUuid(doc.id) ? doc.id : createUuid();
   const payload = stripUndefined({
-    id: doc.id,
+    id: cloudDocumentId,
     tenant_id: tenantId,
     doc_number: doc.number,
     doc_type: doc.type,
@@ -511,7 +517,7 @@ export const salesStore = {
       : doc;
     const cloud = await upsertSalesCloud(draft);
     const saved = cloud || draft;
-    write([saved, ...read().filter((item) => item.id !== saved.id)]);
+    write([saved, ...read().filter((item) => item.id !== saved.id && item.id !== draft.id)]);
     return saved;
   },
   async issueInvoice(doc: SalesDoc): Promise<SalesDoc> {
@@ -602,9 +608,10 @@ export const salesStore = {
     return `${prefix}-${yearStr}-${String(next).padStart(padding, "0")}`;
   },
   upsert(doc: SalesDoc): SalesDoc {
+    const cloudSafeDoc = isUuid(doc.id) ? doc : { ...doc, id: createUuid() };
     const all = read();
     const idx = all.findIndex((d) => d.id === doc.id);
-    const finalDoc = { ...doc, updatedAt: new Date().toISOString() };
+    const finalDoc = { ...cloudSafeDoc, updatedAt: new Date().toISOString() };
     if (idx >= 0) {
       all[idx] = finalDoc;
     } else {
@@ -938,8 +945,7 @@ export function makeEmptyDoc(type: SalesDocType): SalesDoc {
 }
 
 export function cryptoRandom() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return createUuid();
 }
 
 export function statusLabel(status: SalesDocStatus): { ar: string; en: string; cls: string } {

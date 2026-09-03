@@ -1060,6 +1060,7 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "تنازلي": "Descending",
   "النتيجة:": "Results:",
   "فاتورة — يُصدّر Excel جميع النتائج المطابقة، وليس الصفحة الحالية فقط.": "invoice(s) — Excel exports all matching results, not only the current page.",
+  "نوع المصدر": "Source Type",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

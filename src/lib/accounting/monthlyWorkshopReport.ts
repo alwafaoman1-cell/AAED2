@@ -37,6 +37,7 @@ interface HrEmployeeSnapshot {
   position?: string;
   hireDate?: string;
   employmentStatus?: string;
+  contractEndDate?: string;
   baseSalary?: number;
   housingAllowance?: number;
   transportAllowance?: number;
@@ -112,6 +113,10 @@ function advanceDeductionTotal(rows: HrAdjustmentSnapshot[] | undefined, employe
     }, 0);
 }
 
+function normalizedPersonName(value: unknown): string {
+  return String(value || "").trim().toLocaleLowerCase("ar").replace(/\s+/g, " ");
+}
+
 function generatedPayrollRows(hr: HrSnapshot, settings: MonthlySettingsSnapshot, month: string): MonthlyExpenseRow[] {
   const payslips = (hr.payslips || []).filter((row) => row.month === month);
   if (payslips.length) {
@@ -130,7 +135,11 @@ function generatedPayrollRows(hr: HrSnapshot, settings: MonthlySettingsSnapshot,
     }).filter((row) => number(row.subtotal) > 0);
   }
 
-  const employees = (hr.employees || []).filter((employee) => !employee.isDeleted && employee.employmentStatus === "active" && (!employee.hireDate || employee.hireDate.slice(0, 7) <= month));
+  const employees = (hr.employees || []).filter((employee) => {
+    if (employee.isDeleted || (employee.hireDate && employee.hireDate.slice(0, 7) > month)) return false;
+    if (["active", "on_leave"].includes(String(employee.employmentStatus || "active"))) return true;
+    return Boolean(employee.contractEndDate && employee.contractEndDate.slice(0, 7) >= month);
+  });
   const rows = employees.map((employee) => {
     const gross = number(employee.baseSalary) + number(employee.housingAllowance) + number(employee.transportAllowance) + number(employee.otherAllowances)
       + adjustmentTotal(hr.bonuses, employee.id, month);
@@ -152,6 +161,31 @@ function generatedPayrollRows(hr: HrSnapshot, settings: MonthlySettingsSnapshot,
     subcategory_en: "Default payroll total", subtotal: fallback, vat: 0, total: fallback, accounting_mapping_key: "salary_expense",
     source_basis: "monthly_settings", generated: true,
   }];
+}
+
+function payrollAccrualRowsForMonth(
+  actualMonthRows: MonthlyExpenseRow[],
+  hr: HrSnapshot,
+  settings: MonthlySettingsSnapshot,
+  month: string,
+): MonthlyExpenseRow[] {
+  const actualPayrollRows = actualMonthRows.filter((row) => classifyExpenseRow(row) === "salaries");
+  const generatedRows = generatedPayrollRows(hr, settings, month);
+  if (!actualPayrollRows.length) return generatedRows;
+
+  const employeeNames = new Set(
+    (hr.employees || []).flatMap((employee) => [normalizedPersonName(employee.name), normalizedPersonName(employee.nameEn)]).filter(Boolean),
+  );
+  const coveredNames = new Set(
+    actualPayrollRows
+      .flatMap((row) => [normalizedPersonName(row.beneficiary), normalizedPersonName(row.supplier_name)])
+      .filter((name) => employeeNames.has(name)),
+  );
+
+  // A consolidated or otherwise unmatchable payroll voucher is authoritative for
+  // the month. Generating employee accruals beside it would double-count payroll.
+  if (!coveredNames.size) return [];
+  return generatedRows.filter((row) => !coveredNames.has(normalizedPersonName(row.beneficiary || row.supplier_name)));
 }
 
 function generatedFixedRows(settings: MonthlySettingsSnapshot, month: string): MonthlyExpenseRow[] {
@@ -188,20 +222,22 @@ export const monthlyWorkshopReportKeys = {
     ["monthly-workshop-report", "overheads", tenantId, from, to] as const,
 };
 
-export async function fetchMonthlyWorkshopOverheads(from: string, to: string, signal?: AbortSignal) {
-  const requestSignal = signal ?? new AbortController().signal;
-  const [result, hr, settings] = await Promise.all([
-    supabase.rpc("monthly_workshop_overheads_rpc" as never, { p_from: from, p_to: to } as never).abortSignal(requestSignal),
-    readCloudSetting<HrSnapshot>("alwafa_hr_v1", EMPTY_HR),
-    readCloudSetting<MonthlySettingsSnapshot>("alwafa_monthly_settings_v1", EMPTY_MONTHLY_SETTINGS),
-  ]);
-  if (result.error) throw result.error;
-  const source = result.data as unknown as MonthlyWorkshopOverheads;
-  const actualRows = source.expenseRows || [];
+export function composeMonthlyWorkshopOverheads(
+  source: MonthlyWorkshopOverheads,
+  hr: HrSnapshot,
+  settings: MonthlySettingsSnapshot,
+  from: string,
+  to: string,
+): MonthlyWorkshopOverheads {
+  const actualRows: MonthlyExpenseRow[] = (source.expenseRows || []).map((row) => ({
+    ...row,
+    source_basis: row.source_basis || "actual_voucher",
+    generated: false,
+  } as MonthlyExpenseRow));
   const generated: MonthlyExpenseRow[] = [];
   for (const month of monthKeys(from, to)) {
     const monthRows = actualRows.filter((row) => String(row.date || "").startsWith(month));
-    if (!monthRows.some((row) => classifyExpenseRow(row) === "salaries")) generated.push(...generatedPayrollRows(hr, settings, month));
+    generated.push(...payrollAccrualRowsForMonth(monthRows, hr, settings, month));
     if (!monthRows.some((row) => classifyExpenseRow(row) === "fixed")) generated.push(...generatedFixedRows(settings, month));
   }
   const expenseRows = [...actualRows, ...generated].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
@@ -219,8 +255,19 @@ export async function fetchMonthlyWorkshopOverheads(from: string, to: string, si
   };
   return {
     ...source, summary, groups: mergeGroup(expenseRows), expenseRows, payrollRows,
-    basis: `${source.basis}; HR and fixed-cost settings are accrued only for months without matching actual vouchers`,
+    basis: `${source.basis}; HR and fixed-cost settings are accrued only when they are not covered by actual vouchers`,
   };
+}
+
+export async function fetchMonthlyWorkshopOverheads(from: string, to: string, signal?: AbortSignal) {
+  const requestSignal = signal ?? new AbortController().signal;
+  const [result, hr, settings] = await Promise.all([
+    supabase.rpc("monthly_workshop_overheads_rpc" as never, { p_from: from, p_to: to } as never).abortSignal(requestSignal),
+    readCloudSetting<HrSnapshot>("alwafa_hr_v1", EMPTY_HR),
+    readCloudSetting<MonthlySettingsSnapshot>("alwafa_monthly_settings_v1", EMPTY_MONTHLY_SETTINGS),
+  ]);
+  if (result.error) throw result.error;
+  return composeMonthlyWorkshopOverheads(result.data as unknown as MonthlyWorkshopOverheads, hr, settings, from, to);
 }
 
 function sheet(rows: unknown[][], widths: number[]) {

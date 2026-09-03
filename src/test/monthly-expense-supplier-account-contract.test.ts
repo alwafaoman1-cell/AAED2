@@ -16,9 +16,10 @@ describe("monthly expense and supplier account contracts", () => {
 
   it("lets actual payroll and fixed vouchers override generated monthly accruals", () => {
     const source = read("src/lib/accounting/monthlyWorkshopReport.ts");
-    expect(source).toContain('monthRows.some((row) => classifyExpenseRow(row) === "salaries")');
+    expect(source).toContain("payrollAccrualRowsForMonth(monthRows, hr, settings, month)");
+    expect(source).toContain("A consolidated or otherwise unmatchable payroll voucher is authoritative");
     expect(source).toContain('monthRows.some((row) => classifyExpenseRow(row) === "fixed")');
-    expect(source).toContain("without matching actual vouchers");
+    expect(source).toContain("when they are not covered by actual vouchers");
   });
 
   it("exposes a dedicated monthly expense report with column-aware exports", () => {
