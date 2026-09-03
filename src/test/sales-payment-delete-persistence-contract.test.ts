@@ -32,8 +32,24 @@ describe("sales payment deletion persistence contract", () => {
 
   it("never restores metadata-only ghost payments into the invoice cache", () => {
     expect(store).toContain("payments: []");
-    expect(store).toContain("payments: cloudPayments || []");
+    expect(store).toContain("applyAuthoritativeSalesPayments(doc, cloudPayments || [])");
     expect(store).not.toContain("payments: doc.payments,");
+  });
+
+  it("derives the invoice badge and totals from actual payment rows", () => {
+    expect(store).toContain("export function applyAuthoritativeSalesPayments");
+    expect(store).toContain("const paidTotal = payments.reduce");
+    expect(store).toContain('status = doc.invoiceStatus === "issued" ? "unpaid" : "draft"');
+    expect(store).toContain('paid_amount: doc.type === "invoice" ? undefined : doc.paidTotal');
+    expect(store).toContain('balance_due: doc.type === "invoice" ? undefined : doc.balanceDue');
+
+    const triggerSql = readFileSync(resolve(root, "supabase/migrations/20260903123000_sales_invoice_collection_status_ssot.sql"), "utf8");
+    expect(triggerSql).toContain("create or replace function public.refresh_sales_doc_last_payment()");
+    expect(triggerSql).toContain("create or replace function public.enforce_sales_invoice_payment_summary()");
+    expect(triggerSql).toContain("balance_due = greatest(coalesce(d.total, 0) - v_paid, 0)");
+    expect(triggerSql).toContain("before update of total, paid_amount, balance_due, status, invoice_status");
+    expect(triggerSql).toContain("when v_paid > 0 then 'partial'");
+    expect(triggerSql).toContain("then 'unpaid'");
   });
 
   it("migration reverses accounting and recalculates invoice totals atomically", () => {

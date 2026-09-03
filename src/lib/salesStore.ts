@@ -150,6 +150,31 @@ function notify() {
   subscribers.forEach((cb) => cb());
 }
 
+export function applyAuthoritativeSalesPayments(
+  doc: SalesDoc,
+  payments: SalesPayment[],
+): SalesDoc {
+  if (doc.type !== "invoice") return { ...doc, payments };
+
+  const paidTotal = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const balanceDue = Math.max(0, Number(doc.total || 0) - paidTotal);
+  let status = doc.status;
+
+  if (status !== "cancelled") {
+    if (Number(doc.total || 0) > 0 && paidTotal >= Number(doc.total || 0) - 0.001) {
+      status = "paid";
+    } else if (paidTotal > 0.001) {
+      status = "partial";
+    } else if (status === "paid" || status === "partial") {
+      // A cached summary must never keep an invoice marked as paid after its
+      // authoritative sales_payments rows have been removed.
+      status = doc.invoiceStatus === "issued" ? "unpaid" : "draft";
+    }
+  }
+
+  return { ...doc, payments, paidTotal, balanceDue, status };
+}
+
 function rowToSalesDoc(r: any): SalesDoc {
   const m = (r.metadata || {}) as Partial<SalesDoc>;
   const linkedWorkOrderId = r.work_order_id ? `WO-${r.work_order_id}` : undefined;
@@ -253,7 +278,7 @@ async function refreshSalesFromCloud() {
   cache = documentRows.map((row: any) => {
     const doc = rowToSalesDoc(row);
     const cloudPayments = paymentsByDocument.get(doc.id);
-    return { ...doc, payments: cloudPayments || [] };
+    return applyAuthoritativeSalesPayments(doc, cloudPayments || []);
   });
   lastCloudRefreshFailureAt = 0;
   notify();
@@ -281,8 +306,7 @@ async function refreshSalesDocumentFromCloud(id: string): Promise<SalesDoc | nul
     .order("date", { ascending: false });
   if (paymentsError) throw paymentsError;
 
-  const doc = rowToSalesDoc(row);
-  doc.payments = (paymentRows || []).map((payment: any) => ({
+  const payments = (paymentRows || []).map((payment: any) => ({
     id: payment.id,
     date: payment.date,
     amount: Number(payment.amount || 0),
@@ -290,6 +314,7 @@ async function refreshSalesDocumentFromCloud(id: string): Promise<SalesDoc | nul
     reference: payment.reference || undefined,
     note: payment.notes || undefined,
   }));
+  const doc = applyAuthoritativeSalesPayments(rowToSalesDoc(row), payments);
   const next = read().filter((item) => item.id !== doc.id);
   write([doc, ...next]);
   return doc;
@@ -315,12 +340,16 @@ async function upsertSalesCloud(doc: SalesDoc) {
   // Older/restricted webviews used to create compact local ids. Upgrade those
   // drafts before they reach PostgreSQL UUID columns.
   const cloudDocumentId = isUuid(doc.id) ? doc.id : createUuid();
+  const isIssuedSalesInvoice = doc.type === "invoice" && doc.invoiceStatus === "issued";
   const payload = stripUndefined({
     id: cloudDocumentId,
     tenant_id: tenantId,
     doc_number: doc.number,
     doc_type: doc.type,
-    status: doc.isDeleted ? "cancelled" : doc.status,
+    // Collection status for an issued invoice is maintained from
+    // sales_payments in PostgreSQL. Omitting it here prevents an ordinary
+    // invoice edit from restoring an old paid/partial value.
+    status: doc.isDeleted ? "cancelled" : (isIssuedSalesInvoice ? undefined : doc.status),
     invoice_status: doc.isDeleted ? "cancelled" : (doc.invoiceStatus || "draft"),
     issued_at: doc.issuedAt || null,
     customer_id: doc.customerId && isUuid(doc.customerId) ? doc.customerId : null,
@@ -333,8 +362,8 @@ async function upsertSalesCloud(doc: SalesDoc) {
     discount_total: doc.discountTotal,
     tax_total: doc.taxTotal,
     total: doc.total,
-    paid_amount: doc.paidTotal,
-    balance_due: doc.balanceDue,
+    paid_amount: doc.type === "invoice" ? undefined : doc.paidTotal,
+    balance_due: doc.type === "invoice" ? undefined : doc.balanceDue,
     converted_invoice_id: convertedInvoiceId,
     work_order_id: linkedWorkOrderId,
     vehicle_plate: doc.vehicle?.plate || null,
@@ -378,7 +407,9 @@ async function upsertSalesCloud(doc: SalesDoc) {
     console.warn("[salesStore] cloud upsert failed", error);
     throw error;
   }
-  return data ? rowToSalesDoc(data) : null;
+  if (!data) return null;
+  if (isIssuedSalesInvoice) return refreshSalesDocumentFromCloud(data.id);
+  return rowToSalesDoc(data);
 }
 
 function normalizePaymentMethodForCloud(method: string) {
