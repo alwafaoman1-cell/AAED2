@@ -196,6 +196,7 @@ import SystemPreferencesBoot from "@/components/SystemPreferencesBoot";
 import UnsavedWorkGuard from "@/components/UnsavedWorkGuard";
 import AccountingSetupRouteGuard from "@/components/accounting/AccountingSetupRouteGuard";
 import AccountingReportsRouteGuard from "@/components/accounting/AccountingReportsRouteGuard";
+import { setExpensesQueryClient } from "@/lib/expensesStore";
 
 // كاش حيّ — يعيد الجلب فور الدخول للصفحة لمنع عرض بيانات قديمة بين التنقّلات.
 // المستخدم كان يضطر لـ Ctrl+Shift+R لأن staleTime كان 30s.
@@ -222,6 +223,7 @@ const queryClient = new QueryClient({
   },
 });
 setTemplateQueryClient(queryClient);
+setExpensesQueryClient(queryClient);
 
 // Do not let browser focus/visibility events trigger implicit app refreshes.
 // Explicit saves and scoped realtime events remain the only refresh paths.

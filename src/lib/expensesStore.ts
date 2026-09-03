@@ -7,6 +7,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isUuid } from "@/lib/uuid";
 import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
+import { queryKeys } from "@/lib/queryKeys";
+import type { QueryClient } from "@tanstack/react-query";
 
 export type ExpenseAccountingType =
   | "workshop_general"
@@ -105,6 +107,22 @@ let cacheRevision = 0;
 let hydrationRequest = 0;
 let hydrationPromise: Promise<void> | null = null;
 const deletedExpenseIds = new Set<string>();
+let expenseQueryClient: QueryClient | null = null;
+
+export function setExpensesQueryClient(client: QueryClient) {
+  expenseQueryClient = client;
+}
+
+function invalidateExpenseConsumers() {
+  if (!expenseQueryClient) return;
+  void Promise.all([
+    expenseQueryClient.invalidateQueries({ queryKey: queryKeys.expenseManagement.all }),
+    expenseQueryClient.invalidateQueries({ queryKey: queryKeys.workOrderFinancials.all }),
+    expenseQueryClient.invalidateQueries({ queryKey: queryKeys.monthlyVehicleProfitability.all }),
+    expenseQueryClient.invalidateQueries({ queryKey: queryKeys.reports.all }),
+    expenseQueryClient.invalidateQueries({ queryKey: queryKeys.reportCenter.all }),
+  ]);
+}
 
 function notify() { listeners.forEach((l) => { try { l(); } catch {} }); }
 
@@ -150,7 +168,7 @@ function rowToRecord(r: any): ExpenseRecord {
     supplierTaxNumber: r.supplier_tax_number || meta.supplierTaxNumber,
     supplierInvoiceNumber: r.supplier_invoice_number || meta.supplierInvoiceNumber,
     supplierId: r.supplier_id || meta.supplierId,
-    supplierName: meta.supplierName,
+    supplierName: meta.supplierName || r.beneficiary || undefined,
     partId: meta.partId,
     partName: meta.partName,
     partNumber: meta.partNumber,
@@ -348,6 +366,7 @@ if (typeof window !== "undefined") {
               markCacheChanged();
               persistLocal();
               notify();
+              invalidateExpenseConsumers();
               return;
             }
             deletedExpenseIds.delete(rec.id);
@@ -364,6 +383,7 @@ if (typeof window !== "undefined") {
           markCacheChanged();
           persistLocal();
           notify();
+          invalidateExpenseConsumers();
         },
       )
       .subscribe();
@@ -408,6 +428,7 @@ export const expensesStore = {
     markCacheChanged();
     persistLocal();
     notify();
+    invalidateExpenseConsumers();
     return saved;
   },
   async update(id: string, patch: Partial<ExpenseRecord>) {
@@ -444,6 +465,7 @@ export const expensesStore = {
     markCacheChanged();
     persistLocal();
     notify();
+    invalidateExpenseConsumers();
     return cache[idx];
   },
   async remove(id: string): Promise<ExpenseRecord | undefined> {
@@ -472,6 +494,7 @@ export const expensesStore = {
       markCacheChanged();
       persistLocal();
       notify();
+      invalidateExpenseConsumers();
     } catch (e) {
       console.warn("[expensesStore.remove] failed", e);
       throw e;
@@ -485,6 +508,7 @@ export const expensesStore = {
     markCacheChanged();
     persistLocal();
     notify();
+    invalidateExpenseConsumers();
     // Best effort re-insert in cloud
     (async () => {
       try {

@@ -27,4 +27,31 @@ describe("legacy expense amount read compatibility", () => {
       total: 94.5,
     });
   });
+
+  it("restores a historical supplier stored in beneficiary/meta fields", () => {
+    expect(normalizeLegacyExpenseAmounts({
+      amount: 25,
+      supplier_id: null,
+      supplier_name: null,
+      beneficiary: "علامة الثقة",
+      meta: { supplierTaxNumber: "VAT-123", supplierInvoiceNumber: "SUP-52" },
+    })).toMatchObject({
+      supplier_name: "علامة الثقة",
+      supplier_tax_number: "VAT-123",
+      supplier_invoice_number: "SUP-52",
+    });
+  });
+
+  it("prefers the canonical linked supplier over historical display fields", () => {
+    expect(normalizeLegacyExpenseAmounts({
+      amount: 25,
+      supplier_id: "a745d877-98ef-4d79-b629-166740743300",
+      supplier_name: "Canonical Supplier",
+      beneficiary: "Old Supplier",
+      meta: { supplierName: "Older Supplier" },
+    })).toMatchObject({
+      supplier_id: "a745d877-98ef-4d79-b629-166740743300",
+      supplier_name: "Canonical Supplier",
+    });
+  });
 });

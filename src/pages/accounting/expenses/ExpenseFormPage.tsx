@@ -28,7 +28,7 @@ export default function ExpenseFormPage(){
  const detail=useQuery({queryKey:queryKeys.expenseManagement.detail(expenseId),enabled:!!tenantId&&editing,queryFn:()=>getExpense(tenantId,expenseId!)});
  const workOrders=useQuery({queryKey:queryKeys.expenseManagement.workOrders(debouncedWo),enabled:debouncedWo.trim().length>=2,queryFn:()=>searchExpenseWorkOrders(debouncedWo)});
  const centers=useQuery({queryKey:queryKeys.expenseManagement.costCenters,enabled:!!tenantId,queryFn:()=>listCostCenters(tenantId)});
- useEffect(()=>{if(detail.data){const d:any=detail.data;setForm({...empty,...d,subtotal:String(d.subtotal??d.amount??""),vat:Number(d.vat_amount||0)>0,work_order_id:d.work_order_id||"",attachments:d.attachments||[]})}},[detail.data]);
+ useEffect(()=>{if(detail.data){const d:any=detail.data;setForm({...empty,...d,subtotal:String(d.subtotal??d.amount??""),vat:Number(d.vat_amount||0)>0,work_order_id:d.work_order_id||"",attachments:d.attachments||[]});setSupplierName(d.supplier_name||d.beneficiary||"")}},[detail.data]);
  const roots=useMemo(()=> (categories.data||[]).filter(c=>c.level===1&&(c.expense_scope===form.expense_scope||c.expense_scope==='both')),[categories.data,form.expense_scope]);
  const children=useMemo(()=> (categories.data||[]).filter(c=>c.parent_id===form.department_id&&(c.expense_scope===form.expense_scope||c.expense_scope==='both')),[categories.data,form.department_id,form.expense_scope]);
  const subs=useMemo(()=> (categories.data||[]).filter(c=>c.parent_id===form.expense_category_id),[categories.data,form.expense_category_id]);

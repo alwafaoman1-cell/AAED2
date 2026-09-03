@@ -90,13 +90,29 @@ function expenseNumber(value: unknown) {
  * without rewriting financial data in Supabase.
  */
 export function normalizeLegacyExpenseAmounts<T extends Record<string, any>>(row: T): T {
+  const meta = row.meta && typeof row.meta === "object" ? row.meta as Record<string, unknown> : {};
   const amount = expenseNumber(row.amount);
   const storedSubtotal = expenseNumber(row.subtotal);
   const vatAmount = expenseNumber(row.vat_amount);
   const storedTotal = expenseNumber(row.total);
   const subtotal = storedSubtotal !== 0 ? storedSubtotal : amount;
   const total = storedTotal !== 0 ? storedTotal : roundMoney(subtotal + vatAmount);
-  return { ...row, amount, subtotal, vat_amount: vatAmount, total };
+  const legacySupplierId = String(meta.supplierId || "").trim();
+  const supplierId = row.supplier_id || (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(legacySupplierId) ? legacySupplierId : null);
+  const supplierName = row.supplier_name || meta.supplierName || row.beneficiary || null;
+  const supplierTaxNumber = row.supplier_tax_number || meta.supplierTaxNumber || null;
+  const supplierInvoiceNumber = row.supplier_invoice_number || meta.supplierInvoiceNumber || null;
+  return {
+    ...row,
+    amount,
+    subtotal,
+    vat_amount: vatAmount,
+    total,
+    supplier_id: supplierId,
+    supplier_name: supplierName,
+    supplier_tax_number: supplierTaxNumber,
+    supplier_invoice_number: supplierInvoiceNumber,
+  };
 }
 
 export async function listExpenseCategories(tenantId: string, includeInactive = true) {
