@@ -82,6 +82,14 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
       toast.error(error?.message || (isAr ? "تعذر حذف الفاتورة وسنداتها" : "Unable to delete invoice and receipts"));
     }
   }
+  async function doRemovePayment(paymentId: string) {
+    try {
+      await salesStore.removePayment(doc.id, paymentId);
+      toast.success(isAr ? "تم حذف الدفعة فعليًا" : "Payment deleted");
+    } catch (error: any) {
+      toast.error(error?.message || (isAr ? "تعذر حذف الدفعة" : "Unable to delete payment"));
+    }
+  }
   function doDuplicate() {
     const c = salesStore.duplicate(doc.id);
     if (c) { toast.success(isAr ? "تم النسخ" : "Copied"); navigate(`${listRoute}/${c.id}`); }
@@ -419,8 +427,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
                                 title: isAr ? "حذف الدفعة" : "Delete payment",
                                 description: isAr ? "هل تريد حذف هذه الدفعة؟" : "Delete this payment?",
                                 onConfirm: () => {
-                                  salesStore.removePayment(doc.id, p.id);
-                                  toast.success(isAr ? "تم الحذف" : "Removed");
+                                  void doRemovePayment(p.id);
                                 },
                               });
                             }}
@@ -481,8 +488,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
                           title: isAr ? "حذف الدفعة" : "Delete payment",
                           description: isAr ? "هل تريد حذف هذه الدفعة؟" : "Delete this payment?",
                           onConfirm: () => {
-                            salesStore.removePayment(doc.id, p.id);
-                            toast.success(isAr ? "تم الحذف" : "Removed");
+                            void doRemovePayment(p.id);
                           },
                         });
                       }}

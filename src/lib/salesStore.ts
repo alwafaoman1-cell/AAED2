@@ -414,6 +414,32 @@ async function insertSalesPaymentCloud(doc: SalesDoc, payment: Omit<SalesPayment
   };
 }
 
+async function deleteSalesPaymentCloud(docId: string, paymentId: string): Promise<SalesDoc> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذّر تحديد المؤسسة");
+  if (!isUuid(docId) || !isUuid(paymentId)) {
+    throw new Error("لا يمكن حذف دفعة غير محفوظة في السحابة");
+  }
+
+  const { data, error } = await (supabase.from("sales_payments") as any)
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("sales_document_id", docId)
+    .eq("id", paymentId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id) {
+    throw new Error("لم يتم حذف الدفعة من Supabase. تحقق من الصلاحيات ثم أعد المحاولة");
+  }
+
+  // The database trigger recalculates paid_amount, balance_due and invoice status.
+  // Reload the authoritative document only after the cloud deletion succeeds.
+  const refreshed = await refreshSalesDocumentFromCloud(docId);
+  if (!refreshed) throw new Error("تم حذف الدفعة ولكن تعذّر تحديث الفاتورة");
+  return refreshed;
+}
+
 async function updateSalesDocumentReferenceCloud(doc: SalesDoc, reference: string): Promise<SalesDoc> {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذّر تحديد المؤسسة");
@@ -726,32 +752,18 @@ export const salesStore = {
     } catch {}
     void refreshSalesFromCloud();
   },
-  removePayment(docId: string, paymentId: string) {
+  async removePayment(docId: string, paymentId: string) {
     const doc = salesStore.get(docId);
-    if (!doc) return;
+    if (!doc) throw new Error("الفاتورة غير موجودة");
     const removed = doc.payments.find((x) => x.id === paymentId);
-    const payments = doc.payments.filter((x) => x.id !== paymentId);
-    const paidTotal = payments.reduce((s, x) => s + x.amount, 0);
-    const balanceDue = Math.max(0, doc.total - paidTotal);
-    const status: SalesDocStatus =
-      balanceDue <= 0.001 && payments.length > 0 ? "paid" : paidTotal > 0 ? "partial" : "sent";
-    salesStore.upsert({
-      ...doc,
-      payments,
-      paidTotal,
-      balanceDue,
-      status,
-      activity: [
-        ...doc.activity,
-        { id: cryptoRandom(), at: new Date().toISOString(), text: `حذف دفعة بقيمة ${removed?.amount ?? 0} ${doc.currency}` },
-      ],
-    });
+    if (!removed) throw new Error("الدفعة غير موجودة");
+
+    // Supabase is the source of truth. Never hide the payment locally before
+    // the database confirms deletion, otherwise the next refresh restores it.
+    await deleteSalesPaymentCloud(docId, paymentId);
     // إزالة قيد الدفعة من اليومية
-    try {
-      import("./salesAccounting").then(({ removeCustomerPaymentJournal }) => {
-        removeCustomerPaymentJournal(`${docId}::${paymentId}`);
-      });
-    } catch {}
+    const { removeCustomerPaymentJournal } = await import("./salesAccounting");
+    removeCustomerPaymentJournal(`${docId}::${paymentId}`);
   },
   addNote(id: string, text: string, author?: string) {
     const doc = salesStore.get(id);
