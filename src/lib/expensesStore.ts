@@ -154,7 +154,9 @@ function rowToRecord(r: any): ExpenseRecord {
     beneficiary: r.beneficiary || undefined,
     description: r.description || undefined,
     photo,
-    linkedWorkOrderId: r.linked_work_order_id || undefined,
+    // Prefer the canonical FK introduced by expense classification while
+    // retaining the legacy text relation for older vouchers.
+    linkedWorkOrderId: r.work_order_id || r.linked_work_order_id || undefined,
     customerId: r.customer_id || meta.customerId || undefined,
     vehicleId: r.vehicle_id || meta.vehicleId || undefined,
     claimId: r.claim_id || meta.claimId || undefined,
@@ -245,6 +247,10 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     supplier_id: e.supplierId && isUuid(e.supplierId) ? e.supplierId : null,
     beneficiary: e.beneficiary || null,
     description: e.description || null,
+    // Keep both relations during the compatibility period. New writes must
+    // populate the canonical FK so management/report RPCs and work-order
+    // screens read the same expense row immediately.
+    work_order_id: e.linkedWorkOrderId && isUuid(e.linkedWorkOrderId) ? e.linkedWorkOrderId : null,
     linked_work_order_id: e.linkedWorkOrderId || null,
     customer_id: e.customerId && isUuid(e.customerId) ? e.customerId : null,
     vehicle_id: e.vehicleId && isUuid(e.vehicleId) ? e.vehicleId : null,

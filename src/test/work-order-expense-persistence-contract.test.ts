@@ -24,6 +24,9 @@ describe("work-order expense persistence and profitability", () => {
   });
 
   it("writes new work-order vouchers with the canonical cloud relation", () => {
+    const store = read("src/lib/expensesStore.ts");
+    expect(store).toContain("work_order_id: e.linkedWorkOrderId && isUuid(e.linkedWorkOrderId)");
+    expect(store).toContain("r.work_order_id || r.linked_work_order_id");
     for (const path of [
       "src/components/workorders/WorkOrderExpenseDialog.tsx",
       "src/components/workorders/WorkOrderBulkExpenseDialog.tsx",
@@ -34,6 +37,16 @@ describe("work-order expense persistence and profitability", () => {
       expect(source).toContain("vehicleId: order.vehicleId");
       expect(source).toContain("claimId: order.claimId");
     }
+  });
+
+  it("backfills only exact tenant-scoped legacy work-order links without changing financial values", () => {
+    const migration = read("supabase/migrations/20260905100000_expense_work_order_link_ssot.sql");
+    expect(migration).toContain("sync_expense_legacy_work_order_link");
+    expect(migration).toContain("j.tenant_id = e.tenant_id");
+    expect(migration).toContain("j.id::text = btrim(e.linked_work_order_id)");
+    expect(migration).toContain("j.order_number = btrim(e.linked_work_order_id)");
+    expect(migration).toContain("set work_order_id = j.id");
+    expect(migration).not.toMatch(/set\s+(amount|subtotal|vat_amount|total|supplier_id)\s*=/i);
   });
 
   it("keeps the detail screen subscribed and shows actual financial totals", () => {
