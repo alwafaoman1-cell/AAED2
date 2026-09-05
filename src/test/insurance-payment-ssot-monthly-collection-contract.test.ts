@@ -13,6 +13,9 @@ describe("insurance payment SSOT and monthly collection contract", () => {
   const editor = read("src/components/insurance/EditInsuranceInvoiceDialog.tsx");
   const accounting = read("src/pages/insurance/InsuranceAccounting.tsx");
   const payments = read("src/hooks/useClaimPayments.ts");
+  const chequeDialog = read("src/components/insurance/ChequeClearanceDialog.tsx");
+  const paymentsPage = read("src/pages/insurance/InsurancePayments.tsx");
+  const claimDetail = read("src/pages/insurance/InsuranceClaimDetail.tsx");
 
   it("converts only positive legacy paid differences into idempotent payment records", () => {
     expect(migration).toContain("coalesce(i.paid_amount, 0) - coalesce(p.cleared_amount, 0) > 0.001");
@@ -81,5 +84,21 @@ describe("insurance payment SSOT and monthly collection contract", () => {
     expect(matchedCostMigration).toContain("expense_lifetime as (");
     expect(matchedCostMigration).toContain("matched_cost_month as (");
     expect(matchedCostMigration).toContain("least(coalesce(pr.recognized_revenue_ex_vat,0) / nullif(cx.total_invoice_subtotal,0),1)");
+  });
+
+  it("clears an existing cheque atomically without creating a duplicate payment", () => {
+    expect(payments).toContain("useClearClaimCheque");
+    expect(payments).toContain('.eq("payment_method", "cheque")');
+    expect(payments).toContain('.eq("status", "pending")');
+    expect(payments).toContain('status: "cleared", payment_date: clearedDate');
+    expect(chequeDialog).toContain("تاريخ التحصيل الفعلي");
+    expect(paymentsPage).toContain("تحصيل الشيك");
+    expect(claimDetail).toContain("ChequeClearanceDialog");
+  });
+
+  it("does not count pending cheques as collected in insurance payment summaries", () => {
+    expect(paymentsPage).toContain('.filter((p) => p.status === "cleared")');
+    expect(paymentsPage).not.toContain('filter((p) => p.status !== "bounced")');
+    expect(claimDetail).toContain('if (p.status === "cleared") running -= Number(p.amount)');
   });
 });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { DollarSign, AlertTriangle, Clock, TrendingUp, Search, Building2, BarChart3 } from "lucide-react";
+import { DollarSign, AlertTriangle, Clock, TrendingUp, Search, Building2, BarChart3, BadgeCheck } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import StatCard from "@/components/StatCard";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useClaimPayments, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS } from "@/hooks/useClaimPayments";
+import { useClaimPayments, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, type ClaimPayment } from "@/hooks/useClaimPayments";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
 import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
 import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
 import { useOverdueInsuranceAlerts, type OverdueCompany } from "@/hooks/useOverdueInsuranceAlerts";
 import { formatDateLatin } from "@/lib/numberUtils";
+import ChequeClearanceDialog from "@/components/insurance/ChequeClearanceDialog";
 
 export default function InsurancePayments() {
   const navigate = useNavigate();
@@ -23,6 +24,7 @@ export default function InsurancePayments() {
   const { data: invoices } = useInsuranceInvoices();
   const overdueList = useOverdueInsuranceAlerts();
   const [search, setSearch] = useState("");
+  const [chequeToClear, setChequeToClear] = useState<ClaimPayment | null>(null);
 
   // KPIs
   const stats = useMemo(() => {
@@ -32,10 +34,10 @@ export default function InsurancePayments() {
     const activeInvoices = (invoices ?? []).filter((invoice) => invoice.status !== "cancelled");
     const totalInvoiced = activeInvoices.reduce((s, invoice) => s + Number(invoice.total || 0), 0);
     const totalPaid = (payments ?? [])
-      .filter((p) => p.status !== "bounced")
+      .filter((p) => p.status === "cleared")
       .reduce((s, p) => s + Number(p.amount), 0);
     const monthPaid = (payments ?? [])
-      .filter((p) => p.status !== "bounced" && new Date(p.payment_date) >= startOfMonth)
+      .filter((p) => p.status === "cleared" && new Date(p.payment_date) >= startOfMonth)
       .reduce((s, p) => s + Number(p.amount), 0);
 
     const overdueAmount = overdueList.reduce((s, o) => s + o.remaining, 0);
@@ -53,7 +55,7 @@ export default function InsurancePayments() {
       const label = d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
       months.push({ key, label, total: 0 });
     }
-    (payments ?? []).filter((p) => p.status !== "bounced").forEach((p) => {
+    (payments ?? []).filter((p) => p.status === "cleared").forEach((p) => {
       const d = new Date(p.payment_date);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const m = months.find((x) => x.key === key);
@@ -241,8 +243,8 @@ export default function InsurancePayments() {
           {filteredPayments.length === 0 ? (
             <div className="py-6 text-center text-muted-foreground text-sm">لا توجد دفعات</div>
           ) : filteredPayments.map((p) => (
-            <button key={p.id} className="w-full text-right p-3 space-y-1.5 hover:bg-secondary/10"
-                    onClick={() => p.claim_id && navigate(`/insurance/${p.claim_id}`)}>
+            <div key={p.id} className="w-full text-right p-3 space-y-1.5 hover:bg-secondary/10 cursor-pointer"
+                    role="button" tabIndex={0} onClick={() => p.claim_id && navigate(`/insurance/${p.claim_id}`)}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-mono text-xs text-primary truncate">{p.payment_number}</div>
@@ -261,7 +263,12 @@ export default function InsurancePayments() {
                 <span className="text-muted-foreground">{formatDateLatin(p.payment_date)} • {PAYMENT_METHOD_LABELS[p.payment_method]}</span>
                 <span className="font-semibold text-success">{Number(p.amount).toLocaleString()} ر.ع</span>
               </div>
-            </button>
+              {p.payment_method === "cheque" && p.status === "pending" && (
+                <Button size="sm" className="w-full gap-1.5" onClick={(event) => { event.stopPropagation(); setChequeToClear(p); }}>
+                  <BadgeCheck size={14} /> تحصيل الشيك
+                </Button>
+              )}
+            </div>
           ))}
         </div>
         {/* Desktop table */}
@@ -276,11 +283,12 @@ export default function InsurancePayments() {
                 <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">الطريقة</th>
                 <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">المبلغ</th>
                 <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">الحالة</th>
+                <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">إجراء</th>
               </tr>
             </thead>
             <tbody>
               {filteredPayments.length === 0 ? (
-                <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">لا توجد دفعات</td></tr>
+                <tr><td colSpan={8} className="py-6 text-center text-muted-foreground">لا توجد دفعات</td></tr>
               ) : filteredPayments.map((p) => (
                 <tr key={p.id} className="border-b border-border/50 hover:bg-secondary/10 cursor-pointer"
                     onClick={() => p.claim_id && navigate(`/insurance/${p.claim_id}`)}>
@@ -297,12 +305,20 @@ export default function InsurancePayments() {
                       "bg-warning/15 text-warning"
                     }`}>{PAYMENT_STATUS_LABELS[p.status]}</span>
                   </td>
+                  <td className="py-2.5 px-4">
+                    {p.payment_method === "cheque" && p.status === "pending" && (
+                      <Button size="sm" className="gap-1.5" onClick={(event) => { event.stopPropagation(); setChequeToClear(p); }}>
+                        <BadgeCheck size={14} /> تحصيل الشيك
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </Card>
+      <ChequeClearanceDialog open={!!chequeToClear} onOpenChange={(open) => !open && setChequeToClear(null)} payment={chequeToClear} />
     </div>
   );
 }

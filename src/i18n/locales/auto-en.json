@@ -4374,5 +4374,21 @@
   "يعتمد التقرير على الدفعات والمصروفات الفعلية داخل الشهر المحدد فقط؛ لا تُرحّل الإيرادات أو تكاليف المركبة بين الأشهر.": "The report uses only actual payments and expenses within the selected month; vehicle revenue and costs are not carried between months.",
   "أساس الشهر: الإيراد من الدفعات المحصلة في الشهر بعد استبعاد VAT، والتكلفة من سندات مصروف الشهر نفسه فقط. لا يوجد ترحيل بين الأشهر.": "Monthly basis: revenue comes from payments collected during the month after excluding VAT, and costs come only from expense vouchers dated in the same month. There is no carryover between months.",
   "يعتمد التقرير على دفعات الشهر ويطابق معها التكلفة الحقيقية للسيارة حتى لو كان سند المصروف بتاريخ مختلف.": "The report uses the month's payments and matches them with the vehicle's actual cost even when the expense voucher has a different date.",
-  "أساس الشهر: الإيراد من الدفعات المحصلة بعد استبعاد VAT، وتُطابق معه تكلفة السيارة الحقيقية بنسبة التحصيل دون تكرار التكلفة بين دفعات الأشهر.": "Monthly basis: revenue comes from collected payments after excluding VAT, and actual vehicle cost is matched proportionally without duplicating cost across payment months."
+  "أساس الشهر: الإيراد من الدفعات المحصلة بعد استبعاد VAT، وتُطابق معه تكلفة السيارة الحقيقية بنسبة التحصيل دون تكرار التكلفة بين دفعات الأشهر.": "Monthly basis: revenue comes from collected payments after excluding VAT, and actual vehicle cost is matched proportionally without duplicating cost across payment months.",
+  "تحصيل الشيك": "Clear Cheque",
+  "قيمة الشيك": "Cheque Amount",
+  "تاريخ تسجيل الشيك": "Cheque Recorded Date",
+  "تاريخ التحصيل الفعلي": "Actual Clearing Date",
+  "سيظهر التحصيل في تقرير الشهر المطابق لهذا التاريخ، وستُحدّث حالة الفاتورة تلقائيًا.": "The collection will appear in the month matching this date, and the invoice status will update automatically.",
+  "تأكيد التحصيل": "Confirm Clearing",
+  "تحصيل": "Clear",
+  "تم تحصيل الشيك وتحديث الفاتورة": "Cheque cleared and invoice updated",
+  "تعذر تحصيل الشيك": "Unable to clear the cheque",
+  "أدخل تاريخ التحصيل الفعلي": "Enter the actual clearing date",
+  "لا يمكن أن يكون تاريخ التحصيل في المستقبل": "The clearing date cannot be in the future",
+  "سند الشيك غير موجود أو لم يعد متاحًا": "The cheque receipt does not exist or is no longer available",
+  "هذه الدفعة ليست شيكًا": "This payment is not a cheque",
+  "الشيك مرتجع ولا يمكن تحصيله قبل تصحيح حالته": "The cheque is bounced and cannot be cleared until its status is corrected",
+  "هذا سجل تسوية قديم وليس شيكًا فعليًا قابلًا للتحصيل": "This is a legacy reconciliation record, not an actual cheque that can be cleared",
+  "تغيرت حالة الشيك في جلسة أخرى؛ حدّث الصفحة وتحقق من السند": "The cheque status changed in another session; refresh and verify the receipt"
 }

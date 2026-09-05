@@ -198,6 +198,74 @@ export function useUpdateClaimPayment() {
   });
 }
 
+/** تحصيل شيك قائم دون إنشاء دفعة ثانية. */
+export function useClearClaimCheque() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, clearedDate }: { id: string; clearedDate: string }) => {
+      const { data: currentData, error: currentError } = await supabase
+        .from("claim_payments" as any)
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (currentError) throw currentError;
+
+      const current = currentData as unknown as ClaimPayment | null;
+      if (!current) throw new Error("سند الشيك غير موجود أو لم يعد متاحًا");
+      if (current.payment_method !== "cheque") throw new Error("هذه الدفعة ليست شيكًا");
+      if (current.status === "bounced") throw new Error("الشيك مرتجع ولا يمكن تحصيله قبل تصحيح حالته");
+      if (current.status === "cleared") return current;
+      if (current.reference_number?.startsWith("LEGACY-PAID:")) {
+        throw new Error("هذا سجل تسوية قديم وليس شيكًا فعليًا قابلًا للتحصيل");
+      }
+
+      const { data, error } = await supabase
+        .from("claim_payments" as any)
+        .update({ status: "cleared", payment_date: clearedDate } as any)
+        .eq("id", id)
+        .eq("payment_method", "cheque")
+        .eq("status", "pending")
+        .select("*")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("تغيرت حالة الشيك في جلسة أخرى؛ حدّث الصفحة وتحقق من السند");
+
+      const cleared = data as unknown as ClaimPayment;
+      try {
+        const meta = await fetchClaimMeta(cleared.claim_id);
+        postInsurancePayment({
+          paymentId: cleared.id,
+          paymentNumber: cleared.payment_number,
+          claimNumber: meta.claim_number,
+          date: cleared.payment_date,
+          amount: Number(cleared.amount),
+          method: cleared.payment_method,
+          status: cleared.status,
+          companyName: meta.insurance_company,
+          reference: cleared.reference_number,
+        });
+      } catch (e) { console.warn("journal post failed", e); }
+      return cleared;
+    },
+    onSuccess: (payment) => {
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.byClaim(payment.claim_id) });
+      if (payment.insurance_company_id) {
+        qc.invalidateQueries({ queryKey: queryKeys.claimPayments.byCompany(payment.insurance_company_id) });
+      }
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimActiveInvoice() });
+      qc.invalidateQueries({ queryKey: queryKeys.unifiedRevenueInsuranceInvoices });
+      qc.invalidateQueries({ queryKey: queryKeys.monthlyVehicleProfitability.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reportCenter.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reports.all });
+      toast.success("تم تحصيل الشيك وتحديث الفاتورة");
+    },
+    onError: (e: any) => toast.error(e?.message || "تعذر تحصيل الشيك"),
+  });
+}
+
 export function useDeleteClaimPayment() {
   const qc = useQueryClient();
   return useMutation({

@@ -53,6 +53,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompanyAutocomplete";
 import InsuranceEmployeeSelect from "@/components/insurance/InsuranceEmployeeSelect";
 import ClaimPaymentDialog from "@/components/insurance/ClaimPaymentDialog";
+import ChequeClearanceDialog from "@/components/insurance/ChequeClearanceDialog";
 import { usePaymentsByClaim, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, useDeleteClaimPayment } from "@/hooks/useClaimPayments";
 import { findOrCreateInsuranceCompany, useInsuranceCompany } from "@/hooks/useInsuranceCompanies";
 import { useCreateInsuranceInvoice } from "@/hooks/useInsuranceInvoices";
@@ -1592,7 +1593,9 @@ export default function InsuranceClaimDetail() {
     const plate = vehicle?.plate_number || vehiclePlate || "—";
     const color = (vehicle as any)?.color || vehicleColor || "—";
 
-    const totalPaid = (claimPayments || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+    const totalPaid = (claimPayments || [])
+      .filter((p: any) => p.status === "cleared")
+      .reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
     const approvedNum = parseMoneyInput(approvedAmount) || 0;
     const estimatedNum = parseMoneyInput(estimatedCost) || 0;
     const remaining = Math.max(0, approvedNum - totalPaid);
@@ -4047,6 +4050,7 @@ function PaymentsSection({
   const { data: payments } = usePaymentsByClaim(claimId);
   const del = useDeleteClaimPayment();
   const [showDialog, setShowDialog] = useState(false);
+  const [chequeToClear, setChequeToClear] = useState<any>(null);
 
   // ── المصدر المالي الموحّد: نقرأ من الفاتورة المرتبطة (إن وُجدت) ──
   // وإلا نحسب من المطالبة (المعتمد/المُقدّر + VAT) للحفاظ على التوافق.
@@ -4184,7 +4188,7 @@ function PaymentsSection({
               const sorted = [...payments].sort((a, b) => new Date(a.payment_date).getTime() - new Date(b.payment_date).getTime());
               let running = baseAmount;
               const rowsWithBalance = sorted.map((p) => {
-                if (p.status !== "bounced") running -= Number(p.amount);
+                if (p.status === "cleared") running -= Number(p.amount);
                 return { p, balanceAfter: running };
               });
               // اعرض من الأحدث للأقدم
@@ -4217,6 +4221,14 @@ function PaymentsSection({
                     }`}>{PAYMENT_STATUS_LABELS[p.status]}</span>
                   </td>
                   <td className="py-2 px-3">
+                    {p.payment_method === "cheque" && p.status === "pending" && (
+                      <Button
+                        variant="outline" size="sm" className="me-1 h-7 gap-1 text-success"
+                        onClick={() => setChequeToClear(p)}
+                      >
+                        <CheckCircle2 size={13} /> تحصيل
+                      </Button>
+                    )}
                     <Button
                       variant="ghost" size="icon" className="h-7 w-7 text-destructive"
                       onClick={() => { if (confirm("حذف هذه الدفعة؟")) del.mutate(p.id); }}
@@ -4237,6 +4249,11 @@ function PaymentsSection({
         claimId={claimId}
         insuranceCompanyId={insuranceCompanyId}
         remainingAmount={remaining}
+      />
+      <ChequeClearanceDialog
+        open={!!chequeToClear}
+        onOpenChange={(open) => !open && setChequeToClear(null)}
+        payment={chequeToClear}
       />
     </Card>
   );
