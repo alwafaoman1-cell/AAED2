@@ -3,6 +3,7 @@ import { hasUnsavedWork } from "@/lib/unsavedWork";
 
 const RECOVERY_KEY = "__aaed_chunk_recovery_v1";
 const RECOVERY_COOLDOWN_MS = 30_000;
+let recoveryInFlight: Promise<ChunkRecoveryResult> | null = null;
 
 const CHUNK_ERROR_RE =
   /ChunkLoadError|Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk \d+ failed|dynamically imported module|\/assets\/.*\.(js|css)/i;
@@ -69,6 +70,19 @@ export async function recoverFromChunkLoadError(input: unknown, options?: { forc
   if (!isChunkLoadError(input) && !options?.force) return { status: "not_chunk_error" };
   if (!options?.force && hasUnsavedWork()) return { status: "blocked_dirty_form" };
 
+  if (!options?.force && recoveryInFlight) return recoveryInFlight;
+
+  const recovery = recoverOnce(options);
+  recoveryInFlight = recovery;
+  try {
+    return await recovery;
+  } finally {
+    recoveryInFlight = null;
+  }
+}
+
+async function recoverOnce(options?: { force?: boolean }): Promise<ChunkRecoveryResult> {
+
   const last = readLastRecovery();
   if (!options?.force && Date.now() - last < RECOVERY_COOLDOWN_MS) {
     return { status: "already_attempted" };
@@ -86,6 +100,14 @@ export async function recoverFromChunkLoadError(input: unknown, options?: { forc
 
 export function installChunkLoadErrorRecovery(): void {
   if (typeof window === "undefined") return;
+
+  // Vite emits this before a failed lazy import reaches React. Preventing the
+  // default keeps a recoverable stale-deploy error out of the root boundary.
+  window.addEventListener("vite:preloadError", (event) => {
+    if (hasUnsavedWork()) return;
+    event.preventDefault();
+    void recoverFromChunkLoadError("Failed to fetch dynamically imported module");
+  });
 
   window.addEventListener("error", (event) => {
     if (isChunkLoadError(event.message || event.error)) {

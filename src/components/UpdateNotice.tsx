@@ -27,6 +27,7 @@ import {
 } from "@/lib/updateStore";
 import { CURRENT_APP_VERSION } from "@/lib/appVersion";
 import { hasUnsavedWork, subscribeUnsavedWork } from "@/lib/unsavedWork";
+import { applyPendingPwaUpdate, subscribePwaUpdateReady } from "@/lib/registerPwa";
 
 function formatDate(iso: string): string {
   try {
@@ -45,9 +46,11 @@ export default function UpdateNotice() {
   const [ready, setReady] = useState(false);
   const [dirty, setDirty] = useState(hasUnsavedWork());
   const [now, setNow] = useState(Date.now());
+  const [pwaReady, setPwaReady] = useState(false);
 
   useEffect(() => startUpdateWatcher(), []);
   useEffect(() => subscribeUnsavedWork(setDirty), []);
+  useEffect(() => subscribePwaUpdateReady(setPwaReady), []);
 
   // post-update success toast
   useEffect(() => {
@@ -93,7 +96,25 @@ export default function UpdateNotice() {
     };
   }, [latest, now]);
 
-  if (!latest) return null;
+  if (!latest && !pwaReady) return null;
+
+  if (!latest && pwaReady) {
+    return (
+      <button
+        type="button"
+        onClick={async () => {
+          if (dirty) {
+            toast.error("لديك عمل غير محفوظ. يرجى حفظ بياناتك أولاً ثم تطبيق التحديث.");
+            return;
+          }
+          await applyPendingPwaUpdate();
+        }}
+        className="fixed bottom-4 right-4 z-50 rounded-full bg-primary px-4 py-2 text-sm text-primary-foreground shadow-lg hover:opacity-90"
+      >
+        نسخة جديدة جاهزة — تحديث آمن
+      </button>
+    );
+  }
 
   async function handleUpdate(_force = false) {
     if (dirty) {

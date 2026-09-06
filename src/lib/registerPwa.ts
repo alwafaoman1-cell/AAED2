@@ -3,6 +3,31 @@
 // keeps deploy updates safe: the service worker may detect a new shell while
 // the user is editing, so never auto-reload from this low-level hook.
 
+type PwaUpdateListener = (ready: boolean) => void;
+
+const pwaUpdateListeners = new Set<PwaUpdateListener>();
+let pendingPwaUpdater: ((reloadPage?: boolean) => Promise<void>) | null = null;
+
+function publishPwaUpdate(updater: (reloadPage?: boolean) => Promise<void>) {
+  pendingPwaUpdater = updater;
+  pwaUpdateListeners.forEach((listener) => listener(true));
+}
+
+export function subscribePwaUpdateReady(listener: PwaUpdateListener): () => void {
+  pwaUpdateListeners.add(listener);
+  listener(Boolean(pendingPwaUpdater));
+  return () => { pwaUpdateListeners.delete(listener); };
+}
+
+export async function applyPendingPwaUpdate(): Promise<boolean> {
+  if (!pendingPwaUpdater) return false;
+  const updater = pendingPwaUpdater;
+  pendingPwaUpdater = null;
+  pwaUpdateListeners.forEach((listener) => listener(false));
+  await updater(true);
+  return true;
+}
+
 export function registerTechPwa() {
   if (typeof window === "undefined") return;
   if (!("serviceWorker" in navigator)) return;
@@ -31,14 +56,17 @@ export function registerTechPwa() {
 
   import("virtual:pwa-register")
     .then(({ registerSW }) => {
-      registerSW({
+      let updateSW: ((reloadPage?: boolean) => Promise<void>) | null = null;
+      updateSW = registerSW({
         immediate: true,
         // Do not call updateSW(true) here. On Chromium, SW update checks can
         // happen when returning to a browser tab; forcing skipWaiting reloads
         // the app and drops unsaved form data. The explicit update notice flow
         // is the only place allowed to reload the app shell.
         onNeedRefresh() {
-          // Intentionally no-op.
+          // Keep the current tab stable and let the visible update notice apply
+          // the waiting worker only after the user has saved any active draft.
+          if (updateSW) publishPwaUpdate(updateSW);
         },
         onOfflineReady() { /* noop */ },
       });
@@ -47,6 +75,6 @@ export function registerTechPwa() {
       // virtual module may not exist in dev — fine
     });
 
-  // The generated SW uses skipWaiting + clientsClaim; this keeps the app from
-  // staying pinned to an old shell after a successful Vercel deployment.
+  // The generated worker waits until the explicit update action activates it;
+  // returning to a browser tab must never replace the active app session.
 }

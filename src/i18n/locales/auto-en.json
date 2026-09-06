@@ -4390,5 +4390,9 @@
   "هذه الدفعة ليست شيكًا": "This payment is not a cheque",
   "الشيك مرتجع ولا يمكن تحصيله قبل تصحيح حالته": "The cheque is bounced and cannot be cleared until its status is corrected",
   "هذا سجل تسوية قديم وليس شيكًا فعليًا قابلًا للتحصيل": "This is a legacy reconciliation record, not an actual cheque that can be cleared",
-  "تغيرت حالة الشيك في جلسة أخرى؛ حدّث الصفحة وتحقق من السند": "The cheque status changed in another session; refresh and verify the receipt"
+  "تغيرت حالة الشيك في جلسة أخرى؛ حدّث الصفحة وتحقق من السند": "The cheque status changed in another session; refresh and verify the receipt",
+  "لديك عمل غير محفوظ. يرجى حفظ بياناتك أولاً ثم تطبيق التحديث.": "You have unsaved work. Save your changes before applying the update.",
+  "نسخة جديدة جاهزة — تحديث آمن": "A new version is ready — Update safely",
+  "جارٍ تحميل أحدث نسخة من النظام...": "Loading the latest version of the system...",
+  "لن يتم حذف بياناتك المحفوظة.": "Your saved data will not be deleted."
 }

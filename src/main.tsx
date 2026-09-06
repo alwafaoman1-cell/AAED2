@@ -8,6 +8,7 @@ import { ensureCacheVersion } from "./lib/cacheVersion";
 import { installEnglishDigitGuards } from "./lib/formatters/englishDigitsRuntime";
 import { installChunkLoadErrorRecovery, isChunkLoadError, recoverFromChunkLoadError } from "./lib/chunkRecovery";
 import { CURRENT_APP_VERSION } from "./lib/appVersion";
+import { hasUnsavedWork } from "./lib/unsavedWork";
 
 ensureCacheVersion();
 installEnglishDigitGuards();
@@ -24,14 +25,18 @@ const categorizeError = (error: Error) => {
   return "RuntimeError";
 };
 
-class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null; errorId: string | null; category: string | null }> {
-  state = { error: null as Error | null, errorId: null as string | null, category: null as string | null };
+class RootErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null; errorId: string | null; category: string | null; recoveringChunk: boolean }
+> {
+  state = { error: null as Error | null, errorId: null as string | null, category: null as string | null, recoveringChunk: false };
 
   static getDerivedStateFromError(error: Error) {
     return {
       error,
       errorId: `ERR-${Date.now().toString(36).toUpperCase()}`,
       category: categorizeError(error),
+      recoveringChunk: isChunkLoadError(error) && !hasUnsavedWork(),
     };
   }
 
@@ -44,12 +49,26 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
       componentStack: errorInfo.componentStack,
     });
     if (isChunkLoadError(error.message || "")) {
-      void recoverFromChunkLoadError(error);
+      void recoverFromChunkLoadError(error).then((result) => {
+        if (result.status !== "reloading") {
+          this.setState({ recoveringChunk: false });
+        }
+      });
     }
   }
 
   render() {
     if (this.state.error) {
+      if (this.state.recoveringChunk) {
+        return (
+          <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground" translate="no">
+            <div className="rounded-xl border border-border bg-card px-6 py-5 text-center shadow">
+              <div className="mb-2 text-base font-semibold">جارٍ تحميل أحدث نسخة من النظام...</div>
+              <div className="text-sm text-muted-foreground">لن يتم حذف بياناتك المحفوظة.</div>
+            </div>
+          </div>
+        );
+      }
       return (
         <div className="min-h-screen bg-background p-6 text-foreground" translate="no">
           <div className="mx-auto max-w-xl rounded-xl border border-border bg-card p-5 shadow">
