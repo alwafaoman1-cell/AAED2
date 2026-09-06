@@ -10,6 +10,8 @@ export interface WorkOrderExpenseCostRow {
   work_order_id?: string | null;
   linked_work_order_id?: string | null;
   amount?: number | string | null;
+  vat_amount?: number | string | null;
+  is_vat_applicable?: boolean | null;
   total?: number | string | null;
   status?: string | null;
 }
@@ -17,7 +19,8 @@ export interface WorkOrderExpenseCostRow {
 const INELIGIBLE_EXPENSE_STATUSES = new Set(["cancelled", "canceled", "void", "invalid", "deleted"]);
 
 /**
- * Returns actual cash spent per job_orders.id, including recorded VAT.
+ * Returns actual cash spent per job_orders.id. `expenses.amount` is the final
+ * VAT-inclusive amount actually paid, so stale derived totals are ignored.
  * Each expense row is counted once even when both the UUID and display number
  * are present on the same row.
  */
@@ -48,11 +51,10 @@ export function buildWorkOrderActualCostMap(
       .find(Boolean);
     if (!workOrderId) continue;
 
-    const recordedTotal = Number(expense.total);
     const amount = Number(expense.amount || 0);
-    const actualCost = Number.isFinite(recordedTotal) && Math.abs(recordedTotal) > 0.0001
-      ? recordedTotal
-      : amount;
+    if (!Number.isFinite(amount)) continue;
+
+    const actualCost = roundMoney(amount, 3);
     totals.set(workOrderId, roundMoney((totals.get(workOrderId) || 0) + actualCost, 3));
     countedExpenseIds.add(expense.id);
   }

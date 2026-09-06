@@ -12,7 +12,7 @@ describe("expense management VAT and configurable export", () => {
 
   it("exposes VAT filtering and supplier invoice identity columns", () => {
     expect(page).toContain('value="vat"');
-    expect(page).toContain("مصروفات عليها ضريبة");
+    expect(page).toContain("مورد مسجل ضريبيًا — لديه رقم ضريبي");
     expect(page).toContain('key: "supplier_name"');
     expect(page).toContain('key: "supplier_tax_number"');
     expect(page).toContain('key: "supplier_invoice_number"');

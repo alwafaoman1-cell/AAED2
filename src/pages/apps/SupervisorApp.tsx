@@ -940,7 +940,7 @@ export default function SupervisorApp() {
                         supplierId: supplier.id,
                         beneficiary: supplier.name,
                         supplierCompany: supplier.name,
-                        supplierTaxNumber: supplier.taxNumber || s.supplierTaxNumber,
+                        supplierTaxNumber: supplier.taxNumber || "",
                       }));
                     }}
                     onClear={() => setExpField("supplierId", "")}

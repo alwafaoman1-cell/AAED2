@@ -2,16 +2,16 @@ import { describe, expect, it } from "vitest";
 import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
 
 describe("expense totals", () => {
-  it("recalculates VAT and total from the edited VAT-exclusive amount", () => {
+  it("splits VAT from the edited VAT-inclusive amount", () => {
     expect(deriveExpenseTotals(100, true)).toEqual({
-      subtotal: 100,
-      vatAmount: 5,
-      total: 105,
+      subtotal: 95.238,
+      vatAmount: 4.762,
+      total: 100,
     });
     expect(deriveExpenseTotals(1200, true)).toEqual({
-      subtotal: 1200,
-      vatAmount: 60,
-      total: 1260,
+      subtotal: 1142.857,
+      vatAmount: 57.143,
+      total: 1200,
     });
   });
 
@@ -25,9 +25,9 @@ describe("expense totals", () => {
 
   it("uses three-decimal OMR rounding", () => {
     expect(deriveExpenseTotals(1477, true)).toEqual({
-      subtotal: 1477,
-      vatAmount: 73.85,
-      total: 1550.85,
+      subtotal: 1406.667,
+      vatAmount: 70.333,
+      total: 1477,
     });
   });
 });

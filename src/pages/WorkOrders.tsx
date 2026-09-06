@@ -98,7 +98,7 @@ const WORK_ORDER_COLUMNS: Array<{ key: WorkOrderColumnKey; ar: string; en: strin
   { key: "service", ar: "الخدمة", en: "Service" },
   { key: "technician", ar: "الفني", en: "Technician" },
   { key: "status", ar: "الحالة", en: "Status" },
-  { key: "cost", ar: "التكلفة الفعلية", en: "Actual Cost" },
+  { key: "cost", ar: "المنفق شامل الضريبة", en: "Actual Spend incl. VAT" },
 ];
 
 const DEFAULT_WORK_ORDER_COLUMNS = Object.fromEntries(

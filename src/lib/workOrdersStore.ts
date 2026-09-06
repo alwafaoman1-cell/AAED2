@@ -93,7 +93,7 @@ export interface WorkOrder {
   serviceType: string;
   status: string;
   totalCost: number;
-  /** Actual linked expense vouchers including recorded VAT. */
+  /** Actual linked expense vouchers; amount is the final VAT-inclusive spend. */
   actualExpenseCost?: number;
   description?: string;
   diagnosis?: string;

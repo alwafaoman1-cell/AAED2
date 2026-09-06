@@ -42,7 +42,8 @@ import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
-import { calculateVatExclusive, roundMoney } from "@/lib/money";
+import { roundMoney } from "@/lib/money";
+import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 
 type ReportPeriod = "all" | "day" | "month" | "year";
@@ -531,15 +532,18 @@ export default function ExpenseNew() {
     }
   };
 
-  // ===== تقرير ضريبي رسمي: يعرض فقط المصروفات التي تحمل بيانات فاتورة المورد (رقم ضريبي/رقم فاتورة) =====
+  // التقرير الضريبي يعرض فقط مورداً مسجلاً برقم ضريبي. وجود رقم
+  // فاتورة وحده لا يحول المصروف إلى مصروف خاضع للضريبة.
   const taxRows = useMemo(
-    () => filtered.filter((r) => r.supplierTaxNumber || r.supplierInvoiceNumber),
+    () => filtered.filter((r) => Boolean(r.supplierTaxNumber?.trim())),
     [filtered]
   );
   const taxTotals = useMemo(() => {
-    const base = roundMoney(taxRows.reduce((s, r) => s + r.amount, 0));
-    const vat = calculateVatExclusive(base).vatAmount;
-    return { base, vat, totalIncl: roundMoney(base + vat), count: taxRows.length };
+    const breakdowns = taxRows.map((row) => deriveExpenseTotals(row.amount, Boolean(row.supplierTaxNumber?.trim())));
+    const base = roundMoney(breakdowns.reduce((sum, item) => sum + item.subtotal, 0));
+    const vat = roundMoney(breakdowns.reduce((sum, item) => sum + item.vatAmount, 0));
+    const totalIncl = roundMoney(breakdowns.reduce((sum, item) => sum + item.total, 0));
+    return { base, vat, totalIncl, count: taxRows.length };
   }, [taxRows]);
 
   const buildTaxReportHtml = () => {
@@ -547,8 +551,8 @@ export default function ExpenseNew() {
       reportPeriod === "month" ? `شهري - ${reportDate.slice(0, 7)}` :
       reportPeriod === "year" ? `سنوي - ${reportDate.slice(0, 4)}` : "كامل الفترة";
     const rows = taxRows.map((r, i) => {
-      const breakdown = calculateVatExclusive(r.amount);
-      const base = breakdown.subtotalBeforeVat;
+      const breakdown = deriveExpenseTotals(r.amount, Boolean(r.supplierTaxNumber?.trim()));
+      const base = breakdown.subtotal;
       const vat = breakdown.vatAmount;
       return `<tr>
         <td>${i + 1}</td>
@@ -559,7 +563,7 @@ export default function ExpenseNew() {
         <td>${r.categoryName || "-"}</td>
         <td style="text-align:left">${base.toFixed(3)}</td>
         <td style="text-align:left">${vat.toFixed(3)}</td>
-        <td style="text-align:left;font-weight:700">${breakdown.totalIncludingVat.toFixed(3)}</td>
+        <td style="text-align:left;font-weight:700">${breakdown.total.toFixed(3)}</td>
       </tr>`;
     }).join("");
     return `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"/>
@@ -618,10 +622,8 @@ export default function ExpenseNew() {
   const exportTaxCsv = () => {
     const headers = ["#","التاريخ","رقم الفاتورة","اسم المورد","الرقم الضريبي","التصنيف","الوعاء","VAT 5%","الإجمالي"];
     const rows = taxRows.map((r, i) => {
-      const breakdown = calculateVatExclusive(r.amount);
-      const base = breakdown.subtotalBeforeVat;
-      const vat = breakdown.vatAmount;
-      return [i+1, r.date, r.supplierInvoiceNumber||"", r.beneficiary||"", r.supplierTaxNumber||"", r.categoryName||"", breakdown.subtotalBeforeVat.toFixed(3), breakdown.vatAmount.toFixed(3), breakdown.totalIncludingVat.toFixed(3)];
+      const breakdown = deriveExpenseTotals(r.amount, Boolean(r.supplierTaxNumber?.trim()));
+      return [i+1, r.date, r.supplierInvoiceNumber||"", r.beneficiary||"", r.supplierTaxNumber||"", r.categoryName||"", breakdown.subtotal.toFixed(3), breakdown.vatAmount.toFixed(3), breakdown.total.toFixed(3)];
     });
     const csv = "\uFEFF" + [headers, ...rows].map(row => row.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });

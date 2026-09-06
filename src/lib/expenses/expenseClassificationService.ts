@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { roundMoney } from "@/lib/money";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
+import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
 
 export type ExpenseScope = "work_order" | "operating";
 export type WorkOrderChannel = "cash" | "insurance";
@@ -71,7 +72,7 @@ export interface ExpenseInput {
   tenant_id: string; date: string; expense_scope: ExpenseScope; work_order_id?: string | null;
   linked_work_order_id?: string | null; department_id: string; expense_category_id: string;
   subcategory_id?: string | null; cost_center_id?: string | null; supplier_id?: string | null;
-  supplier_invoice_number?: string | null; supplier_invoice_date?: string | null; payment_method: string; description: string;
+  supplier_tax_number?: string | null; supplier_invoice_number?: string | null; supplier_invoice_date?: string | null; payment_method: string; description: string;
   notes?: string | null; reference_number?: string | null; subtotal: number; vat_amount: number;
   total: number; is_vat_applicable: boolean; attachments?: unknown[];
 }
@@ -84,30 +85,25 @@ function expenseNumber(value: unknown) {
 }
 
 /**
- * Older expense rows keep their authoritative value in `amount`. The newer
- * subtotal/total columns can still be zero for those rows. Normalize reads so
- * the management page, edit form and exports show the stored historical value
- * without rewriting financial data in Supabase.
+ * `amount` is the authoritative final amount paid. Rebuild the VAT split on
+ * read so stale derived columns cannot leak into management, exports or reports.
  */
 export function normalizeLegacyExpenseAmounts<T extends Record<string, any>>(row: T): T {
   const meta = row.meta && typeof row.meta === "object" ? row.meta as Record<string, unknown> : {};
   const amount = expenseNumber(row.amount);
-  const storedSubtotal = expenseNumber(row.subtotal);
-  const vatAmount = expenseNumber(row.vat_amount);
-  const storedTotal = expenseNumber(row.total);
-  const subtotal = storedSubtotal !== 0 ? storedSubtotal : amount;
-  const total = storedTotal !== 0 ? storedTotal : roundMoney(subtotal + vatAmount);
   const legacySupplierId = String(meta.supplierId || "").trim();
   const supplierId = row.supplier_id || (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(legacySupplierId) ? legacySupplierId : null);
   const supplierName = row.supplier_name || meta.supplierName || row.beneficiary || null;
   const supplierTaxNumber = row.supplier_tax_number || meta.supplierTaxNumber || null;
   const supplierInvoiceNumber = row.supplier_invoice_number || meta.supplierInvoiceNumber || null;
+  const totals = deriveExpenseTotals(amount, Boolean(String(supplierTaxNumber || "").trim()));
   return {
     ...row,
     amount,
-    subtotal,
-    vat_amount: vatAmount,
-    total,
+    subtotal: totals.subtotal,
+    vat_amount: totals.vatAmount,
+    total: totals.total,
+    is_vat_applicable: Boolean(String(supplierTaxNumber || "").trim()),
     supplier_id: supplierId,
     supplier_name: supplierName,
     supplier_tax_number: supplierTaxNumber,
@@ -179,11 +175,11 @@ export async function listExpenses(page: number, pageSize: number, filters: Expe
     ...result,
     rows: normalizedRows.map((row: any) => {
       const supplier: any = suppliersById.get(row.supplier_id);
-      return {
+      return normalizeLegacyExpenseAmounts({
         ...row,
         supplier_name: row.supplier_name || supplier?.name || null,
         supplier_tax_number: row.supplier_tax_number || supplier?.tax_number || null,
-      };
+      });
     }),
   };
 }
@@ -226,7 +222,7 @@ export async function listCostCenters(tenantId: string) {
 
 export async function saveExpense(input: ExpenseInput, userId: string, id?: string) {
   const payload: any = {
-    ...input, amount: roundMoney(input.subtotal), subtotal: roundMoney(input.subtotal),
+    ...input, amount: roundMoney(input.total), subtotal: roundMoney(input.subtotal),
     vat_amount: roundMoney(input.vat_amount), total: roundMoney(input.total), created_by: userId,
     category_id: input.subcategory_id || input.expense_category_id,
   };

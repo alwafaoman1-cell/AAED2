@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { buildWorkOrderActualCostMap } from "@/lib/workOrderActualCosts";
 
 describe("work orders actual cost column", () => {
-  it("uses active linked expense totals including VAT and counts each voucher once", () => {
+  it("uses the active linked VAT-inclusive entered amount and counts each voucher once", () => {
     const costs = buildWorkOrderActualCostMap([
       { id: "11111111-1111-4111-8111-111111111111", order_number: "WO-00050" },
     ], [
@@ -12,12 +12,40 @@ describe("work orders actual cost column", () => {
       { id: "e1", linked_work_order_id: "WO-00050", amount: 28.8, total: 30.24, status: "active" },
       { id: "e2", linked_work_order_id: "WO-00050", amount: 10, total: 10.5, status: "cancelled" },
     ]);
-    expect(costs.get("11111111-1111-4111-8111-111111111111")).toBe(30.24);
+    expect(costs.get("11111111-1111-4111-8111-111111111111")).toBe(28.8);
+  });
+
+  it("ignores stale derived totals left by an older expense edit", () => {
+    const costs = buildWorkOrderActualCostMap([
+      { id: "11111111-1111-4111-8111-111111111111", order_number: "WO-00092" },
+    ], [
+      {
+        id: "edited-expense",
+        work_order_id: "11111111-1111-4111-8111-111111111111",
+        amount: 130,
+        vat_amount: 61.75,
+        total: 1296.75,
+        is_vat_applicable: true,
+        status: "active",
+      },
+      {
+        id: "no-vat-expense",
+        linked_work_order_id: "WO-00092",
+        amount: 10,
+        vat_amount: 99,
+        total: 999,
+        is_vat_applicable: false,
+        status: "active",
+      },
+    ]);
+
+    expect(costs.get("11111111-1111-4111-8111-111111111111")).toBe(140);
   });
 
   it("does not treat labor charges or estimated parts fields as actual cost", () => {
     const page = readFileSync(resolve(process.cwd(), "src/pages/WorkOrders.tsx"), "utf8");
     expect(page).toContain("actualWorkOrderCost(order)");
+    expect(page).toContain("المنفق شامل الضريبة");
     expect(page).toContain("سندات الصرف الفعلية المرتبطة شامل الضريبة");
     expect(page).not.toContain("order.totalCost.toLocaleString");
   });

@@ -86,9 +86,9 @@ export function inferExpenseAccountingType(e: Partial<ExpenseRecord>): ExpenseAc
 }
 
 export function normalizeExpenseAccountingFields(e: ExpenseRecord): ExpenseRecord {
-  const isVatApplicable = e.isVatApplicable ?? true;
-  // `amount` is the authoritative VAT-exclusive value. Never retain derived
-  // subtotal/VAT/total values from before an edit.
+  // A supplier tax number is the sole VAT eligibility signal. The entered
+  // amount remains the final amount paid and VAT is split from it when eligible.
+  const isVatApplicable = Boolean(e.supplierTaxNumber?.trim());
   const { subtotal, vatAmount, total } = deriveExpenseTotals(e.amount, isVatApplicable);
   const expenseType = e.expenseType || inferExpenseAccountingType(e);
   const costCenter = e.costCenter || (
@@ -237,6 +237,8 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     cashbox_name: e.cashboxName || null,
     payment_method: e.paymentMethod || "cash",
     expense_type: e.expenseType || "unassigned",
+    expense_scope: e.linkedWorkOrderId || e.sourceWorkOrderId ? "work_order" : "operating",
+    work_order_channel: e.claimId || e.sourceClaimId ? "insurance" : (e.linkedWorkOrderId || e.sourceWorkOrderId ? "cash" : null),
     cost_center: e.costCenter || "unassigned",
     subtotal: Number(e.subtotal ?? e.amount ?? 0),
     vat_amount: Number(e.vatAmount ?? 0),
@@ -276,6 +278,8 @@ function stripExpenseAccountingColumns(row: Record<string, any>) {
     supplier_tax_number,
     supplier_invoice_number,
     supplier_id,
+    expense_scope,
+    work_order_channel,
     ...legacy
   } = row;
   return legacy;
@@ -283,7 +287,7 @@ function stripExpenseAccountingColumns(row: Record<string, any>) {
 
 function isMissingAccountingColumnError(error: any): boolean {
   const msg = String(error?.message || error?.details || "");
-  return /expense_type|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|supplier_id|subtotal|total/.test(msg)
+  return /expense_type|expense_scope|work_order_channel|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|supplier_id|subtotal|total/.test(msg)
     && /column|schema|cache/i.test(msg);
 }
 

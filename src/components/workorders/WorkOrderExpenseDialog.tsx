@@ -463,8 +463,9 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
                 <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">المبلغ (ر.ع)</Label>
+                <Label className="text-xs">المبلغ الإجمالي المدفوع شامل الضريبة (ر.ع)</Label>
                 <Input type="number" min="0" step="0.001" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.000" />
+                <p className="mt-1 text-[11px] text-muted-foreground">تُستخرج VAT من المبلغ فقط إذا كان للمورد رقم ضريبي.</p>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">التصنيف المحاسبي</Label>
@@ -509,9 +510,9 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
                 onChange={(supplier) => {
                   setSelectedSupplierId(supplier.id);
                   setBeneficiary(supplier.name);
-                  if (supplier.taxNumber) setSupplierTaxNumber(supplier.taxNumber);
+                  setSupplierTaxNumber(supplier.taxNumber || "");
                 }}
-                onClear={() => setSelectedSupplierId("")}
+                onClear={() => { setSelectedSupplierId(""); setSupplierTaxNumber(""); }}
               />
 
               {/* بيانات المورد الضريبية */}

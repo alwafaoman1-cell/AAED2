@@ -11,21 +11,31 @@ describe("legacy expense amount read compatibility", () => {
     });
   });
 
-  it("adds explicitly stored VAT when the legacy total is zero", () => {
+  it("does not revive stored VAT when the supplier has no tax number", () => {
     expect(normalizeLegacyExpenseAmounts({ amount: 100, subtotal: 0, vat_amount: 5, total: 0 })).toMatchObject({
       subtotal: 100,
-      vat_amount: 5,
-      total: 105,
+      vat_amount: 0,
+      total: 100,
     });
   });
 
-  it("preserves populated modern financial columns", () => {
+  it("rebuilds stale financial columns from the authoritative paid amount", () => {
     expect(normalizeLegacyExpenseAmounts({ amount: 100, subtotal: 90, vat_amount: 4.5, total: 94.5 })).toMatchObject({
       amount: 100,
-      subtotal: 90,
-      vat_amount: 4.5,
-      total: 94.5,
+      subtotal: 100,
+      vat_amount: 0,
+      total: 100,
     });
+  });
+
+  it("splits VAT from the paid amount when a supplier tax number exists", () => {
+    expect(normalizeLegacyExpenseAmounts({
+      amount: 105,
+      supplier_tax_number: "OM1234567890",
+      subtotal: 0,
+      vat_amount: 0,
+      total: 0,
+    })).toMatchObject({ amount: 105, subtotal: 100, vat_amount: 5, total: 105 });
   });
 
   it("restores a historical supplier stored in beneficiary/meta fields", () => {

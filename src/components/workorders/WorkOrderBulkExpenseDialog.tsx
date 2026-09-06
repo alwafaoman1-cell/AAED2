@@ -412,7 +412,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
                     onChange={(supplier) => updateItem(item.id, {
                       supplierId: supplier.id,
                       beneficiary: supplier.name,
-                      supplierTaxNumber: supplier.taxNumber || item.supplierTaxNumber,
+                      supplierTaxNumber: supplier.taxNumber || "",
                     })}
                     onClear={() => updateItem(item.id, { supplierId: "" })}
                   />

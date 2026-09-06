@@ -274,7 +274,7 @@ export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props
                     onChange={(supplier) => updateItem(item.id, {
                       supplierId: supplier.id,
                       beneficiary: supplier.name,
-                      supplierTaxNumber: supplier.taxNumber || item.supplierTaxNumber,
+                      supplierTaxNumber: supplier.taxNumber || "",
                     })}
                     onClear={() => updateItem(item.id, { supplierId: "" })}
                   />
