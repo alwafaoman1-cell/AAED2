@@ -57,4 +57,13 @@ describe("insurance company report SSOT", () => {
     expect(page).toContain("exportInsuranceCollectionRowsToXlsx(\n        collectionExportRows,");
     expect(page).toContain("تقرير عمليات الورشة ({collectionExportRows.length})");
   });
+
+  it("does not classify a real collection number allocated to several claims as a duplicate", () => {
+    const page = readFileSync("src/pages/insurance/InsuranceCompanyDetail.tsx", "utf8");
+    expect(page).toContain("const sharedPaymentNumbers");
+    expect(page).toContain("claimIds.size > 1");
+    expect(page).toContain("const issues = dupInvoicesByClaim.length + dupPaymentSignature.length");
+    expect(page).not.toContain("dupInvoicesByClaim.length + dupPaymentNumbers.length");
+    expect(page).toContain("(p.payment_number || \"\").trim()");
+  });
 });

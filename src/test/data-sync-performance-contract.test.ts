@@ -48,6 +48,19 @@ describe("data sync performance contract", () => {
     expect(workOrdersPage).toContain("refreshWorkOrdersFromCloud");
   });
 
+  it("searches work-order customers lazily in Supabase instead of relying on an empty full-table cache", () => {
+    const store = read("src/lib/customersStore.ts");
+    const lookup = read("src/components/customers/CustomerPhoneLookup.tsx");
+
+    expect(store).toContain("export async function searchCustomersFromCloud");
+    expect(store).toContain('.eq("tenant_id", tenantId)');
+    expect(store).toContain('.is("deleted_at", null)');
+    expect(store).toContain('.limit(Math.max(1, Math.min(limit, 20)))');
+    expect(lookup).toContain("searchCustomersFromCloud(debouncedQuery, 12)");
+    expect(lookup).toContain("debouncedQuery.length >= 2");
+    expect(lookup).not.toContain("refreshCustomersFromCloud()");
+  });
+
   it("syncs supervisor needed-parts changes into the desktop compatibility cache", () => {
     const realtime = read("src/hooks/useRealtimeSync.ts");
     const supervisor = read("src/pages/apps/SupervisorApp.tsx");

@@ -667,11 +667,18 @@ function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: (
       <DialogContent>
         <DialogHeader><DialogTitle>{isAr ? "إضافة عملية دفع" : "Add payment"}</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <div className="rounded bg-muted/40 p-2 text-xs flex justify-between">
-            <span>{isAr ? "الإجمالي" : "Total"}: <strong className="font-mono">{doc.total.toFixed(3)}</strong></span>
+          <div className="rounded bg-muted/40 p-2 text-xs grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <span>{isAr ? "قبل الضريبة" : "Subtotal"}: <strong className="font-mono">{doc.subtotal.toFixed(3)}</strong></span>
+            <span>{isAr ? "ضريبة الفاتورة الكاملة" : "Full invoice VAT"}: <strong className="font-mono">{doc.taxTotal.toFixed(3)}</strong></span>
+            <span>{isAr ? "الإجمالي شامل الضريبة" : "Total incl. VAT"}: <strong className="font-mono">{doc.total.toFixed(3)}</strong></span>
             <span>{isAr ? "المدفوع" : "Paid"}: <strong className="font-mono text-success">{doc.paidTotal.toFixed(3)}</strong></span>
             <span>{isAr ? "المتبقي" : "Balance"}: <strong className="font-mono text-destructive">{doc.balanceDue.toFixed(3)}</strong></span>
           </div>
+          <p className="text-xs text-muted-foreground">
+            {isAr
+              ? "الدفعة مبلغ شامل كما أُدخل. الضريبة تخص إجمالي الفاتورة ولا يعاد احتسابها من الدفعة الجزئية."
+              : "The payment is stored as the entered gross amount. Invoice VAT is based on the full invoice and is not recalculated from a partial payment."}
+          </p>
           <div>
             <Label>{isAr ? "القيمة (قابلة للتعديل — يمكن إدخال دفعة جزئية)" : "Amount (editable — partial payments allowed)"}</Label>
             <Input type="text" inputMode="decimal" step="0.001" value={amount} onChange={(e) => { setAmount(parseMoneyInput(e.target.value)); setMarkFullPaid(false); }} />

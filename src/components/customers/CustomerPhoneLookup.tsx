@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { customersStore, type Customer } from "@/lib/customersStore";
+import { customersStore, searchCustomersFromCloud, type Customer } from "@/lib/customersStore";
 import { Phone, User, Building2, UserPlus, CheckCircle2, AlertCircle, Sparkles, X } from "lucide-react";
 import NewCustomerDialog from "./NewCustomerDialog";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface Props {
   /** العميل المختار حالياً (id) أو فارغ. */
@@ -26,9 +28,21 @@ export default function CustomerPhoneLookup({ customerId, onSelect, disableCreat
   const [open, setOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [showNewDialog, setShowNewDialog] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => customersStore.subscribe(() => setTick((t) => t + 1)), []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  const cloudMatches = useQuery({
+    queryKey: queryKeys.customers.list({ scope: "work_order_lookup", search: debouncedQuery }),
+    enabled: open && debouncedQuery.length >= 2,
+    queryFn: () => searchCustomersFromCloud(debouncedQuery, 12),
+    staleTime: 60_000,
+  });
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
@@ -45,11 +59,13 @@ export default function CustomerPhoneLookup({ customerId, onSelect, disableCreat
   const matches = useMemo(() => {
     void tick;
     const q = query.trim().toLowerCase();
-    if (!q) return customersStore.getAll().slice(0, 6);
-    return customersStore.getAll()
+    const local = !q ? customersStore.getAll().slice(0, 6) : customersStore.getAll()
       .filter((c) => (c.phone || "").includes(q) || c.name.toLowerCase().includes(q))
       .slice(0, 8);
-  }, [query, tick]);
+    const combined = new Map<string, Customer>();
+    for (const customer of [...(cloudMatches.data || []), ...local]) combined.set(customer.id, customer);
+    return Array.from(combined.values()).slice(0, 12);
+  }, [query, tick, cloudMatches.data]);
 
   // عند اختيار عميل، عرض بطاقة بدلاً من حقل البحث
   if (selected) {
@@ -96,7 +112,9 @@ export default function CustomerPhoneLookup({ customerId, onSelect, disableCreat
 
         {open && (
           <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-72 overflow-y-auto">
-            {matches.length > 0 ? (
+            {cloudMatches.isFetching && matches.length === 0 ? (
+              <div className="px-3 py-3 text-center text-xs text-muted-foreground">جاري البحث...</div>
+            ) : matches.length > 0 ? (
               matches.map((c) => {
                 const isPending = customersStore.isInsurancePending(c.name);
                 return (
@@ -128,11 +146,11 @@ export default function CustomerPhoneLookup({ customerId, onSelect, disableCreat
                   </button>
                 );
               })
-            ) : (
+            ) : query.trim().length >= 2 ? (
               <div className="px-3 py-3 text-center text-xs text-muted-foreground">
                 لا يوجد عميل بهذا الرقم
               </div>
-            )}
+            ) : <div className="px-3 py-3 text-center text-xs text-muted-foreground">اكتب حرفين على الأقل للبحث</div>}
 
             {!disableCreate && (
               <button

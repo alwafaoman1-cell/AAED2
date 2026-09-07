@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Save, X, Trash2, Pencil, Plus, Receipt, Package, Eye } from "lucide-react";
 import { toast } from "sonner";
 import {
-  expenseCategoriesStore,
   employeeCashboxesStore,
   voucherSettingsStore,
   PAYMENT_METHOD_LABELS,
@@ -25,6 +25,9 @@ import AiWriteButton from "@/components/ai/AiWriteButton";
 import { writeOperationalAudit } from "@/lib/deletePolicy";
 import SupplierPicker from "@/components/suppliers/SupplierPicker";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
+import { useAuth } from "@/contexts/AuthContext";
+import { queryKeys } from "@/lib/queryKeys";
+import { listExpenseCategories, type ExpenseCategoryRow } from "@/lib/expenses/expenseClassificationService";
 
 interface Props {
   order: WorkOrder | null;
@@ -41,39 +44,16 @@ interface Props {
   onExpenseSaved?: (expense: ExpenseRecord) => void;
 }
 
-/** التصنيفات المقترحة لمصروفات أوامر العمل (تطابق ما طلبه المستخدم) */
-const SUGGESTED_LABELS = ["قطع غيار المركبات", "عمالة خارجية", "نقل وسحب", "صبغ خارجي", "أخرى"];
-
-/** يضمن وجود التصنيفات المقترحة في expenseCategoriesStore، ويعيد التصنيف الافتراضي ("قطع غيار المركبات") */
-function ensureWorkOrderCategories(): string {
-  const all = expenseCategoriesStore.getAll();
-  let defaultId = "";
-  SUGGESTED_LABELS.forEach((name) => {
-    const existing = all.find((c) => c.name === name);
-    if (!existing) {
-      const id = `EC-WO-${name.replace(/\s+/g, "-")}`;
-      expenseCategoriesStore.add({
-        id,
-        name,
-        description: "تصنيف مصروفات مرتبطة بأوامر العمل",
-        color: "#f59e0b",
-        active: true,
-        createdAt: new Date().toISOString(),
-      });
-      if (name === "قطع غيار المركبات") defaultId = id;
-    } else {
-      if (name === "قطع غيار المركبات") defaultId = existing.id;
-    }
-  });
-  return defaultId;
-}
-
 export default function WorkOrderExpenseDialog({ order, open, onOpenChange, initialExpense, initialRequiredPart, onExpenseSaved }: Props) {
+  const { profile } = useAuth();
+  const tenantId = profile?.tenant_id || "";
   const [expenseTick, force] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState("");
-  const [categoryId, setCategoryId] = useState<string>("");
+  const [departmentId, setDepartmentId] = useState<string>("");
+  const [expenseCategoryId, setExpenseCategoryId] = useState<string>("");
+  const [subcategoryId, setSubcategoryId] = useState<string>("");
   const [cashboxId, setCashboxId] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [beneficiary, setBeneficiary] = useState("");
@@ -93,10 +73,22 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
   const [unitSellPrice, setUnitSellPrice] = useState<string>("");
 
   const allowManage = canManageFinance();
+  const categoryQuery = useQuery({
+    queryKey: queryKeys.expenseManagement.categories({ tenantId, active: true }),
+    enabled: open && !!tenantId,
+    queryFn: () => listExpenseCategories(tenantId, false),
+  });
+  const categories = useMemo(() => categoryQuery.data || [], [categoryQuery.data]);
+  const departments = useMemo(
+    () => categories.filter((c) => c.level === 1 && (c.expense_scope === "work_order" || c.expense_scope === "both")),
+    [categories],
+  );
+  const childCategories = useMemo(() => categories.filter((c) => c.parent_id === departmentId), [categories, departmentId]);
+  const subcategories = useMemo(() => categories.filter((c) => c.parent_id === expenseCategoryId), [categories, expenseCategoryId]);
+  const categoryLabel = (row?: ExpenseCategoryRow) => row ? `${row.name_ar} / ${row.name_en}` : "";
 
   useEffect(() => {
     const subs = [
-      expenseCategoriesStore.subscribe(() => force((n) => n + 1)),
       employeeCashboxesStore.subscribe(() => force((n) => n + 1)),
       expensesStore.subscribe(() => force((n) => n + 1)),
     ];
@@ -107,14 +99,15 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     if (open && !expensesStore.isHydrated()) void expensesStore.refresh();
   }, [open]);
 
-  // عند فتح الحوار: إنشاء التصنيفات إن لم توجد + تعيين الافتراضي
+  // عند فتح الحوار: تهيئة الحقول فقط. التصنيفات مصدرها Supabase وليست LocalStorage.
   useEffect(() => {
     if (open) {
-      const def = ensureWorkOrderCategories();
       const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
       const defaultCb = cashboxes.find((c) => c.isDefault) ?? cashboxes[0];
       const settings = voucherSettingsStore.get();
-      setCategoryId(def);
+      setDepartmentId(initialExpense?.departmentId || "");
+      setExpenseCategoryId(initialExpense?.expenseCategoryId || "");
+      setSubcategoryId(initialExpense?.subcategoryId || "");
       setCashboxId(defaultCb?.id ?? "");
       setPaymentMethod(settings.defaultPaymentMethod);
       setDate(new Date().toISOString().slice(0, 10));
@@ -135,7 +128,6 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
         setEditingId(initialExpense.id);
         setDate(initialExpense.date);
         setAmount(String(initialExpense.amount));
-        setCategoryId(initialExpense.categoryId);
         setCashboxId(initialExpense.cashboxId);
         setPaymentMethod(initialExpense.paymentMethod);
         setBeneficiary(initialExpense.beneficiary || "");
@@ -161,7 +153,31 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     }
   }, [open, initialExpense, initialRequiredPart]);
 
-  const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
+  useEffect(() => {
+    if (!open || categoryQuery.isLoading || initialExpense || departmentId || expenseCategoryId) return;
+    const partsDepartment = departments.find((c) => c.code === "PARTS");
+    const defaultCategory = categories.find((c) => c.parent_id === partsDepartment?.id && c.code === "PARTS_NEW");
+    if (partsDepartment) setDepartmentId(partsDepartment.id);
+    if (defaultCategory) setExpenseCategoryId(defaultCategory.id);
+  }, [open, categoryQuery.isLoading, categories, departments, initialExpense, departmentId, expenseCategoryId]);
+
+  useEffect(() => {
+    if (!open || !initialExpense || categories.length === 0) return;
+    const leafId = initialExpense.subcategoryId || initialExpense.expenseCategoryId || initialExpense.categoryId;
+    const leaf = categories.find((c) => c.id === leafId);
+    if (!leaf) return;
+    if (leaf.category_type === "subcategory") {
+      const parent = categories.find((c) => c.id === leaf.parent_id);
+      setSubcategoryId(leaf.id);
+      setExpenseCategoryId(parent?.id || initialExpense.expenseCategoryId || "");
+      setDepartmentId(parent?.parent_id || initialExpense.departmentId || "");
+    } else {
+      setSubcategoryId("");
+      setExpenseCategoryId(leaf.id);
+      setDepartmentId(leaf.parent_id || initialExpense.departmentId || "");
+    }
+  }, [open, initialExpense, categories]);
+
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
   const linkedExpenses = useMemo(() => {
     // The store revision intentionally refreshes this derived external-store view.
@@ -172,8 +188,8 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
   const linkedProfit = linkedExpenses.reduce((s, e) => s + getExpensePartProfit(e), 0);
 
   // هل التصنيف الحالي = قطع غيار؟
-  const currentCat = categories.find((c) => c.id === categoryId);
-  const isPartsCategory = currentCat?.name === "قطع غيار المركبات";
+  const currentCat = categories.find((c) => c.id === (subcategoryId || expenseCategoryId));
+  const isPartsCategory = currentCat?.accounting_mapping_key === "parts_direct_cost";
 
   // مزامنة المبلغ تلقائياً عند تصنيف قطع غيار = سعر الشراء × الكمية (هذا هو المصروف الفعلي)
   useEffect(() => {
@@ -196,7 +212,9 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     setEditingId(rec.id);
     setDate(rec.date);
     setAmount(String(rec.amount));
-    setCategoryId(rec.categoryId);
+    setDepartmentId(rec.departmentId || "");
+    setExpenseCategoryId(rec.expenseCategoryId || "");
+    setSubcategoryId(rec.subcategoryId || "");
     setCashboxId(rec.cashboxId);
     setPaymentMethod(rec.paymentMethod);
     setBeneficiary(rec.beneficiary || "");
@@ -232,13 +250,15 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     if (!order) return;
     const value = parseFloat(amount);
     if (!value || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
-    if (!categoryId) return toast.error("اختر التصنيف");
+    if (!departmentId) return toast.error("اختر القسم");
+    if (!expenseCategoryId) return toast.error("اختر التصنيف");
     if (!cashboxId) return toast.error("اختر الخزينة");
     if (beneficiary.trim() && !selectedSupplierId) {
       return toast.error("اختر المورد من القائمة أو أضف موردًا جديدًا قبل الحفظ");
     }
 
-    const cat = categories.find((c) => c.id === categoryId);
+    const cat = categories.find((c) => c.id === (subcategoryId || expenseCategoryId));
+    const selectedCategoryName = cat ? categoryLabel(cat) : undefined;
     const cb = employeeCashboxesStore.getAll().find((c) => c.id === cashboxId);
 
     // ===== قطع الغيار (إدخال يدوي مستقل عن المخزون) — جميع الحقول اختيارية =====
@@ -270,7 +290,9 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
         let savedExpense: ExpenseRecord;
         try {
           savedExpense = await expensesStore.update(editingId, {
-            date, amount: value, categoryId, categoryName: cat?.name,
+            date, amount: value,
+            categoryId: subcategoryId || expenseCategoryId, categoryName: selectedCategoryName,
+            departmentId, expenseCategoryId, subcategoryId: subcategoryId || undefined,
             cashboxId, cashboxName: cb?.cashboxName, paymentMethod, beneficiary: beneficiary.trim(), description, photo,
             ...supplierFields,
             ...partsFields,
@@ -284,7 +306,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
         if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
         logActivity({
           action: "update", entity: "expense", entityId: old.voucherNumber,
-          label: `${cat?.name || "مصروف"} لأمر العمل ${order.id}`,
+          label: `${selectedCategoryName || "مصروف"} لأمر العمل ${order.id}`,
           description: `تعديل المبلغ من ${old.amount.toLocaleString()} إلى ${value.toLocaleString()} ر.ع`,
           amount: value, metadata: { workOrderId: order.id },
         });
@@ -302,7 +324,8 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       id: `EXP-${Date.now()}`,
       voucherNumber: number,
       date, amount: value,
-      categoryId, categoryName: cat?.name,
+      categoryId: subcategoryId || expenseCategoryId, categoryName: selectedCategoryName,
+      departmentId, expenseCategoryId, subcategoryId: subcategoryId || undefined,
       cashboxId, cashboxName: cb?.cashboxName,
       paymentMethod, beneficiary: beneficiary.trim(), description, photo,
       linkedWorkOrderId: order.cloudId || order.id,
@@ -346,12 +369,12 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
 
     logActivity({
       action: "create", entity: "expense", entityId: number,
-      label: `${cat?.name || "مصروف"} لأمر العمل ${order.id}`,
+      label: `${selectedCategoryName || "مصروف"} لأمر العمل ${order.id}`,
       description: `إضافة مصروف بقيمة ${value.toLocaleString()} ر.ع — ${beneficiary.trim() || "بدون مستفيد"}`,
       amount: value,
       metadata: {
         workOrderId: order.id,
-        categoryName: cat?.name,
+        categoryName: selectedCategoryName,
         requiredPartId: initialRequiredPart?.id,
         convertedFromRequiredPart: !!initialRequiredPart,
       },
@@ -457,6 +480,17 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
               }}
             />
 
+            {categoryQuery.isError && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                تعذر تحميل أقسام وتصنيفات المصروفات. لن يتم الحفظ قبل تحميل التصنيف المحاسبي الصحيح.
+              </div>
+            )}
+            {!categoryQuery.isLoading && !categoryQuery.isError && departments.length === 0 && (
+              <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+                لا توجد أقسام مصروفات مفعلة لأوامر العمل. فعّل التصنيفات من إدارة المصروفات أولًا.
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">التاريخ</Label>
@@ -468,13 +502,32 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
                 <p className="mt-1 text-[11px] text-muted-foreground">تُستخرج VAT من المبلغ فقط إذا كان للمورد رقم ضريبي.</p>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">التصنيف المحاسبي</Label>
-                <Select value={categoryId} onValueChange={setCategoryId}>
+                <Label className="text-xs">القسم / Department</Label>
+                <Select value={departmentId || "none"} onValueChange={(value) => { setDepartmentId(value); setExpenseCategoryId(""); setSubcategoryId(""); }}>
+                  <SelectTrigger><SelectValue placeholder="اختر القسم" /></SelectTrigger>
+                  <SelectContent>
+                    {departments.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{categoryLabel(c)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">التصنيف / Category</Label>
+                <Select value={expenseCategoryId || "none"} onValueChange={(value) => { setExpenseCategoryId(value); setSubcategoryId(""); }} disabled={!departmentId}>
                   <SelectTrigger><SelectValue placeholder="اختر التصنيف" /></SelectTrigger>
                   <SelectContent>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
+                    {childCategories.map((c) => <SelectItem key={c.id} value={c.id}>{categoryLabel(c)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">التصنيف الفرعي / Subcategory</Label>
+                <Select value={subcategoryId || "none"} onValueChange={(value) => setSubcategoryId(value === "none" ? "" : value)} disabled={!expenseCategoryId}>
+                  <SelectTrigger><SelectValue placeholder="اختياري" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">بدون / None</SelectItem>
+                    {subcategories.map((c) => <SelectItem key={c.id} value={c.id}>{categoryLabel(c)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -622,7 +675,11 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
             )}
 
             <div className="flex justify-end pt-2 border-t border-border">
-              <Button onClick={handleSave} className="gap-2 gradient-gold text-primary-foreground">
+              <Button
+                onClick={handleSave}
+                className="gap-2 gradient-gold text-primary-foreground"
+                disabled={categoryQuery.isLoading || categoryQuery.isError || departments.length === 0}
+              >
                 <Save size={14} /> {editingId ? "حفظ التعديلات" : "حفظ سند الصرف"}
               </Button>
             </div>

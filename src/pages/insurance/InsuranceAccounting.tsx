@@ -168,6 +168,8 @@ export default function InsuranceAccounting() {
       invoiceId: invoice.id,
       insuranceCompanyId: invoice.insurance_company_id || null,
       insuranceCompany: invoice.insurance_company_name || claim?.insurance_company || "—",
+      subtotal: Number(invoice.subtotal || 0),
+      vat: Number(invoice.vat || 0),
       total: Number(invoice.total || 0),
       paid: Number(invoice.paid_amount || 0),
       remaining,

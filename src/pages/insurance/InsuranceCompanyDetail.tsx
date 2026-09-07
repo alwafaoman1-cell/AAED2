@@ -859,8 +859,9 @@ function AuditPanel({
     return Array.from(m.entries()).filter(([, arr]) => arr.length > 1);
   }, [invoices]);
 
-  // كشف تكرار أرقام الدفعات
-  const dupPaymentNumbers = useMemo(() => {
+  // A single real collection reference may be allocated across several claims.
+  // Reusing its number is informational, not proof of a duplicated payment.
+  const sharedPaymentNumbers = useMemo(() => {
     const m = new Map<string, any[]>();
     payments.forEach((p) => {
       const k = (p.payment_number || "").trim();
@@ -869,15 +870,18 @@ function AuditPanel({
       arr.push(p);
       m.set(k, arr);
     });
-    return Array.from(m.entries()).filter(([, arr]) => arr.length > 1);
+    return Array.from(m.entries()).filter(([, arr]) => {
+      const claimIds = new Set(arr.map((payment) => payment.claim_id).filter(Boolean));
+      return arr.length > 1 && claimIds.size > 1;
+    });
   }, [payments]);
 
-  // كشف دفعات بنفس (التاريخ + المبلغ + المرجع) — تكرار محتمل
+  // Only an exact business-signature match on the same claim is suspicious.
   const dupPaymentSignature = useMemo(() => {
     const m = new Map<string, any[]>();
     payments.forEach((p) => {
       if (p.status === "bounced") return;
-      const k = `${p.payment_date}|${Number(p.amount).toFixed(3)}|${p.reference_number ?? ""}|${p.claim_id ?? ""}`;
+      const k = `${(p.payment_number || "").trim()}|${p.payment_date}|${Number(p.amount).toFixed(3)}|${p.reference_number ?? ""}|${p.claim_id ?? ""}`;
       const arr = m.get(k) ?? [];
       arr.push(p);
       m.set(k, arr);
@@ -891,8 +895,7 @@ function AuditPanel({
 
   const invoicesTotal = invoices.reduce((s, i) => s + (Number(i.total) || 0), 0);
 
-  const issues =
-    dupInvoicesByClaim.length + dupPaymentNumbers.length + dupPaymentSignature.length;
+  const issues = dupInvoicesByClaim.length + dupPaymentSignature.length;
 
   return (
     <Card className="p-4 space-y-3 border-info/40">
@@ -961,16 +964,19 @@ function AuditPanel({
         </div>
       )}
 
-      {dupPaymentNumbers.length > 0 && (
-        <div className="text-xs p-3 bg-destructive/10 rounded">
-          <strong className="text-destructive">⚠ أرقام دفعات مكررة:</strong>{" "}
-          {dupPaymentNumbers.map(([n]) => n).join(", ")}
+      {sharedPaymentNumbers.length > 0 && (
+        <div className="text-xs p-3 bg-info/10 rounded">
+          <strong className="text-info">أرقام تحصيل موزعة على أكثر من مطالبة:</strong>{" "}
+          {sharedPaymentNumbers.map(([n]) => n).join(", ")}
+          <div className="mt-1 text-muted-foreground">
+            هذه دفعات حقيقية مشتركة، ولا تُحتسب كتكرار ما دامت موزعة على مطالبات مختلفة.
+          </div>
         </div>
       )}
 
       {dupPaymentSignature.length > 0 && (
         <div className="text-xs p-3 bg-warning/10 rounded">
-          <strong>⚠ دفعات بنفس (التاريخ/المبلغ/المرجع) — احتمال تكرار يدوي:</strong>
+          <strong>⚠ دفعات متطابقة بالكامل على المطالبة نفسها — تحتاج مراجعة:</strong>
           <ul className="list-disc pr-5 mt-1">
             {dupPaymentSignature.map(([k, arr]) => (
               <li key={k}>

@@ -129,7 +129,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
       ].join(",");
       const [salesResult, claimsResult] = await Promise.all([
         (supabase.from("sales_documents") as any)
-          .select("id,doc_number,total,paid_amount,balance_due,customer_id,customer_name,vehicle_plate,work_order_id,status")
+          .select("id,doc_number,subtotal,tax_total,total,paid_amount,balance_due,customer_id,customer_name,vehicle_plate,work_order_id,status")
           .eq("tenant_id", tenantId)
           .eq("doc_type", "invoice")
           .not("status", "in", "(cancelled,canceled,draft)")
@@ -148,7 +148,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
       const claimRows = claimsResult.data || [];
       const claimIds = claimRows.map((row: any) => row.id);
       let paidByClaim = new Map<string, number>();
-      let invoiceByClaim = new Map<string, { id: string; total: number }>();
+      let invoiceByClaim = new Map<string, { id: string; subtotal: number; vat: number; total: number }>();
       if (claimIds.length) {
         const [{ data: payments, error }, { data: invoices, error: invoicesError }] = await Promise.all([
           (supabase.from("claim_payments") as any)
@@ -157,7 +157,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
             .in("claim_id", claimIds)
             .neq("status", "bounced"),
           (supabase.from("insurance_invoices") as any)
-            .select("id,claim_id,total,issued_at")
+            .select("id,claim_id,subtotal,vat,total,issued_at")
             .eq("tenant_id", tenantId)
             .in("claim_id", claimIds)
             .neq("status", "cancelled")
@@ -169,8 +169,13 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           map.set(row.claim_id, (map.get(row.claim_id) || 0) + Number(row.amount || 0));
           return map;
         }, paidByClaim);
-        invoiceByClaim = (invoices || []).reduce((map: Map<string, { id: string; total: number }>, row: any) => {
-          if (!map.has(row.claim_id)) map.set(row.claim_id, { id: row.id, total: Number(row.total || 0) });
+        invoiceByClaim = (invoices || []).reduce((map: Map<string, { id: string; subtotal: number; vat: number; total: number }>, row: any) => {
+          if (!map.has(row.claim_id)) map.set(row.claim_id, {
+            id: row.id,
+            subtotal: Number(row.subtotal || 0),
+            vat: Number(row.vat || 0),
+            total: Number(row.total || 0),
+          });
           return map;
         }, invoiceByClaim);
       }
@@ -226,6 +231,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           workOrderId: row.work_order_id || null,
           claimId: null,
           invoiceId: row.id,
+          subtotal: Number(row.subtotal || 0),
+          vat: Number(row.tax_total || 0),
           total,
           paid,
           remaining,
@@ -249,6 +256,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           invoiceId: linkedInvoice?.id || null,
           insuranceCompanyId: row.insurance_company_id || null,
           insuranceCompany: row.insurance_company || "—",
+          subtotal: linkedInvoice?.subtotal,
+          vat: linkedInvoice?.vat,
           total,
           paid,
           remaining: Math.max(0, total - paid),
@@ -387,10 +396,15 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
                   <div>العميل: {selected.customerName}</div>
                   {selected.vehiclePlate && <div>المركبة: {selected.vehiclePlate}</div>}
                   {selected.kind === "insurance_claim" && <div>شركة التأمين: {selected.insuranceCompany}</div>}
-                  <div className="grid grid-cols-3 gap-2 pt-2">
-                    <div><span className="text-muted-foreground">الإجمالي</span><br />{money(selected.total)}</div>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-2">
+                    <div><span className="text-muted-foreground">قبل الضريبة</span><br />{money(selected.subtotal ?? Math.max(0, selected.total - (selected.vat || 0)))}</div>
+                    <div><span className="text-muted-foreground">ضريبة الفاتورة الكاملة</span><br />{money(selected.vat || 0)}</div>
+                    <div><span className="text-muted-foreground">الإجمالي شامل الضريبة</span><br />{money(selected.total)}</div>
                     <div><span className="text-muted-foreground">المدفوع</span><br />{money(selected.paid)}</div>
                     <div><span className="text-muted-foreground">المتبقي</span><br /><b>{money(selected.remaining)}</b></div>
+                  </div>
+                  <div className="pt-2 text-xs text-muted-foreground">
+                    ضريبة الفاتورة ثابتة من إجمالي الفاتورة، والدفعة الجزئية تغيّر المدفوع والمتبقي فقط.
                   </div>
                 </div>
               ) : "اختر نتيجة لربط الدفعة رسميًا."}

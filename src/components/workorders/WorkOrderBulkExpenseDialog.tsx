@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, Save, Package, X, Receipt, FileText } from "lucide-react";
 import {
   ResponsiveDialog,
@@ -16,7 +17,6 @@ import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
-  expenseCategoriesStore,
   employeeCashboxesStore,
   voucherSettingsStore,
   PAYMENT_METHOD_LABELS,
@@ -29,6 +29,9 @@ import { syncWorkOrderInvoiceFromExpenses } from "@/lib/workOrderInvoiceSync";
 import { salesStore } from "@/lib/salesStore";
 import SupplierPicker from "@/components/suppliers/SupplierPicker";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
+import { useAuth } from "@/contexts/AuthContext";
+import { queryKeys } from "@/lib/queryKeys";
+import { listExpenseCategories, type ExpenseCategoryRow } from "@/lib/expenses/expenseClassificationService";
 
 interface PartLine {
   id: string;
@@ -42,7 +45,9 @@ interface PartLine {
 interface ExpenseItem {
   id: string;
   date: string;
-  categoryId: string;
+  departmentId: string;
+  expenseCategoryId: string;
+  subcategoryId: string;
   cashboxId: string;
   paymentMethod: PaymentMethod;
   beneficiary: string;
@@ -61,46 +66,40 @@ interface Props {
   onSaved?: () => void;
 }
 
-const PARTS_CAT_NAME = "قطع غيار المركبات";
-
-const SUGGESTED_LABELS = [PARTS_CAT_NAME, "عمالة خارجية", "نقل وسحب", "صبغ خارجي", "أخرى"];
-function ensureCategories(): string {
-  const all = expenseCategoriesStore.getAll();
-  let defaultId = "";
-  SUGGESTED_LABELS.forEach((name) => {
-    const ex = all.find((c) => c.name === name);
-    if (!ex) {
-      const id = `EC-WO-${name.replace(/\s+/g, "-")}`;
-      expenseCategoriesStore.add({
-        id, name, description: "تصنيف مصروفات أوامر العمل",
-        color: "#f59e0b", active: true, createdAt: new Date().toISOString(),
-      });
-      if (name === PARTS_CAT_NAME) defaultId = id;
-    } else if (name === PARTS_CAT_NAME) defaultId = ex.id;
-  });
-  return defaultId;
-}
-
 const newPart = (): PartLine => ({
   id: `p-${Date.now()}-${Math.random()}`,
   name: "", partNumber: "", quantity: "1", unitBuyPrice: "", unitSellPrice: "",
 });
 
 export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, onSaved }: Props) {
+  const { profile } = useAuth();
+  const tenantId = profile?.tenant_id || "";
   const [items, setItems] = useState<ExpenseItem[]>([]);
   const [autoInvoice, setAutoInvoice] = useState(true);
 
-  const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
+  const categoryQuery = useQuery({
+    queryKey: queryKeys.expenseManagement.categories({ tenantId, active: true }),
+    enabled: open && !!tenantId,
+    queryFn: () => listExpenseCategories(tenantId, false),
+  });
+  const categories = useMemo(() => categoryQuery.data || [], [categoryQuery.data]);
+  const departments = useMemo(
+    () => categories.filter((c) => c.level === 1 && (c.expense_scope === "work_order" || c.expense_scope === "both")),
+    [categories],
+  );
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
   const settings = voucherSettingsStore.get();
   const defaultCb = cashboxes.find((c) => c.isDefault) ?? cashboxes[0];
 
   const blank = (): ExpenseItem => {
-    const partsCatId = categories.find((c) => c.name === PARTS_CAT_NAME)?.id ?? categories[0]?.id ?? "";
+    const partsDepartment = departments.find((c) => c.code === "PARTS");
+    const defaultCategory = categories.find((c) => c.parent_id === partsDepartment?.id && c.code === "PARTS_NEW");
     return {
       id: `e-${Date.now()}-${Math.random()}`,
       date: new Date().toISOString().slice(0, 10),
-      categoryId: partsCatId,
+      departmentId: partsDepartment?.id || "",
+      expenseCategoryId: defaultCategory?.id || "",
+      subcategoryId: "",
       cashboxId: defaultCb?.id ?? "",
       paymentMethod: settings.defaultPaymentMethod,
       beneficiary: "",
@@ -114,14 +113,14 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
   };
 
   useEffect(() => {
-    if (open) {
-      ensureCategories();
-      setItems([blank()]);
-    } else {
+    if (!open) {
       setItems([]);
+      return;
     }
+    if (!categoryQuery.isLoading) setItems((current) => current.length ? current : [blank()]);
+    // `blank` reads the resolved category tree; do not reset user input on query refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, categoryQuery.isLoading, categories.length]);
 
   const addItem = () => setItems((p) => [...p, blank()]);
   const removeItem = (id: string) => setItems((p) => p.filter((i) => i.id !== id));
@@ -147,9 +146,11 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
   };
 
   const isPartsCat = (item: ExpenseItem) => {
-    const cat = categories.find((c) => c.id === item.categoryId);
-    return cat?.name === PARTS_CAT_NAME;
+    const leaf = categories.find((c) => c.id === (item.subcategoryId || item.expenseCategoryId));
+    return leaf?.accounting_mapping_key === "parts_direct_cost";
   };
+
+  const categoryLabel = (row?: ExpenseCategoryRow) => row ? `${row.name_ar} / ${row.name_en}` : "";
 
   const computeAmount = (item: ExpenseItem) => {
     if (isPartsCat(item) && item.parts.length > 0) {
@@ -185,7 +186,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     const errors: string[] = [];
     items.forEach((it, idx) => {
       const amt = computeAmount(it);
-      if (!it.categoryId) errors.push(`البند ${idx + 1}: لم يُحدّد التصنيف`);
+      if (!it.departmentId) errors.push(`البند ${idx + 1}: لم يُحدّد القسم`);
+      else if (!it.expenseCategoryId) errors.push(`البند ${idx + 1}: لم يُحدّد التصنيف`);
       else if (!it.cashboxId) errors.push(`البند ${idx + 1}: لم تُحدّد الخزينة`);
       else if (amt <= 0) errors.push(`البند ${idx + 1}: المبلغ صفر`);
       else if (it.beneficiary.trim() && !it.supplierId) errors.push(`البند ${idx + 1}: اختر المورد من القائمة أو أضف موردًا جديدًا`);
@@ -197,7 +199,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
 
     try {
     for (const it of items) {
-      const cat = categories.find((c) => c.id === it.categoryId);
+      const cat = categories.find((c) => c.id === (it.subcategoryId || it.expenseCategoryId));
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === it.cashboxId);
       const partsCat = isPartsCat(it);
       const totalAmt = computeAmount(it);
@@ -217,7 +219,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             voucherNumber: it.parts.length > 1 ? `${number}-${pi + 1}` : number,
             date: it.date,
             amount: lineAmt,
-            categoryId: it.categoryId, categoryName: cat?.name,
+            categoryId: it.subcategoryId || it.expenseCategoryId, categoryName: cat ? categoryLabel(cat) : undefined,
+            departmentId: it.departmentId, expenseCategoryId: it.expenseCategoryId, subcategoryId: it.subcategoryId || undefined,
             cashboxId: it.cashboxId, cashboxName: cb?.cashboxName,
             paymentMethod: it.paymentMethod,
             beneficiary: it.beneficiary,
@@ -251,7 +254,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           id: `EXP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           voucherNumber: number,
           date: it.date, amount: totalAmt,
-          categoryId: it.categoryId, categoryName: cat?.name,
+          categoryId: it.subcategoryId || it.expenseCategoryId, categoryName: cat ? categoryLabel(cat) : undefined,
+          departmentId: it.departmentId, expenseCategoryId: it.expenseCategoryId, subcategoryId: it.subcategoryId || undefined,
           cashboxId: it.cashboxId, cashboxName: cb?.cashboxName,
           paymentMethod: it.paymentMethod,
           beneficiary: it.beneficiary,
@@ -280,7 +284,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       }
       logActivity({
         action: "create", entity: "expense", entityId: number,
-        label: `${cat?.name || "مصروف"} لأمر ${order.id}`,
+        label: `${cat ? categoryLabel(cat) : "مصروف"} لأمر ${order.id}`,
         description: `سند صرف ${totalAmt.toLocaleString()} ر.ع`,
         amount: totalAmt, metadata: { workOrderId: order.id },
       });
@@ -327,6 +331,16 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       </ResponsiveDialogHeader>
 
       <div className="space-y-3 py-2 max-h-[65vh] overflow-y-auto pr-1">
+        {categoryQuery.isError && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            تعذر تحميل أقسام وتصنيفات المصروفات. لن يتم الحفظ قبل تحميل التصنيف المحاسبي الصحيح.
+          </div>
+        )}
+        {!categoryQuery.isLoading && !categoryQuery.isError && departments.length === 0 && (
+          <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+            لا توجد أقسام مصروفات مفعلة لأوامر العمل. فعّل التصنيفات من إدارة المصروفات أولًا.
+          </div>
+        )}
         {/* Auto-invoice toggle */}
         <Card className="p-3 bg-success/5 border-success/30">
           <label className="flex items-center gap-2 cursor-pointer text-sm">
@@ -377,11 +391,30 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
                   <Input type="date" value={item.date} onChange={(e) => updateItem(item.id, { date: e.target.value })} />
                 </div>
                 <div>
-                  <Label className="text-xs">التصنيف</Label>
-                  <Select value={item.categoryId} onValueChange={(v) => updateItem(item.id, { categoryId: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Label className="text-xs">القسم / Department</Label>
+                  <Select value={item.departmentId || "none"} onValueChange={(v) => updateItem(item.id, { departmentId: v, expenseCategoryId: "", subcategoryId: "" })}>
+                    <SelectTrigger><SelectValue placeholder="اختر القسم" /></SelectTrigger>
                     <SelectContent>
-                      {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      {departments.map((c) => <SelectItem key={c.id} value={c.id}>{categoryLabel(c)}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">التصنيف / Category</Label>
+                  <Select value={item.expenseCategoryId || "none"} onValueChange={(v) => updateItem(item.id, { expenseCategoryId: v, subcategoryId: "" })} disabled={!item.departmentId}>
+                    <SelectTrigger><SelectValue placeholder="اختر التصنيف" /></SelectTrigger>
+                    <SelectContent>
+                      {categories.filter((c) => c.parent_id === item.departmentId).map((c) => <SelectItem key={c.id} value={c.id}>{categoryLabel(c)}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">التصنيف الفرعي / Subcategory</Label>
+                  <Select value={item.subcategoryId || "none"} onValueChange={(v) => updateItem(item.id, { subcategoryId: v === "none" ? "" : v })} disabled={!item.expenseCategoryId}>
+                    <SelectTrigger><SelectValue placeholder="اختياري" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">بدون / None</SelectItem>
+                      {categories.filter((c) => c.parent_id === item.expenseCategoryId).map((c) => <SelectItem key={c.id} value={c.id}>{categoryLabel(c)}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -512,7 +545,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           <span className="text-muted-foreground">({items.length} بند)</span>
         </div>
         <Button variant="outline" onClick={() => onOpenChange(false)}>إلغاء</Button>
-        <Button onClick={saveAll} className="gap-2">
+        <Button onClick={saveAll} className="gap-2" disabled={categoryQuery.isLoading || categoryQuery.isError || departments.length === 0}>
           <Save size={16} /> حفظ الكل
         </Button>
       </ResponsiveDialogFooter>

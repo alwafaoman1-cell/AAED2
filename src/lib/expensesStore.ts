@@ -30,6 +30,9 @@ export interface ExpenseRecord {
   isVatApplicable?: boolean;
   categoryId: string;
   categoryName?: string;
+  departmentId?: string;
+  expenseCategoryId?: string;
+  subcategoryId?: string;
   cashboxId: string;
   cashboxName?: string;
   paymentMethod: PaymentMethod;
@@ -148,6 +151,9 @@ function rowToRecord(r: any): ExpenseRecord {
     isVatApplicable: r.is_vat_applicable ?? meta.isVatApplicable ?? true,
     categoryId: r.category_id || "",
     categoryName: r.category_name || undefined,
+    departmentId: r.department_id || undefined,
+    expenseCategoryId: r.expense_category_id || undefined,
+    subcategoryId: r.subcategory_id || undefined,
     cashboxId: r.cashbox_id || "",
     cashboxName: r.cashbox_name || undefined,
     paymentMethod: (r.payment_method || "cash") as PaymentMethod,
@@ -233,6 +239,9 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     amount: Number(e.amount || 0),
     category_id: e.categoryId || null,
     category_name: e.categoryName || null,
+    department_id: e.departmentId || null,
+    expense_category_id: e.expenseCategoryId || null,
+    subcategory_id: e.subcategoryId || null,
     cashbox_id: e.cashboxId || null,
     cashbox_name: e.cashboxName || null,
     payment_method: e.paymentMethod || "cash",
@@ -278,6 +287,9 @@ function stripExpenseAccountingColumns(row: Record<string, any>) {
     supplier_tax_number,
     supplier_invoice_number,
     supplier_id,
+    department_id,
+    expense_category_id,
+    subcategory_id,
     expense_scope,
     work_order_channel,
     ...legacy
@@ -287,7 +299,7 @@ function stripExpenseAccountingColumns(row: Record<string, any>) {
 
 function isMissingAccountingColumnError(error: any): boolean {
   const msg = String(error?.message || error?.details || "");
-  return /expense_type|expense_scope|work_order_channel|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|supplier_id|subtotal|total/.test(msg)
+  return /expense_type|expense_scope|work_order_channel|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|supplier_id|department_id|expense_category_id|subcategory_id|subtotal|total/.test(msg)
     && /column|schema|cache/i.test(msg);
 }
 

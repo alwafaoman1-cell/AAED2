@@ -35,6 +35,11 @@ import TemplatePicker from "@/components/print/TemplatePicker";
 import WorkOrderPickerDialog from "@/components/workorders/WorkOrderPickerDialog";
 import VehiclePickerDialog from "./VehiclePickerDialog";
 import ImportItemsFromExcelButton from "./ImportItemsFromExcelButton";
+import {
+  netUnitPriceForChangedTaxRate,
+  netUnitPriceFromVatInclusive,
+  vatInclusiveUnitPrice,
+} from "@/lib/vatInclusiveSalesPricing";
 
 interface Props {
   type: SalesDocType;
@@ -118,7 +123,10 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   function toggleTax(on: boolean) {
     setDoc((d) => ({
       ...d,
-      items: (d.items || []).map((it) => ({ ...it, tax: on ? defaultTaxRate : 0 })),
+      items: (d.items || []).map((it) => {
+        const nextTax = on ? defaultTaxRate : 0;
+        return { ...it, unitPrice: netUnitPriceForChangedTaxRate(it.unitPrice, it.tax, nextTax), tax: nextTax };
+      }),
     }));
     toast.success(on ? `تم تفعيل الضريبة (${defaultTaxRate}%)` : "تم إيقاف الضريبة لهذه الفاتورة");
   }
@@ -130,7 +138,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
         id: cryptoRandom(),
         description: `أجرة عمل — ${wo.serviceType || ""}`.trim(),
         quantity: 1,
-        unitPrice: wo.laborCost || 0,
+        unitPrice: netUnitPriceFromVatInclusive(wo.laborCost || 0, 5),
         discount: 0,
         tax: 5,
       });
@@ -158,7 +166,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
         itemName: e.partNumber || e.partName || "قطعة غيار",
         description: `${e.partName ?? ""}${e.partNumber ? ` (#${e.partNumber})` : ""}`.trim() || "قطعة غيار",
         quantity: e.partQty ?? 1,
-        unitPrice: e.unitSellPrice ?? 0,
+        unitPrice: netUnitPriceFromVatInclusive(e.unitSellPrice ?? 0, 5),
         discount: 0,
         tax: 5,
       });
@@ -169,7 +177,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
         id: cryptoRandom(),
         description: "قطع غيار",
         quantity: 1,
-        unitPrice: wo.partsCost || 0,
+        unitPrice: netUnitPriceFromVatInclusive(wo.partsCost || 0, 5),
         discount: 0,
         tax: 5,
       });
@@ -657,6 +665,10 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
               defaultTax={taxEnabled ? defaultTaxRate : 0}
               onImport={(imported) =>
                 setDoc((d) => {
+                  const normalizedImported = imported.map((item) => ({
+                    ...item,
+                    unitPrice: netUnitPriceFromVatInclusive(item.unitPrice, item.tax),
+                  }));
                   // إذا البند الأول فارغ تماماً نستبدله، وإلا نضيف بعده
                   const first = d.items[0];
                   const firstEmpty =
@@ -665,7 +677,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
                     !(first?.quantity > 0) &&
                     !(first?.unitPrice > 0);
                   const rest = firstEmpty ? d.items.slice(1) : d.items;
-                  return { ...d, items: [...imported, ...rest] };
+                  return { ...d, items: [...normalizedImported, ...rest] };
                 })
               }
             />
@@ -680,7 +692,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
               <th className="p-2 text-start w-[22%]">{isAr ? "الصنف / Item" : "Item"}</th>
               <th className="p-2 text-start w-[34%]">{isAr ? "الوصف" : "Description"}</th>
               <th className="p-2 w-[7%]">{isAr ? "الكمية" : "Qty"}</th>
-              <th className="p-2 w-[10%]">{isAr ? "السعر" : "Price"}</th>
+              <th className="p-2 w-[10%]">{isAr ? "السعر شامل الضريبة" : "Price incl. VAT"}</th>
               <th className="p-2 w-[7%]">{isAr ? "خصم %" : "Disc %"}</th>
               <th className="p-2 w-[7%]">{isAr ? "ض %" : "Tax %"}</th>
               <th className="p-2 w-[10%] text-end">{isAr ? "الإجمالي" : "Total"}</th>
@@ -692,8 +704,9 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
               const line = it.quantity * it.unitPrice;
               const disc = (line * (it.discount || 0)) / 100;
               const taxable = line - disc;
-              // عمود "الإجمالي" يعرض السعر قبل الضريبة فقط — الضريبة تُجمع مرة واحدة بالأسفل
-              const total = taxable;
+              const lineTax = (taxable * (it.tax || 0)) / 100;
+              // السعر المدخل والإجمالي الظاهر شاملان للضريبة؛ صافي السعر يبقى محفوظًا محاسبيًا.
+              const total = taxable + lineTax;
               const isFirst = idx === 0;
               return (
                 <tr key={it.id} className={`border-t align-top ${isFirst ? "bg-primary/5" : ""}`}>
@@ -706,7 +719,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
                         updateItem(idx, {
                           itemName: `${p.name}${p.partNumber ? ` (${p.partNumber})` : ""}`,
                           description: it.description || p.name,
-                          unitPrice: p.sellPrice,
+                          unitPrice: netUnitPriceFromVatInclusive(p.sellPrice, it.tax),
                           inventoryId: p.id,
                         } as any)
                       }
@@ -733,8 +746,8 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
                     <Input
                       type="number"
                       step="0.001"
-                      value={it.unitPrice}
-                      onChange={(e) => updateItem(idx, { unitPrice: Number(e.target.value) || 0 })}
+                      value={vatInclusiveUnitPrice(it.unitPrice, it.tax)}
+                      onChange={(e) => updateItem(idx, { unitPrice: netUnitPriceFromVatInclusive(Number(e.target.value) || 0, it.tax) })}
                     />
                   </td>
                   <td className="p-2">
@@ -748,7 +761,13 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
                     <Input
                       type="number"
                       value={it.tax}
-                      onChange={(e) => updateItem(idx, { tax: Number(e.target.value) || 0 })}
+                      onChange={(e) => {
+                        const nextTax = Number(e.target.value) || 0;
+                        updateItem(idx, {
+                          unitPrice: netUnitPriceForChangedTaxRate(it.unitPrice, it.tax, nextTax),
+                          tax: nextTax,
+                        });
+                      }}
                     />
                   </td>
                   <td className="p-2 text-end font-mono">{total.toFixed(3)}</td>

@@ -4394,5 +4394,21 @@
   "لديك عمل غير محفوظ. يرجى حفظ بياناتك أولاً ثم تطبيق التحديث.": "You have unsaved work. Save your changes before applying the update.",
   "نسخة جديدة جاهزة — تحديث آمن": "A new version is ready — Update safely",
   "جارٍ تحميل أحدث نسخة من النظام...": "Loading the latest version of the system...",
-  "لن يتم حذف بياناتك المحفوظة.": "Your saved data will not be deleted."
+  "لن يتم حذف بياناتك المحفوظة.": "Your saved data will not be deleted.",
+  "أرقام تحصيل موزعة على أكثر من مطالبة:": "Collection numbers allocated across multiple claims:",
+  "هذه دفعات حقيقية مشتركة، ولا تُحتسب كتكرار ما دامت موزعة على مطالبات مختلفة.": "These are genuine shared collections and are not duplicates when allocated across different claims.",
+  "⚠ دفعات متطابقة بالكامل على المطالبة نفسها — تحتاج مراجعة:": "⚠ Fully identical payments on the same claim — review required:",
+  "ضريبة الفاتورة الكاملة": "Full invoice VAT",
+  "ضريبة الفاتورة ثابتة من إجمالي الفاتورة، والدفعة الجزئية تغيّر المدفوع والمتبقي فقط.": "Invoice VAT is fixed from the full invoice total; a partial payment changes only paid and outstanding amounts.",
+  "الدفعة مبلغ شامل كما أُدخل. الضريبة تخص إجمالي الفاتورة ولا يعاد احتسابها من الدفعة الجزئية.": "The payment is stored as the entered gross amount. Invoice VAT is based on the full invoice and is not recalculated from a partial payment.",
+  "تعذر تحميل أقسام وتصنيفات المصروفات. لن يتم الحفظ قبل تحميل التصنيف المحاسبي الصحيح.": "Expense departments and categories could not be loaded. Saving is disabled until the correct accounting category is available.",
+  "لا توجد أقسام مصروفات مفعلة لأوامر العمل. فعّل التصنيفات من إدارة المصروفات أولًا.": "No active work-order expense departments are available. Enable categories in Expense Management first.",
+  "القسم / Department": "Department",
+  "اختر القسم": "Select a department",
+  "التصنيف / Category": "Category",
+  "التصنيف الفرعي / Subcategory": "Subcategory",
+  "بدون / None": "None",
+  "اكتب حرفين على الأقل للبحث": "Enter at least two characters to search",
+  "السعر شامل الضريبة": "Price incl. VAT",
+  "السعر شامل الضريبة / Price incl. VAT": "Price incl. VAT"
 }

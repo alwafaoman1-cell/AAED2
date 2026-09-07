@@ -98,6 +98,27 @@ describe("work-order expense persistence and profitability", () => {
     expect(source).toContain("رقم فاتورة المورد");
   });
 
+  it("uses the cloud classification tree for every work-order expense write", () => {
+    const store = read("src/lib/expensesStore.ts");
+    expect(store).toContain("department_id: e.departmentId || null");
+    expect(store).toContain("expense_category_id: e.expenseCategoryId || null");
+    expect(store).toContain("subcategory_id: e.subcategoryId || null");
+
+    for (const path of [
+      "src/components/workorders/WorkOrderExpenseDialog.tsx",
+      "src/components/workorders/WorkOrderBulkExpenseDialog.tsx",
+    ]) {
+      const source = read(path);
+      expect(source).toContain("listExpenseCategories(tenantId, false)");
+      expect(source).toContain("departmentId");
+      expect(source).toContain("expenseCategoryId");
+      expect(source).toContain("subcategoryId");
+      expect(source).not.toContain("ensureWorkOrderCategories");
+      expect(source).not.toContain("ensureCategories()");
+      expect(source).not.toContain("expenseCategoriesStore.add");
+    }
+  });
+
   it("stores and searches supplier vehicle brands from the quick add dialog", () => {
     const source = read("src/components/suppliers/SupplierPicker.tsx");
     expect(source).toContain("vehicle_brands: requestedBrands");

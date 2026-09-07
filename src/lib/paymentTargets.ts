@@ -12,6 +12,8 @@ export type PaymentTarget =
       workOrderId: string | null;
       claimId: null;
       invoiceId: string;
+      subtotal?: number;
+      vat?: number;
       total: number;
       paid: number;
       remaining: number;
@@ -29,6 +31,8 @@ export type PaymentTarget =
       invoiceId: string | null;
       insuranceCompanyId: string | null;
       insuranceCompany: string;
+      subtotal?: number;
+      vat?: number;
       total: number;
       paid: number;
       remaining: number;
@@ -47,6 +51,8 @@ export function paymentTargetFromWorkOrderInvoice(invoice: WorkOrderLinkedInvoic
       workOrderId: invoice.workOrderId,
       claimId: null,
       invoiceId: invoice.id,
+      subtotal: invoice.subtotal,
+      vat: invoice.vat,
       total: invoice.total,
       paid: invoice.paid,
       remaining: invoice.remaining,
@@ -66,6 +72,8 @@ export function paymentTargetFromWorkOrderInvoice(invoice: WorkOrderLinkedInvoic
     invoiceId: invoice.id,
     insuranceCompanyId: invoice.insuranceCompanyId,
     insuranceCompany: invoice.insuranceCompanyName || "—",
+    subtotal: invoice.subtotal,
+    vat: invoice.vat,
     total: invoice.total,
     paid: invoice.paid,
     remaining: invoice.remaining,

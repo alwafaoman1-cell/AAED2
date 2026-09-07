@@ -17,6 +17,11 @@ import { getWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
 import { stockMovementsStore } from "@/lib/stockMovementsStore";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import {
+  netUnitPriceForChangedTaxRate,
+  netUnitPriceFromVatInclusive,
+  vatInclusiveUnitPrice,
+} from "@/lib/vatInclusiveSalesPricing";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -263,7 +268,7 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
         id: newId(),
         description: `أجور عمالة — أمر العمل ${o.id}`,
         quantity: 1,
-        unitPrice: Number(o.laborCost) || 0,
+        unitPrice: netUnitPriceFromVatInclusive(Number(o.laborCost) || 0, 5),
         discount: 0,
         tax: 5,
       });
@@ -275,7 +280,7 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
         id: newId(),
         description: `قطع غيار — أمر العمل ${o.id}`,
         quantity: 1,
-        unitPrice: Number(o.partsCost) || 0,
+        unitPrice: netUnitPriceFromVatInclusive(Number(o.partsCost) || 0, 5),
         discount: 0,
         tax: 5,
       });
@@ -628,7 +633,7 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
               <tr className="border-b border-border text-[11px] text-muted-foreground">
                 <th className="text-right py-2 px-2 font-medium min-w-[260px]">الوصف / Description</th>
                 <th className="text-center py-2 px-2 font-medium w-20">الكمية / Qty</th>
-                <th className="text-center py-2 px-2 font-medium w-28">السعر / Price</th>
+                <th className="text-center py-2 px-2 font-medium w-28">السعر شامل الضريبة / Price incl. VAT</th>
                 <th className="text-center py-2 px-2 font-medium w-20">خصم %</th>
                 <th className="text-center py-2 px-2 font-medium w-20">ضريبة %</th>
                 <th className="text-center py-2 px-2 font-medium w-28">الإجمالي / Total</th>
@@ -639,8 +644,8 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
               {form.items.map((i) => {
                 const line = i.quantity * i.unitPrice;
                 const afterDisc = line - (line * i.discount) / 100;
-                // إجمالي السطر قبل الضريبة فقط (الضريبة تُحتسب مرة واحدة في صندوق الإجماليات)
-                const lineTotal = afterDisc;
+                const lineTax = (afterDisc * (i.tax || 0)) / 100;
+                const lineTotal = afterDisc + lineTax;
                 const linkedPart = i.inventoryId ? inventoryStore.getById(i.inventoryId) : undefined;
                 const overStock = !!linkedPart && i.quantity > linkedPart.stock;
                 return (
@@ -653,7 +658,7 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
                         onSelect={(p) =>
                           updateItem(i.id, {
                             description: `${p.name} (${p.partNumber})`,
-                            unitPrice: p.sellPrice,
+                            unitPrice: netUnitPriceFromVatInclusive(p.sellPrice, i.tax),
                             inventoryId: p.id,
                           })
                         }
@@ -675,9 +680,9 @@ export default function InvoiceEditor({ initial, onSave, onPreview, onCancel }: 
                         </div>
                       )}
                     </td>
-                    <td className="py-1.5 px-2"><Input type="text" inputMode="decimal" min={0} step="0.001" value={i.unitPrice} onChange={(e) => updateItem(i.id, { unitPrice: parseMoneyInput(e.target.value) })} className="h-9 text-center" /></td>
+                    <td className="py-1.5 px-2"><Input type="text" inputMode="decimal" min={0} step="0.001" value={vatInclusiveUnitPrice(i.unitPrice, i.tax)} onChange={(e) => updateItem(i.id, { unitPrice: netUnitPriceFromVatInclusive(parseMoneyInput(e.target.value), i.tax) })} className="h-9 text-center" /></td>
                     <td className="py-1.5 px-2"><Input type="text" inputMode="decimal" min={0} max={100} value={i.discount} onChange={(e) => updateItem(i.id, { discount: parseMoneyInput(e.target.value) })} className="h-9 text-center" /></td>
-                    <td className="py-1.5 px-2"><Input type="text" inputMode="decimal" min={0} max={100} value={i.tax} onChange={(e) => updateItem(i.id, { tax: parseMoneyInput(e.target.value) })} className="h-9 text-center" /></td>
+                    <td className="py-1.5 px-2"><Input type="text" inputMode="decimal" min={0} max={100} value={i.tax} onChange={(e) => { const nextTax = parseMoneyInput(e.target.value); updateItem(i.id, { unitPrice: netUnitPriceForChangedTaxRate(i.unitPrice, i.tax, nextTax), tax: nextTax }); }} className="h-9 text-center" /></td>
                     <td className="py-1.5 px-2 text-center text-xs font-medium text-foreground">{fmt(lineTotal)} ر.ع</td>
                     <td className="py-1.5 px-2 text-center"><button onClick={() => removeItem(i.id)} className="p-1.5 rounded-md hover:bg-destructive/10 text-destructive"><Trash2 size={14} /></button></td>
                   </tr>

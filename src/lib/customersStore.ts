@@ -120,6 +120,42 @@ export async function refreshCustomersFromCloud() {
   return cloudRefreshInFlight;
 }
 
+/**
+ * Lazy, tenant-scoped customer lookup for pickers. This deliberately avoids
+ * hydrating the complete customer table when a work-order form is opened.
+ */
+export async function searchCustomersFromCloud(search: string, limit = 12): Promise<Customer[]> {
+  const raw = search.trim();
+  if (raw.length < 2) return [];
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+
+  const safeText = raw.replace(/[,%()'"\\]/g, " ").replace(/\s+/g, "%");
+  const phoneDigits = normalizePhone(raw).replace(/\D/g, "");
+  const filters = [`name.ilike.%${safeText}%`];
+  if (phoneDigits.length >= 2) filters.push(`phone.ilike.%${phoneDigits}%`);
+
+  const { data, error } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
+    .or("archived.is.null,archived.eq.false")
+    .or(filters.join(","))
+    .order("created_at", { ascending: false })
+    .limit(Math.max(1, Math.min(limit, 20)));
+  if (error) throw error;
+
+  const matches = (data || []).map(rowToCustomer);
+  if (matches.length) {
+    const merged = new Map(cache.map((customer) => [customer.id, customer]));
+    for (const customer of matches) merged.set(customer.id, customer);
+    cache = Array.from(merged.values());
+    persist();
+  }
+  return matches;
+}
+
 function scheduleCustomersRefresh(delay = 250) {
   if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
   if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) return;
