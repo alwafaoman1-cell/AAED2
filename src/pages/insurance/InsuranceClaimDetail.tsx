@@ -1762,7 +1762,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     queryFn: async () => {
       const { data } = await supabase
         .from("insurance_invoices" as any)
-        .select("id,invoice_number,total,paid_amount,status")
+        .select("id,invoice_number,total,paid_amount,settlement_discount_amount,status")
         .eq("claim_id", existing!.id)
         .neq("status", "cancelled")
         .maybeSingle();
@@ -2176,7 +2176,8 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const paidTotal = (activeInvoice as any)?.paid_amount != null
     ? Number((activeInvoice as any).paid_amount || 0)
     : claimPayments.filter((p) => p.status === "cleared").reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  const paymentRemaining = Math.max(0, invoiceTotal > 0 ? invoiceTotal - paidTotal : Number(approvedAmount || estimatedCost || 0) - paidTotal);
+  const settlementDiscountTotal = Number((activeInvoice as any)?.settlement_discount_amount || 0);
+  const paymentRemaining = Math.max(0, invoiceTotal > 0 ? invoiceTotal - paidTotal - settlementDiscountTotal : Number(approvedAmount || estimatedCost || 0) - paidTotal);
   const paymentStatusLabel = paymentRemaining <= 0 && paidTotal > 0 ? "مدفوع" : paidTotal > 0 ? "مدفوع جزئيًا" : "غير مدفوع";
   const hasLinkedWorkOrder = !!(linkedWorkOrderId || (existing as any)?.auto_job_order_id || (existing as any)?.job_order_id);
   const effectiveWorkOrderId = linkedWorkOrderId || (existing as any)?.auto_job_order_id || (existing as any)?.job_order_id || "";
@@ -4060,7 +4061,7 @@ function PaymentsSection({
     queryFn: async () => {
       const { data } = await supabase
         .from("insurance_invoices" as any)
-        .select("id,invoice_number,total,subtotal,vat,paid_amount,status")
+        .select("id,invoice_number,total,subtotal,vat,paid_amount,settlement_discount_amount,status")
         .eq("claim_id", claimId)
         .neq("status", "cancelled")
         .maybeSingle();
@@ -4089,7 +4090,8 @@ function PaymentsSection({
     : (payments ?? [])
         .filter((p) => p.status === "cleared")
         .reduce((s, p) => s + Number(p.amount), 0);
-  const remaining = baseAmount - totalPaid;
+  const settlementDiscount = linkedInvoice ? Number((linkedInvoice as any).settlement_discount_amount || 0) : 0;
+  const remaining = Math.max(0, baseAmount - totalPaid - settlementDiscount);
 
   // Auto-mark as paid when fully settled
   useEffect(() => {
@@ -4117,7 +4119,7 @@ function PaymentsSection({
               {linkedInvoice.status === "paid"
                 ? "مدفوعة بالكامل"
                 : linkedInvoice.status === "partial"
-                ? `مدفوعة جزئياً (متبقي ${(Number(linkedInvoice.total) - Number(linkedInvoice.paid_amount)).toFixed(3)})`
+                ? `مدفوعة جزئياً (متبقي ${Math.max(0, Number(linkedInvoice.total) - Number(linkedInvoice.paid_amount) - Number((linkedInvoice as any).settlement_discount_amount || 0)).toFixed(3)})`
                 : "مُصدرة"}
             </Badge>
           )}

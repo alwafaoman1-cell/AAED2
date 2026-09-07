@@ -19,6 +19,7 @@ export interface InsuranceInvoice {
   vat: number;
   total: number;
   paid_amount: number;
+  settlement_discount_amount?: number;
   status: "issued" | "partial" | "paid" | "overdue" | "cancelled";
   pdf_url: string | null;
   invoice_date: string | null;

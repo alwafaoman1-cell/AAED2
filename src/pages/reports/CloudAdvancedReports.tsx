@@ -51,7 +51,7 @@ function useCloudData(f: Filters) {
     queryFn: async () => {
       const [sales, insInv, exp, payments, purchases] = await Promise.all([
         supabase.from("sales_documents").select("id,doc_type,doc_number,date,due_date,subtotal,tax_total,total,paid_amount,balance_due,status,customer_name").gte("date", f.from).lte("date", f.to),
-        supabase.from("insurance_invoices" as any).select("id,invoice_number,invoice_date,issued_at,due_date,subtotal,vat,total,paid_amount,status,insurance_company_name").gte("invoice_date", f.from).lte("invoice_date", f.to),
+        supabase.from("insurance_invoices" as any).select("id,invoice_number,invoice_date,issued_at,due_date,subtotal,vat,total,paid_amount,settlement_discount_amount,status,insurance_company_name").gte("invoice_date", f.from).lte("invoice_date", f.to),
         supabase.from("expenses").select("id,date,amount,category_name,description,beneficiary").gte("date", f.from).lte("date", f.to),
         supabase.from("claim_payments").select("id,payment_date,amount,status,insurance_company_id").gte("payment_date", f.from).lte("payment_date", f.to),
         supabase.from("purchase_invoices" as any).select("id,invoice_number,date,supplier_name,subtotal,vat,total").gte("date", f.from).lte("date", f.to),
@@ -186,8 +186,8 @@ export default function CloudAdvancedReports() {
     };
     data.sales.filter((s) => s.doc_type === "invoice" && Number(s.balance_due || 0) > 0).forEach((s) =>
       push("مبيعات", s.customer_name || "—", s.doc_number, s.due_date, Number(s.balance_due)));
-    data.insInv.filter((i) => Number(i.total || 0) - Number(i.paid_amount || 0) > 0).forEach((i) =>
-      push("تأمين", i.insurance_company_name || "—", i.invoice_number, i.due_date, Number(i.total) - Number(i.paid_amount)));
+    data.insInv.filter((i) => Number(i.total || 0) - Number(i.paid_amount || 0) - Number(i.settlement_discount_amount || 0) > 0).forEach((i) =>
+      push("تأمين", i.insurance_company_name || "—", i.invoice_number, i.due_date, Number(i.total) - Number(i.paid_amount) - Number(i.settlement_discount_amount || 0)));
     rows.sort((a, b) => b.days - a.days);
     const total = Object.values(buckets).reduce((s, v) => s + v, 0);
     return { buckets, rows, total };

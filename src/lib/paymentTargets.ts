@@ -35,6 +35,7 @@ export type PaymentTarget =
       vat?: number;
       total: number;
       paid: number;
+      settlementDiscount?: number;
       remaining: number;
     };
 
@@ -76,6 +77,7 @@ export function paymentTargetFromWorkOrderInvoice(invoice: WorkOrderLinkedInvoic
     vat: invoice.vat,
     total: invoice.total,
     paid: invoice.paid,
+    settlementDiscount: invoice.settlementDiscount,
     remaining: invoice.remaining,
   };
 }

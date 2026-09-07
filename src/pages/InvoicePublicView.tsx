@@ -91,7 +91,7 @@ export default function InvoicePublicView() {
   const inv = data.invoice;
   const items = Array.isArray(inv.items) ? inv.items : [];
   const fmt = (n: number) => Number(n || 0).toFixed(3);
-  const dueRemaining = Math.max(0, Number(inv.total) - Number(inv.paid_amount));
+  const dueRemaining = inv.status === "paid" ? 0 : Math.max(0, Number(inv.total) - Number(inv.paid_amount));
 
   return (
     <div className="min-h-screen bg-muted/30 p-4 md:p-8" dir="rtl">

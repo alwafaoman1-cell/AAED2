@@ -43,7 +43,7 @@ export default function InsuranceHub() {
     const inWorkshop = claims.filter((c) => getClaimVehicleLocation(c) === "in_workshop").length;
     const withCustomer = claims.filter((c) => getClaimVehicleLocation(c) === "with_customer").length;
     const deliveredCount = claims.filter((c) => getClaimVehicleLocation(c) === "delivered").length;
-    const completedPendingCollection = invoices.filter((i) => i.status !== "paid" && i.status !== "cancelled" && Number(i.total) - Number(i.paid_amount || 0) > 0.01).length;
+    const completedPendingCollection = invoices.filter((i) => i.status !== "paid" && i.status !== "cancelled" && Number(i.total) - Number(i.paid_amount || 0) - Number(i.settlement_discount_amount || 0) > 0.01).length;
     const overdueClaims = claims.filter((c) => {
       const delivered = (c as any).delivered_at;
       if (delivered) return false;
@@ -82,7 +82,7 @@ export default function InsuranceHub() {
     const buckets = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
     for (const inv of invoices) {
       if (inv.status === "paid" || inv.status === "cancelled") continue;
-      const remaining = Number(inv.total) - Number(inv.paid_amount || 0);
+      const remaining = Number(inv.total) - Number(inv.paid_amount || 0) - Number(inv.settlement_discount_amount || 0);
       if (remaining <= 0) continue;
       const issued = new Date(inv.invoice_date || inv.issued_at || inv.created_at).getTime();
       const ageDays = Math.floor((now - issued) / 86400000);

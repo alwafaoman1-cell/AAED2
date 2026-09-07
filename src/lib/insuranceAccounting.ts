@@ -71,6 +71,8 @@ export interface PostInsurancePaymentArgs {
   status: InsurancePaymentStatus;
   companyName: string;
   reference?: string | null;
+  settlementDiscount?: number;
+  settlementReason?: string | null;
 }
 
 /**
@@ -120,6 +122,17 @@ export function postInsurancePayment(args: PostInsurancePaymentArgs) {
     amount: args.amount,
     description: `${desc} — مطالبة ${args.claimNumber}`,
   });
+  if ((args.settlementDiscount || 0) > 0 && args.status === "cleared") {
+    addJournalEntry({
+      date: args.date.slice(0, 10),
+      source: "insurance_payment",
+      sourceId: args.paymentId,
+      debitAccount: "خصم ممنوح",
+      creditAccount: "ذمم شركات التأمين",
+      amount: args.settlementDiscount || 0,
+      description: `خصم تسوية مبكرة — مطالبة ${args.claimNumber}${args.settlementReason ? ` — ${args.settlementReason}` : ""}`,
+    });
+  }
 }
 
 export function removeInsurancePaymentJournal(paymentId: string) {
@@ -167,7 +180,7 @@ export function previewInsurancePayment(args: PostInsurancePaymentArgs): Preview
     desc = `تسوية مقاصة ${args.paymentNumber || "(جديد)"} ${args.reference ? `(${args.reference})` : ""} — ${args.companyName}`;
   }
 
-  return [
+  const lines: PreviewLine[] = [
     {
       date: args.date.slice(0, 10),
       debitAccount: debit,
@@ -176,6 +189,16 @@ export function previewInsurancePayment(args: PostInsurancePaymentArgs): Preview
       description: `${desc} — مطالبة ${args.claimNumber}`,
     },
   ];
+  if ((args.settlementDiscount || 0) > 0 && args.status === "cleared") {
+    lines.push({
+      date: args.date.slice(0, 10),
+      debitAccount: "خصم ممنوح",
+      creditAccount: "ذمم شركات التأمين",
+      amount: args.settlementDiscount || 0,
+      description: `خصم تسوية مبكرة — مطالبة ${args.claimNumber}${args.settlementReason ? ` — ${args.settlementReason}` : ""}`,
+    });
+  }
+  return lines;
 }
 
 export function previewInsuranceClaimApproval(args: PostInsuranceClaimApprovalArgs): PreviewLine[] {

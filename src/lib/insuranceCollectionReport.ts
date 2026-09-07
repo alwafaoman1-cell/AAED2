@@ -164,10 +164,10 @@ function paymentSum(claimId: string, invoice: InsuranceInvoice | null, payments:
   return roundMoney(invoice?.paid_amount || 0);
 }
 
-function collectionStatus(invoice: InsuranceInvoice | null, paid: number, total: number): InsuranceCollectionStatus {
+function collectionStatus(invoice: InsuranceInvoice | null, paid: number, total: number, discount = 0): InsuranceCollectionStatus {
   if (!invoice) return "غير مفوتر";
   if (paid <= 0.001) return "غير مدفوع";
-  if (paid + 0.001 < total) return "مدفوع جزئيًا";
+  if (paid + discount + 0.001 < total) return "مدفوع جزئيًا";
   return "مدفوع بالكامل";
 }
 
@@ -250,8 +250,9 @@ export function buildInsuranceCollectionRows(options: BuildInsuranceCollectionRo
         : calculateVatExclusive(subtotal).vatAmount;
       const total = invoice ? roundMoney(invoice.total || subtotal + vat) : calculateVatExclusive(subtotal).totalIncludingVat;
       const paid = paymentSum(claim.id, invoice, payments);
-      const status = collectionStatus(invoice, paid, total);
-      const remaining = roundMoney(total - paid);
+      const settlementDiscount = Number(invoice?.settlement_discount_amount || 0);
+      const status = collectionStatus(invoice, paid, total, settlementDiscount);
+      const remaining = roundMoney(Math.max(0, total - paid - settlementDiscount));
       const invDate = invoiceDateValue(invoice);
       const sortDate = delivered || invDate || estimateDate || claim.created_at;
       return {

@@ -36,13 +36,16 @@ export default function InsurancePayments() {
     const totalPaid = (payments ?? [])
       .filter((p) => p.status === "cleared")
       .reduce((s, p) => s + Number(p.amount), 0);
+    const totalSettlementDiscount = (payments ?? [])
+      .filter((p) => p.status === "cleared")
+      .reduce((s, p) => s + Number(p.settlement_discount_amount || 0), 0);
     const monthPaid = (payments ?? [])
       .filter((p) => p.status === "cleared" && new Date(p.payment_date) >= startOfMonth)
       .reduce((s, p) => s + Number(p.amount), 0);
 
     const overdueAmount = overdueList.reduce((s, o) => s + o.remaining, 0);
 
-    return { totalInvoiced, totalApproved: totalInvoiced, totalPaid, monthPaid, overdueAmount, remaining: Math.max(0, totalInvoiced - totalPaid) };
+    return { totalInvoiced, totalApproved: totalInvoiced, totalPaid, monthPaid, overdueAmount, remaining: Math.max(0, totalInvoiced - totalPaid - totalSettlementDiscount) };
   }, [invoices, payments, overdueList]);
 
   // Monthly payments chart (last 6 months)
@@ -75,7 +78,8 @@ export default function InsurancePayments() {
       const claimInvoices = (invoices ?? []).filter((invoice) => invoice.claim_id === c.id && invoice.status !== "cancelled");
       const invoiced = claimInvoices.reduce((s, invoice) => s + Number(invoice.total || 0), 0);
       const paid = claimInvoices.reduce((s, invoice) => s + Number(invoice.paid_amount || 0), 0);
-      const rem = invoiced - paid;
+      const discounts = claimInvoices.reduce((s, invoice) => s + Number(invoice.settlement_discount_amount || 0), 0);
+      const rem = invoiced - paid - discounts;
       if (invoiced <= 0) return;
 
       const company = companies?.find((co) => co.id === (c as any).insurance_company_id);
@@ -263,6 +267,9 @@ export default function InsurancePayments() {
                 <span className="text-muted-foreground">{formatDateLatin(p.payment_date)} • {PAYMENT_METHOD_LABELS[p.payment_method]}</span>
                 <span className="font-semibold text-success">{Number(p.amount).toLocaleString()} ر.ع</span>
               </div>
+              {Number(p.settlement_discount_amount || 0) > 0 && (
+                <div className="text-xs text-amber-700">خصم تسوية داخلي: {Number(p.settlement_discount_amount).toFixed(3)} ر.ع — {p.settlement_discount_reason}</div>
+              )}
               {p.payment_method === "cheque" && p.status === "pending" && (
                 <Button size="sm" className="w-full gap-1.5" onClick={(event) => { event.stopPropagation(); setChequeToClear(p); }}>
                   <BadgeCheck size={14} /> تحصيل الشيك
@@ -282,13 +289,14 @@ export default function InsurancePayments() {
                 <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">الشركة</th>
                 <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">الطريقة</th>
                 <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">المبلغ</th>
+                <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">خصم التسوية</th>
                 <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">الحالة</th>
                 <th className="text-right py-2.5 px-4 text-xs text-muted-foreground">إجراء</th>
               </tr>
             </thead>
             <tbody>
               {filteredPayments.length === 0 ? (
-                <tr><td colSpan={8} className="py-6 text-center text-muted-foreground">لا توجد دفعات</td></tr>
+                <tr><td colSpan={9} className="py-6 text-center text-muted-foreground">لا توجد دفعات</td></tr>
               ) : filteredPayments.map((p) => (
                 <tr key={p.id} className="border-b border-border/50 hover:bg-secondary/10 cursor-pointer"
                     onClick={() => p.claim_id && navigate(`/insurance/${p.claim_id}`)}>
@@ -298,6 +306,9 @@ export default function InsurancePayments() {
                   <td className="py-2.5 px-4">{p.claim?.insurance_company ?? "-"}</td>
                   <td className="py-2.5 px-4">{PAYMENT_METHOD_LABELS[p.payment_method]}</td>
                   <td className="py-2.5 px-4 font-semibold text-success">{Number(p.amount).toLocaleString()} ر.ع</td>
+                  <td className="py-2.5 px-4 text-amber-700" title={p.settlement_discount_reason || ""}>
+                    {Number(p.settlement_discount_amount || 0) > 0 ? `${Number(p.settlement_discount_amount).toFixed(3)} ر.ع` : "—"}
+                  </td>
                   <td className="py-2.5 px-4">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                       p.status === "cleared" ? "bg-success/15 text-success" :

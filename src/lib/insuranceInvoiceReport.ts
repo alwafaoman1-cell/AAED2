@@ -22,6 +22,7 @@ export type InsuranceInvoiceReportColumnKey =
   | "vat"
   | "total"
   | "paidAmount"
+  | "settlementDiscountAmount"
   | "remainingAmount"
   | "collectionStatusLabel"
   | "invoiceStatusLabel"
@@ -49,6 +50,7 @@ export interface InsuranceInvoiceReportRow {
   vat: number;
   total: number;
   paidAmount: number;
+  settlementDiscountAmount: number;
   remainingAmount: number;
   collectionStatus: InsuranceInvoiceCollectionStatus;
   collectionStatusLabel: string;
@@ -105,6 +107,7 @@ export const INSURANCE_INVOICE_REPORT_COLUMNS: Array<{
   { key: "vat", label: "الضريبة", width: 16, numeric: true },
   { key: "total", label: "الإجمالي شامل الضريبة", width: 22, numeric: true },
   { key: "paidAmount", label: "المدفوع", width: 16, numeric: true },
+  { key: "settlementDiscountAmount", label: "خصم التسوية الداخلي", width: 20, numeric: true },
   { key: "remainingAmount", label: "المتبقي", width: 16, numeric: true },
   { key: "collectionStatusLabel", label: "حالة التحصيل", width: 18 },
   { key: "invoiceStatusLabel", label: "حالة الفاتورة", width: 16 },
@@ -128,7 +131,8 @@ function collectionStatus(invoice: InsuranceInvoice): InsuranceInvoiceCollection
   if (invoice.status === "cancelled") return "cancelled";
   const total = Number(invoice.total || 0);
   const paid = Number(invoice.paid_amount || 0);
-  if (total <= paid + 0.001) return "paid";
+  const discount = Number(invoice.settlement_discount_amount || 0);
+  if (total <= paid + discount + 0.001) return "paid";
   if (paid > 0.001) return "partial";
   return "unpaid";
 }
@@ -150,6 +154,7 @@ export function buildInsuranceInvoiceReportRows(
     const vehicle = claim?.vehicle || {};
     const total = Number(invoice.total || 0);
     const paidAmount = Number(invoice.paid_amount || 0);
+    const settlementDiscountAmount = Number(invoice.settlement_discount_amount || 0);
     const status = collectionStatus(invoice);
     const plateNumber = [
       vehicle.plate_letters,
@@ -176,7 +181,8 @@ export function buildInsuranceInvoiceReportRows(
       vat: Number(invoice.vat || 0),
       total,
       paidAmount,
-      remainingAmount: Math.max(0, total - paidAmount),
+      settlementDiscountAmount,
+      remainingAmount: Math.max(0, total - paidAmount - settlementDiscountAmount),
       collectionStatus: status,
       collectionStatusLabel: COLLECTION_LABELS[status],
       invoiceStatus: invoice.status,

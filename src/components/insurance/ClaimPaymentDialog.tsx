@@ -17,6 +17,8 @@ import {
 import { previewInsurancePayment } from "@/lib/insuranceAccounting";
 import JournalPreview from "@/components/accounting/JournalPreview";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
+import { roundMoney } from "@/lib/money";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface Props {
   open: boolean;
@@ -40,6 +42,8 @@ export default function ClaimPaymentDialog({
   companyName,
   onSaved,
 }: Props) {
+  const { hasRole } = useAuth();
+  const canApproveSettlement = hasRole("admin", "manager");
   const create = useCreateClaimPayment();
   const [showJournal, setShowJournal] = useState(true);
 
@@ -51,6 +55,8 @@ export default function ClaimPaymentDialog({
   const [chequeDue, setChequeDue] = useState<string>("");
   const [status, setStatus] = useState<PaymentStatus>("cleared");
   const [notes, setNotes] = useState("");
+  const [settleWithDiscount, setSettleWithDiscount] = useState(false);
+  const [settlementReason, setSettlementReason] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -59,6 +65,7 @@ export default function ClaimPaymentDialog({
       setDate(new Date().toISOString().slice(0, 10));
       setReference(""); setBank(""); setChequeDue("");
       setStatus("cleared"); setNotes("");
+      setSettleWithDiscount(false); setSettlementReason("");
     }
   }, [open, remainingAmount]);
 
@@ -68,12 +75,21 @@ export default function ClaimPaymentDialog({
     else setStatus("cleared");
   }, [method]);
 
+  const settlementDiscount = useMemo(
+    () => settleWithDiscount ? roundMoney(Math.max(0, roundMoney(remainingAmount) - roundMoney(amount))) : 0,
+    [settleWithDiscount, remainingAmount, amount],
+  );
+
   const handleSubmit = async () => {
     if (!amount || amount <= 0) { toast.error("يرجى إدخال مبلغ صحيح"); return; }
     if (amount > remainingAmount + 0.01) {
       toast.error(`المبلغ يتجاوز المتبقي (${remainingAmount.toLocaleString()} ر.ع)`);
       return;
     }
+    if (settleWithDiscount && !canApproveSettlement) { toast.error("خصم التسوية يحتاج صلاحية المدير"); return; }
+    if (settleWithDiscount && method === "cheque") { toast.error("يُسجل الخصم بعد تحصيل الشيك"); return; }
+    if (settleWithDiscount && settlementDiscount <= 0) { toast.error("أدخل مبلغًا أقل من الرصيد لإنشاء خصم التسوية"); return; }
+    if (settleWithDiscount && !settlementReason.trim()) { toast.error("اكتب سبب خصم التسوية"); return; }
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { toast.error("يرجى تسجيل الدخول"); return; }
@@ -106,6 +122,8 @@ export default function ClaimPaymentDialog({
       cheque_due_date: method === "cheque" ? (chequeDue || null) : null,
       status,
       notes: notes || null,
+      settlement_discount_amount: settleWithDiscount ? settlementDiscount : 0,
+      settlement_discount_reason: settleWithDiscount ? settlementReason.trim() : null,
     });
 
     onSaved?.();
@@ -125,8 +143,10 @@ export default function ClaimPaymentDialog({
       status,
       companyName: companyName ?? "شركة التأمين",
       reference: reference || null,
+      settlementDiscount: settleWithDiscount ? settlementDiscount : 0,
+      settlementReason: settleWithDiscount ? settlementReason.trim() : null,
     }).map((l) => ({ ...l, pending: true as const }));
-  }, [amount, method, status, date, reference, claimNumber, companyName]);
+  }, [amount, method, status, date, reference, claimNumber, companyName, settleWithDiscount, settlementDiscount, settlementReason]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -221,6 +241,23 @@ export default function ClaimPaymentDialog({
             <div className="space-y-1.5 md:col-span-2">
               <Label>ملاحظات</Label>
               <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </div>
+          )}
+          {canApproveSettlement && (
+            <div className="space-y-3 md:col-span-2 rounded-lg border border-amber-300 bg-amber-50/60 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label>إغلاق الفاتورة بخصم تسوية مبكرة</Label>
+                  <p className="text-xs text-muted-foreground">الخصم داخلي ولا يظهر في الفاتورة أو PDF.</p>
+                </div>
+                <Switch checked={settleWithDiscount} onCheckedChange={setSettleWithDiscount} disabled={method === "cheque"} />
+              </div>
+              {settleWithDiscount && (
+                <>
+                  <div className="text-sm">خصم التسوية المحسوب: <b className="text-amber-700">{settlementDiscount.toFixed(3)} ر.ع</b></div>
+                  <Textarea rows={2} value={settlementReason} onChange={(e) => setSettlementReason(e.target.value)} placeholder="سبب الخصم (إلزامي)" />
+                </>
+              )}
             </div>
           )}
         </div>

@@ -4410,5 +4410,18 @@
   "بدون / None": "None",
   "اكتب حرفين على الأقل للبحث": "Enter at least two characters to search",
   "السعر شامل الضريبة": "Price incl. VAT",
-  "السعر شامل الضريبة / Price incl. VAT": "Price incl. VAT"
+  "السعر شامل الضريبة / Price incl. VAT": "Price incl. VAT",
+  "إغلاق الفاتورة بخصم تسوية مبكرة": "Close Invoice with Early Settlement Discount",
+  "الخصم داخلي ولا يظهر في الفاتورة أو PDF.": "This is an internal discount and does not appear on the invoice or PDF.",
+  "خصم التسوية المحسوب:": "Calculated Settlement Discount:",
+  "سبب الخصم (إلزامي)": "Discount reason (required)",
+  "خصم تسوية داخلي سابق:": "Previous Internal Settlement Discount:",
+  "داخلي فقط؛ لا يغيّر الفاتورة أو الضريبة ولا يظهر في PDF.": "Internal only; it does not change the invoice or VAT and does not appear in the PDF.",
+  "المبلغ المستلم:": "Amount Received:",
+  "خصم التسوية:": "Settlement Discount:",
+  "سبب الخصم *": "Discount Reason *",
+  "مثال: خصم مقابل تسريع سداد شركة التأمين": "Example: discount for expedited insurer payment",
+  "خصم تسوية داخلي:": "Internal Settlement Discount:",
+  "ر.ع —": "OMR —",
+  "خصم التسوية": "Settlement Discount"
 }

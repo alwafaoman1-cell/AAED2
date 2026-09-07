@@ -149,7 +149,7 @@ export default function InsuranceAccounting() {
   const allowDelete = hasRole("admin", "manager");
 
   const openInvoicePayment = (invoice: InsuranceInvoice) => {
-    const remaining = Math.max(0, Number(invoice.total || 0) - Number(invoice.paid_amount || 0));
+    const remaining = Math.max(0, Number(invoice.total || 0) - Number(invoice.paid_amount || 0) - Number(invoice.settlement_discount_amount || 0));
     if (remaining <= 0.001) {
       toast.info("الفاتورة محصلة بالكامل");
       return;
@@ -172,6 +172,7 @@ export default function InsuranceAccounting() {
       vat: Number(invoice.vat || 0),
       total: Number(invoice.total || 0),
       paid: Number(invoice.paid_amount || 0),
+      settlementDiscount: Number(invoice.settlement_discount_amount || 0),
       remaining,
     });
   };

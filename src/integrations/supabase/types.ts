@@ -1696,6 +1696,9 @@ export type Database = {
           payment_method: Database["public"]["Enums"]["claim_payment_method"]
           payment_number: string
           reference_number: string | null
+          settlement_approved_by: string | null
+          settlement_discount_amount: number
+          settlement_discount_reason: string | null
           status: Database["public"]["Enums"]["claim_payment_status"]
           tenant_id: string
           updated_at: string
@@ -1714,6 +1717,9 @@ export type Database = {
           payment_method?: Database["public"]["Enums"]["claim_payment_method"]
           payment_number: string
           reference_number?: string | null
+          settlement_approved_by?: string | null
+          settlement_discount_amount?: number
+          settlement_discount_reason?: string | null
           status?: Database["public"]["Enums"]["claim_payment_status"]
           tenant_id: string
           updated_at?: string
@@ -1732,6 +1738,9 @@ export type Database = {
           payment_method?: Database["public"]["Enums"]["claim_payment_method"]
           payment_number?: string
           reference_number?: string | null
+          settlement_approved_by?: string | null
+          settlement_discount_amount?: number
+          settlement_discount_reason?: string | null
           status?: Database["public"]["Enums"]["claim_payment_status"]
           tenant_id?: string
           updated_at?: string
@@ -4261,6 +4270,7 @@ export type Database = {
           lpo_number: string | null
           notes: string | null
           paid_amount: number
+          settlement_discount_amount: number
           pdf_url: string | null
           secure_token: string | null
           status: string
@@ -4291,6 +4301,7 @@ export type Database = {
           lpo_number?: string | null
           notes?: string | null
           paid_amount?: number
+          settlement_discount_amount?: number
           pdf_url?: string | null
           secure_token?: string | null
           status?: string
@@ -4321,6 +4332,7 @@ export type Database = {
           lpo_number?: string | null
           notes?: string | null
           paid_amount?: number
+          settlement_discount_amount?: number
           pdf_url?: string | null
           secure_token?: string | null
           status?: string

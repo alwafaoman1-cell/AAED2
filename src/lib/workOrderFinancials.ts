@@ -22,6 +22,7 @@ export interface WorkOrderLinkedInvoice {
   vat: number;
   total: number;
   paid: number;
+  settlementDiscount: number;
   remaining: number;
 }
 
@@ -82,7 +83,7 @@ export async function fetchWorkOrderFinancials(
     : Promise.resolve({ data: [], error: null });
   const insurancePromise = claimIds.size
     ? (supabase.from("insurance_invoices" as any) as any)
-        .select("id,claim_id,invoice_number,status,subtotal,vat,total,paid_amount,insurance_company_id,insurance_company_name,vehicle_plate")
+        .select("id,claim_id,invoice_number,status,subtotal,vat,total,paid_amount,settlement_discount_amount,insurance_company_id,insurance_company_name,vehicle_plate")
         .eq("tenant_id", tenantId)
         .in("claim_id", Array.from(claimIds))
     : Promise.resolve({ data: [], error: null });
@@ -152,6 +153,7 @@ export async function fetchWorkOrderFinancials(
         vat: roundMoney(row.tax_total),
         total,
         paid,
+        settlementDiscount: 0,
         remaining: roundMoney(Math.max(0, total - paid)),
       };
     }),
@@ -159,6 +161,7 @@ export async function fetchWorkOrderFinancials(
       const claim = claimsById.get(String(row.claim_id)) as any;
       const total = roundMoney(row.total);
       const paid = roundMoney(claimPaid.has(row.claim_id) ? claimPaid.get(row.claim_id) : row.paid_amount);
+      const settlementDiscount = roundMoney(row.settlement_discount_amount || 0);
       return {
         kind: "insurance_invoice" as const,
         id: row.id,
@@ -176,7 +179,8 @@ export async function fetchWorkOrderFinancials(
         vat: roundMoney(row.vat),
         total,
         paid,
-        remaining: roundMoney(Math.max(0, total - paid)),
+        settlementDiscount,
+        remaining: roundMoney(Math.max(0, total - paid - settlementDiscount)),
       };
     }),
   ];

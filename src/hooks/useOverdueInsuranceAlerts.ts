@@ -28,7 +28,8 @@ export function useOverdueInsuranceAlerts() {
       const claimInvoices = (invoices ?? []).filter((invoice) => invoice.claim_id === c.id && invoice.status !== "cancelled");
       const invoiced = claimInvoices.reduce((s, invoice) => s + Number(invoice.total || 0), 0);
       const paid = claimInvoices.reduce((s, invoice) => s + Number(invoice.paid_amount || 0), 0);
-      const rem = invoiced - paid;
+      const discounts = claimInvoices.reduce((s, invoice) => s + Number(invoice.settlement_discount_amount || 0), 0);
+      const rem = invoiced - paid - discounts;
       if (invoiced <= 0) return;
       if (rem <= 0.01) return;
 

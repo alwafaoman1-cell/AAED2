@@ -22,6 +22,9 @@ export interface ClaimPayment {
   offset_against_invoice_id: string | null;
   status: PaymentStatus;
   notes: string | null;
+  settlement_discount_amount?: number;
+  settlement_discount_reason?: string | null;
+  settlement_approved_by?: string | null;
   created_at: string;
   updated_at: string;
   // joined
@@ -46,6 +49,18 @@ export interface ClaimPaymentInsert {
   offset_against_invoice_id?: string | null;
   status?: PaymentStatus;
   notes?: string | null;
+  settlement_discount_amount?: number;
+  settlement_discount_reason?: string | null;
+}
+
+function throwClaimPaymentError(error: any): never {
+  const message = String(error?.message || "");
+  if (message.includes("INSURANCE_INVOICE_ALREADY_SETTLED")) throw new Error("الفاتورة مسددة بالكامل بالفعل");
+  if (message.includes("PAYMENT_EXCEEDS_REMAINING")) throw new Error("مجموع الدفعة والخصم يتجاوز الرصيد المتبقي");
+  if (message.includes("SETTLEMENT_DISCOUNT_MUST_CLOSE_INVOICE")) throw new Error("خصم التسوية يجب أن يغلق كامل الرصيد المتبقي");
+  if (message.includes("SETTLEMENT_DISCOUNT_APPROVAL_REQUIRED")) throw new Error("خصم التسوية يحتاج اعتماد مدير");
+  if (message.includes("SETTLEMENT_DISCOUNT_REASON_REQUIRED")) throw new Error("سبب خصم التسوية إلزامي");
+  throw error;
 }
 
 /** كل دفعات المؤسسة */
@@ -113,13 +128,24 @@ export function useCreateClaimPayment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payment: ClaimPaymentInsert) => {
-      const { data, error } = await supabase
-        .from("claim_payments" as any)
-        .insert(payment as any)
-        .select()
-        .single();
-      if (error) throw error;
-      const created = data as unknown as ClaimPayment;
+      const { data, error } = await (supabase.rpc as any)("create_insurance_payment_with_settlement", {
+        p_claim_id: payment.claim_id,
+        p_amount: payment.amount,
+        p_payment_method: payment.payment_method,
+        p_payment_date: payment.payment_date,
+        p_invoice_id: payment.offset_against_invoice_id || null,
+        p_insurance_company_id: payment.insurance_company_id || null,
+        p_reference_number: payment.reference_number || null,
+        p_bank_name: payment.bank_name || null,
+        p_cheque_due_date: payment.cheque_due_date || null,
+        p_status: payment.status || "cleared",
+        p_notes: payment.notes || null,
+        p_settlement_discount_amount: payment.settlement_discount_amount || 0,
+        p_settlement_discount_reason: payment.settlement_discount_reason || null,
+        p_payment_id: crypto.randomUUID(),
+      });
+      if (error) throwClaimPaymentError(error);
+      const created = (Array.isArray(data) ? data[0] : data) as unknown as ClaimPayment;
       // قيد محاسبي تلقائي
       try {
         const meta = await fetchClaimMeta(created.claim_id);
@@ -129,6 +155,8 @@ export function useCreateClaimPayment() {
           claimNumber: meta.claim_number,
           date: created.payment_date,
           amount: Number(created.amount),
+          settlementDiscount: Number(created.settlement_discount_amount || 0),
+          settlementReason: created.settlement_discount_reason,
           method: created.payment_method,
           status: created.status,
           companyName: meta.insurance_company,
@@ -177,6 +205,8 @@ export function useUpdateClaimPayment() {
             claimNumber: meta.claim_number,
             date: p.payment_date,
             amount: Number(p.amount),
+            settlementDiscount: Number(p.settlement_discount_amount || 0),
+            settlementReason: p.settlement_discount_reason,
             method: p.payment_method,
             status: p.status,
             companyName: meta.insurance_company,
@@ -239,6 +269,8 @@ export function useClearClaimCheque() {
           claimNumber: meta.claim_number,
           date: cleared.payment_date,
           amount: Number(cleared.amount),
+          settlementDiscount: Number(cleared.settlement_discount_amount || 0),
+          settlementReason: cleared.settlement_discount_reason,
           method: cleared.payment_method,
           status: cleared.status,
           companyName: meta.insurance_company,

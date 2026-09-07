@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { salesStore } from "@/lib/salesStore";
 import { useCreateClaimPayment, type PaymentMethod } from "@/hooks/useClaimPayments";
@@ -40,6 +42,8 @@ function normalizeSearch(value: string) {
 }
 
 export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, initialTarget = null, lockInitialTarget = false }: Props) {
+  const { hasRole } = useAuth();
+  const canApproveSettlement = hasRole("admin", "manager");
   const createClaimPayment = useCreateClaimPayment();
   const queryClient = useQueryClient();
   const [tenantId, setTenantId] = useState<string | null>(null);
@@ -54,6 +58,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
+  const [settleWithDiscount, setSettleWithDiscount] = useState(false);
+  const [settlementReason, setSettlementReason] = useState("");
 
   const selected = useMemo(
     () => targets.find((target) => `${target.kind}:${target.id}` === selectedKey) || null,
@@ -70,6 +76,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
     setDate(new Date().toISOString().slice(0, 10));
     setReference("");
     setNotes("");
+    setSettleWithDiscount(false);
+    setSettlementReason("");
     void supabase.rpc("get_user_tenant_id").then(({ data, error }) => {
       if (error || !data) {
         setTenantId(null);
@@ -85,6 +93,11 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
     const remaining = roundMoney(selected.remaining);
     setAmount(remaining > 0 ? remaining.toFixed(3) : "");
   }, [selected]);
+
+  const settlementDiscount = useMemo(() => {
+    if (!selected || selected.kind !== "insurance_claim" || !settleWithDiscount) return 0;
+    return roundMoney(Math.max(0, roundMoney(selected.remaining) - roundMoney(amount)));
+  }, [selected, settleWithDiscount, amount]);
 
   async function runSearch() {
     const needle = normalizeSearch(query);
@@ -151,7 +164,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
       const claimRows = claimsResult.data || [];
       const claimIds = claimRows.map((row: any) => row.id);
       let paidByClaim = new Map<string, number>();
-      let invoiceByClaim = new Map<string, { id: string; subtotal: number; vat: number; total: number }>();
+      let invoiceByClaim = new Map<string, { id: string; subtotal: number; vat: number; total: number; settlementDiscount: number }>();
       if (claimIds.length) {
         const [{ data: payments, error }, { data: invoices, error: invoicesError }] = await Promise.all([
           (supabase.from("claim_payments") as any)
@@ -160,7 +173,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
             .in("claim_id", claimIds)
             .neq("status", "bounced"),
           (supabase.from("insurance_invoices") as any)
-            .select("id,claim_id,subtotal,vat,total,issued_at")
+            .select("id,claim_id,subtotal,vat,total,settlement_discount_amount,issued_at")
             .eq("tenant_id", tenantId)
             .in("claim_id", claimIds)
             .neq("status", "cancelled")
@@ -172,12 +185,13 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           map.set(row.claim_id, (map.get(row.claim_id) || 0) + Number(row.amount || 0));
           return map;
         }, paidByClaim);
-        invoiceByClaim = (invoices || []).reduce((map: Map<string, { id: string; subtotal: number; vat: number; total: number }>, row: any) => {
+        invoiceByClaim = (invoices || []).reduce((map: Map<string, { id: string; subtotal: number; vat: number; total: number; settlementDiscount: number }>, row: any) => {
           if (!map.has(row.claim_id)) map.set(row.claim_id, {
             id: row.id,
             subtotal: Number(row.subtotal || 0),
             vat: Number(row.vat || 0),
             total: Number(row.total || 0),
+            settlementDiscount: Number(row.settlement_discount_amount || 0),
           });
           return map;
         }, invoiceByClaim);
@@ -246,6 +260,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
         const linkedInvoice = invoiceByClaim.get(row.id);
         const total = linkedInvoice?.total ?? Number(row.approved_amount || row.estimated_amount || 0);
         const paid = paidByClaim.get(row.id) || 0;
+        const discount = linkedInvoice?.settlementDiscount || 0;
         return {
           kind: "insurance_claim",
           id: row.id,
@@ -263,7 +278,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           vat: linkedInvoice?.vat,
           total,
           paid,
-          remaining: Math.max(0, total - paid),
+          settlementDiscount: discount,
+          remaining: Math.max(0, total - paid - discount),
         };
       });
 
@@ -287,6 +303,11 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
     const remaining = roundMoney(selected.remaining);
     if (remaining <= 0) return toast.error("الفاتورة مدفوعة بالكامل ولا يمكن تسجيل دفعة إضافية");
     if (value > remaining) return toast.error(`المبلغ يتجاوز المتبقي ${money(remaining)}`);
+    if (settleWithDiscount && selected.kind !== "insurance_claim") return toast.error("خصم التسوية متاح لفواتير التأمين فقط");
+    if (settleWithDiscount && !canApproveSettlement) return toast.error("خصم التسوية يحتاج صلاحية المدير");
+    if (settleWithDiscount && method === "cheque") return toast.error("يُسجل الخصم بعد تحصيل الشيك وليس عند استلام شيك معلق");
+    if (settleWithDiscount && settlementDiscount <= 0) return toast.error("يجب أن يكون المبلغ المستلم أقل من الرصيد لإضافة خصم تسوية");
+    if (settleWithDiscount && !settlementReason.trim()) return toast.error("اكتب سبب خصم التسوية");
 
     savingRef.current = true;
     setSaving(true);
@@ -313,6 +334,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
           reference_number: reference || null,
           status: method === "cheque" ? "pending" : "cleared",
           notes: notes || null,
+          settlement_discount_amount: settleWithDiscount ? settlementDiscount : 0,
+          settlement_discount_reason: settleWithDiscount ? settlementReason.trim() : null,
         });
       }
       await Promise.all([
@@ -414,6 +437,9 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
                   <div className="pt-2 text-xs text-muted-foreground">
                     ضريبة الفاتورة ثابتة من إجمالي الفاتورة، والدفعة الجزئية تغيّر المدفوع والمتبقي فقط.
                   </div>
+                  {selected.kind === "insurance_claim" && Number(selected.settlementDiscount || 0) > 0 && (
+                    <div className="text-xs text-amber-700">خصم تسوية داخلي سابق: {money(selected.settlementDiscount || 0)}</div>
+                  )}
                 </div>
               ) : "اختر نتيجة لربط الدفعة رسميًا."}
             </div>
@@ -444,6 +470,29 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
                 <Label>ملاحظات</Label>
                 <Textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} />
               </div>
+              {selected?.kind === "insurance_claim" && canApproveSettlement && (
+                <div className="space-y-3 md:col-span-2 rounded-lg border border-amber-300 bg-amber-50/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <Label>إغلاق الفاتورة بخصم تسوية مبكرة</Label>
+                      <p className="text-xs text-muted-foreground">داخلي فقط؛ لا يغيّر الفاتورة أو الضريبة ولا يظهر في PDF.</p>
+                    </div>
+                    <Switch checked={settleWithDiscount} onCheckedChange={setSettleWithDiscount} disabled={method === "cheque"} />
+                  </div>
+                  {settleWithDiscount && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>المبلغ المستلم: <b>{money(roundMoney(amount))}</b></div>
+                        <div>خصم التسوية: <b className="text-amber-700">{money(settlementDiscount)}</b></div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>سبب الخصم *</Label>
+                        <Textarea rows={2} value={settlementReason} onChange={(event) => setSettlementReason(event.target.value)} placeholder="مثال: خصم مقابل تسريع سداد شركة التأمين" />
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
