@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { createUuid, isUuid } from "@/lib/uuid";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload, stripUndefined } from "@/lib/supabasePayload";
+import { roundMoney, subtractMoney } from "@/lib/money";
 
 export type SalesDocType =
   | "invoice"
@@ -156,8 +157,8 @@ export function applyAuthoritativeSalesPayments(
 ): SalesDoc {
   if (doc.type !== "invoice") return { ...doc, payments };
 
-  const paidTotal = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-  const balanceDue = Math.max(0, Number(doc.total || 0) - paidTotal);
+  const paidTotal = roundMoney(payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+  const balanceDue = Math.max(0, subtractMoney(doc.total, paidTotal));
   let status = doc.status;
 
   if (status !== "cancelled") {
@@ -199,8 +200,8 @@ function rowToSalesDoc(r: any): SalesDoc {
     discountTotal: Number(r.discount_total || 0),
     taxTotal: Number(r.tax_total || 0),
     total: Number(r.total || 0),
-    paidTotal: Number(r.paid_amount || 0),
-    balanceDue: Number(r.balance_due || 0),
+    paidTotal: roundMoney(r.paid_amount || 0),
+    balanceDue: roundMoney(r.balance_due || 0),
     costCenter: m.costCenter,
     // The relational column is authoritative after a cloud save. Metadata can
     // contain an older local work-order reference from pre-cloud invoices.
@@ -426,30 +427,35 @@ async function insertSalesPaymentCloud(doc: SalesDoc, payment: Omit<SalesPayment
   if (!tenantId) throw new Error("تعذّر تحديد المؤسسة");
   if (!isUuid(doc.id)) throw new Error("لا يمكن تسجيل دفعة لفاتورة غير محفوظة في السحابة");
 
-  const { data: userData } = await supabase.auth.getUser();
-  const paymentNumber = `PAY-${new Date().getFullYear()}-${Date.now().toString().slice(-8)}`;
-  const { data, error } = await (supabase.from("sales_payments") as any)
-    .insert({
-      tenant_id: tenantId,
-      payment_number: paymentNumber,
-      sales_document_id: doc.id,
-      date: payment.date || new Date().toISOString().slice(0, 10),
-      amount: Number(payment.amount || 0),
-      method: normalizePaymentMethodForCloud(payment.method),
-      reference: payment.reference || null,
-      notes: payment.note || null,
-      created_by: userData.user?.id || null,
-    })
-    .select("id,date,amount,method,reference,notes")
-    .single();
-  if (error) throw error;
+  const paymentId = createUuid();
+  const { data, error } = await (supabase.rpc as any)("create_sales_payment_atomic", {
+    p_payment_id: paymentId,
+    p_document_id: doc.id,
+    p_amount: roundMoney(payment.amount),
+    p_date: payment.date || new Date().toISOString().slice(0, 10),
+    p_method: normalizePaymentMethodForCloud(payment.method),
+    p_reference: payment.reference || null,
+    p_notes: payment.note || null,
+  });
+  if (error) {
+    const message = String(error.message || "");
+    if (message.includes("INVOICE_ALREADY_FULLY_PAID")) {
+      throw new Error("الفاتورة مدفوعة بالكامل ولا يمكن تسجيل دفعة إضافية");
+    }
+    if (message.includes("PAYMENT_EXCEEDS_REMAINING")) {
+      throw new Error("المبلغ يتجاوز الرصيد المتبقي للفاتورة");
+    }
+    throw error;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.id) throw new Error("لم تؤكد قاعدة البيانات تسجيل الدفعة");
   return {
-    id: data.id,
-    date: data.date,
-    amount: Number(data.amount || 0),
-    method: data.method || payment.method,
-    reference: data.reference || undefined,
-    note: data.notes || undefined,
+    id: row.id,
+    date: row.date,
+    amount: roundMoney(row.amount || 0),
+    method: row.method || payment.method,
+    reference: row.reference || undefined,
+    note: row.notes || undefined,
   };
 }
 
@@ -769,30 +775,22 @@ export const salesStore = {
   async addPayment(id: string, payment: Omit<SalesPayment, "id">) {
     const doc = salesStore.get(id);
     if (!doc) throw new Error("الفاتورة غير موجودة");
-    if (!Number.isFinite(Number(payment.amount)) || Number(payment.amount) <= 0) {
+    const normalizedAmount = roundMoney(payment.amount);
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
       throw new Error("أدخل مبلغاً صحيحاً");
     }
-    const remaining = Math.max(0, Number(doc.total || 0) - Number(doc.paidTotal || 0));
-    if (Number(payment.amount) > remaining + 0.001) {
+    const remaining = Math.max(0, subtractMoney(doc.total, doc.paidTotal));
+    if (remaining <= 0) {
+      throw new Error("الفاتورة مدفوعة بالكامل ولا يمكن تسجيل دفعة إضافية");
+    }
+    if (normalizedAmount > remaining) {
       throw new Error(`المبلغ يتجاوز المتبقي (${remaining.toFixed(3)} ر.ع)`);
     }
-    const p = await insertSalesPaymentCloud(doc, payment);
-    const payments = [...doc.payments, p];
-    const paidTotal = payments.reduce((s, x) => s + x.amount, 0);
-    const balanceDue = Math.max(0, doc.total - paidTotal);
-    const status: SalesDocStatus =
-      balanceDue <= 0.001 ? "paid" : paidTotal > 0 ? "partial" : doc.status;
-    salesStore.upsert({
-      ...doc,
-      payments,
-      paidTotal,
-      balanceDue,
-      status,
-      activity: [
-        ...doc.activity,
-        { id: cryptoRandom(), at: new Date().toISOString(), text: `إضافة دفعة بقيمة ${p.amount} ${doc.currency}` },
-      ],
-    });
+    const p = await insertSalesPaymentCloud(doc, { ...payment, amount: normalizedAmount });
+    // PostgreSQL is authoritative after the locked insert. Reload rather than
+    // writing a stale browser-side balance over a concurrent payment result.
+    const refreshed = await refreshSalesDocumentFromCloud(id);
+    if (!refreshed) throw new Error("تم تسجيل الدفعة ولكن تعذّر تحديث الفاتورة");
     // ─── ترحيل دفعة العميل في دفتر اليومية ───
     try {
       import("./salesAccounting").then(({ postCustomerPayment }) => {
@@ -813,7 +811,7 @@ export const salesStore = {
         });
       });
     } catch {}
-    void refreshSalesFromCloud();
+    return refreshed;
   },
   async removePayment(docId: string, paymentId: string) {
     const doc = salesStore.get(docId);

@@ -34,6 +34,7 @@ import SalesStatusBadge from "./SalesStatusBadge";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import TemplatePicker from "@/components/print/TemplatePicker";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
+import { roundMoney } from "@/lib/money";
 import { getInvoiceHtml, getQuoteHtml, getTemplateSettings } from "@/lib/pdfGenerator";
 import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
 import UnifiedSendButton from "@/components/UnifiedSendButton";
@@ -621,16 +622,18 @@ const PAYMENT_METHODS_EN: Record<string, string> = {
 };
 
 function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: () => void; doc: SalesDoc; isAr: boolean }) {
-  const [amount, setAmount] = useState(doc.balanceDue || 0);
+  const [amount, setAmount] = useState(roundMoney(doc.balanceDue));
   const [method, setMethod] = useState<string>("نقداً");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [ref, setRef] = useState("");
   const [markFullPaid, setMarkFullPaid] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   // Reset balance amount whenever opened
   useEffect(() => {
     if (open) {
-      setAmount(doc.balanceDue || 0);
+      setAmount(roundMoney(doc.balanceDue));
       setRef("");
       setDate(new Date().toISOString().slice(0, 10));
       setMethod("نقداً");
@@ -640,22 +643,32 @@ function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: (
 
   // عند تفعيل "مدفوعة بالكامل بالفعل" يتم تعبئة المبلغ بالرصيد المتبقي تلقائياً
   useEffect(() => {
-    if (markFullPaid) setAmount(doc.balanceDue || 0);
+    if (markFullPaid) setAmount(roundMoney(doc.balanceDue));
   }, [markFullPaid, doc.balanceDue]);
 
   async function commit() {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
-      await salesStore.addPayment(doc.id, { amount, method, date, reference: ref });
+      await salesStore.addPayment(doc.id, { amount: roundMoney(amount), method, date, reference: ref });
       toast.success(isAr ? "تمت إضافة الدفعة" : "Payment added");
       onClose();
     } catch (error: any) {
       toast.error(error?.message || (isAr ? "تعذر حفظ الدفعة" : "Unable to save payment"));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   }
 
   function save() {
-    if (amount <= 0) { toast.error(isAr ? "أدخل قيمة" : "Enter amount"); return; }
-    if (amount > doc.balanceDue + 0.001) {
+    if (savingRef.current) return;
+    const normalizedAmount = roundMoney(amount);
+    const normalizedBalance = roundMoney(doc.balanceDue);
+    if (normalizedBalance <= 0) { toast.error(isAr ? "الفاتورة مدفوعة بالكامل" : "Invoice is already fully paid"); return; }
+    if (normalizedAmount <= 0) { toast.error(isAr ? "أدخل قيمة" : "Enter amount"); return; }
+    if (normalizedAmount > normalizedBalance) {
       toast.error(isAr ? "لا يمكن تسجيل دفعة أكبر من المبلغ المتبقي." : "Payment cannot exceed the remaining balance.");
       return;
     }
@@ -710,7 +723,7 @@ function PaymentDialog({ open, onClose, doc, isAr }: { open: boolean; onClose: (
             <span>{isAr ? "مدفوعة بالكامل بالفعل" : "Already fully paid"}</span>
           </label>
           <Button variant="outline" onClick={onClose}>{isAr ? "إلغاء" : "Cancel"}</Button>
-          <Button onClick={save}>{isAr ? "حفظ" : "Save"}</Button>
+          <Button onClick={save} disabled={saving}>{saving ? (isAr ? "جاري الحفظ..." : "Saving...") : (isAr ? "حفظ" : "Save")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

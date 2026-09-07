@@ -38,7 +38,7 @@ describe("sales payment deletion persistence contract", () => {
 
   it("derives the invoice badge and totals from actual payment rows", () => {
     expect(store).toContain("export function applyAuthoritativeSalesPayments");
-    expect(store).toContain("const paidTotal = payments.reduce");
+    expect(store).toContain("const paidTotal = roundMoney(payments.reduce");
     expect(store).toContain('status = doc.invoiceStatus === "issued" ? "unpaid" : "draft"');
     expect(store).toContain('paid_amount: doc.type === "invoice" ? undefined : doc.paidTotal');
     expect(store).toContain('balance_due: doc.type === "invoice" ? undefined : doc.balanceDue');

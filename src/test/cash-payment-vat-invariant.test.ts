@@ -11,7 +11,7 @@ describe("cash invoice payment VAT invariant", () => {
       store.indexOf("async function deleteSalesPaymentCloud"),
     );
 
-    expect(insert).toContain("amount: Number(payment.amount || 0)");
+    expect(insert).toContain("p_amount: roundMoney(payment.amount)");
     expect(insert).not.toMatch(/vat|tax_total|subtotal/i);
   });
 

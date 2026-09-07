@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Search, ShieldCheck, ReceiptText } from "lucide-react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +14,7 @@ import { useCreateClaimPayment, type PaymentMethod } from "@/hooks/useClaimPayme
 import { toast } from "sonner";
 import type { PaymentTarget } from "@/lib/paymentTargets";
 import { queryKeys } from "@/lib/queryKeys";
+import { roundMoney } from "@/lib/money";
 
 interface Props {
   open: boolean;
@@ -47,6 +48,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
   const [selectedKey, setSelectedKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -80,7 +82,8 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
 
   useEffect(() => {
     if (!selected) return;
-    setAmount(selected.remaining > 0 ? selected.remaining.toFixed(3) : "");
+    const remaining = roundMoney(selected.remaining);
+    setAmount(remaining > 0 ? remaining.toFixed(3) : "");
   }, [selected]);
 
   async function runSearch() {
@@ -276,12 +279,16 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
   }
 
   async function save() {
+    if (savingRef.current) return;
     if (!tenantId) return toast.error("تعذّر تحديد المؤسسة");
     if (!selected) return toast.error("اختر الفاتورة أو المطالبة");
-    const value = Number(amount);
+    const value = roundMoney(amount);
     if (!Number.isFinite(value) || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
-    if (value > selected.remaining + 0.001) return toast.error(`المبلغ يتجاوز المتبقي ${money(selected.remaining)}`);
+    const remaining = roundMoney(selected.remaining);
+    if (remaining <= 0) return toast.error("الفاتورة مدفوعة بالكامل ولا يمكن تسجيل دفعة إضافية");
+    if (value > remaining) return toast.error(`المبلغ يتجاوز المتبقي ${money(remaining)}`);
 
+    savingRef.current = true;
     setSaving(true);
     try {
       if (selected.kind === "sales_invoice") {
@@ -326,6 +333,7 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
     } catch (error: any) {
       toast.error(error?.message || "تعذر حفظ الدفعة");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
