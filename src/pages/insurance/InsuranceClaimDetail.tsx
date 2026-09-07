@@ -5,7 +5,7 @@ import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
   Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Sparkles, Phone,
-  DollarSign, PackageCheck, Download, ChevronDown, Undo2,
+  DollarSign, PackageCheck, Download, ChevronDown, Undo2, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,7 +54,9 @@ import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompan
 import InsuranceEmployeeSelect from "@/components/insurance/InsuranceEmployeeSelect";
 import ClaimPaymentDialog from "@/components/insurance/ClaimPaymentDialog";
 import ChequeClearanceDialog from "@/components/insurance/ChequeClearanceDialog";
-import { usePaymentsByClaim, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, useDeleteClaimPayment } from "@/hooks/useClaimPayments";
+import EditClaimPaymentDialog from "@/components/insurance/EditClaimPaymentDialog";
+import { usePaymentsByClaim, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, useDeleteClaimPayment, type ClaimPayment } from "@/hooks/useClaimPayments";
+import { useAuth } from "@/contexts/AuthContext";
 import { findOrCreateInsuranceCompany, useInsuranceCompany } from "@/hooks/useInsuranceCompanies";
 import { useCreateInsuranceInvoice } from "@/hooks/useInsuranceInvoices";
 import CancelClaimDialog from "@/components/insurance/CancelClaimDialog";
@@ -4048,10 +4050,13 @@ function PaymentsSection({
   status: string;
   onAllPaid: () => void;
 }) {
+  const { hasRole } = useAuth();
+  const canEditPayments = hasRole("admin", "manager");
   const { data: payments } = usePaymentsByClaim(claimId);
   const del = useDeleteClaimPayment();
   const [showDialog, setShowDialog] = useState(false);
   const [chequeToClear, setChequeToClear] = useState<any>(null);
+  const [paymentToEdit, setPaymentToEdit] = useState<ClaimPayment | null>(null);
 
   // ── المصدر المالي الموحّد: نقرأ من الفاتورة المرتبطة (إن وُجدت) ──
   // وإلا نحسب من المطالبة (المعتمد/المُقدّر + VAT) للحفاظ على التوافق.
@@ -4190,7 +4195,7 @@ function PaymentsSection({
               const sorted = [...payments].sort((a, b) => new Date(a.payment_date).getTime() - new Date(b.payment_date).getTime());
               let running = baseAmount;
               const rowsWithBalance = sorted.map((p) => {
-                if (p.status === "cleared") running -= Number(p.amount);
+                if (p.status === "cleared") running -= Number(p.amount) + Number(p.settlement_discount_amount || 0);
                 return { p, balanceAfter: running };
               });
               // اعرض من الأحدث للأقدم
@@ -4211,7 +4216,12 @@ function PaymentsSection({
                     {p.reference_number ?? "-"}
                     {p.bank_name && <div>{p.bank_name}</div>}
                   </td>
-                  <td className="py-2 px-3 font-semibold text-success">{Number(p.amount).toLocaleString()} ر.ع</td>
+                  <td className="py-2 px-3 font-semibold text-success">
+                    {Number(p.amount).toLocaleString()} ر.ع
+                    {Number(p.settlement_discount_amount || 0) > 0 && (
+                      <div className="text-[11px] font-normal text-amber-700">خصم تسوية: {Number(p.settlement_discount_amount).toFixed(3)} ر.ع</div>
+                    )}
+                  </td>
                   <td className={`py-2 px-3 font-semibold ${balanceAfter > 0 ? "text-warning" : "text-success"}`}>
                     {balanceAfter.toLocaleString()} ر.ع
                   </td>
@@ -4229,6 +4239,14 @@ function PaymentsSection({
                         onClick={() => setChequeToClear(p)}
                       >
                         <CheckCircle2 size={13} /> تحصيل
+                      </Button>
+                    )}
+                    {canEditPayments && (
+                      <Button
+                        variant="outline" size="sm" className="me-1 h-7 gap-1"
+                        onClick={() => setPaymentToEdit(p)}
+                      >
+                        <Pencil size={13} /> تعديل
                       </Button>
                     )}
                     <Button
@@ -4256,6 +4274,11 @@ function PaymentsSection({
         open={!!chequeToClear}
         onOpenChange={(open) => !open && setChequeToClear(null)}
         payment={chequeToClear}
+      />
+      <EditClaimPaymentDialog
+        open={!!paymentToEdit}
+        onOpenChange={(open) => !open && setPaymentToEdit(null)}
+        payment={paymentToEdit}
       />
     </Card>
   );

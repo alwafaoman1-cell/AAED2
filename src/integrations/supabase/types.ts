@@ -1688,6 +1688,7 @@ export type Database = {
           cheque_due_date: string | null
           claim_id: string
           created_at: string
+          edit_version: number
           id: string
           insurance_company_id: string | null
           notes: string | null
@@ -1709,6 +1710,7 @@ export type Database = {
           cheque_due_date?: string | null
           claim_id: string
           created_at?: string
+          edit_version?: number
           id?: string
           insurance_company_id?: string | null
           notes?: string | null
@@ -1730,6 +1732,7 @@ export type Database = {
           cheque_due_date?: string | null
           claim_id?: string
           created_at?: string
+          edit_version?: number
           id?: string
           insurance_company_id?: string | null
           notes?: string | null

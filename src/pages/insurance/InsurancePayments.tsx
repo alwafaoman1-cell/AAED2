@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { DollarSign, AlertTriangle, Clock, TrendingUp, Search, Building2, BarChart3, BadgeCheck } from "lucide-react";
+import { DollarSign, AlertTriangle, Clock, TrendingUp, Search, Building2, BarChart3, BadgeCheck, Pencil } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import StatCard from "@/components/StatCard";
 import { Button } from "@/components/ui/button";
@@ -15,9 +15,13 @@ import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
 import { useOverdueInsuranceAlerts, type OverdueCompany } from "@/hooks/useOverdueInsuranceAlerts";
 import { formatDateLatin } from "@/lib/numberUtils";
 import ChequeClearanceDialog from "@/components/insurance/ChequeClearanceDialog";
+import EditClaimPaymentDialog from "@/components/insurance/EditClaimPaymentDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function InsurancePayments() {
   const navigate = useNavigate();
+  const { hasRole } = useAuth();
+  const canEditPayments = hasRole("admin", "manager");
   const { data: payments } = useClaimPayments();
   const { data: claims } = useInsuranceClaims();
   const { data: companies } = useInsuranceCompanies();
@@ -25,6 +29,7 @@ export default function InsurancePayments() {
   const overdueList = useOverdueInsuranceAlerts();
   const [search, setSearch] = useState("");
   const [chequeToClear, setChequeToClear] = useState<ClaimPayment | null>(null);
+  const [paymentToEdit, setPaymentToEdit] = useState<ClaimPayment | null>(null);
 
   // KPIs
   const stats = useMemo(() => {
@@ -275,6 +280,11 @@ export default function InsurancePayments() {
                   <BadgeCheck size={14} /> تحصيل الشيك
                 </Button>
               )}
+              {canEditPayments && (
+                <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={(event) => { event.stopPropagation(); setPaymentToEdit(p); }}>
+                  <Pencil size={14} /> تعديل الدفعة
+                </Button>
+              )}
             </div>
           ))}
         </div>
@@ -317,11 +327,18 @@ export default function InsurancePayments() {
                     }`}>{PAYMENT_STATUS_LABELS[p.status]}</span>
                   </td>
                   <td className="py-2.5 px-4">
-                    {p.payment_method === "cheque" && p.status === "pending" && (
-                      <Button size="sm" className="gap-1.5" onClick={(event) => { event.stopPropagation(); setChequeToClear(p); }}>
-                        <BadgeCheck size={14} /> تحصيل الشيك
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {p.payment_method === "cheque" && p.status === "pending" && (
+                        <Button size="sm" className="gap-1.5" onClick={(event) => { event.stopPropagation(); setChequeToClear(p); }}>
+                          <BadgeCheck size={14} /> تحصيل الشيك
+                        </Button>
+                      )}
+                      {canEditPayments && (
+                        <Button variant="outline" size="sm" className="gap-1.5" onClick={(event) => { event.stopPropagation(); setPaymentToEdit(p); }}>
+                          <Pencil size={14} /> تعديل
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -330,6 +347,7 @@ export default function InsurancePayments() {
         </div>
       </Card>
       <ChequeClearanceDialog open={!!chequeToClear} onOpenChange={(open) => !open && setChequeToClear(null)} payment={chequeToClear} />
+      <EditClaimPaymentDialog open={!!paymentToEdit} onOpenChange={(open) => !open && setPaymentToEdit(null)} payment={paymentToEdit} />
     </div>
   );
 }

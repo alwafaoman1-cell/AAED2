@@ -25,6 +25,7 @@ export interface ClaimPayment {
   settlement_discount_amount?: number;
   settlement_discount_reason?: string | null;
   settlement_approved_by?: string | null;
+  edit_version: number;
   created_at: string;
   updated_at: string;
   // joined
@@ -60,6 +61,12 @@ function throwClaimPaymentError(error: any): never {
   if (message.includes("SETTLEMENT_DISCOUNT_MUST_CLOSE_INVOICE")) throw new Error("خصم التسوية يجب أن يغلق كامل الرصيد المتبقي");
   if (message.includes("SETTLEMENT_DISCOUNT_APPROVAL_REQUIRED")) throw new Error("خصم التسوية يحتاج اعتماد مدير");
   if (message.includes("SETTLEMENT_DISCOUNT_REASON_REQUIRED")) throw new Error("سبب خصم التسوية إلزامي");
+  if (message.includes("PAYMENT_EDIT_MANAGER_REQUIRED")) throw new Error("تعديل الدفعة متاح للمدير فقط");
+  if (message.includes("PAYMENT_EDIT_REASON_REQUIRED")) throw new Error("سبب تعديل الدفعة إلزامي");
+  if (message.includes("PAYMENT_CHANGED_BY_ANOTHER_USER")) throw new Error("تم تعديل هذه الدفعة من مستخدم آخر. أغلق النافذة وحدّث الصفحة ثم راجع القيم الجديدة");
+  if (message.includes("INSURANCE_PAYMENT_NOT_FOUND")) throw new Error("الدفعة غير موجودة أو لم تعد متاحة");
+  if (message.includes("PAYMENT_EXCEEDS_INVOICE_TOTAL")) throw new Error("القيمة المعدلة تتجاوز إجمالي الفاتورة بعد احتساب الدفعات الأخرى");
+  if (message.includes("SETTLEMENT_DISCOUNT_REQUIRES_CLEARED_NON_CHEQUE")) throw new Error("خصم التسوية يتطلب دفعة محصلة وليست شيكًا");
   throw error;
 }
 
@@ -183,48 +190,67 @@ export function useCreateClaimPayment() {
 export function useUpdateClaimPayment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, updates }: { id: string; updates: Partial<ClaimPaymentInsert> }) => {
-      const { error } = await supabase
-        .from("claim_payments" as any)
-        .update(updates as any)
-        .eq("id", id);
-      if (error) throw error;
-      // إعادة ترحيل القيد المحاسبي
-      const { data } = await supabase
-        .from("claim_payments" as any)
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
-      const p = data as unknown as ClaimPayment | null;
-      if (p) {
-        try {
-          const meta = await fetchClaimMeta(p.claim_id);
-          postInsurancePayment({
-            paymentId: p.id,
-            paymentNumber: p.payment_number,
-            claimNumber: meta.claim_number,
-            date: p.payment_date,
-            amount: Number(p.amount),
-            settlementDiscount: Number(p.settlement_discount_amount || 0),
-            settlementReason: p.settlement_discount_reason,
-            method: p.payment_method,
-            status: p.status,
-            companyName: meta.insurance_company,
-            reference: p.reference_number,
-          });
-        } catch (e) { console.warn("journal post failed", e); }
-      }
+    mutationFn: async ({
+      payment,
+      updates,
+      editReason,
+    }: {
+      payment: ClaimPayment;
+      updates: Partial<ClaimPaymentInsert>;
+      editReason: string;
+    }) => {
+      const { data, error } = await (supabase.rpc as any)("update_insurance_payment_by_manager", {
+        p_payment_id: payment.id,
+        p_expected_updated_at: payment.updated_at,
+        p_expected_edit_version: payment.edit_version,
+        p_amount: updates.amount ?? payment.amount,
+        p_payment_method: updates.payment_method ?? payment.payment_method,
+        p_payment_date: updates.payment_date ?? payment.payment_date,
+        p_reference_number: updates.reference_number ?? payment.reference_number,
+        p_bank_name: updates.bank_name ?? payment.bank_name,
+        p_cheque_due_date: updates.cheque_due_date ?? payment.cheque_due_date,
+        p_status: updates.status ?? payment.status,
+        p_notes: updates.notes ?? payment.notes,
+        p_settlement_discount_amount: updates.settlement_discount_amount ?? payment.settlement_discount_amount ?? 0,
+        p_settlement_discount_reason: updates.settlement_discount_reason ?? payment.settlement_discount_reason,
+        p_edit_reason: editReason,
+      });
+      if (error) throwClaimPaymentError(error);
+      const updated = (Array.isArray(data) ? data[0] : data) as unknown as ClaimPayment;
+      try {
+        const meta = await fetchClaimMeta(updated.claim_id);
+        postInsurancePayment({
+          paymentId: updated.id,
+          paymentNumber: updated.payment_number,
+          claimNumber: meta.claim_number,
+          date: updated.payment_date,
+          amount: Number(updated.amount),
+          settlementDiscount: Number(updated.settlement_discount_amount || 0),
+          settlementReason: updated.settlement_discount_reason,
+          method: updated.payment_method,
+          status: updated.status,
+          companyName: meta.insurance_company,
+          reference: updated.reference_number,
+        });
+      } catch (e) { console.warn("journal post failed", e); }
+      return updated;
     },
-    onSuccess: () => {
+    onSuccess: (payment) => {
       qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.byClaim(payment.claim_id) });
+      if (payment.insurance_company_id) {
+        qc.invalidateQueries({ queryKey: queryKeys.claimPayments.byCompany(payment.insurance_company_id) });
+      }
       qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
       qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
       qc.invalidateQueries({ queryKey: queryKeys.claimActiveInvoice() });
       qc.invalidateQueries({ queryKey: queryKeys.unifiedRevenueInsuranceInvoices });
       qc.invalidateQueries({ queryKey: queryKeys.monthlyVehicleProfitability.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reportCenter.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reports.all });
       toast.success("تم حفظ التعديلات");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(e?.message || "تعذر تعديل الدفعة"),
   });
 }
 
