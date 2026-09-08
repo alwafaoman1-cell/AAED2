@@ -7,6 +7,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isUuid } from "@/lib/uuid";
 import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
+import {
+  checkExpenseDuplicates,
+  duplicateExpenseMessage,
+  exactDuplicateErrorFromDatabase,
+  ExpenseExactDuplicateError,
+  ExpensePotentialDuplicateError,
+} from "@/lib/expenses/expenseDuplicateGuard";
 import { queryKeys } from "@/lib/queryKeys";
 import type { QueryClient } from "@tanstack/react-query";
 
@@ -64,6 +71,9 @@ export interface ExpenseRecord {
   sourceWorkOrderId?: string;
   sourceClaimId?: string;
   convertedFromRequiredPart?: boolean;
+  duplicateBatchId?: string;
+  duplicateOverrideReason?: string;
+  documentSha256?: string;
   archivedAt?: string;
   deletedAt?: string;
   deleteReason?: string;
@@ -187,6 +197,9 @@ function rowToRecord(r: any): ExpenseRecord {
     sourceWorkOrderId: meta.sourceWorkOrderId,
     sourceClaimId: meta.sourceClaimId,
     convertedFromRequiredPart: meta.convertedFromRequiredPart,
+    duplicateBatchId: meta.duplicateBatchId,
+    duplicateOverrideReason: meta.duplicateOverrideReason,
+    documentSha256: r.document_sha256 || meta.documentSha256,
     archivedAt: meta.archivedAt,
     deletedAt: meta.deletedAt || r.deleted_at || undefined,
     deleteReason: meta.deleteReason,
@@ -225,6 +238,9 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
   if (e.sourceWorkOrderId) meta.sourceWorkOrderId = e.sourceWorkOrderId;
   if (e.sourceClaimId) meta.sourceClaimId = e.sourceClaimId;
   if (e.convertedFromRequiredPart !== undefined) meta.convertedFromRequiredPart = e.convertedFromRequiredPart;
+  if (e.duplicateBatchId) meta.duplicateBatchId = e.duplicateBatchId;
+  if (e.duplicateOverrideReason) meta.duplicateOverrideReason = e.duplicateOverrideReason;
+  if (e.documentSha256) meta.documentSha256 = e.documentSha256;
   if (e.archivedAt) meta.archivedAt = e.archivedAt;
   if (e.deletedAt) meta.deletedAt = e.deletedAt;
   if (e.deleteReason) meta.deleteReason = e.deleteReason;
@@ -255,6 +271,7 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     is_vat_applicable: e.isVatApplicable ?? true,
     supplier_tax_number: e.supplierTaxNumber || null,
     supplier_invoice_number: e.supplierInvoiceNumber || null,
+    document_sha256: e.documentSha256 || null,
     supplier_id: e.supplierId && isUuid(e.supplierId) ? e.supplierId : null,
     beneficiary: e.beneficiary || null,
     description: e.description || null,
@@ -286,6 +303,7 @@ function stripExpenseAccountingColumns(row: Record<string, any>) {
     is_vat_applicable,
     supplier_tax_number,
     supplier_invoice_number,
+    document_sha256,
     supplier_id,
     department_id,
     expense_category_id,
@@ -299,7 +317,7 @@ function stripExpenseAccountingColumns(row: Record<string, any>) {
 
 function isMissingAccountingColumnError(error: any): boolean {
   const msg = String(error?.message || error?.details || "");
-  return /expense_type|expense_scope|work_order_channel|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|supplier_id|department_id|expense_category_id|subcategory_id|subtotal|total/.test(msg)
+  return /expense_type|expense_scope|work_order_channel|cost_center|vat_amount|is_vat_applicable|supplier_tax_number|supplier_invoice_number|document_sha256|supplier_id|department_id|expense_category_id|subcategory_id|subtotal|total/.test(msg)
     && /column|schema|cache/i.test(msg);
 }
 
@@ -429,7 +447,28 @@ export const expensesStore = {
     }
     const tenantId = await getCurrentTenantId();
     if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+    if (item.photo && !item.documentSha256) {
+      const { sha256Text } = await import("@/lib/expenses/expenseDuplicateGuard");
+      item.documentSha256 = await sha256Text(item.photo);
+    }
     const row = recordToRow(item, tenantId);
+    const duplicates = await checkExpenseDuplicates({
+      supplier_id: row.supplier_id,
+      supplier_tax_number: row.supplier_tax_number,
+      beneficiary: row.beneficiary,
+      supplier_invoice_number: row.supplier_invoice_number,
+      date: row.date,
+      total: row.total,
+      work_order_id: row.work_order_id,
+      linked_work_order_id: row.linked_work_order_id,
+      description: row.description,
+      duplicate_batch_id: item.duplicateBatchId,
+      document_sha256: row.document_sha256,
+    });
+    if (duplicates.exact.length) throw new ExpenseExactDuplicateError(duplicates.exact);
+    if (duplicates.potential.length && !item.duplicateOverrideReason) {
+      throw new ExpensePotentialDuplicateError(duplicates.potential);
+    }
     let { data, error } = await (supabase.from("expenses") as any)
       .upsert(row)
       .select("*")
@@ -442,7 +481,11 @@ export const expensesStore = {
       data = retry.data;
       error = retry.error;
     }
-    if (error) throw error;
+    if (error) {
+      const exactDuplicate = exactDuplicateErrorFromDatabase(error);
+      if (exactDuplicate) throw exactDuplicate;
+      throw new Error(duplicateExpenseMessage(error) || error.message || "تعذر حفظ المصروف");
+    }
     if (!data?.id) throw new Error("تعذر تأكيد حفظ المصروف في Supabase");
     const saved = rowToRecord(data);
     deletedExpenseIds.delete(saved.id);
@@ -461,6 +504,23 @@ export const expensesStore = {
     const tenantId = await getCurrentTenantId();
     if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
     const row = recordToRow(next, tenantId);
+    const duplicates = await checkExpenseDuplicates({
+      supplier_id: row.supplier_id,
+      supplier_tax_number: row.supplier_tax_number,
+      beneficiary: row.beneficiary,
+      supplier_invoice_number: row.supplier_invoice_number,
+      date: row.date,
+      total: row.total,
+      work_order_id: row.work_order_id,
+      linked_work_order_id: row.linked_work_order_id,
+      description: row.description,
+      duplicate_batch_id: next.duplicateBatchId,
+      document_sha256: row.document_sha256,
+    }, id);
+    if (duplicates.exact.length) throw new ExpenseExactDuplicateError(duplicates.exact);
+    if (duplicates.potential.length && !next.duplicateOverrideReason) {
+      throw new ExpensePotentialDuplicateError(duplicates.potential);
+    }
     // Remove tenant_id from update payload to avoid changing it.
     const { tenant_id, id: _id, ...updatable } = row as any;
     let { data, error } = await supabase
@@ -480,7 +540,11 @@ export const expensesStore = {
       data = retry.data;
       error = retry.error;
     }
-    if (error) throw error;
+    if (error) {
+      const exactDuplicate = exactDuplicateErrorFromDatabase(error);
+      if (exactDuplicate) throw exactDuplicate;
+      throw new Error(duplicateExpenseMessage(error) || error.message || "تعذر تحديث المصروف");
+    }
     if (!data?.id) throw new Error("تعذر تأكيد تحديث المصروف في Supabase");
     cache[idx] = rowToRecord(data);
     deletedExpenseIds.delete(id);

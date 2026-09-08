@@ -3242,6 +3242,7 @@ export type Database = {
           deleted_by: string | null
           department_id: string | null
           description: string | null
+          document_sha256: string | null
           expense_category_id: string | null
           expense_scope: string | null
           expense_type: string
@@ -3294,6 +3295,7 @@ export type Database = {
           deleted_by?: string | null
           department_id?: string | null
           description?: string | null
+          document_sha256?: string | null
           expense_category_id?: string | null
           expense_scope?: string | null
           expense_type?: string
@@ -3346,6 +3348,7 @@ export type Database = {
           deleted_by?: string | null
           department_id?: string | null
           description?: string | null
+          document_sha256?: string | null
           expense_category_id?: string | null
           expense_scope?: string | null
           expense_type?: string

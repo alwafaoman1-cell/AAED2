@@ -36,6 +36,12 @@ import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 import { useAuth } from "@/contexts/AuthContext";
 import { queryKeys } from "@/lib/queryKeys";
 import { listExpenseCategories, type ExpenseCategoryRow } from "@/lib/expenses/expenseClassificationService";
+import { canManageFinance } from "@/lib/permissions";
+import {
+  ExpenseExactDuplicateError,
+  ExpensePotentialDuplicateError,
+  requestPotentialDuplicateOverride,
+} from "@/lib/expenses/expenseDuplicateGuard";
 
 interface PartLine {
   id: string;
@@ -80,6 +86,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
   const tenantId = profile?.tenant_id || "";
   const [items, setItems] = useState<ExpenseItem[]>([]);
   const [autoInvoice, setAutoInvoice] = useState(true);
+  const allowDuplicateOverride = canManageFinance();
 
   const categoryQuery = useQuery({
     queryKey: queryKeys.expenseManagement.categories({ tenantId, active: true }),
@@ -202,9 +209,27 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
 
     let savedCount = 0;
     const createdRecords: ExpenseRecord[] = [];
+    const saveExpenseRecord = async (record: ExpenseRecord) => {
+      try {
+        return await expensesStore.add(record);
+      } catch (error) {
+        if (error instanceof ExpensePotentialDuplicateError) {
+          const reason = requestPotentialDuplicateOverride(error.matches, allowDuplicateOverride, "ar");
+          if (!reason) throw new Error("تم إلغاء الحفظ بعد مراجعة المصروف المشابه");
+          return expensesStore.add({ ...record, duplicateOverrideReason: reason });
+        }
+        if (error instanceof ExpenseExactDuplicateError) {
+          const existing = error.matches[0];
+          toast.error(error.message, { action: existing ? { label: "فتح المصروف", onClick: () => window.open(`/accounting/expenses/${existing.id}/edit`, "_blank") } : undefined });
+        }
+        throw error;
+      }
+    };
 
     try {
     for (const it of items) {
+      // One supplier invoice may legitimately contain several part lines.
+      const duplicateBatchId = crypto.randomUUID();
       const cat = categories.find((c) => c.id === (it.subcategoryId || it.expenseCategoryId));
       const cb = employeeCashboxesStore.getAll().find((c) => c.id === it.cashboxId);
       const partsCat = isPartsCat(it);
@@ -241,6 +266,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             customerId: order.customerId,
             vehicleId: order.vehicleId,
             claimId: order.claimId,
+            duplicateBatchId,
             linkedVehiclePlate: order.plate,
             linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
             partName: p.name,
@@ -250,7 +276,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             unitSellPrice: sell > 0 ? sell : undefined,
             createdAt: new Date().toISOString(),
           };
-          const saved = await expensesStore.add(rec);
+          const saved = await saveExpenseRecord(rec);
           createdRecords.push(saved || rec);
           savedAmountForItem += lineAmt;
           savedCount++;
@@ -275,11 +301,12 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           customerId: order.customerId,
           vehicleId: order.vehicleId,
           claimId: order.claimId,
+          duplicateBatchId,
           linkedVehiclePlate: order.plate,
           linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
           createdAt: new Date().toISOString(),
         };
-        const saved = await expensesStore.add(rec);
+        const saved = await saveExpenseRecord(rec);
         createdRecords.push(saved || rec);
         savedAmountForItem += totalAmt;
         savedCount++;

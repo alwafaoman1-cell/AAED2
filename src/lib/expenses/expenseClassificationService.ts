@@ -1,5 +1,12 @@
 import { supabase } from "@/integrations/supabase/client";
 import { roundMoney } from "@/lib/money";
+import {
+  checkExpenseDuplicates,
+  duplicateExpenseMessage,
+  exactDuplicateErrorFromDatabase,
+  ExpenseExactDuplicateError,
+  ExpensePotentialDuplicateError,
+} from "@/lib/expenses/expenseDuplicateGuard";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
 
@@ -75,6 +82,7 @@ export interface ExpenseInput {
   supplier_tax_number?: string | null; supplier_invoice_number?: string | null; supplier_invoice_date?: string | null; payment_method: string; description: string;
   notes?: string | null; reference_number?: string | null; subtotal: number; vat_amount: number;
   total: number; is_vat_applicable: boolean; attachments?: unknown[];
+  document_sha256?: string | null;
 }
 
 function fail(error: any): never { throw new Error(error?.message || "تعذر تنفيذ العملية"); }
@@ -220,18 +228,48 @@ export async function listCostCenters(tenantId: string) {
   if (error) fail(error); return data || [];
 }
 
-export async function saveExpense(input: ExpenseInput, userId: string, id?: string) {
+export async function saveExpense(input: ExpenseInput, userId: string, id?: string, duplicateOverrideReason?: string) {
+  const duplicates = await checkExpenseDuplicates({
+    supplier_id: input.supplier_id,
+    supplier_tax_number: input.supplier_tax_number,
+    supplier_invoice_number: input.supplier_invoice_number,
+    supplier_invoice_date: input.supplier_invoice_date,
+    date: input.date,
+    total: input.total,
+    work_order_id: input.work_order_id,
+    linked_work_order_id: input.linked_work_order_id,
+    description: input.description,
+    document_sha256: input.document_sha256,
+  }, id);
+  if (duplicates.exact.length) throw new ExpenseExactDuplicateError(duplicates.exact);
+  if (duplicates.potential.length && !duplicateOverrideReason) {
+    throw new ExpensePotentialDuplicateError(duplicates.potential);
+  }
   const payload: any = {
     ...input, amount: roundMoney(input.total), subtotal: roundMoney(input.subtotal),
     vat_amount: roundMoney(input.vat_amount), total: roundMoney(input.total), created_by: userId,
     category_id: input.subcategory_id || input.expense_category_id,
   };
+  if (duplicateOverrideReason) {
+    let existingMeta: Record<string, unknown> = {};
+    if (id) {
+      const { data } = await (supabase.from("expenses") as any)
+        .select("meta").eq("tenant_id", input.tenant_id).eq("id", id).maybeSingle();
+      existingMeta = data?.meta && typeof data.meta === "object" ? data.meta : {};
+    }
+    payload.meta = { ...existingMeta, duplicateOverrideReason };
+  }
   if (!id) payload.voucher_number = await nextExpenseVoucherNumber();
   const query = id
     ? (supabase.from("expenses") as any).update(payload).eq("tenant_id", input.tenant_id).eq("id", id)
     : (supabase.from("expenses") as any).insert(payload);
   const { data, error } = await query.select("*").single();
-  if (error) fail(error); if (!data?.id) throw new Error("لم يتم تأكيد حفظ المصروف"); return data;
+  if (error) {
+    const exactDuplicate = exactDuplicateErrorFromDatabase(error);
+    if (exactDuplicate) throw exactDuplicate;
+    throw new Error(duplicateExpenseMessage(error) || error.message || "تعذر حفظ المصروف");
+  }
+  if (!data?.id) throw new Error("لم يتم تأكيد حفظ المصروف"); return data;
 }
 
 export async function softDeleteExpense(tenantId: string, id: string) {

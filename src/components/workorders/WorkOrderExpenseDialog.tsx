@@ -28,6 +28,11 @@ import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 import { useAuth } from "@/contexts/AuthContext";
 import { queryKeys } from "@/lib/queryKeys";
 import { listExpenseCategories, type ExpenseCategoryRow } from "@/lib/expenses/expenseClassificationService";
+import {
+  ExpenseExactDuplicateError,
+  ExpensePotentialDuplicateError,
+  requestPotentialDuplicateOverride,
+} from "@/lib/expenses/expenseDuplicateGuard";
 
 interface Props {
   order: WorkOrder | null;
@@ -288,19 +293,35 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
       if (old) {
         const oldCb = employeeCashboxesStore.getAll().find((c) => c.id === old.cashboxId);
         let savedExpense: ExpenseRecord;
+        const expensePatch: Partial<ExpenseRecord> = {
+          date, amount: value,
+          categoryId: subcategoryId || expenseCategoryId, categoryName: selectedCategoryName,
+          departmentId, expenseCategoryId, subcategoryId: subcategoryId || undefined,
+          cashboxId, cashboxName: cb?.cashboxName, paymentMethod, beneficiary: beneficiary.trim(), description, photo,
+          ...supplierFields,
+          ...partsFields,
+          ...(isPartsCategory ? {} : { partId: undefined, partName: undefined, partNumber: undefined, partQty: undefined, unitBuyPrice: undefined, unitSellPrice: undefined }),
+        };
         try {
-          savedExpense = await expensesStore.update(editingId, {
-            date, amount: value,
-            categoryId: subcategoryId || expenseCategoryId, categoryName: selectedCategoryName,
-            departmentId, expenseCategoryId, subcategoryId: subcategoryId || undefined,
-            cashboxId, cashboxName: cb?.cashboxName, paymentMethod, beneficiary: beneficiary.trim(), description, photo,
-            ...supplierFields,
-            ...partsFields,
-            ...(isPartsCategory ? {} : { partId: undefined, partName: undefined, partNumber: undefined, partQty: undefined, unitBuyPrice: undefined, unitSellPrice: undefined }),
-          });
+          savedExpense = await expensesStore.update(editingId, expensePatch);
         } catch (error: any) {
+          if (error instanceof ExpensePotentialDuplicateError) {
+            const reason = requestPotentialDuplicateOverride(error.matches, allowManage, "ar");
+            if (!reason) return;
+            try {
+              savedExpense = await expensesStore.update(editingId, { ...expensePatch, duplicateOverrideReason: reason });
+            } catch (retryError: any) {
+              toast.error(retryError?.message || "تعذر تحديث المصروف بعد مراجعة التكرار");
+              return;
+            }
+          } else if (error instanceof ExpenseExactDuplicateError) {
+            const existing = error.matches[0];
+            toast.error(error.message, { action: existing ? { label: "فتح المصروف", onClick: () => window.open(`/accounting/expenses/${existing.id}/edit`, "_blank") } : undefined });
+            return;
+          } else {
           toast.error(error?.message || "تعذر تحديث المصروف في Supabase");
           return;
+          }
         }
         if (oldCb) employeeCashboxesStore.update(oldCb.id, { currentBalance: oldCb.currentBalance + old.amount });
         if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
@@ -347,8 +368,23 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     try {
       savedExpense = await expensesStore.add(record);
     } catch (error: any) {
-      toast.error(error?.message || "تعذر حفظ المصروف في Supabase");
-      return;
+      if (error instanceof ExpensePotentialDuplicateError) {
+        const reason = requestPotentialDuplicateOverride(error.matches, allowManage, "ar");
+        if (!reason) return;
+        try {
+          savedExpense = await expensesStore.add({ ...record, duplicateOverrideReason: reason });
+        } catch (retryError: any) {
+          toast.error(retryError?.message || "تعذر حفظ المصروف بعد مراجعة التكرار");
+          return;
+        }
+      } else if (error instanceof ExpenseExactDuplicateError) {
+        const existing = error.matches[0];
+        toast.error(error.message, { action: existing ? { label: "فتح المصروف", onClick: () => window.open(`/accounting/expenses/${existing.id}/edit`, "_blank") } : undefined });
+        return;
+      } else {
+        toast.error(error?.message || "تعذر حفظ المصروف في Supabase");
+        return;
+      }
     }
     if (cb) employeeCashboxesStore.update(cb.id, { currentBalance: cb.currentBalance - value });
     if (initialRequiredPart) {
