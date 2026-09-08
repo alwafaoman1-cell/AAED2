@@ -28,6 +28,7 @@ export default function WorkOrderNew() {
         <div className="bg-card border border-border rounded-xl p-4 md:p-6">
           <WorkOrderForm
             onClose={() => navigate("/work-orders")}
+            onSaved={(saved) => navigate(`/work-orders/${encodeURIComponent(saved.id)}`, { replace: true })}
             prefillCustomer={state.prefillCustomer}
             prefillPhone={state.prefillPhone}
             prefillPlate={state.prefillPlate}

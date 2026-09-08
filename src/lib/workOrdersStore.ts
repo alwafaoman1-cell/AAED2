@@ -216,11 +216,13 @@ function isActiveWorkOrder(order: WorkOrder): boolean {
 }
 
 export function getWorkOrders(options: { includeArchived?: boolean } = {}): WorkOrder[] {
-  // الأحدث أولاً: حسب تاريخ الدخول ثم رقم العرض.
+  // الأحدث أولاً حسب تسلسل أمر العمل، حتى تبقى الأوامر الجديدة في أعلى
+  // القائمة ولو كان تاريخ دخول المركبة مُدخلاً بأثر رجعي.
   return load().filter((order) => (options.includeArchived ? !order.deletedAt : isActiveWorkOrder(order))).sort((a, b) => {
-    const da = (a.entryDate || "").localeCompare(b.entryDate || "");
-    if (da !== 0) return -da;
-    return (b.id || "").localeCompare(a.id || "");
+    const aNumber = Number((a.displayNumber || a.id || "").match(/(\d+)(?!.*\d)/)?.[1] || -1);
+    const bNumber = Number((b.displayNumber || b.id || "").match(/(\d+)(?!.*\d)/)?.[1] || -1);
+    if (aNumber !== bNumber) return bNumber - aNumber;
+    return (b.entryDate || "").localeCompare(a.entryDate || "");
   });
 }
 

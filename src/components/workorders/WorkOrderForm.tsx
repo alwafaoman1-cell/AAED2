@@ -68,6 +68,7 @@ const empty: WorkOrder = {
 
 interface Props {
   onClose: () => void;
+  onSaved?: (workOrder: WorkOrder) => void;
   initial?: WorkOrder | null;
   prefillCustomer?: string;
   prefillPhone?: string;
@@ -103,7 +104,7 @@ function visitPrefillFields(prefillVisit: unknown): Partial<WorkOrder> {
   };
 }
 
-export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit }: Props) {
+export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit }: Props) {
   const isEdit = !!initial;
   const prefillVehicleKey = vehiclePrefillFields(prefillVehicle);
   const prefillVisitKey = visitPrefillFields(prefillVisit);
@@ -599,7 +600,8 @@ export default function WorkOrderForm({ onClose, initial, prefillCustomer, prefi
       draftGuard.clear();
       setFormDirty(false);
       toast.success(isEdit ? `تم تحديث ${saved.id}` : `تم إنشاء ${saved.id}`);
-      onClose();
+      if (onSaved) onSaved(saved);
+      else onClose();
     } catch (error: any) {
       toast.error(error?.message || "تعذر حفظ أمر العمل في Supabase");
     } finally {

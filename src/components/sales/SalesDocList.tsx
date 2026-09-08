@@ -171,7 +171,8 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
           d.customerName.toLowerCase().includes(s) ||
           (d.customerTaxNo || "").toLowerCase().includes(s)
         );
-      });
+      })
+      .sort((a, b) => b.number.localeCompare(a.number, undefined, { numeric: true, sensitivity: "base" }));
   }, [q, status, type, tick]);
 
   return (

@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { buildPublicUrl } from "@/lib/publicAccessSettingsStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { Search, Download, Eye, Trash2, Pencil, Plus, Filter, Receipt, AlertTriangle, CheckCircle2, FileSpreadsheet, FolderArchive, Wallet, Columns3, ArrowUpDown, RotateCcw } from "lucide-react";
@@ -70,6 +71,7 @@ const DEFAULT_VISIBLE_COLUMNS = Object.fromEntries(
 ) as Record<InsuranceInvoiceReportColumnKey, boolean>;
 
 export default function InsuranceAccounting() {
+  const [searchParams] = useSearchParams();
   const { hasRole } = useAuth();
   const { data: invoices, isLoading } = useInsuranceInvoices();
   const { data: claims } = useInsuranceClaims();
@@ -86,7 +88,7 @@ export default function InsuranceAccounting() {
   const [lpoFilter, setLpoFilter] = useState("all");
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
-  const [sortKey, setSortKey] = useState<InsuranceInvoiceSortKey>("invoiceDate");
+  const [sortKey, setSortKey] = useState<InsuranceInvoiceSortKey>("invoiceNumber");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePersistedState<number>("insurance_invoices_page_size", 20);
@@ -101,6 +103,7 @@ export default function InsuranceAccounting() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editInvoice, setEditInvoice] = useState<InsuranceInvoice | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
+  const openedInvoiceFromRoute = useRef<string | null>(null);
 
   // ── أرشيف كل المستندات (تقديرات + عروض + فواتير + ملخصات) من claim_audit_logs ──
   const [allDocs, setAllDocs] = useState<Array<{
@@ -330,6 +333,17 @@ export default function InsuranceAccounting() {
     setPreviewTitle(`فاتورة ${inv.invoice_number}`);
     setShowPreview(true);
   }
+
+  useEffect(() => {
+    const requestedInvoiceId = searchParams.get("invoice");
+    if (!requestedInvoiceId || openedInvoiceFromRoute.current === requestedInvoiceId || !invoices?.length) return;
+    const invoice = invoices.find((item) => item.id === requestedInvoiceId);
+    if (!invoice) return;
+    openedInvoiceFromRoute.current = requestedInvoiceId;
+    void handlePreview(invoice);
+    // handlePreview intentionally reads the latest claims/company data available for this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, searchParams]);
 
   function exportExcel() {
     if (!filteredRows.length) {
