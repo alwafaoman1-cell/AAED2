@@ -4451,5 +4451,11 @@
   "سيتم استعادة نفس سجل المركبة من الأرشيف عند تأكيد استخدامه، بدون إنشاء مركبة مكررة وبدون تغيير المالك المسجل.": "The same archived vehicle record will be restored after confirmation, without creating a duplicate or changing its registered owner.",
   "تم اختيار المركبة وسيتم استعادتها عند حفظ أمر العمل": "The vehicle was selected and will be restored when the work order is saved",
   "تم اختيار المركبة": "Vehicle selected",
-  "استخدام واستعادة المركبة": "Use and Restore Vehicle"
+  "استخدام واستعادة المركبة": "Use and Restore Vehicle",
+  "فلتر الشهر": "Month filter",
+  "اختر شهر المصروفات": "Choose expense month",
+  "كل الأشهر": "All months",
+  "أعمدة الجدول": "Table columns",
+  "إظهار وإخفاء أعمدة الجدول": "Show or hide table columns",
+  "إظهار الكل": "Show all"
 }

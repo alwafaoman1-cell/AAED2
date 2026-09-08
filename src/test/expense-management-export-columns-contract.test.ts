@@ -43,6 +43,23 @@ describe("expense management VAT and configurable export", () => {
     expect(sheet["C6"]).toBeUndefined();
   });
 
+  it("defaults the management list to the current month and allows selecting another month", () => {
+    expect(page).toContain("function currentLocalMonth()");
+    expect(page).toContain("function monthDateRange(month: string)");
+    expect(page).toContain('params.get("month")');
+    expect(page).toContain('type="month"');
+    expect(page).toContain('updateMonth("all")');
+    expect(page).toContain("Object.assign(resolved, monthDateRange(monthFilter))");
+  });
+
+  it("allows table columns to be shown or hidden independently from export columns", () => {
+    expect(page).toContain("visibleColumnKeys");
+    expect(page).toContain("setVisibleColumnKeys");
+    expect(page).toContain("visibleColumns.map");
+    expect(page).toContain("إظهار وإخفاء أعمدة الجدول");
+    expect(page).toContain("selectedExportColumns");
+  });
+
   it("adds supplier invoice date without historical backfill", () => {
     expect(migration).toContain("add column if not exists supplier_invoice_date date");
     expect(migration).not.toMatch(/update\s+public\.expenses/i);
