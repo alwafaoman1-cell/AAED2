@@ -4447,5 +4447,9 @@
   "خصم التسوية يتطلب دفعة محصلة وليست شيكًا": "A settlement discount requires a cleared non-cheque payment",
   "سبب خصم التسوية إلزامي": "The settlement discount reason is required",
   "لم يتم تغيير أي قيمة في الدفعة": "No payment values were changed",
-  "خصم تسوية:": "Settlement Discount:"
+  "خصم تسوية:": "Settlement Discount:",
+  "سيتم استعادة نفس سجل المركبة من الأرشيف عند تأكيد استخدامه، بدون إنشاء مركبة مكررة وبدون تغيير المالك المسجل.": "The same archived vehicle record will be restored after confirmation, without creating a duplicate or changing its registered owner.",
+  "تم اختيار المركبة وسيتم استعادتها عند حفظ أمر العمل": "The vehicle was selected and will be restored when the work order is saved",
+  "تم اختيار المركبة": "Vehicle selected",
+  "استخدام واستعادة المركبة": "Use and Restore Vehicle"
 }

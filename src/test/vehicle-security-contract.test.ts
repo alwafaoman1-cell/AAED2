@@ -44,6 +44,20 @@ describe("vehicle identity guard", () => {
     expect(store).toContain("vehicleId?: string");
   });
 
+  it("requires explicit confirmation and restores an archived vehicle instead of duplicating it", () => {
+    const root = process.cwd();
+    const identity = readFileSync(resolve(root, "src/lib/vehicleIdentity.ts"), "utf8");
+    const workOrderForm = readFileSync(resolve(root, "src/components/workorders/WorkOrderForm.tsx"), "utf8");
+
+    expect(identity).toContain("archived_vehicle_requires_confirmation");
+    expect(identity).toContain("input.reactivateArchived && existing.archived");
+    expect(identity).toContain("patch.archived = false");
+    expect(identity).toContain("patch.archived_at = null");
+    expect(identity).toContain("patch.deleted_at = null");
+    expect(workOrderForm).toContain("reactivateArchived: useExistingVehicle");
+    expect(workOrderForm).toContain("بدون إنشاء مركبة مكررة وبدون تغيير المالك المسجل");
+  });
+
   it("adds duplicate reports without applying unsafe unique constraints", () => {
     const migration = readFileSync(
       resolve(rootPath(), "supabase/migrations/20260626100000_vehicle_identity_duplicate_report.sql"),

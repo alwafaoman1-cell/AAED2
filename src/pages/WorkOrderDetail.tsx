@@ -1716,6 +1716,7 @@ export default function WorkOrderDetail() {
         order={expenseOpen ? order : null}
         open={expenseOpen}
         onOpenChange={setExpenseOpen}
+        onSaved={() => setExpenseTick((value) => value + 1)}
       />
       <WorkOrderExpenseDialog
         order={convertPart ? order : null}

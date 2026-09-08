@@ -514,6 +514,7 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
         color: form.color,
         allowVinCandidate: useExistingVehicle,
         allowDifferentCustomer: true,
+        reactivateArchived: useExistingVehicle,
       });
       resolvedVehicleId = resolved.vehicleId;
       if (resolved.ownershipConflict && vehicleMatch?.customer_id) {
@@ -529,6 +530,8 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
     } catch (error: any) {
       if (String(error?.message || "").includes("vin_candidate_requires_user_confirmation")) {
         toast.error("تم العثور على مركبة محتملة عبر VIN فقط. يجب تأكيد استخدام المركبة الموجودة قبل الحفظ.");
+      } else if (String(error?.message || "").includes("archived_vehicle_requires_confirmation")) {
+        toast.error("المركبة مؤرشفة. اضغط استخدام المركبة الموجودة لاستعادتها وربط أمر العمل بها.");
       } else {
         toast.error(error?.message || "تعذر ربط المركبة أو إنشاؤها");
       }
@@ -803,7 +806,13 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
                 <div className="space-y-1">
                   <p className="font-semibold text-foreground">
                     {vehicleMatch.source === "vin" ? "تم العثور على مركبة محتملة عبر VIN" : "تم العثور على مركبة موجودة"}
+                    {vehicleMatch.archived ? " — مؤرشفة" : ""}
                   </p>
+                  {vehicleMatch.archived && (
+                    <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
+                      سيتم استعادة نفس سجل المركبة من الأرشيف عند تأكيد استخدامه، بدون إنشاء مركبة مكررة وبدون تغيير المالك المسجل.
+                    </p>
+                  )}
                   {vehicleMatch.source === "vin" && (
                     <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
                       لم يتم العثور على تطابق كامل باللوحة والحروف والدولة. هذه نتيجة محتملة عبر VIN فقط، ولن يتم ربطها تلقائيًا إلا بعد الضغط على Use Existing Vehicle.
@@ -870,9 +879,14 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
                       receivedFromCustomerId: currentCustomerId || prev.receivedFromCustomerId,
                       customerRelationshipToVehicle: prev.customerRelationshipToVehicle || "delivered_by",
                     }));
+                    toast.success(vehicleMatch.archived ? "تم اختيار المركبة وسيتم استعادتها عند حفظ أمر العمل" : "تم اختيار المركبة الموجودة");
                   }}
                 >
-                  Use Existing Vehicle
+                  {useExistingVehicle
+                    ? "تم اختيار المركبة"
+                    : vehicleMatch.archived
+                      ? "استخدام واستعادة المركبة"
+                      : "Use Existing Vehicle"}
                 </Button>
               </div>
             </div>

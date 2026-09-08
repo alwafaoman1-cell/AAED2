@@ -22,7 +22,11 @@ import {
   PAYMENT_METHOD_LABELS,
   type PaymentMethod,
 } from "@/lib/financeSettingsStore";
-import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
+import {
+  expenseBelongsToWorkOrder,
+  expensesStore,
+  type ExpenseRecord,
+} from "@/lib/expensesStore";
 import { logActivity } from "@/lib/auditLogStore";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { syncWorkOrderInvoiceFromExpenses } from "@/lib/workOrderInvoiceSync";
@@ -183,6 +187,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
 
   const saveAll = async () => {
     if (!order) return;
+    const canonicalWorkOrderId = order.cloudId || order.id;
+    const visibleWorkOrderNumber = order.displayNumber || order.id;
     const errors: string[] = [];
     items.forEach((it, idx) => {
       const amt = computeAmount(it);
@@ -230,8 +236,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             supplierInvoiceNumber: it.supplierInvoiceNumber?.trim() || undefined,
             description: `${it.description ? it.description + " — " : ""}${p.name}${p.partNumber ? ` (#${p.partNumber})` : ""}`,
             photo: null,
-            linkedWorkOrderId: order.cloudId || order.id,
-            sourceWorkOrderId: order.cloudId || order.id,
+            linkedWorkOrderId: canonicalWorkOrderId,
+            sourceWorkOrderId: visibleWorkOrderNumber,
             customerId: order.customerId,
             vehicleId: order.vehicleId,
             claimId: order.claimId,
@@ -264,8 +270,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           supplierTaxNumber: it.supplierTaxNumber || undefined,
           supplierInvoiceNumber: it.supplierInvoiceNumber?.trim() || undefined,
           description: it.description, photo: null,
-          linkedWorkOrderId: order.cloudId || order.id,
-          sourceWorkOrderId: order.cloudId || order.id,
+          linkedWorkOrderId: canonicalWorkOrderId,
+          sourceWorkOrderId: visibleWorkOrderNumber,
           customerId: order.customerId,
           vehicleId: order.vehicleId,
           claimId: order.claimId,
@@ -291,6 +297,12 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     }
     } catch (error: any) {
       toast.error(error?.message || "تعذر حفظ المصروفات في Supabase");
+      return;
+    }
+
+    const unlinkedRecords = createdRecords.filter((expense) => !expenseBelongsToWorkOrder(expense, order));
+    if (createdRecords.length === 0 || unlinkedRecords.length > 0) {
+      toast.error("تم رفض إنشاء الفاتورة لأن ربط المصروفات بأمر العمل لم يكتمل. لم يتم عرض نجاح وهمي.");
       return;
     }
 

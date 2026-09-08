@@ -5,7 +5,7 @@
 // تُصدر فاتورته من شاشة المطالبة (insurance_invoices) لتجنّب الإيراد المزدوج و VAT مكرر.
 
 import { salesStore, type SalesDoc, type SalesLineItem } from "./salesStore";
-import { expensesStore, type ExpenseRecord } from "./expensesStore";
+import { getExpensesForWorkOrder, type ExpenseRecord } from "./expensesStore";
 import type { WorkOrder } from "./workOrdersStore";
 
 const VAT_PCT = 5;
@@ -33,15 +33,13 @@ function cryptoRandom() {
 }
 
 /** استخراج قطع غيار سند مصروف لأمر عمل (كل سجل = قطعة واحدة) */
-function partsFromExpenses(orderId: string): ExpenseRecord[] {
-  return expensesStore
-    .getAll()
-    .filter(
-      (e) =>
-        e.linkedWorkOrderId === orderId &&
-        e.partName &&
-        (e.unitSellPrice ?? 0) > 0,
-    );
+function partsFromExpenses(order: WorkOrder): ExpenseRecord[] {
+  // Expense rows are canonically linked by the Supabase work-order UUID, while
+  // older rows can still carry the visible WO number. Use the shared matcher so
+  // invoice sync and the work-order financial panel always see the same rows.
+  return getExpensesForWorkOrder(order).filter(
+    (expense) => expense.partName && (expense.unitSellPrice ?? 0) > 0,
+  );
 }
 
 /** البحث عن فاتورة موجودة مرتبطة بأمر العمل */
@@ -102,7 +100,7 @@ export interface SyncResult {
 export function syncWorkOrderInvoiceFromExpenses(order: WorkOrder): SyncResult {
   // حارس مركزي: أوامر العمل التأمينية تُفوتر من شاشة المطالبة فقط
   assertNotInsuranceOrder(order);
-  const parts = partsFromExpenses(order.id);
+  const parts = partsFromExpenses(order);
   const partLines = parts.map(partToLineItem);
 
   let inv = findInvoiceForOrder(order.id);

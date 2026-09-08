@@ -12,6 +12,7 @@ export interface VehicleIdentityInput {
   vehicleId?: string | null;
   allowVinCandidate?: boolean;
   allowDifferentCustomer?: boolean;
+  reactivateArchived?: boolean;
   customerId?: string | null;
   plate?: string | null;
   plateNumber?: string | null;
@@ -38,6 +39,7 @@ export interface VehicleIdentityMatch {
   vin_number: string | null;
   customer_name?: string | null;
   customer_phone?: string | null;
+  archived: boolean;
   source: "explicit" | "plate" | "vin";
 }
 
@@ -69,6 +71,7 @@ function mapVehicle(row: any, source: VehicleIdentityMatch["source"]): VehicleId
     vin_number: row.vin_number || null,
     customer_name: row.customers?.name || null,
     customer_phone: row.customers?.phone || null,
+    archived: !!row.archived || !!row.archived_at || !!row.deleted_at,
     source,
   };
 }
@@ -85,6 +88,14 @@ async function updateExistingVehicleFromInput(
   const model = String(input.model || "").trim();
   const color = String(input.color || "").trim();
   const year = input.year ? Number(input.year) || null : null;
+
+  if (input.reactivateArchived && existing.archived) {
+    patch.archived = false;
+    patch.archived_at = null;
+    patch.archived_reason = null;
+    patch.deleted_at = null;
+    patch.deleted_by = null;
+  }
 
   if (plate.digits && plate.digits !== existing.plate_number) patch.plate_number = plate.digits;
   if (plate.letters && plate.letters !== existing.plate_letters) patch.plate_letters = plate.letters;
@@ -121,7 +132,7 @@ export async function findExistingVehicle(input: VehicleIdentityInput): Promise<
   if (input.vehicleId && isUuid(input.vehicleId)) {
     const { data } = await supabase
       .from("vehicles")
-      .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,customers(name,phone)")
+      .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,archived,archived_at,deleted_at,customers(name,phone)")
       .eq("tenant_id", tenantId)
       .eq("id", input.vehicleId)
       .maybeSingle();
@@ -140,7 +151,7 @@ export async function findExistingVehicle(input: VehicleIdentityInput): Promise<
     if (row?.id) {
       const { data: full } = await supabase
         .from("vehicles")
-        .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,customers(name,phone)")
+        .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,archived,archived_at,deleted_at,customers(name,phone)")
         .eq("tenant_id", tenantId)
         .eq("id", row.id)
         .maybeSingle();
@@ -153,7 +164,7 @@ export async function findExistingVehicle(input: VehicleIdentityInput): Promise<
   if (vin) {
     const { data } = await supabase
       .from("vehicles")
-      .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,customers(name,phone)")
+      .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,archived,archived_at,deleted_at,customers(name,phone)")
       .eq("tenant_id", tenantId)
       .or(`vin.eq.${vin},vin_number.eq.${vin}`)
       .limit(1)
@@ -182,6 +193,9 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
   const existing = await findExistingVehicle(input);
   if (existing?.id) {
     const sameCustomer = !existing.customer_id || existing.customer_id === input.customerId;
+    if (existing.archived && !input.reactivateArchived) {
+      throw new Error("archived_vehicle_requires_confirmation");
+    }
     if (input.vehicleId && input.vehicleId !== existing.id) {
       throw new Error(vehicleSelectionRequiredMessage());
     }
@@ -197,6 +211,7 @@ export async function ensureVehicleForCustomer(input: VehicleIdentityInput & { c
       vehicleId: existing.id,
       existing,
       ownershipConflict: !!existing.customer_id && existing.customer_id !== input.customerId,
+      reactivated: !!input.reactivateArchived && existing.archived,
       created: false,
     };
   }

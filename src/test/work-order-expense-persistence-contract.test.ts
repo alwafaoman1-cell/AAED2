@@ -27,16 +27,17 @@ describe("work-order expense persistence and profitability", () => {
     const store = read("src/lib/expensesStore.ts");
     expect(store).toContain("work_order_id: e.linkedWorkOrderId && isUuid(e.linkedWorkOrderId)");
     expect(store).toContain("r.work_order_id || r.linked_work_order_id");
-    for (const path of [
-      "src/components/workorders/WorkOrderExpenseDialog.tsx",
-      "src/components/workorders/WorkOrderBulkExpenseDialog.tsx",
-    ]) {
-      const source = read(path);
-      expect(source).toContain("linkedWorkOrderId: order.cloudId || order.id");
-      expect(source).toContain("sourceWorkOrderId: order.cloudId || order.id");
-      expect(source).toContain("vehicleId: order.vehicleId");
-      expect(source).toContain("claimId: order.claimId");
-    }
+    const single = read("src/components/workorders/WorkOrderExpenseDialog.tsx");
+    expect(single).toContain("linkedWorkOrderId: order.cloudId || order.id");
+    expect(single).toContain("vehicleId: order.vehicleId");
+    expect(single).toContain("claimId: order.claimId");
+
+    const bulk = read("src/components/workorders/WorkOrderBulkExpenseDialog.tsx");
+    expect(bulk).toContain("const canonicalWorkOrderId = order.cloudId || order.id");
+    expect(bulk).toContain("linkedWorkOrderId: canonicalWorkOrderId");
+    expect(bulk).toContain("sourceWorkOrderId: visibleWorkOrderNumber");
+    expect(bulk).toContain("vehicleId: order.vehicleId");
+    expect(bulk).toContain("claimId: order.claimId");
   });
 
   it("backfills only exact tenant-scoped legacy work-order links without changing financial values", () => {
@@ -96,6 +97,18 @@ describe("work-order expense persistence and profitability", () => {
     expect(source).toContain("supplierInvoiceNumber?: string");
     expect(source).toContain("supplierInvoiceNumber: it.supplierInvoiceNumber?.trim() || undefined");
     expect(source).toContain("رقم فاتورة المورد");
+  });
+
+  it("uses the shared UUID/display-number matcher before syncing a work-order invoice", () => {
+    const dialog = read("src/components/workorders/WorkOrderBulkExpenseDialog.tsx");
+    const sync = read("src/lib/workOrderInvoiceSync.ts");
+    const detail = read("src/pages/WorkOrderDetail.tsx");
+
+    expect(dialog).toContain("expenseBelongsToWorkOrder(expense, order)");
+    expect(dialog).toContain("createdRecords.length === 0 || unlinkedRecords.length > 0");
+    expect(sync).toContain("getExpensesForWorkOrder(order)");
+    expect(sync).not.toContain("e.linkedWorkOrderId === orderId");
+    expect(detail).toContain("onSaved={() => setExpenseTick((value) => value + 1)}");
   });
 
   it("uses the cloud classification tree for every work-order expense write", () => {

@@ -140,7 +140,7 @@ export default function InsuranceIndependentEstimates() {
           const { data: tenant } = await supabase.rpc("get_user_tenant_id");
           const { data: row } = await supabase
             .from("vehicles" as any)
-            .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,customers(name,phone)")
+            .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin,vin_number,archived,archived_at,deleted_at,customers(name,phone)")
             .eq("tenant_id", tenant as string)
             .eq("plate_number", digits)
             .limit(1)
@@ -161,6 +161,7 @@ export default function InsuranceIndependentEstimates() {
               vin_number: vehicleRow.vin_number || null,
               customer_name: vehicleRow.customers?.name || null,
               customer_phone: vehicleRow.customers?.phone || null,
+              archived: !!vehicleRow.archived || !!vehicleRow.archived_at || !!vehicleRow.deleted_at,
               source: "plate",
             };
           }
