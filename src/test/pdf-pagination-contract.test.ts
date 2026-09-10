@@ -24,12 +24,12 @@ describe("PDF pagination contract", () => {
     expect(renderer).not.toContain('page.style.overflow = "hidden"');
   });
 
-  it("keeps work order PDF VAT and totals decimal-safe", () => {
+  it("keeps work order money formatting decimal-safe without treating it as an invoice", () => {
     const generator = read("src/lib/pdfGenerator.ts");
 
-    expect(generator).toContain("const vat = Number((subtotal * (s.vatRate / 100)).toFixed(3))");
-    expect(generator).toContain("const grandTotal = Number((subtotal + vat).toFixed(3))");
-    expect(generator).toContain("const balanceDue = Number(Math.max(0, grandTotal - deposit).toFixed(3))");
+    expect(generator).toContain("const laborBalance = Math.max(0, laborCharge - deposit)");
+    expect(generator).toContain("This work order is not a final tax invoice.");
+    expect(generator).toContain('const financialSection = isInsurance ? ""');
     expect(generator).not.toContain("Math.round(subtotal");
     expect(generator).not.toContain("Math.round(vat");
   });

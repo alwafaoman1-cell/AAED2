@@ -15,6 +15,7 @@ import { useDailyTasksReminder } from "@/hooks/useDailyTasksReminder";
 import PortalNotesRealtimeListener from "./PortalNotesRealtimeListener";
 import UpdateNotice from "./UpdateNotice";
 import FeatureGate from "./FeatureGate";
+import VehicleReturnContextBar from "./vehicles/VehicleReturnContextBar";
 
 export default function AppLayout() {
   // مزامنة فورية مع جميع الجداول الحرجة (المطالبات/الفواتير/أوامر العمل/الدفعات)
@@ -56,6 +57,7 @@ export default function AppLayout() {
           </div>
         </div>
         <AutoBreadcrumb />
+        <VehicleReturnContextBar />
         <div className="p-3 md:p-6 lg:p-8">
           <FeatureGate>
             <Outlet />

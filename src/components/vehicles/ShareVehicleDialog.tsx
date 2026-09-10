@@ -17,6 +17,7 @@ import { openSanitizedPdfWindow, openAndPrintWindow } from "@/lib/safePdfWindow"
 import { buildPublicUrl } from "@/lib/publicAccessSettingsStore";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import { toast } from "sonner";
+import { logVehicleAudit } from "@/lib/vehicleAudit";
 
 interface Props {
   vehicle: Vehicle;
@@ -73,6 +74,7 @@ export default function ShareVehicleDialog({ vehicle, open, onOpenChange }: Prop
   async function copyLink() {
     try {
       await navigator.clipboard.writeText(publicUrl);
+      if (vehicle.cloudId) await logVehicleAudit(vehicle.cloudId, "vehicle_share_link_copied", { channel: "copy" });
       toast.success("تم نسخ الرابط");
     } catch {
       toast.error("تعذر النسخ");
@@ -85,7 +87,8 @@ export default function ShareVehicleDialog({ vehicle, open, onOpenChange }: Prop
       `${vehicle.type}\n` +
       `يمكنك الاطلاع على البطاقة الكاملة (الصور قبل/بعد، سجل الإصلاح، المطالبات) من خلال الرابط:\n${publicUrl}`;
     try {
-      await sendWhatsAppMessage({ message: text, phone: vehicle.ownerPhone, vehicleId: vehicle.id, recipientName: vehicle.owner });
+      await sendWhatsAppMessage({ message: text, phone: vehicle.ownerPhone, vehicleId: vehicle.cloudId || vehicle.id, recipientName: vehicle.owner });
+      if (vehicle.cloudId) await logVehicleAudit(vehicle.cloudId, "vehicle_file_shared", { channel: "whatsapp" });
       toast.success("تم إرسال بطاقة السيارة عبر واتساب");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");

@@ -2,8 +2,9 @@ import { createStore } from "./createStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { customersStore } from "@/lib/customersStore";
-import { ensureVehicleForCustomer, normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
+import { ensureVehicleForCustomer, findExistingVehicle, normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
 import { isUuid } from "@/lib/uuid";
+import { logVehicleAudit } from "@/lib/vehicleAudit";
 
 export interface VehiclePhotoPair {
   id: string;
@@ -198,6 +199,53 @@ export async function refreshVehiclesFromCloud(): Promise<void> {
   return fetchVehiclesFromCloud();
 }
 
+export interface VehicleArchivePage {
+  rows: Vehicle[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function fetchVehicleArchivePage(input: { page: number; pageSize: number; search?: string; scope?: "active" | "all" | "archived" }): Promise<VehicleArchivePage> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+  const page = Math.max(1, Number(input.page) || 1);
+  const pageSize = Math.max(10, Math.min(100, Number(input.pageSize) || 25));
+  const search = String(input.search || "").trim();
+  const safeSearch = search.replace(/[(),]/g, " ").replace(/%/g, "").trim();
+  let customerIds: string[] = [];
+  if (safeSearch.length >= 2) {
+    const { data: customers, error: customerError } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .or(`name.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%,customer_code.ilike.%${safeSearch}%`)
+      .limit(100);
+    if (customerError) throw customerError;
+    customerIds = (customers || []).map((row) => row.id);
+  }
+
+  let query = (supabase.from("vehicles") as any)
+    .select("id,plate_number,plate_letters,plate_country,brand,model,year,color,mileage,vin,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,deleted_at,customer_id,customers(name,phone)", { count: "exact" })
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null);
+  if (input.scope === "active") query = query.eq("archived", false);
+  if (input.scope === "archived") query = query.eq("archived", true);
+  if (safeSearch) {
+    const filters = [
+      `plate_number.ilike.%${safeSearch}%`, `plate_letters.ilike.%${safeSearch}%`,
+      `vin.ilike.%${safeSearch}%`, `vin_number.ilike.%${safeSearch}%`,
+      `brand.ilike.%${safeSearch}%`, `model.ilike.%${safeSearch}%`,
+    ];
+    if (customerIds.length) filters.push(`customer_id.in.(${customerIds.join(",")})`);
+    query = query.or(filters.join(","));
+  }
+  const from = (page - 1) * pageSize;
+  const { data, error, count } = await query.order("updated_at", { ascending: false }).range(from, from + pageSize - 1);
+  if (error) throw error;
+  return { rows: (data || []).map(rowToVehicle), total: Number(count || 0), page, pageSize };
+}
+
 function buildFullPlate(r: any) {
   return [r.plate_letters, r.plate_number].filter(Boolean).join(" ").trim();
 }
@@ -236,6 +284,31 @@ async function readVehicleById(tenantId: string, id: string): Promise<Vehicle> {
   if (error) throw error;
   if (!data?.id || !isUuid(data.id)) throw new Error("تعذر تأكيد حفظ المركبة في Supabase");
   return rowToVehicle(data);
+}
+
+/**
+ * Resolve the canonical cloud vehicle behind a route reference.
+ * UUID is the primary identity. Plate lookup exists only to keep historical
+ * bookmarks working while callers migrate to /vehicles/:vehicleId.
+ */
+export async function fetchVehicleByRouteRef(routeRef: string, tenantId?: string | null): Promise<Vehicle | null> {
+  const resolvedTenantId = tenantId || await getCurrentTenantId();
+  const cleanRef = decodeURIComponent(String(routeRef || "")).trim();
+  if (!resolvedTenantId || !cleanRef) return null;
+
+  let vehicleId = isUuid(cleanRef) ? cleanRef : null;
+  if (!vehicleId) {
+    const match = await findExistingVehicle({ plate: cleanRef });
+    vehicleId = match?.id && isUuid(match.id) ? match.id : null;
+  }
+  if (!vehicleId) return null;
+
+  try {
+    return await readVehicleById(resolvedTenantId, vehicleId);
+  } catch (error: any) {
+    if (/PGRST116|0 rows|not found/i.test(`${error?.code || ""} ${error?.message || ""}`)) return null;
+    throw error;
+  }
 }
 
 function putVehicleInCache(saved: Vehicle, previousIds: string[] = []) {
@@ -363,96 +436,6 @@ export async function saveVehicleToCloud(
   return saved;
 }
 
-async function archiveVehicleOperationalLinks(tenantId: string, vehicle: Vehicle, cloudId: string, archivedAt: string, reason: string) {
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData.user?.id || null;
-  const safeUpdate = async (label: string, query: PromiseLike<{ error: any }>) => {
-    const { error } = await query;
-    if (error) console.warn(`[vehicle operational archive] ${label}`, error);
-  };
-
-  const { data: workOrders } = await supabase
-    .from("job_orders")
-    .select("id,order_number")
-    .eq("tenant_id", tenantId)
-    .eq("vehicle_id", cloudId);
-  const workOrderKeys = Array.from(new Set(((workOrders || []) as any[])
-    .flatMap((row) => [row.id, row.order_number])
-    .filter(Boolean)
-    .map(String)));
-
-  const { data: invoices } = workOrderKeys.length
-    ? await (supabase.from("sales_documents") as any)
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .in("work_order_id", workOrderKeys)
-    : { data: [] as any[] };
-  const invoiceIds = ((invoices || []) as any[]).map((row) => row.id).filter(Boolean);
-
-  const { data: claims } = await supabase
-    .from("insurance_claims" as any)
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("vehicle_id", cloudId);
-  const claimIds = ((claims || []) as any[]).map((row) => row.id).filter(Boolean);
-
-  await safeUpdate("job_orders", (supabase.from("job_orders") as any)
-    .update({ archived_at: archivedAt, deleted_at: archivedAt, deleted_by: userId } as any)
-    .eq("tenant_id", tenantId)
-    .eq("vehicle_id", cloudId));
-
-  await safeUpdate("insurance_claims", (supabase.from("insurance_claims" as any) as any)
-    .update({ status: "cancelled", deleted_at: archivedAt } as any)
-    .eq("tenant_id", tenantId)
-    .eq("vehicle_id", cloudId));
-
-  await safeUpdate("expenses_by_vehicle_id", (supabase.from("expenses") as any)
-    .update({ archived_at: archivedAt } as any)
-    .eq("tenant_id", tenantId)
-    .eq("vehicle_id", cloudId));
-
-  if (vehicle.plate) {
-    await safeUpdate("expenses_by_plate", (supabase.from("expenses") as any)
-      .update({ archived_at: archivedAt } as any)
-      .eq("tenant_id", tenantId)
-      .eq("linked_vehicle_plate", vehicle.plate));
-  }
-
-  if (workOrderKeys.length) {
-    await safeUpdate("expenses_by_work_order", (supabase.from("expenses") as any)
-      .update({ archived_at: archivedAt } as any)
-      .eq("tenant_id", tenantId)
-      .in("linked_work_order_id", workOrderKeys));
-
-    await safeUpdate("sales_documents", (supabase.from("sales_documents") as any)
-      .update({ status: "cancelled", archived_at: archivedAt } as any)
-      .eq("tenant_id", tenantId)
-      .in("work_order_id", workOrderKeys));
-  }
-
-  if (invoiceIds.length) {
-    await safeUpdate("sales_payments", (supabase.from("sales_payments" as any) as any)
-      .update({ archived_at: archivedAt } as any)
-      .eq("tenant_id", tenantId)
-      .in("sales_document_id", invoiceIds));
-  }
-
-  if (claimIds.length) {
-    await safeUpdate("claim_payments", (supabase.from("claim_payments" as any) as any)
-      .update({ archived_at: archivedAt } as any)
-      .eq("tenant_id", tenantId)
-      .in("claim_id", claimIds));
-  }
-
-  console.info("[vehicle operational archive] completed", {
-    vehicleId: cloudId,
-    reason,
-    workOrders: workOrderKeys.length,
-    invoices: invoiceIds.length,
-    claims: claimIds.length,
-  });
-}
-
 export async function deleteVehicleFromCloud(vehicle: Vehicle, reason = "Soft delete vehicle"): Promise<Vehicle> {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
@@ -462,7 +445,6 @@ export async function deleteVehicleFromCloud(vehicle: Vehicle, reason = "Soft de
     KNOWN_CLOUD.get(normPlate(vehicle.plate));
   if (!cloudId || !isUuid(cloudId)) throw new Error("تعذر تحديد vehicle_id للحذف");
   const deletedAt = new Date().toISOString();
-  const { data: userData } = await supabase.auth.getUser();
   const { data, error } = await supabase
     .from("vehicles")
     .update({
@@ -478,7 +460,13 @@ export async function deleteVehicleFromCloud(vehicle: Vehicle, reason = "Soft de
     .maybeSingle();
   if (error) throw error;
   if (!data?.id) throw new Error("لم يتم حذف المركبة في Supabase");
-  await archiveVehicleOperationalLinks(tenantId, vehicle, cloudId, deletedAt, reason);
+  await logVehicleAudit(cloudId, "vehicle_archived", { reason, archived_at: deletedAt }).catch((auditError) => {
+    console.warn("[vehiclesStore] vehicle archive audit failed", auditError);
+  });
+  // Archiving a vehicle is a presentation/lifecycle state only. Its operational
+  // and financial history is immutable source data and must remain untouched.
+  // In particular, never cancel claims/invoices or archive payments/expenses
+  // as a side effect of moving a vehicle to the archive view.
   const archivedVehicle = { ...vehicle, archived: true, archivedAt: deletedAt, archivedReason: reason };
   suppressCloudMutation = true;
   try {

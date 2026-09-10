@@ -436,7 +436,7 @@ const App = () => (
                 <Route path="/insurance/:id" element={<InsuranceClaimDetail />} />
               </Route>
               <Route path="/vehicles" element={<Vehicles />} />
-              <Route path="/vehicles/:plate" element={<VehicleDetail />} />
+              <Route path="/vehicles/:vehicleId" element={<VehicleDetail />} />
               <Route path="/customers" element={<Customers />} />
               <Route path="/tasks" element={<DailyTasks />} />
               <Route path="/daily-log" element={<DailyLog />} />

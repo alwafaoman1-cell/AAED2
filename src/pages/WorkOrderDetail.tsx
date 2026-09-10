@@ -685,6 +685,8 @@ export default function WorkOrderDetail() {
       partsCost: order!.partsCost,
       extraExpenses: order!.extraExpenses,
       depositApplied: order!.depositApplied,
+      workItems: order!.workItems,
+      partsNeeded: order!.partsNeeded,
       photos: photos.map((p) => ({ phase: p.phase, dataUrl: p.dataUrl, caption: p.caption })),
       customerSignatureDataUrl,
       customerSignatureName,

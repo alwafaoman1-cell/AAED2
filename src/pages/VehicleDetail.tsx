@@ -21,11 +21,12 @@ import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import PhotoLightbox, { type LightboxPhoto } from "@/components/vehicles/PhotoLightbox";
 import VehicleStatusTimelineDialog from "@/components/vehicles/VehicleStatusTimelineDialog";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
-import { saveVehicleToCloud, vehiclesStore, refreshVehiclesFromCloud, type Vehicle, type VehiclePhotoPair } from "@/lib/vehiclesStore";
-import { getWorkOrders, subscribeWorkOrders, refreshWorkOrdersFromCloud, type WorkOrder, STAGE_LABELS, type StagePhase } from "@/lib/workOrdersStore";
+import VehicleFilePrintDialog from "@/components/vehicles/VehicleFilePrintDialog";
+import { fetchVehicleByRouteRef, saveVehicleToCloud, vehiclesStore, type Vehicle, type VehiclePhotoPair } from "@/lib/vehiclesStore";
+import { getWorkOrders, subscribeWorkOrders, type WorkOrder, STAGE_LABELS, type StagePhase } from "@/lib/workOrdersStore";
 import { customersStore } from "@/lib/customersStore";
-import { getVehicleCardHtml, getWorkOrderHtml, getStagePhotosAlbumHtml } from "@/lib/pdfGenerator";
-import { canEdit } from "@/lib/permissions";
+import { getWorkOrderHtml, getStagePhotosAlbumHtml } from "@/lib/pdfGenerator";
+import { canEdit, canManageFinance, canViewAuditLog } from "@/lib/permissions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
@@ -34,54 +35,123 @@ import { formatDateLatin } from "@/lib/numberUtils";
 import { queryKeys } from "@/lib/queryKeys";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTranslation } from "react-i18next";
-import { fetchVehicle360Snapshot } from "@/lib/vehicle360";
+import {
+  composeVehicle360Snapshot,
+  fetchVehicle360Audit,
+  fetchVehicle360Communications,
+  fetchVehicle360Estimates,
+  fetchVehicle360Media,
+  fetchVehicle360Signatures,
+  fetchVehicle360Snapshot,
+} from "@/lib/vehicle360";
 import {
   VehicleAuditPanel,
   VehicleClaimsPanel,
   VehicleFinancialPanel,
   VehicleMediaPanel,
   VehicleOverviewPanel,
+  VehicleSignaturesPanel,
+  VehicleCommunicationsPanel,
   VehicleTimelinePanel,
   VehicleVisitsPanel,
 } from "@/components/vehicles/Vehicle360Panels";
+import { getVehicle360FileHtml, type VehicleFilePrintOptions } from "@/lib/vehicle360Print";
+import { logVehicleAudit } from "@/lib/vehicleAudit";
 
 export default function VehicleDetail() {
-  const { plate } = useParams<{ plate: string }>();
+  const { vehicleId } = useParams<{ vehicleId: string }>();
   const navigate = useNavigate();
-  const decodedPlate = plate ? decodeURIComponent(plate) : "";
+  const routeVehicleRef = vehicleId ? decodeURIComponent(vehicleId) : "";
   const { profile } = useAuth();
   const { i18n } = useTranslation();
   const english = i18n.language.toLowerCase().startsWith("en");
   const tx = (ar: string, en: string) => english ? en : ar;
+  const allowFinance = canManageFinance();
+  const allowAudit = canViewAuditLog();
 
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
+  const [activeTab, setActiveTab] = useState("overview");
   useEffect(() => vehiclesStore.subscribe(() => setTick((t) => t + 1)), []);
   // Subscribe to WO store so photo changes immediately reflect here
   useEffect(() => subscribeWorkOrders(() => setTick((t) => t + 1)), []);
+  const cachedVehicle = vehiclesStore.getById(routeVehicleRef);
+  const vehicleRecordQuery = useQuery({
+    queryKey: queryKeys.vehicles.detail(routeVehicleRef),
+    queryFn: () => fetchVehicleByRouteRef(routeVehicleRef, profile?.tenant_id),
+    enabled: Boolean(profile?.tenant_id && routeVehicleRef),
+    staleTime: 60_000,
+    gcTime: 600_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const vehicle = vehicleRecordQuery.data || cachedVehicle;
+  const decodedPlate = vehicle?.plate || cachedVehicle?.plate || routeVehicleRef;
   useEffect(() => {
-    void refreshVehiclesFromCloud();
-  }, []);
-
-  const vehicle = useMemo(() => vehiclesStore.getById(decodedPlate), [decodedPlate, tick]);
+    if (!vehicle?.cloudId || routeVehicleRef === vehicle.cloudId) return;
+    navigate(`/vehicles/${vehicle.cloudId}`, { replace: true });
+  }, [navigate, routeVehicleRef, vehicle?.cloudId]);
   const vehicle360Query = useQuery({
-    queryKey: queryKeys.vehicle360.detail(profile?.tenant_id, vehicle?.cloudId),
-    queryFn: () => fetchVehicle360Snapshot(profile!.tenant_id, vehicle!.cloudId!, vehicle!.plate),
+    queryKey: [...queryKeys.vehicle360.detail(profile?.tenant_id, vehicle?.cloudId), allowFinance ? "financial" : "restricted"],
+    queryFn: () => fetchVehicle360Snapshot(profile!.tenant_id, vehicle!.cloudId!, vehicle!.plate, { includeFinancial: allowFinance }),
     enabled: Boolean(profile?.tenant_id && vehicle?.cloudId),
     staleTime: 60_000,
     gcTime: 600_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  const vehicle360 = vehicle360Query.data;
-  const allOrders = useMemo<WorkOrder[]>(() => getWorkOrders(), [tick]);
-  const orders = useMemo(
-    () => allOrders.filter((o) => o.plate === decodedPlate).sort((a, b) => b.entryDate.localeCompare(a.entryDate)),
-    [allOrders, decodedPlate],
-  );
+  const baseVehicle360 = vehicle360Query.data;
+  const cloudRefs = useMemo(() => ({
+    workOrderIds: (baseVehicle360?.workOrders || []).map((row) => row.id).filter(Boolean),
+    claimIds: (baseVehicle360?.claims || []).map((row) => row.id).filter(Boolean),
+    entryIds: (baseVehicle360?.entries || []).map((row) => row.id).filter(Boolean),
+  }), [baseVehicle360]);
+  const sectionQueryOptions = { staleTime: 60_000, gcTime: 600_000, refetchOnWindowFocus: false as const, refetchOnReconnect: false as const };
+  const mediaQuery = useQuery({
+    queryKey: [...queryKeys.vehicle360.detail(profile?.tenant_id, vehicle?.cloudId), "media"],
+    queryFn: () => fetchVehicle360Media(profile!.tenant_id, vehicle!.cloudId!, cloudRefs.workOrderIds, cloudRefs.claimIds),
+    enabled: Boolean(baseVehicle360 && profile?.tenant_id && vehicle?.cloudId && ["overview", "activity", "media360"].includes(activeTab)),
+    ...sectionQueryOptions,
+  });
+  const estimatesQuery = useQuery({
+    queryKey: [...queryKeys.vehicle360.detail(profile?.tenant_id, vehicle?.cloudId), "estimates"],
+    queryFn: () => fetchVehicle360Estimates(profile!.tenant_id, vehicle!.cloudId!, cloudRefs.workOrderIds, cloudRefs.claimIds),
+    enabled: Boolean(baseVehicle360 && profile?.tenant_id && vehicle?.cloudId && ["activity", "claims"].includes(activeTab)),
+    ...sectionQueryOptions,
+  });
+  const signaturesQuery = useQuery({
+    queryKey: [...queryKeys.vehicle360.detail(profile?.tenant_id, vehicle?.cloudId), "signatures"],
+    queryFn: () => fetchVehicle360Signatures(profile!.tenant_id, cloudRefs.entryIds, baseVehicle360!.handovers),
+    enabled: Boolean(baseVehicle360 && profile?.tenant_id && ["activity", "signatures"].includes(activeTab)),
+    ...sectionQueryOptions,
+  });
+  const communicationsQuery = useQuery({
+    queryKey: [...queryKeys.vehicle360.detail(profile?.tenant_id, vehicle?.cloudId), "communications"],
+    queryFn: () => fetchVehicle360Communications(profile!.tenant_id, vehicle!.cloudId!, cloudRefs.workOrderIds, cloudRefs.claimIds),
+    enabled: Boolean(baseVehicle360 && profile?.tenant_id && vehicle?.cloudId && ["activity", "communications"].includes(activeTab)),
+    ...sectionQueryOptions,
+  });
+  const auditQuery = useQuery({
+    queryKey: [...queryKeys.vehicle360.detail(profile?.tenant_id, vehicle?.cloudId), "audit"],
+    queryFn: () => fetchVehicle360Audit(profile!.tenant_id, vehicle!.cloudId!, cloudRefs.workOrderIds, cloudRefs.claimIds, cloudRefs.entryIds),
+    enabled: Boolean(allowAudit && baseVehicle360 && profile?.tenant_id && vehicle?.cloudId && ["activity", "audit"].includes(activeTab)),
+    ...sectionQueryOptions,
+  });
+  const vehicle360 = useMemo(() => baseVehicle360 ? composeVehicle360Snapshot(baseVehicle360, {
+    media: mediaQuery.data || [],
+    estimates: estimatesQuery.data || [],
+    signatures: signaturesQuery.data || [],
+    communications: communicationsQuery.data || [],
+    auditLogs: auditQuery.data || [],
+  }) : undefined, [baseVehicle360, mediaQuery.data, estimatesQuery.data, signaturesQuery.data, communicationsQuery.data, auditQuery.data]);
+  const allOrders: WorkOrder[] = getWorkOrders();
+  const orders = allOrders
+    .filter((o) => (vehicle?.cloudId && o.vehicleId === vehicle.cloudId) || o.plate === decodedPlate)
+    .sort((a, b) => b.entryDate.localeCompare(a.entryDate));
 
   const [editOpen, setEditOpen] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
+  const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
   const [pdfHtml, setPdfHtml] = useState("");
   const [pdfTitle, setPdfTitle] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
@@ -132,11 +202,7 @@ export default function VehicleDetail() {
     setSyncState("syncing");
     try {
       await qc.invalidateQueries({ queryKey: queryKeys.vehicle360.detail(profile?.tenant_id, vehicle?.cloudId), refetchType: "active" });
-      await Promise.all([
-        refreshVehiclesFromCloud().catch(() => {}),
-        refreshWorkOrdersFromCloud().catch(() => {}),
-      ]);
-      setTick((t) => t + 1);
+      await vehicleRecordQuery.refetch();
       setSyncState("synced");
       setLastSyncAt(new Date());
       toast.success(tx("تم تحديث سجل المركبة من المصادر السحابية", "Vehicle history refreshed from cloud sources"));
@@ -146,12 +212,16 @@ export default function VehicleDetail() {
     }
   }
 
+  if (!vehicle && vehicleRecordQuery.isLoading) {
+    return <div className="flex items-center justify-center py-24 text-muted-foreground"><Loader2 className="me-2 h-5 w-5 animate-spin" />{tx("جاري تحميل ملف المركبة...", "Loading vehicle file...")}</div>;
+  }
+
   if (!vehicle) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <Car size={48} className="text-muted-foreground/30 mb-4" />
         <h2 className="text-lg font-semibold text-foreground mb-2">السيارة غير موجودة</h2>
-        <p className="text-sm text-muted-foreground mb-6">رقم اللوحة: {decodedPlate}</p>
+        <p className="text-sm text-muted-foreground mb-6">{tx("مرجع المركبة", "Vehicle reference")}: {routeVehicleRef}</p>
         <Button onClick={() => smartBack(navigate, "/vehicles")} variant="outline">العودة للأرشيف</Button>
       </div>
     );
@@ -229,7 +299,7 @@ export default function VehicleDetail() {
 
   function openWoPdf(o: WorkOrder) {
     const html = getWorkOrderHtml({
-      orderNumber: o.id, date: o.entryDate, customerName: o.customer,
+      orderNumber: o.displayNumber || o.id, date: o.entryDate, customerName: o.customer,
       customerPhone: o.phone, vehicleType: o.vehicleType, model: o.model,
       year: o.year, plateNumber: o.plate, vin: o.vin, insurance: o.insurance,
       claimNumber: o.claimNumber, serviceType: o.serviceType, technician: o.technician,
@@ -239,54 +309,12 @@ export default function VehicleDetail() {
       laborCost: o.laborCost, partsCost: o.partsCost,
       extraExpenses: o.extraExpenses,
       depositApplied: o.depositApplied,
+      workItems: o.workItems,
+      partsNeeded: o.partsNeeded,
       photos: (o.photos || []).map((p) => ({ phase: p.phase, dataUrl: p.dataUrl, caption: p.caption })),
     });
     setPdfHtml(html);
     setPdfTitle(`أمر عمل ${o.id}`);
-    setPdfOpen(true);
-  }
-
-  function openPdf() {
-    const html = getVehicleCardHtml({
-      plate: vehicle.plate,
-      type: vehicle.type,
-      vin: vehicle.vin,
-      year: vehicle.year,
-      color: vehicle.color,
-      mileage: vehicle.mileage,
-      owner: vehicle.owner,
-      ownerPhone: vehicle.ownerPhone,
-      visits: vehicle.visits || orders.length,
-      totalSpent: vehicle.totalSpent || totalRepairCost,
-      lastVisit: vehicle.lastVisit,
-      notes: vehicle.notes,
-      workOrders: orders.map((o) => ({
-        orderNumber: o.id,
-        date: o.entryDate,
-        serviceType: o.serviceType,
-        status: o.status,
-        technician: o.technician,
-        cost: o.totalCost,
-        description: o.diagnosis || o.description,
-      })),
-      photoPairs: photoPairs.map((p) => ({
-        workOrderId: p.workOrderId,
-        date: p.date,
-        beforeUrl: p.beforeUrl,
-        afterUrl: p.afterUrl,
-        caption: p.caption,
-      })),
-      claims: orders
-        .filter((o) => o.claimNumber && o.claimNumber !== "-")
-        .map((o) => ({
-          claimNumber: o.claimNumber,
-          insuranceCompany: o.insurance,
-          estimatedAmount: o.totalCost,
-          status: "مرتبطة بأمر العمل",
-        })),
-    });
-    setPdfHtml(html);
-    setPdfTitle(`بطاقة السيارة ${vehicle.plate}`);
     setPdfOpen(true);
   }
 
@@ -399,6 +427,21 @@ export default function VehicleDetail() {
     toast.info(`فتح عمل جديد للمركبة ${vehicle.plate}`);
   }
 
+  async function openVehicle360Pdf(options: VehicleFilePrintOptions) {
+    if (!vehicle360 || !vehicle.cloudId) {
+      toast.error(tx("لم يكتمل تحميل ملف المركبة", "Vehicle file has not finished loading"));
+      return;
+    }
+    try {
+      await logVehicleAudit(vehicle.cloudId, "vehicle_file_printed", { report_type: options.reportType, sections: options.sections });
+      setPdfHtml(getVehicle360FileHtml(vehicle, vehicle360, { ...options, generatedBy: profile?.full_name || profile?.email || "—", english }));
+      setPdfTitle(`${tx("ملف المركبة", "Vehicle File")} ${vehicle.plate}`);
+      setPdfOpen(true);
+    } catch (error: any) {
+      toast.error(error?.message || tx("تعذر تسجيل أو تجهيز الطباعة", "Could not audit or prepare printing"));
+    }
+  }
+
   return (
     <div className="space-y-6" dir="rtl">
       {/* Header */}
@@ -487,7 +530,7 @@ export default function VehicleDetail() {
                   </Button>
                 </>
               )}
-              <Button onClick={openPdf} variant="outline" size="sm" className="gap-1.5">
+              <Button onClick={() => setPrintOptionsOpen(true)} variant="outline" size="sm" className="gap-1.5">
                 <Printer size={14} /> طباعة بطاقة
               </Button>
               {!isArchived && (
@@ -538,15 +581,17 @@ export default function VehicleDetail() {
         <StatCard title={tx("آخر زيارة", "Latest visit")} value={vehicle360?.lastVisitAt || lastWorkshopVisit} icon={Calendar} variant="success" />
         <StatCard title={tx("زيارات رابط التتبع", "Tracking visits")} value={trackingVisits} icon={Activity} variant="info" />
         <StatCard title={tx("آخر فتح للرابط", "Last tracking open")} value={lastTrackingOpen} icon={Activity} variant="info" />
-        <StatCard title={tx("إجمالي الفواتير", "Total billed")} value={`OMR ${totalRepairCost.toFixed(3)}`} icon={DollarSign} variant="success" />
-        <StatCard title={tx("إجمالي المصروفات", "Actual expenses")} value={`OMR ${(vehicle360?.financial.expenses ?? (totalParts + totalLabor + totalExtras)).toFixed(3)}`} icon={Receipt} variant="warning" />
-        <StatCard title={tx("قطع الغيار", "Spare parts")} value={`OMR ${totalParts.toFixed(3)}`} icon={Wrench} variant="gold" />
-        <StatCard title={tx("أجرة العمل المسجلة", "Recorded labour charge")} value={`OMR ${totalLabor.toFixed(3)}`} icon={Wrench} variant="info" />
-        <StatCard title={tx("المحصل فعليًا", "Actually collected")} value={`OMR ${totalDeposits.toFixed(3)}`} icon={Banknote} variant="success" />
+        {allowFinance && <StatCard title={tx("إجمالي الفواتير قبل الضريبة", "Billed before VAT")} value={`OMR ${(vehicle360?.financial.billedBeforeVat ?? totalRepairCost).toFixed(3)}`} icon={DollarSign} variant="success" />}
+        {allowFinance && <StatCard title={tx("إجمالي الضريبة", "VAT total")} value={`OMR ${(vehicle360?.financial.vatTotal ?? 0).toFixed(3)}`} icon={Receipt} variant="info" />}
+        {allowFinance && <StatCard title={tx("إجمالي المصروفات", "Actual expenses")} value={`OMR ${(vehicle360?.financial.directCostBeforeVat ?? (totalParts + totalExtras)).toFixed(3)}`} icon={Receipt} variant="warning" />}
+        {allowFinance && <StatCard title={tx("قطع الغيار", "Spare parts")} value={`OMR ${totalParts.toFixed(3)}`} icon={Wrench} variant="gold" />}
+        {allowFinance && <StatCard title={tx("العمالة الخارجية", "External labour")} value={`OMR ${(vehicle360?.financial.externalLabor ?? 0).toFixed(3)}`} icon={Wrench} variant="warning" />}
+        {allowFinance && <StatCard title={tx("المحصل فعليًا", "Actually collected")} value={`OMR ${totalDeposits.toFixed(3)}`} icon={Banknote} variant="success" />}
+        {allowFinance && <StatCard title={tx("الربح / الخسارة", "Profit / loss")} value={`OMR ${(vehicle360?.financial.actualProfit ?? 0).toFixed(3)}`} icon={DollarSign} variant={(vehicle360?.financial.actualProfit ?? 0) >= 0 ? "success" : "warning"} />}
       </div>
 
       {/* Permanent vehicle record. Cloud snapshot is the source for operational and financial history. */}
-      <Tabs defaultValue="overview" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto bg-secondary border border-border p-1">
           <TabsTrigger value="overview" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
             <Car size={14} /> {tx("نظرة عامة", "Overview")}
@@ -560,11 +605,17 @@ export default function VehicleDetail() {
           <TabsTrigger value="claims" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
             <Shield size={14} /> {tx("المطالبات والتقديرات", "Claims & estimates")} ({vehicle360?.claims.length || 0})
           </TabsTrigger>
-          <TabsTrigger value="financial" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
+          {allowFinance && <TabsTrigger value="financial" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
             <DollarSign size={14} /> {tx("الحساب المالي", "Financials")}
-          </TabsTrigger>
+          </TabsTrigger>}
           <TabsTrigger value="media360" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
             <ImageIcon size={14} /> {tx("الصور والمستندات", "Photos & documents")} ({vehicle360?.media.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="signatures" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
+            <FileText size={14} /> {tx("التوقيعات", "Signatures")} ({vehicle360?.signatures.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="communications" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
+            <Share2 size={14} /> {tx("التواصل والمراسلات", "Communications")} ({vehicle360?.communications.length || 0})
           </TabsTrigger>
           <TabsTrigger value="wo-photos" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
             <Camera size={14} /> {tx("صور المراحل القديمة", "Legacy stage photos")} ({totalWoPhotos})
@@ -572,9 +623,9 @@ export default function VehicleDetail() {
           <TabsTrigger value="photos" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
             <ImageIcon size={14} /> {tx("قبل/بعد", "Before/after")} ({photoPairs.length})
           </TabsTrigger>
-          <TabsTrigger value="audit" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
+          {allowAudit && <TabsTrigger value="audit" className="gap-1 whitespace-nowrap data-[state=active]:bg-card">
             <Activity size={14} /> {tx("التدقيق الإداري", "Administrative audit")} ({vehicle360?.auditLogs.length || 0})
-          </TabsTrigger>
+          </TabsTrigger>}
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -890,6 +941,14 @@ export default function VehicleDetail() {
         <TabsContent value="media360" className="mt-4">
           {vehicle360 ? <VehicleMediaPanel data={vehicle360} tx={tx} /> : <VehicleCloudLoading tx={tx} />}
         </TabsContent>
+
+        <TabsContent value="signatures" className="mt-4">
+          {vehicle360 ? <VehicleSignaturesPanel data={vehicle360} tx={tx} /> : <VehicleCloudLoading tx={tx} />}
+        </TabsContent>
+
+        <TabsContent value="communications" className="mt-4">
+          {vehicle360 ? <VehicleCommunicationsPanel data={vehicle360} tx={tx} /> : <VehicleCloudLoading tx={tx} />}
+        </TabsContent>
       </Tabs>
 
       {/* Edit Dialog */}
@@ -902,6 +961,7 @@ export default function VehicleDetail() {
       <ShareVehicleDialog vehicle={vehicle} open={shareOpen} onOpenChange={setShareOpen} />
 
       {/* PDF Preview */}
+      <VehicleFilePrintDialog open={printOptionsOpen} onOpenChange={setPrintOptionsOpen} tx={tx} allowFinancial={allowFinance} onGenerate={openVehicle360Pdf} />
       <PdfPreviewDialog open={pdfOpen} onOpenChange={setPdfOpen} htmlContent={pdfHtml} title={pdfTitle} />
 
       {/* Photo Lightbox */}
@@ -1018,7 +1078,8 @@ function EditVehicleDialog({
       return;
     }
     try {
-      await saveVehicleToCloud(form, { previousPlate: vehicle.plate });
+      const saved = await saveVehicleToCloud(form, { previousPlate: vehicle.plate });
+      if (saved.cloudId) await logVehicleAudit(saved.cloudId, "vehicle_updated", { previous_plate: vehicle.plate, current_plate: saved.plate });
       toast.success("تم تحديث بيانات السيارة");
       onOpenChange(false);
     } catch (error: any) {

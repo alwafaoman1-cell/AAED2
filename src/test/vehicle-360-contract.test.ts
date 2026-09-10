@@ -13,6 +13,27 @@ describe("vehicle 360 cloud record", () => {
     expect(page).not.toContain("setInterval(");
     expect(page).not.toContain("qc.clear()");
     expect(page).not.toContain("caches.delete");
+    expect(page).not.toContain("refreshVehiclesFromCloud");
+    expect(page).not.toContain("refreshWorkOrdersFromCloud");
+  });
+
+  it("uses the canonical vehicle id route, lazy heavy sections and a stable return context", () => {
+    const app = read("src/App.tsx");
+    const page = read("src/pages/VehicleDetail.tsx");
+    const layout = read("src/components/AppLayout.tsx");
+    expect(app).toContain('path="/vehicles/:vehicleId"');
+    expect(page).toContain("fetchVehicleByRouteRef");
+    expect(page).toContain('includes(activeTab)');
+    expect(layout).toContain("VehicleReturnContextBar");
+  });
+
+  it("paginates the archive on the server and does not mount a detail query for every card", () => {
+    const page = read("src/pages/Vehicles.tsx");
+    const store = read("src/lib/vehiclesStore.ts");
+    expect(page).toContain("fetchVehicleArchivePage");
+    expect(page).toContain("TablePaginationControls");
+    expect(page).not.toContain("ArchivedVehicleDetails");
+    expect(store).toContain(".range(from, from + pageSize - 1)");
   });
 
   it("loads every operational and financial source by tenant and vehicle links", () => {

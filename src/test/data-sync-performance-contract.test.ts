@@ -38,13 +38,14 @@ describe("data sync performance contract", () => {
     expect(workOrders).not.toContain("scheduleCloudFetch(50)");
   });
 
-  it("keeps explicit page-level refreshes for legacy compatibility lists", () => {
+  it("keeps legacy refresh only where compatibility is still required and uses a paged vehicle query", () => {
     const customersPage = read("src/pages/Customers.tsx");
     const vehiclesPage = read("src/pages/Vehicles.tsx");
     const workOrdersPage = read("src/pages/WorkOrders.tsx");
 
     expect(customersPage).toContain("refreshCustomersFromCloud");
-    expect(vehiclesPage).toContain("refreshVehiclesFromCloud");
+    expect(vehiclesPage).toContain("fetchVehicleArchivePage");
+    expect(vehiclesPage).not.toContain("refreshVehiclesFromCloud");
     expect(workOrdersPage).toContain("refreshWorkOrdersFromCloud");
   });
 

@@ -19,15 +19,11 @@ describe("insurance claims archived_at production hotfix", () => {
     expect(payload).not.toContain("claim_number,deleted_at,archived_at");
   });
 
-  it("archives claim links through status and deleted_at instead of a missing column", () => {
+  it("does not mutate claims while archiving the vehicle record", () => {
     const vehiclesStore = source("src/lib/vehiclesStore.ts");
-    const claimUpdate = vehiclesStore.match(
-      /safeUpdate\("insurance_claims"[\s\S]*?\.eq\("vehicle_id", cloudId\)\);/,
-    )?.[0];
-
-    expect(claimUpdate).toBeTruthy();
-    expect(claimUpdate).toContain('status: "cancelled", deleted_at: archivedAt');
-    expect(claimUpdate).not.toContain("archived_at");
+    expect(vehiclesStore).not.toContain('safeUpdate("insurance_claims"');
+    expect(vehiclesStore).not.toContain('status: "cancelled", deleted_at: archivedAt');
+    expect(vehiclesStore).not.toContain('from("insurance_claims").update');
   });
 
   it("keeps cancelled and deleted claims out of insurance collection reports", () => {

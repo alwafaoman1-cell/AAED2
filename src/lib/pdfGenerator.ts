@@ -102,18 +102,9 @@ interface WorkOrderData {
   customerSignatureDataUrl?: string;
   customerSignatureName?: string;
   customerSignatureDate?: string;
+  workItems?: { title: string; note?: string }[];
+  partsNeeded?: { name: string; quantity?: number; notes?: string; status?: string }[];
 }
-
-// Bilingual stage labels: [AR, EN]
-const WORK_ORDER_STAGES: [string, string][] = [
-  ["تحت الفحص", "Under Inspection"],
-  ["بانتظار الموافقة", "Awaiting Approval"],
-  ["بانتظار قطع الغيار", "Awaiting Parts"],
-  ["تحت الإصلاح", "Under Repair"],
-  ["ضبط الجودة", "Quality Control"],
-  ["جاهز للتسليم", "Ready for Delivery"],
-  ["تم التسليم", "Delivered"],
-];
 
 interface InspectionData {
   inspectionId: string;
@@ -662,185 +653,160 @@ export function generateInvoicePdf(data: InvoiceData) {
 }
 
 // ===== WORK ORDER =====
-export function getWorkOrderHtml(data: WorkOrderData): string {
-  const custom = tryCustomTemplate("work_order", { ...data, ...getTemplateSettings(), totalCost: data.totalCost }, `WorkOrder ${data.orderNumber}`);
-  if (custom) return custom;
-  const s = getTemplateSettings();
-  const statusClass = data.status.includes('إصلاح') || data.status.includes('Repair') ? 'status-progress'
-    : data.status.includes('جاهز') || data.status.includes('تم') || data.status.includes('Ready') || data.status.includes('Delivered') ? 'status-completed'
-    : data.status.includes('فحص') || data.status.includes('Inspection') ? 'status-pending'
-    : 'status-progress';
+const escapeWorkOrderText = (value: unknown): string => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#039;");
 
-  const currentStageIdx = WORK_ORDER_STAGES.findIndex(([ar]) => ar === data.status);
-  const statusEn = currentStageIdx >= 0 ? WORK_ORDER_STAGES[currentStageIdx][1] : data.status;
-
-  const timelineHtml = `
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin:8px 0 18px;padding:14px 6px;background:#fafafa;border-radius:8px;border:1px solid #eee;">
-      ${WORK_ORDER_STAGES.map(([stageAr, stageEn], i) => {
-        const done = currentStageIdx >= 0 && i <= currentStageIdx;
-        const current = i === currentStageIdx;
-        return `<div style="flex:1;text-align:center;position:relative;">
-          <div style="width:26px;height:26px;border-radius:50%;margin:0 auto 5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:'Inter',sans-serif;${
-            done
-              ? `background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor, -15)});color:white;`
-              : 'background:#e5e5e5;color:#999;'
-          }${current ? `box-shadow:0 0 0 3px ${s.primaryColor}33;` : ''}">${i + 1}</div>
-          <div style="font-size:8px;color:${current ? s.primaryColor : '#888'};font-weight:${current ? '700' : '500'};line-height:1.25;">${stageAr}</div>
-          <div style="font-size:7px;color:#aaa;font-family:'Inter',sans-serif;line-height:1.2;margin-top:1px;">${stageEn}</div>
-          ${i < WORK_ORDER_STAGES.length - 1 ? `<div style="position:absolute;top:12px;right:-50%;width:100%;height:2px;background:${done && currentStageIdx > i ? s.primaryColor : '#e5e5e5'};z-index:-1;"></div>` : ''}
-        </div>`;
-      }).join('')}
-    </div>`;
-
-  const laborCost = data.laborCost ?? 0;
-  const partsCost = data.partsCost ?? 0;
-  const extras = data.extraExpenses || [];
-  const extrasTotal = extras.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  const deposit = Number(data.depositApplied) || 0;
-  const subtotal = laborCost + partsCost + extrasTotal || data.totalCost;
-  const vat = Number((subtotal * (s.vatRate / 100)).toFixed(3));
-  // Accounting: total = subtotal + VAT. Payments do not reduce revenue.
-  const grandTotal = Number((subtotal + vat).toFixed(3));
-  const balanceDue = Number(Math.max(0, grandTotal - deposit).toFixed(3));
-
-  const extrasRowsHtml = extras.length === 0 ? '' : extras.map((e) => `
-    <tr>
-      <td style="padding-right:24px;color:#555;">↳ ${e.label}${e.notes ? ` <span style="color:#aaa;font-size:9.5px;">(${e.notes})</span>` : ''}</td>
-      <td style="text-align:left;font-weight:600;">${omr(Number(e.amount) || 0)}</td>
-    </tr>
-  `).join('');
-
-  const orderType = data.workOrderType === "insurance" ? "insurance" : "general_customer";
-  const typeBadge = orderType === "insurance"
-    ? `<span style="display:inline-block;padding:5px 10px;border-radius:999px;background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;font-size:10px;font-weight:700;">ًں›، INSURANCE</span>`
-    : `<span style="display:inline-block;padding:5px 10px;border-radius:999px;background:#dcfce7;color:#047857;border:1px solid #86efac;font-size:10px;font-weight:700;">ًںڑ— GENERAL / CASH</span>`;
-  const trackUrl = getTrackingUrl(data.trackingToken);
-  const qrDataUrl = getTrackingQrFromCache(data.trackingToken);
-  const qrCardHtml = qrDataUrl ? `
-    <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;margin:0 0 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
-      <img src="${qrDataUrl}" alt="QR" style="width:90px;height:90px;flex-shrink:0;border-radius:6px;background:#fff;padding:4px;border:1px solid #e2e8f0;" />
-      <div style="flex:1;">
-        <div style="font-size:11px;font-weight:700;color:${s.primaryColor};margin-bottom:3px;">تتبع حالة السيارة <span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;font-weight:500;">/ Track Vehicle Status</span></div>
-        <div style="font-size:9.5px;color:#555;line-height:1.55;">امسح الرمز بكاميرا الجوال لمتابعة مراحل الإصلاح والصور لحظياً.<br/><span style="font-family:'Inter',sans-serif;color:#888;">Scan with your phone camera to follow repair stages and photos in real-time.</span></div>
-        <div style="font-size:8.5px;color:#888;font-family:monospace;margin-top:3px;direction:ltr;text-align:left;word-break:break-all;">${trackUrl}</div>
-      </div>
-    </div>` : '';
-
-  const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
-    ${headerHtml(s, 'أمر عمل', 'WORK ORDER', data.orderNumber, data.date)}
-    <div style="display:flex;justify-content:flex-end;margin:-4px 0 10px;">${typeBadge}</div>
-    ${qrCardHtml}
-
-    ${sectionTitle('مسار حالة الإصلاح', 'Repair Status Timeline')}
-    ${timelineHtml}
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-      <div style="padding:10px 14px;background:#fafafa;border-right:3px solid ${s.primaryColor};border-radius:6px;">
-        <div style="font-size:11px;font-weight:600;color:${s.primaryColor};margin-bottom:6px;">معلومات العميل <span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;font-weight:500;">/ Customer Info</span></div>
-        <div class="info-row">${lbl('الاسم:', 'Name')}<span class="value">${data.customerName}</span></div>
-        <div class="info-row">${lbl('الهاتف:', 'Phone')}<span class="value" style="direction:ltr;font-family:'Inter',sans-serif;">${data.customerPhone}</span></div>
-      </div>
-      <div style="padding:10px 14px;background:#fafafa;border-right:3px solid ${s.primaryColor};border-radius:6px;">
-        <div style="font-size:11px;font-weight:600;color:${s.primaryColor};margin-bottom:6px;">معلومات السيارة <span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;font-weight:500;">/ Vehicle Info</span></div>
-        <div class="info-row">${lbl('النوع:', 'Make/Model')}<span class="value">${data.vehicleType} ${data.model} ${data.year}</span></div>
-        <div class="info-row">${lbl('اللوحة:', 'Plate')}<span class="value">${data.plateNumber}</span></div>
-        ${data.color ? `<div class="info-row">${lbl('اللون:', 'Color')}<span class="value">${data.color}</span></div>` : ''}
-        ${data.mileage ? `<div class="info-row">${lbl('الكيلومترات:', 'Mileage')}<span class="value" style="direction:ltr;font-family:'Inter',sans-serif;">${data.mileage} km</span></div>` : ''}
-        <div class="info-row">${lbl('رقم الهيكل:', 'VIN')}<span class="value" style="direction:ltr;text-align:right;font-family:monospace;font-size:10px;">${data.vin}</span></div>
-      </div>
-    </div>
-
-    ${sectionTitle('تفاصيل العمل', 'Job Details')}
-    <div class="info-grid">
-      <div class="info-row">${lbl('نوع الخدمة:', 'Service Type')}<span class="value">${data.serviceType}</span></div>
-      <div class="info-row">${lbl('الفني المسؤول:', 'Technician')}<span class="value">${data.technician}</span></div>
-      ${orderType === "insurance" ? `
-      <div class="info-row">${lbl('شركة التأمين:', 'Insurance Co.')}<span class="value">${data.insurance}</span></div>
-      <div class="info-row">${lbl('رقم المطالبة:', 'Claim No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${data.claimNumber}</span></div>` : `
-      <div class="info-row">${lbl('نوع الأمر:', 'Order Type')}<span class="value">عميل عام / General Customer</span></div>`}
-      <div class="info-row">${lbl('الحالة الحالية:', 'Current Status')}<span class="value"><span class="status-badge ${statusClass}">${data.status}<span class="en">${statusEn}</span></span></span></div>
-    </div>
-
-    ${data.description ? `<div class="notes-box"><span class="label-en">Diagnosis / Notes</span><strong>التشخيص / ملاحظات:</strong> ${data.description}</div>` : ''}
-
-    ${sectionTitle('التكلفة', 'Cost Breakdown')}
-    <table>
-      <thead><tr>
-        ${th('البيان', 'Description', 'width:60%;')}
-        ${th('القيمة', 'Amount', 'text-align:left;')}
-      </tr></thead>
-      <tbody>
-        <tr><td>${bi('أجور العمالة', 'Labor Cost')}</td><td style="text-align:left;font-weight:600;">${omr(laborCost)}</td></tr>
-        <tr><td>${bi('قطع الغيار', 'Parts Cost')}</td><td style="text-align:left;font-weight:600;">${omr(partsCost)}</td></tr>
-        ${extras.length > 0 ? `<tr><td>${bi('مصروفات إضافية', 'Extra Expenses')}</td><td style="text-align:left;font-weight:600;">${omr(extrasTotal)}</td></tr>${extrasRowsHtml}` : ''}
-        <tr><td>${bi('المجموع الفرعي', 'Subtotal')}</td><td style="text-align:left;font-weight:600;">${omr(subtotal)}</td></tr>
-        <tr><td>${bi(`ضريبة القيمة المضافة (${s.vatRate}%)`, `VAT (${s.vatRate}%)`)}</td><td style="text-align:left;font-weight:600;">${omr(vat)}</td></tr>
-      </tbody>
-    </table>
-    <div class="totals-box">
-      <div class="totals-row total"><span>${bi('إجمالي الفاتورة', 'Invoice Total')}</span><span class="amount">${omr(grandTotal)}</span></div>
-      ${deposit > 0 ? `
-      <div class="totals-row" style="color:#2d6a4f;"><span>${bi('دفعة مستلمة (دخل)', 'Payment Received')}</span><span class="amount">+ ${omr(deposit)}</span></div>
-      <div class="totals-row total" style="color:#b45309;"><span>${bi('الرصيد المستحق', 'Balance Due')}</span><span class="amount">${omr(balanceDue)}</span></div>
-      ` : ''}
-    </div>
-
-    ${(() => {
-      const photos = data.photos || [];
-      if (photos.length === 0) return '';
-      const stageMap: Record<string, [string, string]> = {
-        received: ['استلام', 'Received'],
-        inspection: ['فحص', 'Inspection'],
-        in_progress: ['تحت الإصلاح', 'In Progress'],
-        quality: ['ضبط الجودة', 'Quality Check'],
-        delivery: ['تسليم', 'Delivery'],
-      };
-      const orderArr: string[] = ['received', 'inspection', 'in_progress', 'quality', 'delivery'];
-      const grouped = orderArr
-        .map(phase => ({ phase, list: photos.filter(p => p.phase === phase) }))
-        .filter(g => g.list.length > 0);
-      if (grouped.length === 0) return '';
-      const sections = grouped.map(({ phase, list }) => {
-        const [ar, en] = stageMap[phase] || [phase, phase];
-        const grid = list.map(p => `
-          <div style="break-inside:avoid;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden;background:#fafafa;">
-            <img src="${p.dataUrl}" alt="" style="width:100%;height:110px;object-fit:cover;display:block;" />
-            ${p.caption ? `<div style="padding:4px 6px;font-size:8.5px;color:#666;line-height:1.3;">${p.caption}</div>` : ''}
-          </div>`).join('');
-        return `
-          <div style="margin-bottom:14px;break-inside:avoid;">
-            <div style="font-size:11px;font-weight:600;color:${s.primaryColor};margin-bottom:6px;padding:5px 10px;background:${s.primaryColor}15;border-right:3px solid ${s.primaryColor};border-radius:4px;">
-              ${ar} <span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;font-weight:500;">/ ${en}</span>
-              <span style="float:left;font-size:9px;color:#888;font-family:'Inter',sans-serif;">${list.length} ${list.length === 1 ? 'photo' : 'photos'}</span>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">${grid}</div>
-          </div>`;
-      }).join('');
-      return `
-        ${sectionTitle('صور مراحل العمل', 'Work Stage Photos')}
-        <div style="page-break-inside:auto;">${sections}</div>
-      `;
-    })()}
-
-    <div style="margin-top:40px;display:flex;justify-content:space-between;page-break-inside:avoid;">
-      <div style="text-align:center;width:170px;">
-        ${data.customerSignatureDataUrl
-          ? `<img src="${data.customerSignatureDataUrl}" alt="customer signature" style="max-width:160px;max-height:60px;object-fit:contain;display:block;margin:0 auto 4px;" />`
-          : `<div style="height:60px;"></div>`}
-        <div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">
-          توقيع العميل<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Customer Signature</span>
-          ${data.customerSignatureName ? `<div style="font-size:9px;color:#555;margin-top:2px;">${data.customerSignatureName}</div>` : ''}
-          ${data.customerSignatureDate ? `<div style="font-size:8.5px;color:#888;font-family:monospace;">${data.customerSignatureDate}</div>` : ''}
+function workOrderHeaderHtml(s: PdfTemplateSettings, data: WorkOrderData, isInsurance: boolean): string {
+  const logo = s.logoUrl
+    ? `<img class="wo-logo" src="${escapeWorkOrderText(s.logoUrl)}" alt="Company logo" />`
+    : "";
+  return `<header class="wo-header">
+    <section class="wo-company">
+      ${logo}
+      <div class="wo-company-copy">
+        <h1>${escapeWorkOrderText(s.companyName)}</h1>
+        <div class="wo-company-en" dir="ltr">${escapeWorkOrderText(s.companyNameEn)}</div>
+        <div class="wo-company-meta">
+          <span>CR: ${escapeWorkOrderText(s.commercialReg)}</span>
+          <span>VAT: ${escapeWorkOrderText(s.vatNumber)}</span>
+          <span dir="ltr">${escapeWorkOrderText(s.phone)}</span>
+          <span dir="ltr">${escapeWorkOrderText(s.email)}</span>
+          <span>${escapeWorkOrderText(s.address)}</span>
+          ${s.addressEn ? `<span dir="ltr">${escapeWorkOrderText(s.addressEn)}</span>` : ""}
         </div>
       </div>
-      <div style="text-align:center;width:170px;"><div style="height:60px;"></div><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">الفني المسؤول<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Technician</span></div></div>
-      <div style="text-align:center;width:170px;"><div style="height:60px;"></div><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">مدير الورشة<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Workshop Manager</span></div></div>
+    </section>
+    <section class="wo-number-card">
+      <div class="wo-document-title">أمر عمل <span>/ WORK ORDER</span></div>
+      <strong dir="ltr">${escapeWorkOrderText(data.orderNumber)}</strong>
+      <div class="wo-type">${isInsurance ? "تأمين / INSURANCE" : "عميل كاش / CASH CUSTOMER"}</div>
+      <time dir="ltr">${escapeWorkOrderText(data.date)}</time>
+    </section>
+  </header>`;
+}
+
+export function getWorkOrderHtml(data: WorkOrderData): string {
+  const s = getTemplateSettings();
+  const isInsurance = data.workOrderType === "insurance";
+  const value = (input: unknown, fallback = "—") => {
+    const text = String(input ?? "").trim();
+    return escapeWorkOrderText(text && text !== "-" ? text : fallback);
+  };
+  const workItems = (data.workItems || []).filter((item) => item?.title?.trim());
+  const parts = (data.partsNeeded || []).filter((part) => part?.name?.trim());
+  const diagnosis = String(data.description || "").trim();
+  const fallbackWork = String(data.serviceType || "").trim();
+  const laborCharge = Number(data.laborCost) || 0;
+  const deposit = Number(data.depositApplied) || 0;
+  const laborBalance = Math.max(0, laborCharge - deposit);
+
+  const workRows = workItems.length
+    ? workItems.map((item, index) => `<tr><td class="wo-index">${index + 1}</td><td>${value(item.title)}</td><td>${value(item.note)}</td></tr>`).join("")
+    : `<tr><td class="wo-index">1</td><td>${value(fallbackWork)}</td><td>${value(diagnosis)}</td></tr>`;
+  const partsRows = parts.length
+    ? parts.map((part, index) => `<tr><td class="wo-index">${index + 1}</td><td>${value(part.name)}</td><td class="wo-center">${Math.max(1, Number(part.quantity) || 1)}</td><td>${value(part.notes)}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="wo-empty">لا توجد قطع غيار مطلوبة مسجلة / No required parts recorded</td></tr>`;
+
+  const financialSection = isInsurance ? "" : `
+    ${sectionTitle("الاتفاق المالي", "Financial Agreement")}
+    <div class="wo-financial-grid">
+      <div><span>أجرة العمل المتفق عليها<br/><small>Agreed labor charge</small></span><strong>${omr(laborCharge)}</strong></div>
+      <div><span>دفعة مستلمة<br/><small>Advance received</small></span><strong>${omr(deposit)}</strong></div>
+      <div><span>المتبقي من أجرة العمل<br/><small>Labor balance</small></span><strong>${omr(laborBalance)}</strong></div>
     </div>
-    ${stampSignatureHtml(s, "workOrder")}
+    <p class="wo-agreement-note">أجرة العمل/الخدمة تُحتسب وفق الاتفاق، أما قطع الغيار فيتحمل العميل تكلفتها الفعلية وتُدفع مقدمًا أو عند انتهاء الخدمة حسب الاتفاق. هذا المستند أمر عمل وليس فاتورة ضريبية نهائية.<br/><span dir="ltr">Labor/service charges are governed by the agreement. Spare parts are paid by the customer in advance or upon completion, as agreed. This work order is not a final tax invoice.</span></p>`;
+
+  const signature = data.customerSignatureDataUrl
+    ? `<img src="${escapeWorkOrderText(data.customerSignatureDataUrl)}" alt="Customer signature" />`
+    : "";
+  const stamp = s.stampEnabled && s.stampOnWorkOrder && s.stampUrl
+    ? `<img src="${escapeWorkOrderText(s.stampUrl)}" alt="Company stamp" />`
+    : "";
+
+  const photoAppendix = (data.photos || []).length ? `<section class="wo-photo-page page">
+    ${workOrderHeaderHtml(s, data, isInsurance)}
+    ${sectionTitle("مرفقات أمر العمل", "Work Order Attachments")}
+    <div class="wo-photo-grid">${(data.photos || []).map((photo, index) => `<figure><img src="${escapeWorkOrderText(photo.dataUrl)}" alt="Work order photo ${index + 1}"/><figcaption>${value(photo.caption, `صورة ${index + 1} / Photo ${index + 1}`)}</figcaption></figure>`).join("")}</div>
     ${footerHtml(s)}
-  </div>`;
-  return wrapHtml(`Work Order ${data.orderNumber}`, getBaseStyles(s), body);
+  </section>` : "";
+
+  const body = `<main class="wo-document">
+    <section class="page wo-main-page">
+      ${s.showWatermark ? `<div class="watermark">${escapeWorkOrderText(s.companyNameEn)}</div>` : ""}
+      ${workOrderHeaderHtml(s, data, isInsurance)}
+
+      <div class="wo-summary-grid">
+        <section><h2>بيانات العميل <span>/ CUSTOMER</span></h2><dl>
+          <div><dt>الاسم / Name</dt><dd>${value(data.customerName)}</dd></div>
+          <div><dt>الهاتف / Phone</dt><dd dir="ltr">${value(data.customerPhone)}</dd></div>
+        </dl></section>
+        <section><h2>بيانات المركبة <span>/ VEHICLE</span></h2><dl>
+          <div><dt>الماركة والموديل / Make &amp; Model</dt><dd>${value([data.vehicleType, data.model, data.year].filter(Boolean).join(" "))}</dd></div>
+          <div><dt>رقم اللوحة / Plate No.</dt><dd class="wo-emphasis" dir="ltr">${value(data.plateNumber)}</dd></div>
+          <div><dt>رقم الهيكل / VIN</dt><dd class="wo-emphasis" dir="ltr">${value(data.vin)}</dd></div>
+          ${data.color ? `<div><dt>اللون / Color</dt><dd>${value(data.color)}</dd></div>` : ""}
+          ${data.mileage ? `<div><dt>العداد / Mileage</dt><dd dir="ltr">${value(data.mileage)} km</dd></div>` : ""}
+        </dl></section>
+      </div>
+
+      <div class="wo-order-meta">
+        <div><span>نوع الخدمة / Service</span><strong>${value(data.serviceType)}</strong></div>
+        <div><span>الفني المسؤول / Technician</span><strong>${value(data.technician)}</strong></div>
+        <div><span>الحالة / Status</span><strong>${value(data.status)}</strong></div>
+        ${isInsurance ? `<div><span>شركة التأمين / Insurance</span><strong>${value(data.insurance)}</strong></div><div><span>رقم المطالبة / Claim No.</span><strong dir="ltr">${value(data.claimNumber)}</strong></div>` : ""}
+      </div>
+
+      ${sectionTitle("الأعمال المطلوبة والمعتمدة", "Authorized Work")}
+      <table class="wo-table"><thead><tr><th>#</th><th>العمل / Work Item</th><th>ملاحظات / Notes</th></tr></thead><tbody>${workRows}</tbody></table>
+      ${diagnosis && workItems.length ? `<div class="wo-diagnosis"><strong>التشخيص والملاحظات / Diagnosis &amp; Notes</strong><p>${value(diagnosis)}</p></div>` : ""}
+
+      ${sectionTitle("قطع الغيار المطلوبة", "Required Spare Parts")}
+      <table class="wo-table"><thead><tr><th>#</th><th>اسم القطعة / Part</th><th>الكمية / Qty</th><th>ملاحظات / Notes</th></tr></thead><tbody>${partsRows}</tbody></table>
+      ${financialSection}
+
+      ${sectionTitle("التفويض والشروط", "Authorization & Terms")}
+      <ol class="wo-terms">
+        <li>أفوض الشركة بتنفيذ أعمال الإصلاح المبينة أعلاه وفق المعتمد والاتفاق. <span dir="ltr">I authorize the company to perform the repair work listed above as approved and agreed.</span></li>
+        <li>لا تتحمل الشركة مسؤولية أي عطل أو ضرر يحدث خارج إرادتها أو بسبب عيب سابق أو خفي. <span dir="ltr">The company is not liable for faults or damage beyond its control or arising from pre-existing or hidden defects.</span></li>
+        <li>الورشة غير مسؤولة عن الأغراض الثمينة أو غير الثمينة المتروكة داخل المركبة. <span dir="ltr">The workshop is not responsible for valuable or non-valuable belongings left in the vehicle.</span></li>
+        <li>تُحتسب أرضية بحد أقصى 5 ريالات عمانية عن كل يوم تأخير بعد إخطار العميل بجاهزية المركبة للاستلام، وذلك وفق الأنظمة المعمول بها. <span dir="ltr">Storage may be charged up to OMR 5 per delayed day after the customer is notified that the vehicle is ready, subject to applicable regulations.</span></li>
+        <li>أي أعمال أو أضرار خفية إضافية تتطلب موافقة جديدة، وقد يتغير موعد التسليم بسبب القطع أو الموافقات أو ظروف خارجة عن السيطرة. <span dir="ltr">Additional hidden work requires further approval, and delivery may change due to parts, approvals, or circumstances beyond control.</span></li>
+        ${isInsurance ? `<li>يخضع الإصلاح لموافقة شركة التأمين وحدود التغطية، ولا يتضمن أمر عمل التأمين أي أسعار أو أجور أو مبالغ. <span dir="ltr">Repairs remain subject to insurer approval and coverage limits; this insurance work order displays no prices, labor charges, or amounts.</span></li>` : ""}
+      </ol>
+
+      <div class="wo-approval-grid">
+        <section>${signature}<div class="wo-sign-line"></div><strong>توقيع العميل / Customer Signature</strong>${data.customerSignatureName ? `<small>${value(data.customerSignatureName)}</small>` : ""}${data.customerSignatureDate ? `<small dir="ltr">${value(data.customerSignatureDate)}</small>` : ""}</section>
+        <section><div class="wo-sign-space"></div><div class="wo-sign-line"></div><strong>اعتماد مدير الورشة / Workshop Manager Approval</strong></section>
+        <section>${stamp}<strong>ختم الشركة / Company Stamp</strong></section>
+      </div>
+      ${footerHtml(s)}
+    </section>
+    ${photoAppendix}
+  </main>`;
+
+  const styles = `${getBaseStyles(s)}
+    .wo-document{color:#142033}.wo-main-page{font-size:10.4px;line-height:1.55;padding:10mm 11mm 11mm;overflow-wrap:anywhere}
+    .wo-header{display:grid;grid-template-columns:minmax(0,1fr) 58mm;gap:8mm;align-items:start;border-bottom:2px solid ${s.primaryColor};padding-bottom:5mm;margin-bottom:5mm;break-inside:avoid}
+    .wo-company{display:flex;gap:4mm;align-items:flex-start;min-width:0}.wo-logo{width:22mm;height:22mm;object-fit:contain;flex:0 0 22mm}.wo-company-copy{min-width:0}
+    .wo-company h1{font-size:16px;line-height:1.35;margin:0;color:#101d35}.wo-company-en{font-family:'Inter',sans-serif;font-size:10.5px;font-weight:700;line-height:1.35;margin-top:1mm;white-space:normal;word-spacing:1px}
+    .wo-company-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5mm 4mm;margin-top:2mm;font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:7.8px;line-height:1.4;color:#536078}
+    .wo-number-card{border:1px solid #c9d2df;border-top:4px solid ${s.primaryColor};border-radius:4px;padding:3mm 4mm;text-align:center;min-height:30mm;display:flex;flex-direction:column;justify-content:center}
+    .wo-document-title{font-size:10px;font-weight:800}.wo-document-title span{font-family:'Inter',sans-serif;font-size:8px;color:#68758b}.wo-number-card>strong{font-family:'Inter',sans-serif;font-size:21px;line-height:1.15;margin:1.5mm 0;letter-spacing:.4px;color:#0b1730}.wo-type{font-size:8px;font-weight:700;color:${s.primaryColor}}.wo-number-card time{font-family:'Inter',sans-serif;font-size:8px;color:#64748b;margin-top:1mm}
+    .wo-summary-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:4mm;margin-bottom:4mm}.wo-summary-grid>section{border:1px solid #dce2ea;border-radius:4px;overflow:hidden;break-inside:avoid}.wo-summary-grid h2{background:#f4f6f9;color:#13223a;padding:2mm 3mm;font-size:10px}.wo-summary-grid h2 span{font-family:'Inter',sans-serif;font-size:8px;color:#6b778c}.wo-summary-grid dl{padding:1.5mm 3mm}.wo-summary-grid dl>div{display:grid;grid-template-columns:42% 58%;gap:2mm;padding:1.2mm 0;border-bottom:1px solid #edf0f4}.wo-summary-grid dl>div:last-child{border:0}.wo-summary-grid dt{font-size:8px;color:#68758b}.wo-summary-grid dd{font-size:9.5px;font-weight:700;margin:0;min-width:0}.wo-emphasis{color:#a61b1b;font-size:11px!important;font-family:'Inter',sans-serif}
+    .wo-order-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #dce2ea;border-radius:4px;margin-bottom:3mm;overflow:hidden;break-inside:avoid}.wo-order-meta>div{padding:2mm 3mm;border-left:1px solid #e2e7ee;min-width:0}.wo-order-meta>div:nth-child(3n){border-left:0}.wo-order-meta span{display:block;font-size:7.8px;color:#68758b}.wo-order-meta strong{display:block;font-size:9.4px;margin-top:.7mm}
+    .wo-table{font-size:9px;margin:2mm 0 3mm}.wo-table thead th{font-size:8.5px;padding:2mm 2.5mm;background:#142542}.wo-table tbody td{padding:1.8mm 2.5mm;vertical-align:top}.wo-index,.wo-center{text-align:center;width:10mm}.wo-empty{text-align:center;color:#8490a2;padding:4mm!important}.wo-diagnosis,.wo-agreement-note{border:1px solid #dce2ea;background:#fafbfc;border-radius:4px;padding:2.5mm 3mm;margin:2mm 0 3mm;line-height:1.6}.wo-diagnosis strong{display:block;font-size:8.5px;color:#667287}.wo-diagnosis p{margin-top:1mm}
+    .wo-financial-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #d8e0ea;border-radius:4px;overflow:hidden;break-inside:avoid}.wo-financial-grid>div{padding:2.5mm 3mm;border-left:1px solid #e4e8ee}.wo-financial-grid>div:last-child{border-left:0}.wo-financial-grid span{font-size:8.4px;color:#5f6c80}.wo-financial-grid small{font-family:'Inter',sans-serif;font-size:7.2px}.wo-financial-grid strong{display:block;font-size:11px;margin-top:1mm}
+    .wo-terms{margin:1mm 4mm 2mm 0;padding:0 4mm 0 0;display:grid;grid-template-columns:1fr 1fr;gap:1.5mm 7mm;line-height:1.45;font-size:8px}.wo-terms li{padding-right:1mm;break-inside:avoid}.wo-terms span{display:block;font-family:'Inter',sans-serif;direction:ltr;text-align:left;color:#57657a;font-size:7.2px;line-height:1.32;margin-top:.4mm}
+    .wo-approval-grid{display:grid;grid-template-columns:1fr 1fr .8fr;gap:6mm;align-items:end;margin-top:1.5mm;break-inside:avoid;text-align:center}.wo-approval-grid section{min-height:16mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}.wo-approval-grid img{max-width:34mm;max-height:10mm;object-fit:contain;margin:auto}.wo-sign-space{height:7mm}.wo-sign-line{border-top:1px solid #8c98a8;width:100%;margin-bottom:1mm}.wo-approval-grid strong{font-size:8px}.wo-approval-grid small{display:block;font-size:7px;color:#68758b;margin-top:.3mm}
+    .wo-photo-page{padding:10mm 11mm 12mm}.wo-photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}.wo-photo-grid figure{border:1px solid #dce2ea;border-radius:4px;overflow:hidden;break-inside:avoid}.wo-photo-grid img{display:block;width:100%;height:48mm;object-fit:cover}.wo-photo-grid figcaption{font-size:8px;padding:1.5mm 2mm}
+    @page{size:A4;margin:0}
+    @media print{.wo-main-page{min-height:297mm;padding:7mm 9mm 10mm;zoom:.96;width:104.1667%}.wo-header{grid-template-columns:minmax(0,1fr) 58mm;margin-bottom:3.5mm;padding-bottom:3.5mm}.wo-document .section-title{margin:2.2mm 0 1.2mm;font-size:10.5px}.wo-document .section-title .en{font-size:8px}.wo-main-page>.footer{position:absolute!important;bottom:2.5mm;right:9mm;left:9mm;margin:0!important}}
+  `;
+  return wrapHtml(`Work Order ${data.orderNumber}`, styles, body);
 }
 
 export async function generateWorkOrderPdf(data: WorkOrderData) {

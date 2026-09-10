@@ -826,6 +826,9 @@ const CURATED_AR_TO_EN: Record<string, string> = {
 };
 
 const COMMON_UI_OVERRIDES: Record<string, string> = {
+  "جاري التجهيز...": "Preparing...",
+  "فتح المعاينة": "Open preview",
+  "اضغط لفتح الملف الإلكتروني الكامل للمركبة": "Open the complete electronic vehicle file",
   "تكلفة قطع الغيار الفعلية": "Actual Spare Parts Cost",
   "مصروفات فعلية أخرى": "Other Actual Expenses",
   "إجمالي التكلفة قبل الضريبة": "Total Cost Before VAT",

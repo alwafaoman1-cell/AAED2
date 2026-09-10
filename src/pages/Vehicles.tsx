@@ -10,14 +10,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import VehicleTracking from "@/components/tracking/VehicleTracking";
-import { deleteVehicleFromCloud, refreshVehiclesFromCloud, saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
-import ArchivedVehicleDetails from "@/components/vehicles/ArchivedVehicleDetails";
+import { deleteVehicleFromCloud, saveVehicleToCloud, vehiclesStore, type Vehicle } from "@/lib/vehiclesStore";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import PlateInput from "@/components/vehicles/PlateInput";
 import { canDelete, canEdit } from "@/lib/permissions";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { toast } from "sonner";
 import { formatMoney } from "@/lib/pdfGenerator";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/queryKeys";
+import { fetchVehicleArchivePage } from "@/lib/vehiclesStore";
+import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
+import { logVehicleAudit } from "@/lib/vehicleAudit";
 
 const empty: Vehicle = { id: "", plate: "", type: "", vin: "", owner: "", visits: 0, lastVisit: new Date().toISOString().split("T")[0], totalSpent: 0 };
 
@@ -34,28 +38,39 @@ export default function Vehicles() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [list, setList] = useState<Vehicle[]>(vehiclesStore.getAll());
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [tab, setTab] = useState("active");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [editing, setEditing] = useState<Vehicle | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [deleting, setDeleting] = useState<Vehicle | null>(null);
   const [form, setForm] = useState<Vehicle>(empty);
   const allowEdit = canEdit();
   const allowDelete = canDelete();
+  const queryClient = useQueryClient();
 
-  useEffect(() => vehiclesStore.subscribe(() => setList([...vehiclesStore.getAll()])), []);
   useEffect(() => {
-    void refreshVehiclesFromCloud();
-  }, []);
+    const timer = setTimeout(() => { setDebouncedSearch(search.trim()); setPage(1); }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const vehiclesQuery = useQuery({
+    queryKey: queryKeys.vehicles.list({ scope: tab === "active" ? "active" : "all", search: debouncedSearch, page, pageSize }),
+    queryFn: () => fetchVehicleArchivePage({ page, pageSize, search: debouncedSearch, scope: tab === "active" ? "active" : "all" }),
+    staleTime: 30_000,
+    gcTime: 300_000,
+    placeholderData: (previous) => previous,
+    refetchOnWindowFocus: false,
+  });
+  const list = useMemo(() => vehiclesQuery.data?.rows || [], [vehiclesQuery.data?.rows]);
 
   const { active, archiveVehicles } = useMemo(() => {
-    const matches = (v: Vehicle) =>
-      v.plate.includes(search) || v.owner.includes(search) || v.vin.includes(search);
-    const filtered = list.filter(matches);
     return {
-      active: filtered.filter((v) => !v.archived),
-      archiveVehicles: filtered,
+      active: list.filter((v) => !v.archived),
+      archiveVehicles: list,
     };
-  }, [list, search]);
+  }, [list]);
 
   const bulk = useBulkSelection(archiveVehicles);
   async function handleBulkDelete() {
@@ -85,6 +100,7 @@ export default function Vehicles() {
     if (!form.plate || !form.owner) { toast.error("اللوحة والمالك مطلوبان"); return; }
     try {
       await saveVehicleToCloud({ ...form, id: form.plate || form.id, cloudId: editing?.cloudId || form.cloudId }, { previousPlate: editing?.plate });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.vehicles.all });
       toast.success(editing ? "تم التحديث" : "تمت الإضافة");
     } catch (error: any) {
       toast.error(error?.message || "تعذر حفظ المركبة في Supabase");
@@ -97,6 +113,7 @@ export default function Vehicles() {
     try {
       await deleteVehicleFromCloud(deleting, "Archive vehicle");
       toast.success("تم نقل السيارة إلى أرشيف السيارات");
+      await queryClient.invalidateQueries({ queryKey: queryKeys.vehicles.all });
     } catch (error: any) {
       toast.error(error?.message || "تعذر حذف المركبة في Supabase");
     }
@@ -111,7 +128,9 @@ export default function Vehicles() {
     };
     try {
       await saveVehicleToCloud(restored, { previousPlate: v.plate });
+      if (v.cloudId) await logVehicleAudit(v.cloudId, "vehicle_restored", { restored_from: v.archivedAt || null }).catch(() => undefined);
       vehiclesStore.update(v.id, restored);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.vehicles.all });
       toast.success(`تمت استعادة "${v.plate}" إلى قائمة المركبات النشطة`);
       if (editAfterRestore) {
         setEditing(restored);
@@ -128,7 +147,7 @@ export default function Vehicles() {
       return (
         <div
           key={v.id}
-          onClick={() => navigate(`/vehicles/${encodeURIComponent(v.id)}`)}
+          onClick={() => navigate(`/vehicles/${encodeURIComponent(v.cloudId || v.id)}`)}
           className="bg-card border rounded-xl p-4 shadow-card hover:border-primary/40 hover:shadow-lg transition-all cursor-pointer group border-border"
         >
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -166,7 +185,7 @@ export default function Vehicles() {
     return (
       <div
         key={v.id}
-        onClick={() => navigate(`/vehicles/${encodeURIComponent(v.id)}`)}
+        onClick={() => navigate(`/vehicles/${encodeURIComponent(v.cloudId || v.id)}`)}
         className="bg-card border border-muted rounded-xl p-5 shadow-card hover:border-primary/40 hover:shadow-lg transition-all cursor-pointer group"
       >
         <div className="flex flex-col gap-4">
@@ -248,8 +267,7 @@ export default function Vehicles() {
             </div>
           )}
 
-          {/* Cloud-loaded details: work orders, claims, uploaded documents */}
-          <ArchivedVehicleDetails plate={v.plate} />
+          <div className="pt-2 text-xs text-primary">اضغط لفتح الملف الإلكتروني الكامل للمركبة</div>
         </div>
       </div>
     );
@@ -267,10 +285,10 @@ export default function Vehicles() {
         )}
       </div>
 
-      <Tabs defaultValue="active" className="w-full">
+      <Tabs value={tab} onValueChange={(value) => { setTab(value); setPage(1); }} className="w-full">
         <TabsList className="bg-secondary border border-border">
-          <TabsTrigger value="active" className="gap-1 data-[state=active]:bg-card"><Car size={14} /> النشطة <span className="text-[10px] mr-1 px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">{active.length}</span></TabsTrigger>
-          <TabsTrigger value="archive" className="gap-1 data-[state=active]:bg-card"><Archive size={14} /> أرشيف كل السيارات <span className="text-[10px] mr-1 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{archiveVehicles.length}</span></TabsTrigger>
+          <TabsTrigger value="active" className="gap-1 data-[state=active]:bg-card"><Car size={14} /> النشطة <span className="text-[10px] mr-1 px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">{tab === "active" ? vehiclesQuery.data?.total || 0 : ""}</span></TabsTrigger>
+          <TabsTrigger value="archive" className="gap-1 data-[state=active]:bg-card"><Archive size={14} /> أرشيف كل السيارات <span className="text-[10px] mr-1 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{tab === "archive" ? vehiclesQuery.data?.total || 0 : ""}</span></TabsTrigger>
           <TabsTrigger value="tracking" className="gap-1 data-[state=active]:bg-card"><MapPin size={14} /> تتبع الحالة</TabsTrigger>
         </TabsList>
 
@@ -317,6 +335,8 @@ export default function Vehicles() {
             {archiveVehicles.length === 0 && <div className="text-center py-12 text-muted-foreground"><Archive size={40} className="mx-auto mb-3 opacity-30" /><p>لا توجد سيارات مسجلة</p></div>}
           </div>
         </TabsContent>
+
+        {tab !== "tracking" && <TablePaginationControls page={page} pageSize={pageSize} totalItems={vehiclesQuery.data?.total || 0} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} />}
 
         <TabsContent value="tracking" className="mt-4"><VehicleTracking /></TabsContent>
       </Tabs>

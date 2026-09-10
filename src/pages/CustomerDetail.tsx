@@ -509,7 +509,7 @@ export default function CustomerDetail() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {vehicles.map((v) => (
-                  <Link key={v.id} to={`/vehicles/${encodeURIComponent(v.plate)}`}
+                  <Link key={v.id} to={`/vehicles/${encodeURIComponent(v.cloudId || v.id || v.plate)}`}
                     className="bg-secondary/30 border border-border rounded-lg p-3 hover:border-primary/40 transition-all">
                     <div className="flex items-center gap-2 mb-1">
                       <Car size={14} className="text-primary" />
@@ -639,7 +639,7 @@ export default function CustomerDetail() {
                       return (
                         <tr key={v.id} className="border-b border-border/50 hover:bg-secondary/20">
                           <td className="py-2 px-3 font-mono text-primary">
-                            <Link to={`/vehicles/${encodeURIComponent(v.plate)}`} className="hover:underline">{v.plate}</Link>
+                            <Link to={`/vehicles/${encodeURIComponent(v.cloudId || v.id || v.plate)}`} className="hover:underline">{v.plate}</Link>
                           </td>
                           <td className="py-2 px-3">{v.type || "-"}</td>
                           <td className="py-2 px-3 text-muted-foreground">{(v as any).year || "-"}</td>
@@ -728,7 +728,7 @@ export default function CustomerDetail() {
                     {orders.map((o) => (
                       <tr key={o.id} className="border-b border-border/50 hover:bg-secondary/20">
                         <td className="py-2 px-3 font-mono text-primary">{o.id}</td>
-                        <td className="py-2 px-3"><Link to={`/vehicles/${encodeURIComponent(o.plate)}`} className="hover:text-primary">{o.plate}</Link></td>
+                        <td className="py-2 px-3"><Link to={`/vehicles/${encodeURIComponent(o.vehicleId || o.plate)}`} className="hover:text-primary">{o.plate}</Link></td>
                         <td className="py-2 px-3 text-muted-foreground">{o.serviceType}</td>
                         <td className="py-2 px-3 text-muted-foreground">{o.entryDate}</td>
                         <td className="py-2 px-3"><span className="text-[10px] px-2 py-0.5 rounded-full bg-info/15 text-info">{o.status}</span></td>
@@ -993,7 +993,7 @@ export default function CustomerDetail() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {vehicles.map((v) => (
-                  <Link key={v.id} to={`/vehicles/${encodeURIComponent(v.plate)}`}
+                  <Link key={v.id} to={`/vehicles/${encodeURIComponent(v.cloudId || v.id || v.plate)}`}
                     className="block bg-secondary/30 border border-border rounded-lg p-3 hover:border-primary/40 transition-all">
                     <div className="flex items-center gap-2 mb-2">
                       <Car size={16} className="text-primary" />

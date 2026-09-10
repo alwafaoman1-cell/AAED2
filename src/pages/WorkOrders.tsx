@@ -183,7 +183,7 @@ function insuranceReason(order: WorkOrder) {
 
 function buildWorkOrderHtml(order: WorkOrder) {
   return getWorkOrderHtml({
-    orderNumber: order.id, date: order.entryDate, customerName: order.customer,
+    orderNumber: order.displayNumber || order.id, date: order.entryDate, customerName: order.customer,
     workOrderType: resolveWorkOrderType(order), trackingToken: order.trackingToken,
     customerPhone: order.phone, vehicleType: order.vehicleType, model: order.model,
     year: order.year, plateNumber: order.plate, vin: order.vin, insurance: order.insurance,
@@ -194,6 +194,8 @@ function buildWorkOrderHtml(order: WorkOrder) {
     laborCost: order.laborCost, partsCost: order.partsCost,
     extraExpenses: order.extraExpenses,
     depositApplied: order.depositApplied,
+    workItems: order.workItems,
+    partsNeeded: order.partsNeeded,
     photos: (order.photos || []).map(p => ({ phase: p.phase, dataUrl: p.dataUrl, caption: p.caption })),
   });
 }
@@ -917,7 +919,7 @@ export default function WorkOrders() {
                           <Phone size={14} className="text-info" /> اتصال بالعميل
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => order.plate ? navigate(`/vehicles/${encodeURIComponent(order.plate)}`) : toast.error("لا يوجد رقم لوحة")}
+                          onClick={() => order.vehicleId || order.plate ? navigate(`/vehicles/${encodeURIComponent(order.vehicleId || order.plate)}`) : toast.error("لا يوجد رقم لوحة")}
                           className="gap-2 cursor-pointer"
                         >
                           <Car size={14} className="text-primary" /> ملف السيارة

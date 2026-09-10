@@ -13,7 +13,8 @@ describe("accounting core contract", () => {
     const pdf = readFileSync(resolve(process.cwd(), "src/lib/pdfGenerator.ts"), "utf8");
     expect(pdf).toContain("toFixed(3)");
     expect(pdf).not.toContain("const vat = Math.round(subtotal");
-    expect(pdf).toContain("const vat = Number((subtotal * (s.vatRate / 100)).toFixed(3))");
+    expect(pdf).toContain("minimumFractionDigits: d");
+    expect(pdf).toContain("maximumFractionDigits: d");
   });
 
   it("does not treat work order totalCost as accounting revenue", () => {
