@@ -139,15 +139,36 @@ begin
            and c.table_name = r.table_name
            and c.column_name = 'tenant_id'
        ) then
-      execute format(
-        'update public.%I t set %I = m.new_order_number '
-        'from tmp_typed_work_order_renumber m '
-        'where t.tenant_id = m.tenant_id and t.%I = m.old_order_number '
-        'and m.old_order_number is distinct from m.new_order_number',
-        r.table_name,
-        r.column_name,
-        r.column_name
-      );
+      -- Deleted legacy rows are deliberately left untouched. Besides keeping
+      -- archived financial history immutable, this avoids re-validating old
+      -- rows against constraints introduced after they were deleted.
+      if exists (
+        select 1 from information_schema.columns c
+        where c.table_schema = 'public'
+          and c.table_name = r.table_name
+          and c.column_name = 'deleted_at'
+      ) then
+        execute format(
+          'update public.%I t set %I = m.new_order_number '
+          'from tmp_typed_work_order_renumber m '
+          'where t.tenant_id = m.tenant_id and t.%I = m.old_order_number '
+          'and t.deleted_at is null '
+          'and m.old_order_number is distinct from m.new_order_number',
+          r.table_name,
+          r.column_name,
+          r.column_name
+        );
+      else
+        execute format(
+          'update public.%I t set %I = m.new_order_number '
+          'from tmp_typed_work_order_renumber m '
+          'where t.tenant_id = m.tenant_id and t.%I = m.old_order_number '
+          'and m.old_order_number is distinct from m.new_order_number',
+          r.table_name,
+          r.column_name,
+          r.column_name
+        );
+      end if;
     end if;
   end loop;
 end
