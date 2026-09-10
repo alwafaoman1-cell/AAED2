@@ -1524,7 +1524,7 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     if (!isSupportedWorkOrderNumber(finalOrderNumber)) throw new Error("Invalid work order number");
   } else {
     // Optimistic only: the database BEFORE INSERT trigger atomically allocates
-    // the authoritative WO-00001 number for the current tenant.
+    // the authoritative typed/yearly number for the current tenant.
     finalOrderNumber = normalizeWorkOrderNumber(order.id);
   }
 

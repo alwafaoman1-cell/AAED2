@@ -711,6 +711,7 @@ const CURATED_AR_TO_EN: Record<string, string> = {
   "متوسط السند": "Average voucher",
   "مثال: Oman United Insurance": "Example: Oman United Insurance",
   "مثال: WO-2024-001 أو أحمد محمد أو أ ب ج 1234": "Example: WO-2024-001 or Ahmed Mohamed or ABC 1234",
+  "مثال: WO-C-26-0001 أو أحمد محمد أو أ ب ج 1234": "Example: WO-C-26-0001 or Ahmed Mohamed or ABC 1234",
   "مثال: أ ب ج 1234 أو أحمد محمد": "Example: ABC 1234 or Ahmed Mohamed",
   "مثال: أحمد محمد — مدير الورشة": "Example: Ahmed Mohamed — Workshop Manager",
   "مثال: إصلاح الصدام الأمامي": "Example: Front bumper repair",

@@ -30,7 +30,7 @@ export async function createCustomerInvoiceFromCancelledClaim(
   claim: InsuranceClaim,
   amount: number,
 ): Promise<WorkOrder> {
-  const woId = nextWorkOrderNumber();
+  const woId = nextWorkOrderNumber("general_customer");
   const wo: WorkOrder = {
     id: woId,
     customerId: (claim as any).customer_id || undefined,

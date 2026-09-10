@@ -63,16 +63,18 @@ describe("work order visible save contract", () => {
     expect(form).not.toContain("أدخل ماركة وموديل المركبة قبل حفظ أمر العمل");
   });
 
-  it("uses immutable five-digit global work-order numbers and a safe audit migration", () => {
+  it("uses immutable typed yearly work-order numbers and a safe audit migration", () => {
     const numbering = read("src/lib/numberingSettings.ts");
     const helper = read("src/lib/numbering.ts");
-    const migration = read("supabase/migrations/20260901100000_work_order_global_five_digit_numbering.sql");
-    expect(numbering).toContain('WO:        { label: "أوامر العمل",            prefix: "WO",      startFrom: 1, padding: 5 }');
-    expect(helper).toContain("WO-NNNNN");
+    const migration = read("supabase/migrations/20260910100000_work_order_cash_insurance_yearly_numbering.sql");
+    expect(numbering).toContain('WO:        { label: "أوامر العمل",            prefix: "WO",      startFrom: 1, padding: 4 }');
+    expect(helper).toContain("WO-C-YY-NNNN or WO-I-YY-NNNN");
     expect(migration).toContain("work_order_number_renumber_audit");
     expect(migration).toContain("where jo.deleted_at is null");
-    expect(migration).toContain("lpad(sequence_number::text, 5, '0')");
-    expect(migration).toContain("allocate_work_order_number");
+    expect(migration).toContain("partition by");
+    expect(migration).toContain("jo.work_order_type = 'insurance'");
+    expect(migration).toContain("lpad(sequence_number::text, 4, '0')");
+    expect(migration).toContain("allocate_typed_work_order_number");
     expect(migration).toContain("before insert on public.job_orders");
     expect(migration).not.toMatch(/\bDELETE\s+FROM\b/i);
     expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);

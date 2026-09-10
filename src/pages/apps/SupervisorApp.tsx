@@ -176,7 +176,7 @@ export default function SupervisorApp() {
       if (!wo.insuranceCompany.trim()) return toast.error(isAr ? "اسم شركة التأمين مطلوب" : "Insurance company required");
       if (!wo.claimNumber.trim()) return toast.error(isAr ? "رقم المطالبة مطلوب" : "Claim number required");
     }
-    const id = nextWorkOrderNumber();
+    const id = nextWorkOrderNumber(wo.isInsurance ? "insurance" : "general_customer", wo.entryDate);
     const descParts: string[] = [];
     if (wo.description.trim()) descParts.push(wo.description.trim());
     if (wo.isInsurance) {

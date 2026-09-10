@@ -8472,6 +8472,38 @@ export type Database = {
           },
         ]
       }
+      work_order_number_series: {
+        Row: {
+          channel: string
+          next_value: number
+          order_year: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          next_value?: number
+          order_year: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          next_value?: number
+          order_year?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_order_number_series_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_order_number_renumber_audit: {
         Row: {
           id: string
@@ -9489,6 +9521,14 @@ export type Database = {
       }
       allocate_work_order_number: {
         Args: { p_tenant_id: string }
+        Returns: string
+      }
+      allocate_typed_work_order_number: {
+        Args: {
+          p_entry_date?: string
+          p_tenant_id: string
+          p_work_order_type: string
+        }
         Returns: string
       }
       allocate_invoice_number_internal: {

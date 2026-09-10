@@ -81,7 +81,7 @@ export default function WorkOrderPickerDialog({
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="مثال: WO-00001 أو أحمد محمد أو أ ب ج 1234"
+            placeholder="مثال: WO-C-26-0001 أو أحمد محمد أو أ ب ج 1234"
             className="pr-9 pl-9 h-11 text-sm"
           />
           {q && (

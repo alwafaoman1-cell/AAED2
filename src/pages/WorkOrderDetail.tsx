@@ -251,7 +251,7 @@ export default function WorkOrderDetail() {
     setOrder(local);
     const unsub = subscribeWorkOrders(() => setOrder((prev) => getWorkOrderById(id) || prev));
 
-    // Fallback: resolve UUID, current WO-00001 numbers and legacy WO-YYYY-NNNN aliases.
+    // Fallback: resolve UUID, current typed numbers and every historical number alias.
     const isUuid = UUID_RE.test(id);
     const woMatch = extractWorkOrderNumber(id);
     if (!local && id && (isUuid || woMatch)) {
@@ -568,7 +568,7 @@ export default function WorkOrderDetail() {
     }
     return Array.from(byKey.values());
   })();
-  // رقم العرض الاحترافي للأمر (WO-NNNNN). يُستخدم في كل الواجهات والـPDF بدل الـUUID.
+  // رقم العرض الرسمي (WO-C-YY-NNNN / WO-I-YY-NNNN) المستخدم بدل UUID.
   const displayNo = order.displayNumber || (UUID_RE.test(order.id) ? `WO-${order.id.slice(0, 8).toUpperCase()}` : order.id);
   const effectiveLinkedClaim = linkedClaim || (order.claimId && UUID_RE.test(order.claimId)
     ? { id: order.claimId, claim_number: order.claimNumber && order.claimNumber !== "-" ? order.claimNumber : "مطالبة مرتبطة" }

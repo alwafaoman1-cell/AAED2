@@ -1,8 +1,13 @@
-export const WORK_ORDER_NUMBER_DIGITS = 5;
+import type { WorkOrderType } from "@/lib/workOrderType";
 
-const CURRENT_WORK_ORDER_NUMBER_RE = /^WO-(\d{5})$/i;
+export const WORK_ORDER_NUMBER_DIGITS = 4;
+
+export type WorkOrderNumberChannel = "cash" | "insurance";
+
+const CURRENT_WORK_ORDER_NUMBER_RE = /^WO-([CI])-(\d{2})-(\d{4})$/i;
+const GLOBAL_WORK_ORDER_NUMBER_RE = /^WO-(\d{5})$/i;
 const LEGACY_WORK_ORDER_NUMBER_RE = /^WO-(\d{4})-(\d+)$/i;
-const WORK_ORDER_NUMBER_IN_TEXT_RE = /WO-(?:\d{4}-)?\d+/i;
+const WORK_ORDER_NUMBER_IN_TEXT_RE = /WO-(?:[CI]-\d{2}-\d{4}|\d{4}-\d+|\d{5})/i;
 
 export function normalizeWorkOrderNumber(value: string): string {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -13,12 +18,14 @@ export function isCurrentWorkOrderNumber(value: string): boolean {
 }
 
 /**
- * Legacy numbers remain accepted only for backward-compatible links while the
- * database audit table resolves them to the immutable job-order UUID.
+ * Previous WO-NNNNN and WO-YYYY-NNNN numbers remain accepted as immutable
+ * aliases so bookmarks and historical documents continue resolving by UUID.
  */
 export function isSupportedWorkOrderNumber(value: string): boolean {
   const normalized = normalizeWorkOrderNumber(value);
-  return CURRENT_WORK_ORDER_NUMBER_RE.test(normalized) || LEGACY_WORK_ORDER_NUMBER_RE.test(normalized);
+  return CURRENT_WORK_ORDER_NUMBER_RE.test(normalized)
+    || GLOBAL_WORK_ORDER_NUMBER_RE.test(normalized)
+    || LEGACY_WORK_ORDER_NUMBER_RE.test(normalized);
 }
 
 export function extractWorkOrderNumber(value: string): string | null {
@@ -26,16 +33,44 @@ export function extractWorkOrderNumber(value: string): string | null {
   return match ? normalizeWorkOrderNumber(match[0]) : null;
 }
 
-export function formatWorkOrderNumber(sequence: number): string {
-  if (!Number.isInteger(sequence) || sequence < 1 || sequence > 99_999) {
-    throw new Error("Work order sequence must be between 1 and 99999");
+function resolveYear(value: Date | string | number): number {
+  if (typeof value === "number") return value;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date().getFullYear() : date.getFullYear();
+}
+
+export function workOrderNumberChannel(type: WorkOrderType | WorkOrderNumberChannel): WorkOrderNumberChannel {
+  return type === "insurance" ? "insurance" : "cash";
+}
+
+export function formatWorkOrderNumber(
+  sequence: number,
+  type: WorkOrderType | WorkOrderNumberChannel = "cash",
+  year: Date | string | number = new Date(),
+): string {
+  if (!Number.isInteger(sequence) || sequence < 1 || sequence > 9_999) {
+    throw new Error("Work order sequence must be between 1 and 9999");
   }
-  return `WO-${String(sequence).padStart(WORK_ORDER_NUMBER_DIGITS, "0")}`;
+  const fullYear = resolveYear(year);
+  if (fullYear < 2000 || fullYear > 2099) throw new Error("Work order year must be between 2000 and 2099");
+  const channel = workOrderNumberChannel(type) === "insurance" ? "I" : "C";
+  return `WO-${channel}-${String(fullYear).slice(-2)}-${String(sequence).padStart(WORK_ORDER_NUMBER_DIGITS, "0")}`;
 }
 
 export function workOrderSequence(value: string): number | null {
   const match = normalizeWorkOrderNumber(value).match(CURRENT_WORK_ORDER_NUMBER_RE);
   if (!match) return null;
-  const sequence = Number(match[1]);
+  const sequence = Number(match[3]);
   return Number.isSafeInteger(sequence) ? sequence : null;
+}
+
+export function workOrderNumberYear(value: string): number | null {
+  const match = normalizeWorkOrderNumber(value).match(CURRENT_WORK_ORDER_NUMBER_RE);
+  return match ? 2000 + Number(match[2]) : null;
+}
+
+export function parsedWorkOrderNumberChannel(value: string): WorkOrderNumberChannel | null {
+  const match = normalizeWorkOrderNumber(value).match(CURRENT_WORK_ORDER_NUMBER_RE);
+  if (!match) return null;
+  return match[1].toUpperCase() === "I" ? "insurance" : "cash";
 }

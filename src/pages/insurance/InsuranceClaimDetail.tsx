@@ -1224,7 +1224,7 @@ export default function InsuranceClaimDetail() {
       return;
     }
 
-    const newId = nextWorkOrderNumber();
+    const newId = nextWorkOrderNumber("insurance");
     const partsForOrder: NeededPart[] = neededParts
       .filter((p) => p.name.trim())
       .map((p, i) => ({

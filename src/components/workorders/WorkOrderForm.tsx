@@ -541,7 +541,9 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
       toast.error("لا يمكن حفظ أمر العمل بدون vehicle_id");
       return;
     }
-    const targetOrderNumber = isEdit ? normalizeWorkOrderNumberInput(form.id || form.displayNumber || initial?.id || "") : nextWorkOrderNumber();
+    const targetOrderNumber = isEdit
+      ? normalizeWorkOrderNumberInput(form.id || form.displayNumber || initial?.id || "")
+      : nextWorkOrderNumber(selectedType, form.entryDate || new Date());
     if (isEdit) {
       if (!isSupportedWorkOrderNumber(targetOrderNumber)) {
         toast.error("رقم أمر العمل غير صالح");
@@ -621,7 +623,7 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
             dir="ltr"
             value={form.id || form.displayNumber || ""}
             readOnly
-            placeholder="WO-00001"
+            placeholder="WO-C-26-0001"
             className="mt-1 bg-card border-border font-mono text-left"
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
