@@ -29,6 +29,8 @@ describe("typed yearly work-order numbering migration", () => {
     expect(sql).toContain("new_order_number");
     expect(sql).toContain("UUID foreign keys are left");
     expect(sql).not.toMatch(/set\s+id\s*=/i);
+    expect(sql).not.toContain("('expenses', 'linked_work_order_id')");
+    expect(sql).not.toContain("('expenses', 'source_work_order_id')");
   });
 
   it("uses an atomic database allocator scoped by tenant, year and channel", () => {

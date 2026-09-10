@@ -104,16 +104,17 @@ where jo.id = m.job_order_id
   and jo.tenant_id = m.tenant_id
   and m.old_order_number is distinct from m.new_order_number;
 
--- Only legacy text references are rewritten. Real UUID foreign keys are left
--- untouched. Unknown/optional tables and non-text columns are skipped safely.
+-- Only non-financial legacy text references are rewritten. Expense rows are
+-- intentionally excluded: their canonical work_order_id UUID remains stable,
+-- while rewriting a legacy display number would re-run current accounting
+-- validation against historical rows. Real UUID foreign keys are left untouched.
+-- Unknown/optional tables and non-text columns are skipped safely.
 do $$
 declare
   r record;
 begin
   for r in
     select * from (values
-      ('expenses', 'linked_work_order_id'),
-      ('expenses', 'source_work_order_id'),
       ('message_logs', 'work_order_id'),
       ('sales_documents', 'work_order_id'),
       ('sales_documents', 'from_doc_id'),
