@@ -37,6 +37,8 @@ describe("unified work-order print contract", () => {
     expect(html).toContain("Front bumper");
     expect(html).not.toContain("Repair Status Timeline");
     expect(html).not.toContain("مسار حالة الإصلاح");
+    expect(html).not.toContain("Work Order Attachments");
+    expect(html).not.toContain("مرفقات أمر العمل");
     expect(html).not.toContain("Service Advisor Signature");
   });
 

@@ -727,13 +727,6 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
     ? `<img src="${escapeWorkOrderText(s.stampUrl)}" alt="Company stamp" />`
     : "";
 
-  const photoAppendix = (data.photos || []).length ? `<section class="wo-photo-page page">
-    ${workOrderHeaderHtml(s, data, isInsurance)}
-    ${sectionTitle("مرفقات أمر العمل", "Work Order Attachments")}
-    <div class="wo-photo-grid">${(data.photos || []).map((photo, index) => `<figure><img src="${escapeWorkOrderText(photo.dataUrl)}" alt="Work order photo ${index + 1}"/><figcaption>${value(photo.caption, `صورة ${index + 1} / Photo ${index + 1}`)}</figcaption></figure>`).join("")}</div>
-    ${footerHtml(s)}
-  </section>` : "";
-
   const body = `<main class="wo-document">
     <section class="page wo-main-page">
       ${s.showWatermark ? `<div class="watermark">${escapeWorkOrderText(s.companyNameEn)}</div>` : ""}
@@ -785,7 +778,6 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
       </div>
       ${footerHtml(s)}
     </section>
-    ${photoAppendix}
   </main>`;
 
   const styles = `${getBaseStyles(s)}
@@ -802,7 +794,6 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
     .wo-financial-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #d8e0ea;border-radius:4px;overflow:hidden;break-inside:avoid}.wo-financial-grid>div{padding:2.5mm 3mm;border-left:1px solid #e4e8ee}.wo-financial-grid>div:last-child{border-left:0}.wo-financial-grid span{font-size:8.4px;color:#5f6c80}.wo-financial-grid small{font-family:'Inter',sans-serif;font-size:7.2px}.wo-financial-grid strong{display:block;font-size:11px;margin-top:1mm}
     .wo-terms{margin:1mm 4mm 2mm 0;padding:0 4mm 0 0;display:grid;grid-template-columns:1fr 1fr;gap:1.5mm 7mm;line-height:1.45;font-size:8px}.wo-terms li{padding-right:1mm;break-inside:avoid}.wo-terms span{display:block;font-family:'Inter',sans-serif;direction:ltr;text-align:left;color:#57657a;font-size:7.2px;line-height:1.32;margin-top:.4mm}
     .wo-approval-grid{display:grid;grid-template-columns:1fr 1fr .8fr;gap:6mm;align-items:end;margin-top:1.5mm;break-inside:avoid;text-align:center}.wo-approval-grid section{min-height:16mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}.wo-approval-grid img{max-width:34mm;max-height:10mm;object-fit:contain;margin:auto}.wo-sign-space{height:7mm}.wo-sign-line{border-top:1px solid #8c98a8;width:100%;margin-bottom:1mm}.wo-approval-grid strong{font-size:8px}.wo-approval-grid small{display:block;font-size:7px;color:#68758b;margin-top:.3mm}
-    .wo-photo-page{padding:10mm 11mm 12mm}.wo-photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}.wo-photo-grid figure{border:1px solid #dce2ea;border-radius:4px;overflow:hidden;break-inside:avoid}.wo-photo-grid img{display:block;width:100%;height:48mm;object-fit:cover}.wo-photo-grid figcaption{font-size:8px;padding:1.5mm 2mm}
     @page{size:A4;margin:0}
     @media print{.wo-main-page{min-height:297mm;padding:7mm 9mm 10mm;zoom:.96;width:104.1667%}.wo-header{grid-template-columns:minmax(0,1fr) 58mm;margin-bottom:3.5mm;padding-bottom:3.5mm}.wo-document .section-title{margin:2.2mm 0 1.2mm;font-size:10.5px}.wo-document .section-title .en{font-size:8px}.wo-main-page>.footer{position:absolute!important;bottom:2.5mm;right:9mm;left:9mm;margin:0!important}}
   `;
