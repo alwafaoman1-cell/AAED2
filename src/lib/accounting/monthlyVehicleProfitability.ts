@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { queryKeys } from "@/lib/queryKeys";
+import { subtractMoney } from "@/lib/money";
 
 export type MonthlyBusinessType = "cash" | "insurance";
 
@@ -21,6 +22,7 @@ export interface MonthlyVehicleProfitabilityResult {
     invoiced_ex_vat: number;
     labor_revenue: number;
     parts_revenue: number;
+    parts_profit: number;
     vat: number;
     invoiced_total: number;
     collected: number;
@@ -48,6 +50,13 @@ export interface MonthlyVehicleProfitabilityResult {
 
 export const monthlyVehicleProfitabilityKeys = queryKeys.monthlyVehicleProfitability;
 
+function withPartsProfit(row: MonthlyVehicleProfitabilityRow): MonthlyVehicleProfitabilityRow {
+  return {
+    ...row,
+    parts_profit: subtractMoney(row.parts_revenue, row.parts_cost),
+  };
+}
+
 export async function fetchMonthlyVehicleProfitability(
   filters: MonthlyVehicleProfitabilityFilters,
   signal?: AbortSignal,
@@ -61,7 +70,15 @@ export async function fetchMonthlyVehicleProfitability(
     p_page_size: filters.pageSize,
   } as never).abortSignal(signal ?? new AbortController().signal);
   if (result.error) throw result.error;
-  return result.data as unknown as MonthlyVehicleProfitabilityResult;
+  const data = result.data as unknown as MonthlyVehicleProfitabilityResult;
+  return {
+    ...data,
+    rows: (data.rows || []).map(withPartsProfit),
+    aggregates: {
+      ...data.aggregates,
+      parts_profit: subtractMoney(data.aggregates?.parts_revenue, data.aggregates?.parts_cost),
+    },
+  };
 }
 
 export async function fetchAllMonthlyVehicleProfitabilityRows(

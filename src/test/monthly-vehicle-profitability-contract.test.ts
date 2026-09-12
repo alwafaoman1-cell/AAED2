@@ -12,6 +12,7 @@ const paymentMonthMigration = readFileSync(resolve(root, "supabase/migrations/20
 const matchedCostMigration = readFileSync(resolve(root, "supabase/migrations/20260902120000_monthly_vehicle_profitability_matched_cost_basis.sql"), "utf8");
 const page = readFileSync(resolve(root, "src/pages/accounting/reports/MonthlyVehicleProfitabilityPage.tsx"), "utf8");
 const service = readFileSync(resolve(root, "src/lib/accounting/monthlyWorkshopReport.ts"), "utf8");
+const monthlyProfitabilityService = readFileSync(resolve(root, "src/lib/accounting/monthlyVehicleProfitability.ts"), "utf8");
 
 describe("monthly vehicle profitability report contract", () => {
   it("keeps cash and insurance financial sources separated", () => {
@@ -43,12 +44,19 @@ describe("monthly vehicle profitability report contract", () => {
     expect(page).toContain('runExport("print")');
   });
 
-  it("exports the filtered vehicle rows with the same selected columns as PDF and labels real parts expenses correctly", () => {
+  it("exports the filtered vehicle rows with purchase, sale, and parts profitability columns", () => {
     expect(page).toContain("const rows = await fetchAllMonthlyVehicleProfitabilityRows(filters)");
     expect(page).toContain("const request = exportRequest(rows)");
-    expect(page).toContain('key: "parts_cost", ar: "مصروفات قطع الغيار"');
+    expect(page).toContain('key: "parts_cost", ar: "شراء قطع الغيار"');
+    expect(page).toContain('key: "parts_revenue", ar: "بيع قطع الغيار"');
+    expect(page).toContain('key: "parts_profit", ar: "ربحية قطع الغيار"');
+    expect(page).toContain('column.key === "parts_profit"');
+    expect(monthlyProfitabilityService).toContain("parts_profit: subtractMoney(row.parts_revenue, row.parts_cost)");
+    expect(monthlyProfitabilityService).toContain("parts_profit: subtractMoney(data.aggregates?.parts_revenue, data.aggregates?.parts_cost)");
+    expect(service).toContain('["شراء قطع الغيار", cashSummary.parts_cost');
+    expect(service).toContain('["بيع قطع الغيار", cashSummary.parts_revenue');
+    expect(service).toContain('["ربحية قطع الغيار", cashSummary.parts_profit');
     expect(page).not.toContain("إيراد قطع الغيار");
-    expect(service).toContain('["مصروفات قطع الغيار", cashSummary.parts_cost');
     expect(service).not.toContain("إيراد قطع الغيار");
   });
 

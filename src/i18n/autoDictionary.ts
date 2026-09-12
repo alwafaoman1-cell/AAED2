@@ -1074,6 +1074,11 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "النتيجة:": "Results:",
   "فاتورة — يُصدّر Excel جميع النتائج المطابقة، وليس الصفحة الحالية فقط.": "invoice(s) — Excel exports all matching results, not only the current page.",
   "نوع المصدر": "Source Type",
+  "فلاتر متقدمة": "Advanced Filters",
+  "تم حفظ الفلاتر لمدة 12 ساعة": "Filters saved for 12 hours",
+  "شراء قطع الغيار": "Spare Parts Purchases",
+  "بيع قطع الغيار": "Spare Parts Sales",
+  "ربحية قطع الغيار": "Spare Parts Profit",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

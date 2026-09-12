@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Plus, Search, Filter, Eye, Edit, Printer, Car, FileText, Workflow, QrCode, Camera, Trash2, MoreHorizontal, Search as SearchIcon, Receipt, FilePlus2, FolderOpen, Package, MessageCircle, Shield, Copy, FileSpreadsheet, FilePlus, Phone, Send, SlidersHorizontal } from "lucide-react";
+import { Plus, Search, Filter, Eye, Edit, Printer, Car, FileText, Workflow, QrCode, Camera, Trash2, MoreHorizontal, Search as SearchIcon, Receipt, FilePlus2, FolderOpen, Package, MessageCircle, Shield, Copy, FileSpreadsheet, FilePlus, Phone, Send, SlidersHorizontal, Bookmark, ChevronDown, ChevronUp, RotateCcw, CalendarDays, Banknote } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -63,6 +63,15 @@ import { isInsuranceWorkOrder, resolveWorkOrderType } from "@/lib/workOrderType"
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { isUuid } from "@/lib/uuid";
 import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
+import {
+  DEFAULT_WORK_ORDER_FILTERS,
+  clearWorkOrderListFilters,
+  loadWorkOrderListFilters,
+  saveWorkOrderListFilters,
+  type WorkOrderAgeFilter,
+  type WorkOrderListFilters,
+  type WorkOrderPartsFilter,
+} from "@/lib/workOrderListPreferences";
 
 const DURATION_BAR_HEX: Record<string, string> = {
   red: "#ef4444",
@@ -86,6 +95,13 @@ type WorkOrderColumnKey =
   | "plate"
   | "service"
   | "technician"
+  | "entryDate"
+  | "daysInWorkshop"
+  | "phone"
+  | "insuranceCompany"
+  | "claimNumber"
+  | "vin"
+  | "neededParts"
   | "status"
   | "cost";
 
@@ -97,13 +113,35 @@ const WORK_ORDER_COLUMNS: Array<{ key: WorkOrderColumnKey; ar: string; en: strin
   { key: "plate", ar: "اللوحة", en: "Plate" },
   { key: "service", ar: "الخدمة", en: "Service" },
   { key: "technician", ar: "الفني", en: "Technician" },
+  { key: "entryDate", ar: "تاريخ الدخول", en: "Entry Date" },
+  { key: "daysInWorkshop", ar: "أيام الورشة", en: "Workshop Days" },
+  { key: "phone", ar: "الهاتف", en: "Phone" },
+  { key: "insuranceCompany", ar: "شركة التأمين", en: "Insurance Company" },
+  { key: "claimNumber", ar: "رقم المطالبة", en: "Claim Number" },
+  { key: "vin", ar: "رقم الهيكل", en: "VIN" },
+  { key: "neededParts", ar: "القطع المطلوبة", en: "Needed Parts" },
   { key: "status", ar: "الحالة", en: "Status" },
   { key: "cost", ar: "المنفق شامل الضريبة", en: "Actual Spend incl. VAT" },
 ];
 
-const DEFAULT_WORK_ORDER_COLUMNS = Object.fromEntries(
-  WORK_ORDER_COLUMNS.map(({ key }) => [key, true]),
-) as Record<WorkOrderColumnKey, boolean>;
+const DEFAULT_WORK_ORDER_COLUMNS: Record<WorkOrderColumnKey, boolean> = {
+  orderType: false,
+  orderNumber: true,
+  customer: true,
+  vehicle: true,
+  plate: true,
+  service: false,
+  technician: true,
+  entryDate: true,
+  daysInWorkshop: true,
+  phone: false,
+  insuranceCompany: false,
+  claimNumber: false,
+  vin: false,
+  neededParts: false,
+  status: true,
+  cost: true,
+};
 
 function actualWorkOrderCost(order: WorkOrder): number {
   return Number(order.actualExpenseCost || 0);
@@ -204,14 +242,20 @@ export default function WorkOrders() {
   const { t, i18n } = useTranslation();
   const isArabic = i18n.language?.startsWith("ar") ?? true;
   const navigate = useNavigate();
+  const initialFilters = useMemo(() => loadWorkOrderListFilters(), []);
   const [orders, setOrders] = useState<WorkOrder[]>(getWorkOrdersForAdminList());
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [ownershipFilter, setOwnershipFilter] = useState("all");
-  const [technicianFilter, setTechnicianFilter] = useState("all");
-  const [entryFrom, setEntryFrom] = useState("");
-  const [entryTo, setEntryTo] = useState("");
-  const [archiveFilter, setArchiveFilter] = useState("all");
+  const [searchTerm, setSearchTerm] = useState(initialFilters.searchTerm);
+  const [statusFilter, setStatusFilter] = useState(initialFilters.statusFilter);
+  const [ownershipFilter, setOwnershipFilter] = useState(initialFilters.ownershipFilter);
+  const [technicianFilter, setTechnicianFilter] = useState(initialFilters.technicianFilter);
+  const [serviceFilter, setServiceFilter] = useState(initialFilters.serviceFilter);
+  const [insuranceFilter, setInsuranceFilter] = useState(initialFilters.insuranceFilter);
+  const [partsFilter, setPartsFilter] = useState<WorkOrderPartsFilter>(initialFilters.partsFilter);
+  const [ageFilter, setAgeFilter] = useState<WorkOrderAgeFilter>(initialFilters.ageFilter);
+  const [entryFrom, setEntryFrom] = useState(initialFilters.entryFrom);
+  const [entryTo, setEntryTo] = useState(initialFilters.entryTo);
+  const [archiveFilter, setArchiveFilter] = useState(initialFilters.archiveFilter);
+  const [showAdvancedFilters, setShowAdvancedFilters] = usePersistedState("work_orders_advanced_filters_open_v1", false);
   const [showForm, setShowForm] = useState(false);
   const [editOrder, setEditOrder] = useState<WorkOrder | null>(null);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -223,12 +267,11 @@ export default function WorkOrders() {
   const [photosOrderId, setPhotosOrderId] = useState<string | null>(null);
   const [deleteOrder, setDeleteOrder] = useState<WorkOrder | null>(null);
   const [expenseOrder, setExpenseOrder] = useState<WorkOrder | null>(null);
-  const [partsOnlyFilter, setPartsOnlyFilter] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePersistedState<number>("work_orders_page_size", 20);
   const [visibleColumns, setVisibleColumns] = usePersistedState<Record<WorkOrderColumnKey, boolean>>(
-    "work_orders_visible_columns_v1",
+    "work_orders_visible_columns_v2",
     DEFAULT_WORK_ORDER_COLUMNS,
   );
   const [showBulkDelete, setShowBulkDelete] = useState(false);
@@ -262,8 +305,27 @@ export default function WorkOrders() {
   };
 
   useEffect(() => {
-    if (searchParams.get("parts") === "1") setPartsOnlyFilter(true);
+    if (searchParams.get("parts") === "1") setPartsFilter("needed");
   }, [searchParams]);
+
+  const currentFilters: WorkOrderListFilters = useMemo(() => ({
+    searchTerm,
+    statusFilter,
+    ownershipFilter,
+    technicianFilter,
+    serviceFilter,
+    insuranceFilter,
+    partsFilter,
+    ageFilter,
+    entryFrom,
+    entryTo,
+    archiveFilter,
+  }), [searchTerm, statusFilter, ownershipFilter, technicianFilter, serviceFilter, insuranceFilter, partsFilter, ageFilter, entryFrom, entryTo, archiveFilter]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => saveWorkOrderListFilters(currentFilters), 250);
+    return () => window.clearTimeout(timer);
+  }, [currentFilters]);
 
   useEffect(() => {
     let cancelled = false;
@@ -326,6 +388,34 @@ export default function WorkOrders() {
     setDeleteReason("");
   };
 
+  const resetFilters = () => {
+    setSearchTerm(DEFAULT_WORK_ORDER_FILTERS.searchTerm);
+    setStatusFilter(DEFAULT_WORK_ORDER_FILTERS.statusFilter);
+    setOwnershipFilter(DEFAULT_WORK_ORDER_FILTERS.ownershipFilter);
+    setTechnicianFilter(DEFAULT_WORK_ORDER_FILTERS.technicianFilter);
+    setServiceFilter(DEFAULT_WORK_ORDER_FILTERS.serviceFilter);
+    setInsuranceFilter(DEFAULT_WORK_ORDER_FILTERS.insuranceFilter);
+    setPartsFilter(DEFAULT_WORK_ORDER_FILTERS.partsFilter);
+    setAgeFilter(DEFAULT_WORK_ORDER_FILTERS.ageFilter);
+    setEntryFrom(DEFAULT_WORK_ORDER_FILTERS.entryFrom);
+    setEntryTo(DEFAULT_WORK_ORDER_FILTERS.entryTo);
+    setArchiveFilter(DEFAULT_WORK_ORDER_FILTERS.archiveFilter);
+    clearWorkOrderListFilters();
+  };
+
+  const technicianOptions = useMemo(
+    () => Array.from(new Set(orders.map((order) => order.technician?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
+    [orders],
+  );
+  const serviceOptions = useMemo(
+    () => Array.from(new Set(orders.map((order) => order.serviceType?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
+    [orders],
+  );
+  const insuranceOptions = useMemo(
+    () => Array.from(new Set(orders.filter(isInsuranceOrder).map((order) => order.insurance?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
+    [orders],
+  );
+
   const runWorkOrderDelete = async (order: WorkOrder, mode: DeleteMode, reason: string) => {
     const finalReason = reason.trim() || "Delete work order from Work Orders page";
     if (mode === "delete_with_related") {
@@ -376,14 +466,23 @@ export default function WorkOrders() {
         ? delay.days !== null && delay.level !== "green"
         : (statusGroup ? statusGroup.includes(normalizedStatus) : normalizedStatus === normalizeWorkOrderStatus(statusFilter)));
     const matchesOwnership = ownershipFilter === "all" || (ownershipFilter === "insurance" ? isInsuranceOrder(o) : !isInsuranceOrder(o));
-    const matchesParts = !partsOnlyFilter || (o.partsNeeded && o.partsNeeded.some(isPartStillNeeded));
-    const matchesTechnician = technicianFilter === "all" || o.technician === technicianFilter;
+    const neededPartsCount = (o.partsNeeded || []).filter(isPartStillNeeded).length;
+    const matchesParts = partsFilter === "all" || (partsFilter === "needed" ? neededPartsCount > 0 : neededPartsCount === 0);
+    const matchesTechnician = technicianFilter === "all" || (technicianFilter === "unassigned" ? !o.technician?.trim() : o.technician === technicianFilter);
+    const matchesService = serviceFilter === "all" || o.serviceType === serviceFilter;
+    const matchesInsurance = insuranceFilter === "all" || o.insurance === insuranceFilter;
+    const workshopDays = CLOSED_STATUSES.has(normalizedStatus) ? null : computeDays(o.entryDate);
+    const matchesAge = ageFilter === "all" || (workshopDays !== null && (
+      (ageFilter === "under_7" && workshopDays < 7) ||
+      (ageFilter === "7_29" && workshopDays >= 7 && workshopDays < 30) ||
+      (ageFilter === "30_plus" && workshopDays >= 30)
+    ));
     const matchesEntryFrom = !entryFrom || (o.entryDate || "") >= entryFrom;
     const matchesEntryTo = !entryTo || (o.entryDate || "") <= entryTo;
     const matchesArchive =
       archiveFilter === "all" ||
       (archiveFilter === "archived" ? !!o.archivedAt || !!o.deletedAt : !o.archivedAt && !o.deletedAt);
-    return matchesSearch && matchesStatus && matchesOwnership && matchesParts && matchesTechnician && matchesEntryFrom && matchesEntryTo && matchesArchive;
+    return matchesSearch && matchesStatus && matchesOwnership && matchesParts && matchesTechnician && matchesService && matchesInsurance && matchesAge && matchesEntryFrom && matchesEntryTo && matchesArchive;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginatedOrders = useMemo(
@@ -393,7 +492,7 @@ export default function WorkOrders() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, statusFilter, ownershipFilter, technicianFilter, entryFrom, entryTo, archiveFilter, partsOnlyFilter, pageSize]);
+  }, [searchTerm, statusFilter, ownershipFilter, technicianFilter, serviceFilter, insuranceFilter, partsFilter, ageFilter, entryFrom, entryTo, archiveFilter, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -476,7 +575,6 @@ export default function WorkOrders() {
   // Stats
   const inProgress = orders.filter(o => ["تحت الإصلاح", "تحت الفحص"].includes(normalizeWorkOrderStatus(o.status))).length;
   const ready = orders.filter(o => normalizeWorkOrderStatus(o.status) === "جاهز للتسليم").length;
-  const waiting = orders.filter(o => ["بانتظار الموافقة", "بانتظار قطع الغيار"].includes(normalizeWorkOrderStatus(o.status))).length;
   const insuranceCount = orders.filter(isInsuranceOrder).length;
   const cashCount = orders.length - insuranceCount;
   const delivered = orders.filter(o => ["تم التسليم", "مغلق"].includes(normalizeWorkOrderStatus(o.status))).length;
@@ -484,6 +582,8 @@ export default function WorkOrders() {
     const delay = getOrderDelayStyle(o);
     return delay.days !== null && delay.level !== "green";
   }).length;
+  const activeFilterCount = (Object.keys(DEFAULT_WORK_ORDER_FILTERS) as Array<keyof WorkOrderListFilters>)
+    .filter((key) => currentFilters[key] !== DEFAULT_WORK_ORDER_FILTERS[key]).length;
 
   return (
     <div className="space-y-6">
@@ -492,14 +592,14 @@ export default function WorkOrders() {
           <h1 className="text-2xl font-bold text-foreground">{t("workOrders.title")}</h1>
           <p className="text-sm text-muted-foreground">{t("workOrders.subtitle")}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-card p-1.5 shadow-sm">
           <Button
             size="sm"
-            variant={partsOnlyFilter ? "default" : "outline"}
-            onClick={() => setPartsOnlyFilter((v) => !v)}
-            className={`gap-1.5 h-9 ${partsOnlyFilter ? "bg-info text-info-foreground hover:bg-info/90" : "border-info/40 text-info hover:bg-info/10"}`}
+            variant={partsFilter === "needed" ? "default" : "ghost"}
+            onClick={() => setPartsFilter((value) => value === "needed" ? "all" : "needed")}
+            className={`gap-1.5 h-9 ${partsFilter === "needed" ? "bg-info text-info-foreground hover:bg-info/90" : "text-info hover:bg-info/10"}`}
           >
-            <Package size={14} /> تحتاج قطع
+            <Package size={14} /> {isArabic ? "تحتاج قطع" : "Parts needed"}
             <span className="text-[10px] bg-background/20 rounded-full px-1.5 py-0.5">{ordersNeedingParts.length}</span>
           </Button>
           <Button
@@ -507,7 +607,7 @@ export default function WorkOrders() {
             variant="outline"
             onClick={handlePrintAllNeededParts}
             disabled={ordersNeedingParts.length === 0}
-            className="h-9 gap-1.5 border-warning/40 text-warning hover:bg-warning/10 disabled:opacity-50"
+            className="h-9 gap-1.5 border-0 text-warning hover:bg-warning/10 disabled:opacity-50"
           >
             <Printer size={14} /> طلب القطع
           </Button>
@@ -522,11 +622,11 @@ export default function WorkOrders() {
               toast.info("استخدم مركز واتساب داخل كل أمر عمل لاختيار المستلم وتسجيل الربط الكامل");
             }}
             disabled={ordersNeedingParts.length === 0}
-            className="h-9 gap-1.5 border-success/40 text-success hover:bg-success/10 disabled:opacity-50"
+            className="h-9 gap-1.5 border-0 text-success hover:bg-success/10 disabled:opacity-50"
           >
             <MessageCircle size={14} /> واتساب
           </Button>
-          <Button size="sm" variant="outline" onClick={handlePrintAllFiltered} className="h-9 gap-1.5 border-border text-foreground">
+          <Button size="sm" variant="ghost" onClick={handlePrintAllFiltered} className="h-9 gap-1.5 text-foreground">
             <Printer size={14} /> طباعة الكل ({filtered.length})
           </Button>
           <Button
@@ -539,8 +639,8 @@ export default function WorkOrders() {
         </div>
       </div>
 
-      {/* Quick stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+      {/* Focused operational summary */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <button
           type="button"
           onClick={() => setStatusFilter("all")}
@@ -559,35 +659,15 @@ export default function WorkOrders() {
         </button>
         <button
           type="button"
-          onClick={() => setStatusFilter("waiting")}
-          className={`text-right bg-card border rounded-xl p-3 transition-all hover:shadow-md hover:-translate-y-0.5 ${statusFilter === "waiting" ? "border-info/60" : "border-border hover:border-info/40"}`}
-        >
-          <p className="text-[10px] text-muted-foreground">انتظار</p>
-          <p className="text-lg font-bold text-info">{waiting}</p>
-        </button>
-        <button
-          type="button"
           onClick={() => setStatusFilter("ready")}
           className={`text-right bg-card border rounded-xl p-3 transition-all hover:shadow-md hover:-translate-y-0.5 ${statusFilter === "ready" ? "border-success/60" : "border-border hover:border-success/40"}`}
         >
           <p className="text-[10px] text-muted-foreground">جاهز للتسليم</p>
           <p className="text-lg font-bold text-success">{ready}</p>
         </button>
-        <button type="button" onClick={() => setStatusFilter("بانتظار قطع الغيار")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-warning/40">
-          <p className="text-[10px] text-muted-foreground">بانتظار القطع</p>
-          <p className="text-lg font-bold text-warning">{orders.filter(o => normalizeWorkOrderStatus(o.status) === "بانتظار قطع الغيار").length}</p>
-        </button>
         <button type="button" onClick={() => setStatusFilter("delivered")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-success/40">
           <p className="text-[10px] text-muted-foreground">تم التسليم</p>
           <p className="text-lg font-bold text-success">{delivered}</p>
-        </button>
-        <button type="button" onClick={() => setOwnershipFilter("insurance")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-sky-500/40">
-          <p className="text-[10px] text-muted-foreground">تأمين</p>
-          <p className="text-lg font-bold text-sky-600">{insuranceCount}</p>
-        </button>
-        <button type="button" onClick={() => setOwnershipFilter("cash")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-emerald-500/40">
-          <p className="text-[10px] text-muted-foreground">كاش / عام</p>
-          <p className="text-lg font-bold text-emerald-600">{cashCount}</p>
         </button>
         <button type="button" onClick={() => setStatusFilter("overdue")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-destructive/40">
           <p className="text-[10px] text-muted-foreground">متأخرة</p>
@@ -595,73 +675,53 @@ export default function WorkOrders() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <div className="relative flex-1">
-          <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="بحث برقم الأمر، اسم العميل، رقم اللوحة، أو الهاتف..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pr-9 bg-card border-border text-foreground placeholder:text-muted-foreground" />
-        </div>
-        <Select value={ownershipFilter} onValueChange={setOwnershipFilter}>
-          <SelectTrigger className="w-full sm:w-[190px] bg-card border-border text-foreground">
-            <Shield size={14} className="ml-2" /><SelectValue placeholder="نوع الأمر" />
-          </SelectTrigger>
-          <SelectContent className="bg-card border-border">
-            <SelectItem value="all">الكل ({orders.length})</SelectItem>
-            <SelectItem value="insurance">تأمين ({insuranceCount})</SelectItem>
-            <SelectItem value="cash">ورشة / كاش ({cashCount})</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-full sm:w-[180px] bg-card border-border text-foreground">
-            <Filter size={14} className="ml-2" /><SelectValue placeholder="الحالة" />
-          </SelectTrigger>
-          <SelectContent className="bg-card border-border">
-            <SelectItem value="all">جميع الحالات</SelectItem>
-            <SelectItem value="repair">قيد الإصلاح / الفحص</SelectItem>
-            <SelectItem value="waiting">انتظار</SelectItem>
-            <SelectItem value="ready">جاهزة للتسليم</SelectItem>
-            {WORK_ORDER_STATUSES.map(s => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
+      <section className="rounded-2xl border border-border bg-card p-3 shadow-sm md:p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search size={17} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder={isArabic ? "بحث برقم الأمر، العميل، اللوحة، الهاتف، المطالبة أو VIN..." : "Search order, customer, plate, phone, claim or VIN..."}
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              className="h-11 bg-background pr-10 text-sm"
+            />
+          </div>
+          <div className="grid grid-cols-3 rounded-xl border border-border bg-muted/30 p-1 xl:w-[330px]">
+            {[
+              ["all", isArabic ? `الكل ${orders.length}` : `All ${orders.length}`],
+              ["cash", isArabic ? `كاش ${cashCount}` : `Cash ${cashCount}`],
+              ["insurance", isArabic ? `تأمين ${insuranceCount}` : `Insurance ${insuranceCount}`],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setOwnershipFilter(value)}
+                className={`h-9 rounded-lg px-2 text-xs font-semibold transition-colors ${ownershipFilter === value ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                {label}
+              </button>
             ))}
-          </SelectContent>
-        </Select>
-        <Select value={technicianFilter} onValueChange={setTechnicianFilter}>
-          <SelectTrigger className="w-full bg-card border-border text-foreground"><SelectValue placeholder="الفني / المشرف" /></SelectTrigger>
-          <SelectContent className="bg-card border-border">
-            <SelectItem value="all">كل الفنيين</SelectItem>
-            {Array.from(new Set(orders.map(o => o.technician).filter(Boolean))).map((name) => (
-              <SelectItem key={name} value={name}>{name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Input type="date" value={entryFrom} onChange={(e) => setEntryFrom(e.target.value)} className="bg-card border-border" aria-label="تاريخ الدخول من" />
-        <Input type="date" value={entryTo} onChange={(e) => setEntryTo(e.target.value)} className="bg-card border-border" aria-label="تاريخ الدخول إلى" />
-        <Select value={archiveFilter} onValueChange={setArchiveFilter}>
-          <SelectTrigger className="w-full bg-card border-border text-foreground"><SelectValue placeholder="الأرشيف" /></SelectTrigger>
-          <SelectContent className="bg-card border-border">
-            <SelectItem value="all">الحالي والأرشيف</SelectItem>
-            <SelectItem value="current">الحالي فقط</SelectItem>
-            <SelectItem value="archived">الأرشيف فقط</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {[
-          ["insurance", "Insurance Only", () => setOwnershipFilter("insurance")],
-          ["cash", "Cash Only", () => setOwnershipFilter("cash")],
-          ["repair", "In Workshop", () => setStatusFilter("repair")],
-          ["ready", "Ready", () => setStatusFilter("ready")],
-          ["delivered", "Delivered", () => setStatusFilter("delivered")],
-          ["overdue", "Overdue", () => setStatusFilter("overdue")],
-        ].map(([key, label, action]) => (
-          <Button key={key as string} size="sm" variant="outline" className="h-8 rounded-full text-xs" onClick={action as () => void}>{label as string}</Button>
-        ))}
-        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => {
-          setSearchTerm(""); setStatusFilter("all"); setOwnershipFilter("all"); setTechnicianFilter("all"); setEntryFrom(""); setEntryTo(""); setArchiveFilter("all"); setPartsOnlyFilter(false);
-        }}>مسح الفلاتر</Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="h-10 gap-2" onClick={() => setShowAdvancedFilters((open) => !open)}>
+              <Filter size={15} />
+              {isArabic ? "فلاتر متقدمة" : "Advanced filters"}
+              {activeFilterCount > 0 && <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground">{activeFilterCount}</span>}
+              {showAdvancedFilters ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </Button>
+            <Button
+              variant="outline"
+              className="h-10 gap-2 border-primary/30 text-primary hover:bg-primary/10"
+              onClick={() => {
+                saveWorkOrderListFilters(currentFilters);
+                toast.success(isArabic ? "تم حفظ الفلاتر لمدة 12 ساعة" : "Filters saved for 12 hours");
+              }}
+            >
+              <Bookmark size={15} /> {isArabic ? "حفظ العرض" : "Save view"}
+            </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs">
+            <Button variant="outline" className="h-10 gap-2">
               <SlidersHorizontal size={14} />
               {isArabic ? "الأعمدة" : "Columns"} ({visibleColumnCount})
             </Button>
@@ -692,7 +752,98 @@ export default function WorkOrders() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+          {[
+            ["all", isArabic ? "كل الحالات" : "All statuses"],
+            ["repair", isArabic ? "داخل الورشة" : "In workshop"],
+            ["waiting", isArabic ? "بانتظار إجراء" : "Waiting"],
+            ["ready", isArabic ? "جاهزة للتسليم" : "Ready"],
+            ["delivered", isArabic ? "تم التسليم" : "Delivered"],
+            ["overdue", isArabic ? "متأخرة" : "Overdue"],
+          ].map(([value, label]) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={statusFilter === value ? "default" : "ghost"}
+              className={`h-8 rounded-full px-3 text-xs ${value === "overdue" && statusFilter === value ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}`}
+              onClick={() => setStatusFilter(value)}
+            >
+              {label}
+            </Button>
+          ))}
+          {activeFilterCount > 0 && (
+            <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-xs text-muted-foreground" onClick={resetFilters}>
+              <RotateCcw size={13} /> {isArabic ? "مسح الكل" : "Reset"}
+            </Button>
+          )}
+          <span className="mr-auto text-xs text-muted-foreground">
+            {isArabic ? `${filtered.length} نتيجة · يتم حفظ العرض تلقائيًا لمدة 12 ساعة` : `${filtered.length} results · view auto-saved for 12 hours`}
+          </span>
+        </div>
+
+        {showAdvancedFilters && (
+          <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+            <Select value={technicianFilter} onValueChange={setTechnicianFilter}>
+              <SelectTrigger className="bg-background"><SelectValue placeholder={isArabic ? "الفني / المشرف" : "Technician"} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{isArabic ? "كل الفنيين" : "All technicians"}</SelectItem>
+                <SelectItem value="unassigned">{isArabic ? "غير مسند لفني" : "Unassigned"}</SelectItem>
+                {technicianOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={serviceFilter} onValueChange={setServiceFilter}>
+              <SelectTrigger className="bg-background"><SelectValue placeholder={isArabic ? "نوع الخدمة" : "Service type"} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{isArabic ? "كل الخدمات" : "All services"}</SelectItem>
+                {serviceOptions.map((service) => <SelectItem key={service} value={service}>{service}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={insuranceFilter} onValueChange={(value) => { setInsuranceFilter(value); if (value !== "all") setOwnershipFilter("insurance"); }}>
+              <SelectTrigger className="bg-background"><SelectValue placeholder={isArabic ? "شركة التأمين" : "Insurance company"} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{isArabic ? "كل شركات التأمين" : "All insurers"}</SelectItem>
+                {insuranceOptions.map((company) => <SelectItem key={company} value={company}>{company}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={partsFilter} onValueChange={(value) => setPartsFilter(value as WorkOrderPartsFilter)}>
+              <SelectTrigger className="bg-background"><SelectValue placeholder={isArabic ? "حالة القطع" : "Parts status"} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{isArabic ? "كل حالات القطع" : "All parts statuses"}</SelectItem>
+                <SelectItem value="needed">{isArabic ? "تحتاج قطع" : "Parts needed"}</SelectItem>
+                <SelectItem value="none">{isArabic ? "لا تحتاج قطع" : "No parts needed"}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={ageFilter} onValueChange={(value) => setAgeFilter(value as WorkOrderAgeFilter)}>
+              <SelectTrigger className="bg-background"><SelectValue placeholder={isArabic ? "مدة الورشة" : "Workshop age"} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{isArabic ? "كل المدد" : "All durations"}</SelectItem>
+                <SelectItem value="under_7">{isArabic ? "أقل من 7 أيام" : "Under 7 days"}</SelectItem>
+                <SelectItem value="7_29">{isArabic ? "من 7 إلى 29 يومًا" : "7 to 29 days"}</SelectItem>
+                <SelectItem value="30_plus">{isArabic ? "30 يومًا فأكثر" : "30+ days"}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={archiveFilter} onValueChange={setArchiveFilter}>
+              <SelectTrigger className="bg-background"><SelectValue placeholder={isArabic ? "الأرشيف" : "Archive"} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{isArabic ? "الحالي والأرشيف" : "Current and archived"}</SelectItem>
+                <SelectItem value="current">{isArabic ? "الحالي فقط" : "Current only"}</SelectItem>
+                <SelectItem value="archived">{isArabic ? "الأرشيف فقط" : "Archived only"}</SelectItem>
+              </SelectContent>
+            </Select>
+            <label className="relative">
+              <CalendarDays size={14} className="absolute right-3 top-3 text-muted-foreground" />
+              <Input type="date" value={entryFrom} onChange={(event) => setEntryFrom(event.target.value)} className="bg-background pr-9" aria-label={isArabic ? "تاريخ الدخول من" : "Entry date from"} />
+            </label>
+            <label className="relative">
+              <CalendarDays size={14} className="absolute right-3 top-3 text-muted-foreground" />
+              <Input type="date" value={entryTo} onChange={(event) => setEntryTo(event.target.value)} className="bg-background pr-9" aria-label={isArabic ? "تاريخ الدخول إلى" : "Entry date to"} />
+            </label>
+          </div>
+        )}
+      </section>
 
       <div className="hidden md:block bg-card border border-border rounded-xl shadow-card overflow-hidden">
         <div className="overflow-x-auto">
@@ -722,7 +873,8 @@ export default function WorkOrders() {
                 <tr
                   key={order.id}
                   onClick={() => navigate(`/work-orders/${encodeURIComponent(order.id)}`)}
-                  className={`border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer ${selectedIds.has(order.id) ? "bg-primary/5" : ""}`}
+                  data-work-order-kind={isInsurance ? "insurance" : "cash"}
+                  className={`border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer ${selectedIds.has(order.id) ? "bg-primary/5" : ""} ${!isInsurance ? "border-r-[3px] border-r-emerald-500/70" : ""}`}
                   style={{ boxShadow: delay.boxShadow, backgroundColor: delay.backgroundColor }}
                   title={delay.days && delay.level !== "green" ? `متأخر داخل الورشة منذ ${delay.days} يوم` : "عرض التفاصيل"}
                 >
@@ -750,6 +902,15 @@ export default function WorkOrders() {
                   </td>}
                   {isColumnVisible("orderNumber") && <td className="py-3 px-4 font-mono text-xs text-primary">
                     <div className="flex items-center gap-1.5">
+                      {!isInsurance && !isColumnVisible("orderType") && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-300"
+                          title={isArabic ? "أمر عمل كاش" : "Cash work order"}
+                        >
+                          <Banknote size={10} />
+                          <span>{isArabic ? "كاش" : "CASH"}</span>
+                        </span>
+                      )}
                       {isInsurance && (
                         <span
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-info/15 text-info border border-info/25 text-[9px] font-medium"
@@ -771,7 +932,7 @@ export default function WorkOrders() {
                       )}
                     </div>
                   </td>}
-                  {isColumnVisible("customer") && <td className="py-3 px-4"><div><p className="text-foreground font-medium">{order.customer}</p><p className="text-[10px] text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>{toEnglishDigits(order.phone || "")}</p></div></td>}
+                  {isColumnVisible("customer") && <td className="py-3 px-4"><p className="text-foreground font-medium">{order.customer}</p></td>}
                   {isColumnVisible("vehicle") && <td className="py-3 px-4 text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>
                     <div className="flex items-center gap-2">
                       <VehicleAvatar
@@ -790,6 +951,17 @@ export default function WorkOrders() {
                   {isColumnVisible("plate") && <td className="py-3 px-4 text-muted-foreground font-mono" style={{ fontFamily: "Inter, monospace" }}>{formatPlateLatin(order.plate)}</td>}
                   {isColumnVisible("service") && <td className="py-3 px-4 text-muted-foreground">{order.serviceType}</td>}
                   {isColumnVisible("technician") && <td className="py-3 px-4 text-muted-foreground">{order.technician}</td>}
+                  {isColumnVisible("entryDate") && <td className="whitespace-nowrap py-3 px-4 text-muted-foreground" dir="ltr">{toEnglishDigits(order.entryDate || "—")}</td>}
+                  {isColumnVisible("daysInWorkshop") && <td className="whitespace-nowrap py-3 px-4 text-muted-foreground">
+                    {delay.days == null ? "—" : `${toEnglishDigits(String(delay.days))} ${isArabic ? "يوم" : "days"}`}
+                  </td>}
+                  {isColumnVisible("phone") && <td className="whitespace-nowrap py-3 px-4 font-mono text-muted-foreground" dir="ltr">{toEnglishDigits(order.phone || "—")}</td>}
+                  {isColumnVisible("insuranceCompany") && <td className="max-w-[190px] truncate py-3 px-4 text-muted-foreground" title={order.insurance}>{order.insurance || "—"}</td>}
+                  {isColumnVisible("claimNumber") && <td className="max-w-[180px] truncate py-3 px-4 font-mono text-xs text-muted-foreground" dir="ltr" title={order.claimNumber}>{toEnglishDigits(order.claimNumber || "—")}</td>}
+                  {isColumnVisible("vin") && <td className="max-w-[180px] truncate py-3 px-4 font-mono text-xs text-muted-foreground" dir="ltr" title={order.vin}>{toEnglishDigits(order.vin || "—")}</td>}
+                  {isColumnVisible("neededParts") && <td className="whitespace-nowrap py-3 px-4 text-muted-foreground">
+                    {(order.partsNeeded || []).filter(isPartStillNeeded).length}
+                  </td>}
                   {isColumnVisible("status") && <td className="py-3 px-4">
                     <button
                       onClick={(e) => { e.stopPropagation(); openStatus(order); }}
@@ -1009,16 +1181,25 @@ export default function WorkOrders() {
       <div className="grid gap-3 md:hidden">
         {paginatedOrders.map((order) => {
           const delay = getOrderDelayStyle(order);
+          const isInsurance = isInsuranceOrder(order);
           return (
             <article
               key={order.id}
               onClick={() => navigate(`/work-orders/${encodeURIComponent(order.id)}`)}
-              className="rounded-xl border border-border bg-card p-4 shadow-sm"
+              data-work-order-kind={isInsurance ? "insurance" : "cash"}
+              className={`rounded-xl border border-border bg-card p-4 shadow-sm ${!isInsurance ? "border-r-4 border-r-emerald-500/70" : ""}`}
               style={{ boxShadow: delay.boxShadow, backgroundColor: delay.backgroundColor }}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  {isColumnVisible("orderNumber") && <p className="font-mono text-sm font-bold text-primary">{toEnglishDigits(order.id)}</p>}
+                  {isColumnVisible("orderNumber") && <div className="flex items-center gap-2">
+                    {!isInsurance && !isColumnVisible("orderType") && (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                        <Banknote size={10} /> {isArabic ? "كاش" : "CASH"}
+                      </span>
+                    )}
+                    <p className="font-mono text-sm font-bold text-primary">{toEnglishDigits(order.id)}</p>
+                  </div>}
                   {isColumnVisible("customer") && <p className="mt-1 font-semibold text-foreground">{order.customer}</p>}
                   {(isColumnVisible("plate") || isColumnVisible("vehicle")) && (
                     <p className="text-xs text-muted-foreground">
@@ -1049,6 +1230,17 @@ export default function WorkOrders() {
                 {isColumnVisible("status") && <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${workOrderStatusColor(order.status)}`}>{normalizeWorkOrderStatus(order.status)}</span>}
                 {delay.level !== "green" && delay.days !== null && <span className="rounded-full bg-destructive/10 px-2 py-1 text-[10px] font-semibold text-destructive">{delay.days} يوم</span>}
               </div>
+              {(isColumnVisible("entryDate") || isColumnVisible("daysInWorkshop") || isColumnVisible("phone") || isColumnVisible("insuranceCompany") || isColumnVisible("claimNumber") || isColumnVisible("vin") || isColumnVisible("neededParts")) && (
+                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/25 p-3 text-xs">
+                  {isColumnVisible("entryDate") && <div><span className="text-muted-foreground">{isArabic ? "الدخول" : "Entry"}: </span><span dir="ltr">{toEnglishDigits(order.entryDate || "—")}</span></div>}
+                  {isColumnVisible("daysInWorkshop") && <div><span className="text-muted-foreground">{isArabic ? "المدة" : "Age"}: </span>{delay.days == null ? "—" : `${delay.days} ${isArabic ? "يوم" : "days"}`}</div>}
+                  {isColumnVisible("phone") && <div><span className="text-muted-foreground">{isArabic ? "الهاتف" : "Phone"}: </span><span dir="ltr">{toEnglishDigits(order.phone || "—")}</span></div>}
+                  {isColumnVisible("insuranceCompany") && <div className="col-span-2 truncate"><span className="text-muted-foreground">{isArabic ? "التأمين" : "Insurer"}: </span>{order.insurance || "—"}</div>}
+                  {isColumnVisible("claimNumber") && <div className="col-span-2 truncate"><span className="text-muted-foreground">{isArabic ? "المطالبة" : "Claim"}: </span><span dir="ltr">{toEnglishDigits(order.claimNumber || "—")}</span></div>}
+                  {isColumnVisible("vin") && <div className="col-span-2 truncate"><span className="text-muted-foreground">VIN: </span><span dir="ltr">{toEnglishDigits(order.vin || "—")}</span></div>}
+                  {isColumnVisible("neededParts") && <div><span className="text-muted-foreground">{isArabic ? "قطع مطلوبة" : "Needed parts"}: </span>{(order.partsNeeded || []).filter(isPartStillNeeded).length}</div>}
+                </div>
+              )}
               {(isColumnVisible("technician") || isColumnVisible("cost") || isColumnVisible("service")) && (
                 <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 text-xs">
                   <span className="text-muted-foreground">

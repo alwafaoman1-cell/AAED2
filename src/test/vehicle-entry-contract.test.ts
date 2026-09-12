@@ -76,6 +76,10 @@ describe("vehicle entry receipt contract", () => {
     expect(detail).toContain('category: "cancelled_delivery_proof"');
     expect(handover).toContain("CANCELLED CLAIM VEHICLE HANDOVER");
     expect(handover).toContain("ولا يُعد فاتورة");
+    expect(handover).toContain("height:296mm");
+    expect(handover).toContain("page-break-inside:avoid");
+    expect(handover).toContain("font-size:14pt");
+    expect(handover).not.toContain("min-height:297mm");
     expect(upload).toContain('"cancelled_delivery_proof"');
   });
 
