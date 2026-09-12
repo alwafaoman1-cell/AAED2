@@ -434,7 +434,7 @@ export default function VehicleDetail() {
     }
     try {
       await logVehicleAudit(vehicle.cloudId, "vehicle_file_printed", { report_type: options.reportType, sections: options.sections });
-      setPdfHtml(getVehicle360FileHtml(vehicle, vehicle360, { ...options, generatedBy: profile?.full_name || profile?.email || "—", english }));
+      setPdfHtml(getVehicle360FileHtml(vehicle, vehicle360, { ...options, generatedBy: profile?.full_name || "—", english }));
       setPdfTitle(`${tx("ملف المركبة", "Vehicle File")} ${vehicle.plate}`);
       setPdfOpen(true);
     } catch (error: any) {

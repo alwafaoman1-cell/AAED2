@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Edit, FileText, Printer, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
+import { ArrowRight, Copy, Edit, ExternalLink, FileText, Link2, MessageCircle, Printer, RefreshCw, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import { queryKeys } from "@/lib/queryKeys";
 import {
   buildVehicleEntryHtml,
   convertVehicleEntryToClaim,
+  createVehicleEntryCustomerSignatureLink,
   createWorkOrderFromVehicleEntry,
   getVehicleEntry,
   issueVehicleEntry,
@@ -44,6 +45,7 @@ export default function VehicleEntryDetail() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [printing, setPrinting] = useState(false);
+  const [customerSignatureLink, setCustomerSignatureLink] = useState<string | null>(null);
 
   const detail = useQuery({
     queryKey: queryKeys.vehicleEntries.detail(id),
@@ -91,6 +93,15 @@ export default function VehicleEntryDetail() {
     onError: (error: any) => toast.error(error?.message || "تعذر حذف الملف"),
   });
 
+  const signatureLinkMutation = useMutation({
+    mutationFn: () => createVehicleEntryCustomerSignatureLink(id!),
+    onSuccess: (result) => {
+      setCustomerSignatureLink(result.url);
+      toast.success("تم إنشاء رابط توقيع العميل بصلاحية 7 أيام");
+    },
+    onError: (error: any) => toast.error(error?.message || "تعذر إنشاء رابط توقيع العميل"),
+  });
+
   const entry = detail.data;
 
   function printEntry() {
@@ -106,6 +117,27 @@ export default function VehicleEntryDetail() {
   function previewEntry() {
     if (!entry) return;
     openSanitizedPdfWindow(buildVehicleEntryHtml(entry));
+  }
+
+  async function copyCustomerSignatureLink() {
+    if (!customerSignatureLink) return;
+    try {
+      await navigator.clipboard.writeText(customerSignatureLink);
+      toast.success("تم نسخ رابط التوقيع");
+    } catch {
+      toast.error("تعذر نسخ الرابط. افتحه ثم انسخه من المتصفح.");
+    }
+  }
+
+  function shareCustomerSignatureLink() {
+    if (!customerSignatureLink) return;
+    const customer = entry?.customer || entry?.customers || entry?.customer_snapshot || {};
+    const message = [
+      `مرحبًا ${customer.name || ""}`.trim(),
+      `يرجى مراجعة واعتماد نموذج دخول واستلام المركبة رقم ${entry?.entry_number || ""} بالتوقيع الإلكتروني:`,
+      customerSignatureLink,
+    ].join("\n");
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   }
 
   if (detail.isLoading) {
@@ -265,6 +297,30 @@ export default function VehicleEntryDetail() {
           <SignatureBox label="توقيع المستلم" signature={signatures.find((s: any) => s.signature_role === "receiver")} />
           <SignatureBox label="توقيع العميل/المسلم" signature={signatures.find((s: any) => s.signature_role === "delivered_by")} />
           <SignatureBox label="ختم الورشة" />
+        </div>
+        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 font-bold"><Link2 size={16} /> توقيع العميل الإلكتروني</div>
+              <p className="mt-1 text-xs text-muted-foreground">رابط آمن لمرة واحدة، صالح 7 أيام. بعد التوقيع يظهر تلقائيًا هنا وفي مستند دخول المركبة.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => detail.refetch()} className="gap-1.5"><RefreshCw size={14} /> تحديث الحالة</Button>
+              <Button size="sm" disabled={signatureLinkMutation.isPending || Boolean(signatures.find((s: any) => s.signature_role === "delivered_by"))} onClick={() => signatureLinkMutation.mutate()} className="gap-1.5">
+                <Link2 size={14} /> {signatureLinkMutation.isPending ? "جاري الإنشاء..." : "إنشاء رابط التوقيع"}
+              </Button>
+            </div>
+          </div>
+          {customerSignatureLink && (
+            <div className="mt-3 space-y-2">
+              <div className="break-all rounded-lg border bg-background p-2 text-xs" dir="ltr">{customerSignatureLink}</div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={copyCustomerSignatureLink} className="gap-1.5"><Copy size={14} /> نسخ الرابط</Button>
+                <Button variant="outline" size="sm" onClick={shareCustomerSignatureLink} className="gap-1.5 text-emerald-700"><MessageCircle size={14} /> إرسال واتساب</Button>
+                <Button variant="outline" size="sm" onClick={() => window.open(customerSignatureLink, "_blank", "noopener,noreferrer")} className="gap-1.5"><ExternalLink size={14} /> فتح صفحة التوقيع</Button>
+              </div>
+            </div>
+          )}
         </div>
       </Card>
 

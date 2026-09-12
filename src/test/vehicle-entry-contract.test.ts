@@ -192,4 +192,36 @@ describe("vehicle entry receipt contract", () => {
     expect(issueBody).toContain('roles.has("receiver")');
     expect(issueBody).toContain("لا يمكن إصدار نموذج دخول المركبة");
   });
+
+  it("supports a secure one-time customer signature page backed by the canonical entry signature", () => {
+    const migration = read("supabase/migrations/20260912170000_vehicle_entry_customer_signature.sql");
+    const app = read("src/App.tsx");
+    const publicPage = read("src/pages/public/VehicleEntrySignPage.tsx");
+    const detail = read("src/pages/vehicle-entry/VehicleEntryDetail.tsx");
+    const service = read("src/lib/vehicleEntryService.ts");
+    const realtime = read("src/hooks/useRealtimeSync.ts");
+
+    expect(migration).toContain("create table if not exists public.vehicle_entry_signature_links");
+    expect(migration).toContain("enable row level security");
+    expect(migration).toContain("create_vehicle_entry_signature_link");
+    expect(migration).toContain("get_vehicle_entry_for_customer_signature");
+    expect(migration).toContain("submit_vehicle_entry_customer_signature");
+    expect(migration).toContain("signature_role = 'delivered_by'");
+    expect(migration).toContain("for update");
+    expect(migration).toContain("consent_version");
+    expect(migration).toContain("declaration_ar_snapshot");
+    expect(migration).toContain("grant execute on function public.submit_vehicle_entry_customer_signature");
+    expect(migration.toLowerCase()).not.toContain("delete from public.vehicle_entries");
+    expect(migration.toLowerCase()).not.toContain("drop table");
+
+    expect(app).toContain('import("./pages/public/VehicleEntrySignPage")');
+    expect(app).toContain('path="/vehicle-entry/sign/:token"');
+    expect(publicPage).toContain("get_vehicle_entry_for_customer_signature");
+    expect(publicPage).toContain("submit_vehicle_entry_customer_signature");
+    expect(publicPage).toContain("I have reviewed the vehicle details and declaration");
+    expect(detail).toContain("إنشاء رابط التوقيع");
+    expect(detail).toContain("إرسال واتساب");
+    expect(service).toContain("createVehicleEntryCustomerSignatureLink");
+    expect(realtime).toContain('vehicle_entry_signatures: ["vehicle_entries", "vehicle_360"]');
+  });
 });

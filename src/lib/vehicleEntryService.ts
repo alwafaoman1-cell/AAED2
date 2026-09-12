@@ -1143,6 +1143,32 @@ function buildVehicleEntryHtmlLegacy(entry: any) {
   </main></body></html>`;
 }
 
+export interface VehicleEntryCustomerSignatureLink {
+  token: string;
+  expires_at: string;
+  vehicle_entry_id: string;
+  url: string;
+}
+
+export async function createVehicleEntryCustomerSignatureLink(
+  entryId: string,
+  expiresHours = 168,
+): Promise<VehicleEntryCustomerSignatureLink> {
+  if (!entryId) throw new Error("احفظ نموذج الدخول أولًا");
+  const { data, error } = await supabase.rpc("create_vehicle_entry_signature_link" as any, {
+    p_vehicle_entry_id: entryId,
+    p_expires_hours: expiresHours,
+  } as any);
+  if (error) throw error;
+  const result = data as unknown as Omit<VehicleEntryCustomerSignatureLink, "url"> | null;
+  if (!result?.token) throw new Error("تعذر إنشاء رابط توقيع العميل");
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+  return {
+    ...result,
+    url: `${baseUrl}/vehicle-entry/sign/${encodeURIComponent(result.token)}`,
+  };
+}
+
 function buildVehicleEntryBarcode(value: string) {
   if (!value || typeof document === "undefined" || typeof XMLSerializer === "undefined") return "";
   try {

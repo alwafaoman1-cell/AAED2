@@ -158,6 +158,7 @@ const AdminNotifications = lazy(() => import("./pages/AdminNotifications"));
 const SaasAdminConsole = lazy(() => import("./pages/admin/SaasAdminConsole"));
 const TenantFiles = lazy(() => import("./pages/admin/TenantFiles"));
 const WorkOrderSignPage = lazy(() => import("./pages/public/WorkOrderSignPage"));
+const VehicleEntrySignPage = lazy(() => import("./pages/public/VehicleEntrySignPage"));
 const accountingSetupPage = <K extends keyof typeof import("./pages/accounting/setup/AccountingSetupPages")>(name: K) =>
   lazy(() => import("./pages/accounting/setup/AccountingSetupPages").then((module) => ({ default: module[name] as ComponentType })));
 const AccountingSetupCenterPage = accountingSetupPage("AccountingSetupCenterPage");
@@ -266,6 +267,7 @@ const App = () => (
             <Route path="/v/:plate" element={<LegacyPortalRedirect param="plate" />} />
             <Route path="/c/approve/:token" element={<SupplementApprovalPage />} />
             <Route path="/sign/:token" element={<WorkOrderSignPage />} />
+            <Route path="/vehicle-entry/sign/:token" element={<VehicleEntrySignPage />} />
             <Route path="/pdf/:documentType/:id" element={<ProtectedRoute><PdfV2PreviewPage /></ProtectedRoute>} />
             <Route path="/pdf-preview/:documentType/:id" element={<ProtectedRoute><PdfV2PreviewPage /></ProtectedRoute>} />
             <Route path="/technician" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechnicianApp /></ProtectedRoute>} />

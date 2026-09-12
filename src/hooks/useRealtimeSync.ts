@@ -14,6 +14,7 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   vehicles: ["vehicles", "customers", "vehicle_360"],
   vehicle_media: ["vehicle_media", "vehicles", "vehicle_360"],
   vehicle_entries: ["vehicle_entries", "vehicle_360"],
+  vehicle_entry_signatures: ["vehicle_entries", "vehicle_360"],
   vehicle_handover_records: ["vehicle_handover_records", "vehicle_360"],
   inventory: ["inventory"],
   job_order_parts: ["job_order_parts", "inventory", "job_orders", "vehicle_360"],
@@ -76,6 +77,11 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
     scope: "claims_list",
     test: (path) => path === "/insurance/claims" || path.startsWith("/insurance/pipeline"),
     tables: ["insurance_claims"],
+  },
+  {
+    scope: "vehicle_entry_detail",
+    test: (path) => /^\/vehicle-entry\/[^/]+/.test(path) && !path.startsWith("/vehicle-entry/sign/"),
+    tables: ["vehicle_entries", "vehicle_entry_signatures"],
   },
   {
     scope: "vehicle_detail",

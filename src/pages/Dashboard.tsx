@@ -264,7 +264,7 @@ export default function Dashboard() {
         out.push({ kind: t("customers.title"), label: c.name, sub: c.phone || "", to: `/customers/${c.id}` });
     });
     vehiclesStore.getAll().forEach((v) => {
-      if (`${v.plate} ${v.type} ${v.brand || ""} ${v.model || ""} ${v.vin || ""} ${v.owner || ""}`.toLowerCase().includes(q))
+      if (`${v.plate} ${v.type} ${v.vin || ""} ${v.owner || ""}`.toLowerCase().includes(q))
         out.push({ kind: t("vehicles.title"), label: v.plate, sub: `${v.type || ""}${v.vin ? ` — ${v.vin}` : ""}`, to: `/vehicles/${encodeURIComponent(v.cloudId || v.id)}` });
     });
     docs.forEach((d) => {
