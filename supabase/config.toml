@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.whatsapp-webhook]
 verify_jwt = false
+
+[functions.vehicle-entry-signature-media]
+verify_jwt = false

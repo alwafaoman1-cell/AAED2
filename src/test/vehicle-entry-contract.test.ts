@@ -224,4 +224,23 @@ describe("vehicle entry receipt contract", () => {
     expect(service).toContain("createVehicleEntryCustomerSignatureLink");
     expect(realtime).toContain('vehicle_entry_signatures: ["vehicle_entries", "vehicle_360"]');
   });
+
+  it("exposes only token-scoped entry images through short-lived signed URLs", () => {
+    const publicPage = read("src/pages/public/VehicleEntrySignPage.tsx");
+    const mediaFunction = read("supabase/functions/vehicle-entry-signature-media/index.ts");
+    const config = read("supabase/config.toml");
+
+    expect(publicPage).toContain('supabase.functions.invoke(\n      "vehicle-entry-signature-media"');
+    expect(publicPage).toContain("صور المركبة عند الدخول / Entry Photos");
+    expect(publicPage).toContain('loading="lazy"');
+    expect(mediaFunction).toContain('.from("vehicle_entry_signature_links")');
+    expect(mediaFunction).toContain('.from("vehicle_entries")');
+    expect(mediaFunction).toContain('.from("vehicle_media")');
+    expect(mediaFunction).toContain('.eq("media_type", "image")');
+    expect(mediaFunction).toContain('.is("deleted_at", null)');
+    expect(mediaFunction).toContain("createSignedUrl(path, 900)");
+    expect(mediaFunction).toContain("path.startsWith(`${link.tenant_id}/vehicle-entry/${link.vehicle_entry_id}/`)");
+    expect(mediaFunction).not.toContain('"Access-Control-Allow-Origin": "*"');
+    expect(config).toContain("[functions.vehicle-entry-signature-media]\nverify_jwt = false");
+  });
 });

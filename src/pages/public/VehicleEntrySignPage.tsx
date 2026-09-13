@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { AlertCircle, Car, CheckCircle2, Eraser, FileSignature, Loader2, ShieldCheck } from "lucide-react";
+import { AlertCircle, Camera, Car, CheckCircle2, Eraser, FileSignature, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,6 +33,25 @@ interface EntrySignatureData {
   error?: string;
 }
 
+interface EntryPhoto {
+  id: string;
+  url: string;
+  category?: string;
+  file_name?: string;
+  caption?: string | null;
+}
+
+const photoCategoryLabel: Record<string, string> = {
+  front_view: "الواجهة الأمامية / Front View",
+  rear_view: "الواجهة الخلفية / Rear View",
+  right_side: "الجهة اليمنى / Right Side",
+  left_side: "الجهة اليسرى / Left Side",
+  plate_number: "رقم اللوحة / Plate No.",
+  odometer: "العداد / Odometer",
+  vin: "رقم الهيكل / VIN",
+  main_damage: "الضرر الرئيسي / Main Damage",
+};
+
 const errorMessage = (error?: string | null) => {
   if (error === "expired_link") return "انتهت صلاحية رابط التوقيع. يرجى طلب رابط جديد من الورشة.";
   if (error === "entry_unavailable") return "نموذج دخول المركبة غير متاح للتوقيع.";
@@ -50,6 +69,9 @@ export default function VehicleEntrySignPage() {
   const [error, setError] = useState<string | null>(null);
   const [signerName, setSignerName] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [photos, setPhotos] = useState<EntryPhoto[]>([]);
+  const [photosLoading, setPhotosLoading] = useState(false);
+  const [photosUnavailable, setPhotosUnavailable] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -72,6 +94,20 @@ export default function VehicleEntrySignPage() {
     setSignerName(result.signer_name || result.customer?.name || "");
     setError(null);
     setLoading(false);
+
+    setPhotosLoading(true);
+    setPhotosUnavailable(false);
+    const { data: mediaResponse, error: mediaError } = await supabase.functions.invoke(
+      "vehicle-entry-signature-media",
+      { body: { token } },
+    );
+    if (mediaError || mediaResponse?.error) {
+      setPhotos([]);
+      setPhotosUnavailable(true);
+    } else {
+      setPhotos(Array.isArray(mediaResponse?.media) ? mediaResponse.media : []);
+    }
+    setPhotosLoading(false);
   }, [token]);
 
   useEffect(() => {
@@ -217,6 +253,29 @@ export default function VehicleEntrySignPage() {
             <Info label="تاريخ الدخول / Entry Date" value={data.arrival_date || "—"} />
             <Info label="طريقة الوصول / Arrival" value={data.arrival_method || "—"} />
           </div>
+        </section>
+
+        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center gap-2 font-bold"><Camera size={18} /> صور المركبة عند الدخول / Entry Photos</div>
+          {photosLoading ? (
+            <div className="flex min-h-28 items-center justify-center text-sm text-muted-foreground"><Loader2 className="ml-2 h-5 w-5 animate-spin" /> جارٍ تحميل الصور…</div>
+          ) : photosUnavailable ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">تعذر تحميل الصور مؤقتًا. بيانات المركبة والتوقيع ما زالت متاحة.</div>
+          ) : photos.length === 0 ? (
+            <div className="rounded-xl border border-dashed bg-slate-50 p-5 text-center text-sm text-muted-foreground">لا توجد صور مرفوعة على نموذج الدخول.</div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {photos.map((photo) => (
+                <figure key={photo.id} className="overflow-hidden rounded-xl border bg-slate-50">
+                  <img src={photo.url} alt={photo.file_name || "صورة المركبة عند الدخول"} loading="lazy" className="aspect-[4/3] w-full bg-white object-cover" />
+                  <figcaption className="p-2 text-center text-xs font-semibold text-slate-700">
+                    {photoCategoryLabel[photo.category || ""] || photo.caption || photo.file_name || "صورة المركبة"}
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
+          <p className="mt-3 text-center text-[11px] leading-5 text-muted-foreground">الصور جزء من توثيق حالة المركبة وقت الدخول، وروابط عرضها مؤقتة ومحمية برابط التوقيع.</p>
         </section>
 
         <section className="rounded-2xl border bg-white p-5 shadow-sm">
