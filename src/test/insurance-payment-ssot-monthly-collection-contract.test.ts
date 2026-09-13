@@ -69,7 +69,9 @@ describe("insurance payment SSOT and monthly collection contract", () => {
     expect(verifiedPaymentMigration).toContain("invoice_numbers");
     expect(verifiedPaymentMigration).toContain("invoice_dates");
     expect(read("src/lib/accounting/monthlyVehicleProfitability.ts"))
-      .toContain('monthly_vehicle_profitability_v2_rpc');
+      .toContain('monthly_vehicle_profitability_v3_rpc');
+    expect(read("supabase/migrations/20260913100000_monthly_vehicle_profitability_revenue_allocation.sql"))
+      .toContain("monthly_vehicle_profitability_v2_rpc(");
   });
 
   it("supersedes invoice-date profitability with capped payment-month recognition", () => {

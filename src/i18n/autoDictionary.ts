@@ -1102,6 +1102,11 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "رابط آمن لمرة واحدة، صالح 7 أيام. بعد التوقيع يظهر تلقائيًا هنا وفي مستند دخول المركبة.": "A secure one-time link valid for 7 days. Once signed, the signature appears here and in the vehicle entry document.",
   "إنشاء رابط التوقيع": "Create Signature Link",
   "فتح صفحة التوقيع": "Open Signature Page",
+  "صور المركبة عند الدخول / Entry Photos": "Vehicle Entry Photos",
+  "جارٍ تحميل الصور…": "Loading photos…",
+  "تعذر تحميل الصور مؤقتًا. بيانات المركبة والتوقيع ما زالت متاحة.": "Photos are temporarily unavailable. Vehicle details and signing remain available.",
+  "لا توجد صور مرفوعة على نموذج الدخول.": "No photos are attached to the vehicle entry form.",
+  "الصور جزء من توثيق حالة المركبة وقت الدخول، وروابط عرضها مؤقتة ومحمية برابط التوقيع.": "Photos document the vehicle condition at entry. Their viewing links are temporary and protected by the signature link.",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

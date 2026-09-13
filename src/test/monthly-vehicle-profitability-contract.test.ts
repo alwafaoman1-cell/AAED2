@@ -10,6 +10,7 @@ const lifetimeCostMigration = readFileSync(resolve(root, "supabase/migrations/20
 const revenueCompositionMigration = readFileSync(resolve(root, "supabase/migrations/20260902100000_monthly_vehicle_profitability_revenue_composition.sql"), "utf8");
 const paymentMonthMigration = readFileSync(resolve(root, "supabase/migrations/20260902110000_monthly_vehicle_profitability_payment_month_basis.sql"), "utf8");
 const matchedCostMigration = readFileSync(resolve(root, "supabase/migrations/20260902120000_monthly_vehicle_profitability_matched_cost_basis.sql"), "utf8");
+const revenueAllocationMigration = readFileSync(resolve(root, "supabase/migrations/20260913100000_monthly_vehicle_profitability_revenue_allocation.sql"), "utf8");
 const page = readFileSync(resolve(root, "src/pages/accounting/reports/MonthlyVehicleProfitabilityPage.tsx"), "utf8");
 const service = readFileSync(resolve(root, "src/lib/accounting/monthlyWorkshopReport.ts"), "utf8");
 const monthlyProfitabilityService = readFileSync(resolve(root, "src/lib/accounting/monthlyVehicleProfitability.ts"), "utf8");
@@ -155,5 +156,26 @@ describe("monthly vehicle profitability report contract", () => {
     expect(matchedCostMigration).toContain("without duplicating costs across payment months");
     expect(matchedCostMigration).not.toContain("from direct_period_expenses e");
     expect(page).toContain("حتى لو كان سند المصروف بتاريخ مختلف");
+  });
+
+  it("allocates ambiguous invoice totals from actual parts purchases and leaves the remainder as labour", () => {
+    expect(monthlyProfitabilityService).toContain('supabase.rpc("monthly_vehicle_profitability_v3_rpc"');
+    expect(revenueAllocationMigration).toContain("adjust_monthly_vehicle_revenue_composition");
+    expect(revenueAllocationMigration).toContain("monthly_vehicle_parts_sale_basis");
+    expect(revenueAllocationMigration).toContain("e.meta->>'unitSellPrice'");
+    expect(revenueAllocationMigration).toContain("e.meta->>'partQty'");
+    expect(revenueAllocationMigration).toContain("/ 1.05");
+    expect(revenueAllocationMigration).toContain("then least(revenue, p_authoritative_parts_sale)");
+    expect(revenueAllocationMigration).toContain("then 'work_order_parts_sell_price'");
+    expect(revenueAllocationMigration).toContain("parts_cost > 0 and old_parts_revenue > 0 and old_labor_revenue > 0");
+    expect(revenueAllocationMigration).toContain("else least(revenue, parts_cost)");
+    expect(revenueAllocationMigration).toContain("greatest(revenue - adjusted_parts_revenue, 0)");
+    expect(revenueAllocationMigration).toContain("parts_sale_without_linked_purchase_reallocated_to_labor");
+    expect(revenueAllocationMigration).toContain("r.is_direct_vehicle_cost and r.has_parts_metadata then 'parts_direct_cost'");
+    expect(revenueAllocationMigration).toContain("e.meta->>'partName'");
+    expect(revenueAllocationMigration).toContain("e.meta->>'unitBuyPrice'");
+    expect(revenueAllocationMigration).toContain("Aggregates must cover every filtered row, not only the visible page");
+    expect(revenueAllocationMigration).toContain("v_scan_page, 500");
+    expect(revenueAllocationMigration).not.toMatch(/update\s+public\.(expenses|sales_documents|insurance_invoices)/i);
   });
 });
