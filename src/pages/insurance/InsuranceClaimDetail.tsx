@@ -85,6 +85,8 @@ import { markClean, markDirty } from "@/lib/unsavedWork";
 import { ensureVehicleEntryForClaim, getVehicleEntryByClaimId } from "@/lib/vehicleEntryService";
 import { buildCancelledClaimVehicleHandoverHtml } from "@/lib/cancelledClaimVehicleHandover";
 import { cancelLatestFinalizedVehicleHandover } from "@/lib/vehicleDeliveryReceipt";
+import ReopenClaimDialog from "@/components/insurance/ReopenClaimDialog";
+import { buildReopenCancelledClaimPatch, type ReopenClaimTargetStatus } from "@/lib/claimReopen";
 
 
 const insuranceCompanies = [
@@ -219,6 +221,8 @@ export default function InsuranceClaimDetail() {
   const [showSummary, setShowSummary] = useState(false);
   const [showInspectionPdf, setShowInspectionPdf] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showReopenClaimDialog, setShowReopenClaimDialog] = useState(false);
+  const [reopeningClaim, setReopeningClaim] = useState(false);
   const [showCancelledHandover, setShowCancelledHandover] = useState(false);
   const [registeringVehicleEntry, setRegisteringVehicleEntry] = useState(false);
   const [showUndoDeliveryDialog, setShowUndoDeliveryDialog] = useState(false);
@@ -2161,6 +2165,96 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     }
   };
 
+  const handleReopenCancelledClaim = async ({
+    reason,
+    targetStatus,
+  }: {
+    reason: string;
+    targetStatus: ReopenClaimTargetStatus;
+  }) => {
+    if (!id || isNew || status !== "cancelled" || reopeningClaim) return;
+    if ((existing as any)?.deleted_at) {
+      toast.error("لا يمكن إعادة مطالبة محذوفة أو مؤرشفة من هذه الصفحة");
+      return;
+    }
+
+    let patch;
+    try {
+      patch = buildReopenCancelledClaimPatch({ reason, targetStatus });
+    } catch (error: any) {
+      toast.error(error?.message || "تحقق من بيانات إعادة المطالبة");
+      return;
+    }
+
+    setReopeningClaim(true);
+    try {
+      const tenantId = String((existing as any)?.tenant_id || "");
+      if (!tenantId) throw new Error("تعذر تحديد حساب المطالبة");
+
+      const { data: verified, error } = await supabase
+        .from("insurance_claims" as any)
+        .update(patch as any)
+        .eq("id", id)
+        .eq("tenant_id", tenantId)
+        .eq("status", "cancelled")
+        .is("deleted_at", null)
+        .select("*")
+        .maybeSingle();
+      if (error) throw error;
+      if (!(verified as any)?.id || (verified as any).status !== targetStatus) {
+        throw new Error("لم تتم إعادة المطالبة؛ ربما تغيرت حالتها بواسطة مستخدم آخر");
+      }
+
+      const verifiedClaim = {
+        ...(existing as any),
+        ...(verified as any),
+        customer: (verified as any)?.customer || (existing as any)?.customer,
+        vehicle: (verified as any)?.vehicle || (existing as any)?.vehicle,
+        job_order: (verified as any)?.job_order || (existing as any)?.job_order,
+      };
+      queryClient.setQueryData(queryKeys.insuranceClaims.detail(id), verifiedClaim);
+      hydrateFromVerifiedClaim(verifiedClaim);
+      const followUpWarnings: string[] = [];
+      try {
+        await writeClaimAudit("claim_reopened", {
+          from: "cancelled",
+          to: targetStatus,
+          reason: reason.trim(),
+          previous_cancellation_reason: rejectionReason || (existing as any)?.rejection_reason || null,
+          cancellation_document_preserved: true,
+          related_records_preserved: true,
+        });
+      } catch {
+        followUpWarnings.push("تعذر تسجيل حدث الإعادة في سجل التدقيق");
+      }
+      try {
+        await syncClaimOperationalFile({
+          patch: { insurance_approval_status: targetStatus },
+        });
+      } catch {
+        followUpWarnings.push("تعذر تحديث ملف التشغيل الموحد");
+      }
+
+      await Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.claimOperation(id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.jobOrders.all }),
+      ]);
+
+      setStatus(targetStatus);
+      setRejectionReason("");
+      setShowReopenClaimDialog(false);
+      setTab(targetStatus === "approved" ? "workorder" : "inspect");
+      toast.success(targetStatus === "approved" ? "تمت إعادة المطالبة بحالة معتمدة" : "تمت إعادة المطالبة وبانتظار الموافقة");
+      if (followUpWarnings.length) toast.warning(followUpWarnings.join(" — "));
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر إعادة المطالبة");
+    } finally {
+      setReopeningClaim(false);
+    }
+  };
+
 
   if (!isNew && isLoading) {
     return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
@@ -2390,6 +2484,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
             >
               <XCircle size={16} /> إغلاق/إلغاء
+            </Button>
+          )}
+          {!isNew && status === "cancelled" && !(existing as any)?.deleted_at && (
+            <Button
+              variant="outline"
+              onClick={() => setShowReopenClaimDialog(true)}
+              className="gap-2 border-emerald-500/50 text-emerald-700 hover:bg-emerald-50"
+            >
+              <Undo2 size={16} /> إعادة المطالبة
             </Button>
           )}
           {!isNew && (
@@ -3848,6 +3951,17 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               );
             });
           }}
+        />
+      )}
+
+      {!isNew && existing && status === "cancelled" && !(existing as any)?.deleted_at && (
+        <ReopenClaimDialog
+          open={showReopenClaimDialog}
+          onOpenChange={setShowReopenClaimDialog}
+          claimNumber={claimNumber}
+          approvedAmount={parseMoneyInput(approvedAmount) || 0}
+          submitting={reopeningClaim}
+          onConfirm={handleReopenCancelledClaim}
         />
       )}
 

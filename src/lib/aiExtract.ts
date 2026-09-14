@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - worker is loaded as URL by Vite.
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min?url";
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 (pdfjsLib as any).GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
