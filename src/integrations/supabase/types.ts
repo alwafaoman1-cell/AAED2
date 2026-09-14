@@ -3666,6 +3666,8 @@ export type Database = {
           auto_job_order_id: string | null
           claim_number: string
           claim_registered_at: string | null
+          cancelled_handover_signature_data_url: string | null
+          cancelled_handover_signed_at: string | null
           created_at: string
           customer_id: string
           damage_photos: string[] | null
@@ -3765,6 +3767,8 @@ export type Database = {
           auto_job_order_id?: string | null
           claim_number: string
           claim_registered_at?: string | null
+          cancelled_handover_signature_data_url?: string | null
+          cancelled_handover_signed_at?: string | null
           created_at?: string
           customer_id: string
           damage_photos?: string[] | null
@@ -3864,6 +3868,8 @@ export type Database = {
           auto_job_order_id?: string | null
           claim_number?: string
           claim_registered_at?: string | null
+          cancelled_handover_signature_data_url?: string | null
+          cancelled_handover_signed_at?: string | null
           created_at?: string
           customer_id?: string
           damage_photos?: string[] | null

@@ -78,6 +78,7 @@ import { isUuid } from "@/lib/uuid";
 import { queryKeys } from "@/lib/queryKeys";
 import { resolveClaimVehicleForWorkOrder } from "@/lib/claimVehicleResolver";
 import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
+import ElectronicSignaturePad from "@/components/ElectronicSignaturePad";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { displayCustomerCode } from "@/lib/customerCode";
 import { upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
@@ -224,6 +225,12 @@ export default function InsuranceClaimDetail() {
   const [showReopenClaimDialog, setShowReopenClaimDialog] = useState(false);
   const [reopeningClaim, setReopeningClaim] = useState(false);
   const [showCancelledHandover, setShowCancelledHandover] = useState(false);
+  const [cancelledHandoverReceiverName, setCancelledHandoverReceiverName] = useState("");
+  const [cancelledHandoverReceiverIdNumber, setCancelledHandoverReceiverIdNumber] = useState("");
+  const [cancelledHandoverReceiverNotes, setCancelledHandoverReceiverNotes] = useState("");
+  const [cancelledHandoverSignature, setCancelledHandoverSignature] = useState("");
+  const [cancelledHandoverAcknowledged, setCancelledHandoverAcknowledged] = useState(false);
+  const [savingCancelledHandover, setSavingCancelledHandover] = useState(false);
   const [registeringVehicleEntry, setRegisteringVehicleEntry] = useState(false);
   const [showUndoDeliveryDialog, setShowUndoDeliveryDialog] = useState(false);
   const [undoDeliveryReason, setUndoDeliveryReason] = useState("");
@@ -339,6 +346,10 @@ export default function InsuranceClaimDetail() {
     setWorkStartedAt(ws ? String(ws).slice(0, 10) : "");
     const wc = (existing as any).work_completed_at;
     setWorkCompletedAt(wc ? String(wc).slice(0, 10) : "");
+    setCancelledHandoverReceiverName((existing as any).receiver_name ?? "");
+    setCancelledHandoverReceiverIdNumber((existing as any).receiver_id_number ?? "");
+    setCancelledHandoverReceiverNotes((existing as any).delivery_notes ?? "");
+    setCancelledHandoverSignature((existing as any).cancelled_handover_signature_data_url ?? "");
   }, [existing]);
 
   useEffect(() => {
@@ -2255,6 +2266,74 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     }
   };
 
+  const handlePrepareCancelledClaimHandover = async () => {
+    if (!id || isNew || status !== "cancelled" || savingCancelledHandover) return;
+    const receiverName = cancelledHandoverReceiverName.trim();
+    const receiverIdNumber = cancelledHandoverReceiverIdNumber.trim();
+    if (!receiverName) {
+      toast.error("اسم المستلم مطلوب قبل إصدار ورقة التسليم");
+      return;
+    }
+    if (!receiverIdNumber) {
+      toast.error("رقم هوية أو جواز المستلم مطلوب قبل إصدار ورقة التسليم");
+      return;
+    }
+    if (!cancelledHandoverAcknowledged) {
+      toast.error("يجب تأكيد معاينة واستلام المركبة والمحتويات والقطع قبل إصدار الورقة");
+      return;
+    }
+    if (!cancelledHandoverSignature.startsWith("data:image/png;base64,")) {
+      toast.error("توقيع المستلم الإلكتروني مطلوب قبل إصدار ورقة التسليم");
+      return;
+    }
+    const tenantId = String((existing as any)?.tenant_id || "");
+    if (!tenantId) {
+      toast.error("تعذر تحديد حساب المطالبة");
+      return;
+    }
+
+    setSavingCancelledHandover(true);
+    try {
+      const receiverNotes = cancelledHandoverReceiverNotes.trim();
+      const { data: saved, error } = await supabase
+        .from("insurance_claims")
+        .update({
+          receiver_name: receiverName,
+          receiver_id_number: receiverIdNumber,
+          delivery_notes: receiverNotes || null,
+          cancelled_handover_signature_data_url: cancelledHandoverSignature,
+        } as never)
+        .eq("id", id)
+        .eq("tenant_id", tenantId)
+        .eq("status", "cancelled")
+        .is("deleted_at", null)
+        .select("id,receiver_name,receiver_id_number,delivery_notes,cancelled_handover_signature_data_url,cancelled_handover_signed_at")
+        .maybeSingle();
+      if (error) throw error;
+      if (!(saved as any)?.id) throw new Error("تعذر تثبيت بيانات المستلم؛ ربما تغيرت حالة المطالبة");
+
+      queryClient.setQueryData(queryKeys.insuranceClaims.detail(id), (current: any) => ({
+        ...(current || existing || {}),
+        ...(saved as any),
+      }));
+      await writeClaimAudit("cancelled_claim_handover_prepared", {
+        receiver_name: receiverName,
+        receiver_id_number: receiverIdNumber,
+        receiver_reservations: receiverNotes || "none",
+        acknowledgement_version: "cancelled-claim-handover-v2",
+        contents_and_removed_parts_acknowledged: true,
+        electronically_signed: true,
+        signed_at: (saved as any).cancelled_handover_signed_at,
+      }, "delivery");
+      setShowCancelledHandover(true);
+      toast.success("تم حفظ بيانات المستلم وتجهيز ورقة التسليم");
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ بيانات ورقة التسليم");
+    } finally {
+      setSavingCancelledHandover(false);
+    }
+  };
+
 
   if (!isNew && isLoading) {
     return <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>;
@@ -3512,16 +3591,72 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         {/* ── 5) Delivery tab ── */}
         <TabsContent value="delivery" className="space-y-4 mt-4">
           {!isNew && id && status === "cancelled" ? (
-            <Card className="p-5 border-red-200 bg-red-50/40">
+            <Card className="p-5 border-red-200 bg-red-50/40 space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h3 className="font-bold text-red-800">تسليم المركبة بعد إلغاء المطالبة</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">تظهر هذه الورقة للمطالبة الملغاة فقط، ولا تسجل فاتورة أو اكتمال إصلاح.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">أدخل بيانات الشخص الذي استلم المركبة فعليًا. تحفظ البيانات في المطالبة وتظهر في الورقة المؤرشفة.</p>
                 </div>
-                <Button onClick={() => setShowCancelledHandover(true)} className="gap-2">
+                <Button onClick={handlePrepareCancelledClaimHandover} disabled={savingCancelledHandover} className="gap-2">
                   <Printer size={16} /> معاينة وطباعة الورقة
                 </Button>
               </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="cancelled-handover-receiver-name">اسم المستلم *</Label>
+                  <Input
+                    id="cancelled-handover-receiver-name"
+                    value={cancelledHandoverReceiverName}
+                    onChange={(event) => {
+                      setCancelledHandoverReceiverName(event.target.value);
+                      setCancelledHandoverSignature("");
+                    }}
+                    placeholder="الاسم الكامل كما في الهوية"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cancelled-handover-receiver-id">رقم الهوية أو الجواز *</Label>
+                  <Input
+                    id="cancelled-handover-receiver-id"
+                    dir="ltr"
+                    value={cancelledHandoverReceiverIdNumber}
+                    onChange={(event) => {
+                      setCancelledHandoverReceiverIdNumber(event.target.value);
+                      setCancelledHandoverSignature("");
+                    }}
+                    placeholder="ID / Passport No."
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cancelled-handover-reservations">تحفظات أو نواقص يذكرها المستلم عند التسليم</Label>
+                <Textarea
+                  id="cancelled-handover-reservations"
+                  value={cancelledHandoverReceiverNotes}
+                  onChange={(event) => {
+                    setCancelledHandoverReceiverNotes(event.target.value);
+                    setCancelledHandoverSignature("");
+                  }}
+                  placeholder="اتركها فارغة إذا لا توجد تحفظات"
+                  rows={2}
+                />
+              </div>
+              <label className="flex items-start gap-2 rounded-lg border border-red-200 bg-white p-3 text-sm leading-6 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-primary"
+                  checked={cancelledHandoverAcknowledged}
+                  onChange={(event) => setCancelledHandoverAcknowledged(event.target.checked)}
+                />
+                <span>تمت معاينة واستلام المركبة ومفاتيحها ومستنداتها ومحتوياتها المسجلة، وكافة القطع القديمة أو المفكوكة والمتاحة المعروضة عند التسليم، وأي نقص أو تحفظ مذكور في الحقل أعلاه.</span>
+              </label>
+              <ElectronicSignaturePad
+                value={cancelledHandoverSignature}
+                onChange={setCancelledHandoverSignature}
+                title="توقيع المستلم الإلكتروني *"
+                description="يؤكد المستلم أن بياناته والإقرار والتحفظات أعلاه صحيحة عند التسليم."
+                disabled={savingCancelledHandover}
+              />
             </Card>
           ) : !isNew && id ? (
             <ClaimDeliverySection
@@ -3666,6 +3801,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           plateCountry: (vehicle as any)?.plate_country,
           vin: (vehicle as any)?.vin_number || vehicleVin,
           workshopArrivalDate,
+          receiverName: cancelledHandoverReceiverName,
+          receiverIdNumber: cancelledHandoverReceiverIdNumber,
+          receiverNotes: cancelledHandoverReceiverNotes,
+          receiverSignatureDataUrl: cancelledHandoverSignature,
+          handoverAt: new Date().toISOString(),
         }, getTemplateSettings());
         return (
           <PdfPreviewDialog
@@ -3682,6 +3822,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               meta: {
                 claim_number: claimNumber,
                 cancellation_reason: rejectionReason || (existing as any)?.rejection_reason || null,
+                receiver_name: cancelledHandoverReceiverName.trim(),
+                receiver_id_number: cancelledHandoverReceiverIdNumber.trim(),
+                receiver_reservations: cancelledHandoverReceiverNotes.trim() || null,
+                acknowledgement_version: "cancelled-claim-handover-v2",
+                electronically_signed: true,
+                signed_at: (existing as any)?.cancelled_handover_signed_at || new Date().toISOString(),
               },
             })}
             onSaved={refreshClaimMedia}
