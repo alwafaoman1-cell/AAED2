@@ -72,6 +72,18 @@ describe("claim estimate PDF template", () => {
     expect(html).toContain("grid-template-columns:repeat(3,minmax(0,1fr))");
     expect(html).toContain(".claim-estimate-page .footer{margin-top:auto");
     expect(html).toContain(".claim-estimate-page .estimation-badge span{padding:4px 18px");
+    expect(html).toContain("font-size:11.5px");
+  });
+
+  it("never includes damage photos in the claim estimate", () => {
+    const html = getClaimEstimateHtml({
+      ...basePayload,
+      estimationType: "lump_sum",
+      damagePhotos: ["https://example.com/damage-1.jpg"],
+    });
+
+    expect(html).not.toContain("صور الأضرار / Damage Photos");
+    expect(html).not.toContain("damage-1.jpg");
   });
 
   it("supports multiline pasted UPL items without replacing existing rows", () => {

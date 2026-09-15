@@ -547,37 +547,37 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
   // لكلا النوعين LUMP SUM و UPL مع الحفاظ على الختم لكل واحد.
   const s = getTemplateSettings();
   const styles = `${baseStyles(s)}
-    .claim-estimate-page{padding:8mm 10mm 9mm;display:flex;flex-direction:column;min-height:297mm;color:#0f172a;font-size:10.5px;font-weight:500;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+    .claim-estimate-page{padding:8mm 10mm 9mm;display:flex;flex-direction:column;min-height:297mm;color:#0f172a;font-size:11.5px;font-weight:500;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
     .claim-estimate-page .header{padding-bottom:6px;margin-bottom:7px;border-bottom-width:2px;align-items:flex-start}
-    .claim-estimate-page .company-info h1{font-size:16px;line-height:1.15;margin-bottom:1px;color:#111827}
-    .claim-estimate-page .company-info .en-name{font-size:11px;line-height:1.2;margin-bottom:2px;color:#111827;font-weight:700}
-    .claim-estimate-page .company-info .details{font-size:8.6px;line-height:1.35;color:#374151;font-weight:500}
+    .claim-estimate-page .company-info h1{font-size:17px;line-height:1.15;margin-bottom:1px;color:#111827}
+    .claim-estimate-page .company-info .en-name{font-size:12px;line-height:1.2;margin-bottom:2px;color:#111827;font-weight:700}
+    .claim-estimate-page .company-info .details{font-size:9.3px;line-height:1.35;color:#374151;font-weight:500}
     .claim-estimate-page .doc-badge{min-width:135px;padding:7px 13px;border-radius:5px}
-    .claim-estimate-page .doc-badge .number{font-size:14.5px;margin:1px 0;letter-spacing:.2px}
-    .claim-estimate-page .doc-badge .label-ar{font-size:10px}
-    .claim-estimate-page .doc-badge .label-en,.claim-estimate-page .doc-badge .date{font-size:8.3px}
+    .claim-estimate-page .doc-badge .number{font-size:15.5px;margin:1px 0;letter-spacing:.2px}
+    .claim-estimate-page .doc-badge .label-ar{font-size:10.7px}
+    .claim-estimate-page .doc-badge .label-en,.claim-estimate-page .doc-badge .date{font-size:9px}
     .claim-estimate-page .insurance-banner{padding:7px 10px;margin-bottom:7px;border-radius:6px}
     .claim-estimate-page .insurance-banner .icon{width:28px;height:28px;font-size:15px}
-    .claim-estimate-page .insurance-banner .info .name{font-size:13.5px;line-height:1.2}
-    .claim-estimate-page .insurance-banner .info .label,.claim-estimate-page .insurance-banner .meta{font-size:9.2px;line-height:1.35}
+    .claim-estimate-page .insurance-banner .info .name{font-size:14.5px;line-height:1.2}
+    .claim-estimate-page .insurance-banner .info .label,.claim-estimate-page .insurance-banner .meta{font-size:10px;line-height:1.35}
     .claim-estimate-page .vehicle-card{padding:7px 10px;margin-bottom:7px;border-radius:6px}
-    .claim-estimate-page .vehicle-card .left .lbl{font-size:9.3px}
-    .claim-estimate-page .vehicle-card .left .val{font-size:13px;line-height:1.2}
-    .claim-estimate-page .vehicle-card .right{font-size:9.8px;gap:2px 10px}
-    .claim-estimate-page .vehicle-plate{padding:3px 10px;font-size:12.5px;border-width:1px;border-radius:4px}
-    .claim-estimate-page .section-title{font-size:11.5px;margin:7px 0 4px;padding-right:7px;border-right-width:2px;color:#b98111}
+    .claim-estimate-page .vehicle-card .left .lbl{font-size:10px}
+    .claim-estimate-page .vehicle-card .left .val{font-size:14px;line-height:1.2}
+    .claim-estimate-page .vehicle-card .right{font-size:10.6px;gap:2px 10px}
+    .claim-estimate-page .vehicle-plate{padding:3px 10px;font-size:13.5px;border-width:1px;border-radius:4px}
+    .claim-estimate-page .section-title{font-size:12.5px;margin:7px 0 4px;padding-right:7px;border-right-width:2px;color:#b98111}
     .claim-estimate-page .info-grid{gap:2px 14px;margin-bottom:6px}
-    .claim-estimate-page .info-row{font-size:10px;padding:1px 0;gap:5px}
+    .claim-estimate-page .info-row{font-size:10.8px;padding:1px 0;gap:5px}
     .claim-estimate-page .info-row .label{min-width:85px;color:#475569}
-    .claim-estimate-page table{margin:4px 0;font-size:10.2px;line-height:1.25;color:#0f172a}
-    .claim-estimate-page thead th{padding:5px 6px;font-size:9.2px;font-weight:800}
+    .claim-estimate-page table{margin:4px 0;font-size:11px;line-height:1.3;color:#0f172a}
+    .claim-estimate-page thead th{padding:5px 6px;font-size:10px;font-weight:800}
     .claim-estimate-page tbody td{padding:5px 6px;color:#111827}
     .claim-estimate-page .totals-box{margin-top:6px;width:275px;border-width:1px;border-radius:5px}
-    .claim-estimate-page .totals-row{padding:5px 10px;font-size:10px}
-    .claim-estimate-page .totals-row.total{font-size:11px}
+    .claim-estimate-page .totals-row{padding:5px 10px;font-size:10.8px}
+    .claim-estimate-page .totals-row.total{font-size:12px}
     .claim-estimate-page .estimation-badge{margin-top:7px}
     .claim-estimate-page .estimation-badge span{padding:4px 18px;border-width:2px;font-size:16pt;letter-spacing:4px;border-radius:4px}
-    .claim-estimate-page .notes-box{margin-top:8px;padding:6px 8px;font-size:9.2px;line-height:1.45;border-right-width:2px;border-radius:5px;color:#334155}
+    .claim-estimate-page .notes-box{margin-top:8px;padding:6px 8px;font-size:10px;line-height:1.5;border-right-width:2px;border-radius:5px;color:#334155}
     .claim-estimate-page .signature-area{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:9px;direction:ltr}
     .claim-estimate-page .signature-area .sig{padding:5px;border-radius:5px;direction:rtl;min-width:0}
     .claim-estimate-page .signature-area .sig .name{font-size:8.6px;margin-bottom:3px;color:#111827}
@@ -656,17 +656,6 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
   const deductible = p.deductibleAmount || 0;
   const netAmount = subtotal - deductible;
 
-  const damagePhotosHtml = (p.damagePhotos || []).slice(0, 6).length
-    ? `
-      <div class="section-title">صور الأضرار / Damage Photos</div>
-      <div class="photos-grid">
-        ${(p.damagePhotos || [])
-          .slice(0, 6)
-          .map((url, i) => `<div class="ph"><img src="${url}" alt="damage ${i + 1}" /><div class="cap">صورة ${i + 1}</div></div>`)
-          .join("")}
-      </div>`
-    : "";
-
   const body = `
     <div class="page claim-estimate-page">
       ${s.showWatermark ? `<div class="watermark">ESTIMATE</div>` : ""}
@@ -697,7 +686,6 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
       </div>
       ${showEstimateBadge ? `<div class="estimation-badge"><span>${p.estimationType === "upl" ? "UPL" : "LUMP SUM"}</span></div>` : ""}
 
-      ${damagePhotosHtml}
       ${p.notes ? `<div class="notes-box"><b>ملاحظات:</b> ${p.notes}</div>` : ""}
 
       ${showStampAndSignature ? `<div class="signature-area">
