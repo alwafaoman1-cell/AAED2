@@ -52,8 +52,12 @@ describe("work orders actual cost column", () => {
 
   it("refreshes the list cost when an expense changes through realtime", () => {
     const realtime = readFileSync(resolve(process.cwd(), "src/hooks/useRealtimeSync.ts"), "utf8");
+    const store = readFileSync(resolve(process.cwd(), "src/lib/workOrdersStore.ts"), "utf8");
     expect(realtime).toContain('tables: ["job_orders", "expenses"]');
-    expect(realtime).toContain('table === "expenses" && realtimeScope.scope === "work_orders_list"');
-    expect(realtime).toContain("refreshWorkOrdersFromCloud()");
+    expect(realtime).toContain('realtimeScope.scope === "work_orders_list"');
+    expect(realtime).toContain("refreshWorkOrderActualCostFromExpenseChange(payload)");
+    expect(realtime).not.toContain("refreshWorkOrdersFromCloud()");
+    expect(store).toContain("export async function refreshWorkOrderActualCostFromExpenseChange");
+    expect(store).toContain("fetchActualExpenseCostsForOrders(tenantId, identities)");
   });
 });

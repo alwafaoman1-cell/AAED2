@@ -27,6 +27,7 @@ import {
   type UnifiedEstimate,
 } from "@/lib/unifiedEstimates";
 import { useDraftPersistence } from "@/lib/drafts/useDraftPersistence";
+import { useAuth } from "@/contexts/AuthContext";
 
 const emptyItem: EstimateItemInput = {
   category: "labor",
@@ -133,6 +134,7 @@ export default function EstimateForm() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const qc = useQueryClient();
+  const { profile } = useAuth();
   const isEdit = Boolean(id);
   const defaultType = (searchParams.get("type") as EstimateType | null) || "independent";
 
@@ -141,29 +143,6 @@ export default function EstimateForm() {
     queryFn: () => getUnifiedEstimate(id!),
     enabled: isEdit,
   });
-  const { data: lookups } = useQuery({
-    queryKey: queryKeys.estimates.lookups,
-    queryFn: async () => {
-      const [customers, vehicles, claims, workOrders, estimates] = await Promise.all([
-        supabase.from("customers" as any).select("id,name,phone,email,customer_code").order("created_at", { ascending: false }).limit(200),
-        supabase.from("vehicles" as any).select("id,brand,make,model,plate_number,plate_letters,vin,vin_number,year,color,customer_id").order("created_at", { ascending: false }).limit(200),
-        supabase.from("insurance_claims" as any).select("id,claim_number,insurance_company,insurance_employee_name,policy_number,surveyor,customer_id,vehicle_id").order("created_at", { ascending: false }).limit(200),
-        supabase.from("job_orders" as any).select("id,order_number,status,customer_id,vehicle_id,claim_id").order("created_at", { ascending: false }).limit(200),
-        supabase.from("estimates" as any).select("id,estimate_number,estimate_type,total").order("created_at", { ascending: false }).limit(200),
-      ]);
-      for (const result of [customers, vehicles, claims, workOrders, estimates]) {
-        if (result.error) throw result.error;
-      }
-      return {
-        customers: customers.data || [],
-        vehicles: vehicles.data || [],
-        claims: claims.data || [],
-        workOrders: workOrders.data || [],
-        estimates: estimates.data || [],
-      };
-    },
-  });
-
   const [form, setForm] = useState<Partial<UnifiedEstimate>>({
     estimate_type: defaultType,
     status: "draft",
@@ -197,6 +176,54 @@ export default function EstimateForm() {
     () => `estimate:${id || "new"}:${defaultType}:${searchParams.toString()}`,
     [id, defaultType, searchParams],
   );
+
+  const linkedRecordsQuery = useQuery({
+    queryKey: queryKeys.estimates.linkedRecords(profile?.tenant_id, {
+      customerId: form.customer_id || null,
+      vehicleId: form.vehicle_id || null,
+      claimId: form.claim_id || null,
+      workOrderId: form.work_order_id || null,
+    }),
+    queryFn: async () => {
+      const tenantId = profile!.tenant_id;
+      const empty = Promise.resolve({ data: null, error: null });
+      const [customer, vehicle, claim, workOrder] = await Promise.all([
+        form.customer_id
+          ? supabase.from("customers" as any).select("id,name,phone,email,customer_code").eq("tenant_id", tenantId).eq("id", form.customer_id).maybeSingle()
+          : empty,
+        form.vehicle_id
+          ? supabase.from("vehicles" as any).select("id,brand,make,model,plate_number,plate_letters,vin,vin_number,year,color,customer_id").eq("tenant_id", tenantId).eq("id", form.vehicle_id).maybeSingle()
+          : empty,
+        form.claim_id
+          ? supabase.from("insurance_claims" as any).select("id,claim_number,insurance_company,policy_number,customer_id,vehicle_id,job_order_id,auto_job_order_id").eq("tenant_id", tenantId).eq("id", form.claim_id).is("deleted_at", null).maybeSingle()
+          : empty,
+        form.work_order_id
+          ? supabase.from("job_orders" as any).select("id,order_number,status,customer_id,vehicle_id,claim_id").eq("tenant_id", tenantId).eq("id", form.work_order_id).is("deleted_at", null).maybeSingle()
+          : empty,
+      ]);
+      for (const result of [customer, vehicle, claim, workOrder]) if (result.error) throw result.error;
+      return { customer: customer.data, vehicle: vehicle.data, claim: claim.data, workOrder: workOrder.data };
+    },
+    enabled: Boolean(profile?.tenant_id && (form.customer_id || form.vehicle_id || form.claim_id || form.work_order_id)),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const parentEstimatesQuery = useQuery({
+    queryKey: queryKeys.estimates.list({ purpose: "supplement_parent" }),
+    queryFn: async () => {
+      const { data, error } = await supabase.from("estimates" as any)
+        .select("id,estimate_number,estimate_type,total")
+        .eq("tenant_id", profile!.tenant_id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: Boolean(profile?.tenant_id && form.estimate_type === "supplementary"),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
 
   useEffect(() => {
     if (!existing) return;
@@ -232,7 +259,7 @@ export default function EstimateForm() {
 
   useEffect(() => {
     const term = searchTerm.trim();
-    if (term.length < 2) {
+    if (term.length < 2 || !profile?.tenant_id) {
       setSearchResults([]);
       setSearchLoading(false);
       setSearchError(null);
@@ -244,25 +271,34 @@ export default function EstimateForm() {
     const timer = window.setTimeout(async () => {
       try {
         const pattern = `%${term.replace(/[%_]/g, "")}%`;
+        const tenantId = profile.tenant_id;
         const [vehiclesRes, claimsRes, ordersRes, customersRes] = await Promise.all([
           supabase
             .from("vehicles" as any)
             .select("id,brand,model,year,plate_number,plate_letters,vin_number,customer_id,customer:customers(id,name,phone,customer_code)")
+            .eq("tenant_id", tenantId)
+            .is("deleted_at", null)
             .or(`plate_number.ilike.${pattern},plate_letters.ilike.${pattern},vin_number.ilike.${pattern},brand.ilike.${pattern},model.ilike.${pattern}`)
             .limit(8),
           supabase
             .from("insurance_claims" as any)
             .select("id,claim_number,insurance_company,customer_id,vehicle_id,job_order_id,auto_job_order_id,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,vin_number)")
+            .eq("tenant_id", tenantId)
+            .is("deleted_at", null)
             .or(`claim_number.ilike.${pattern},insurance_company.ilike.${pattern}`)
             .limit(8),
           supabase
             .from("job_orders" as any)
             .select("id,order_number,status,customer_id,vehicle_id,claim_id,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,vin_number)")
+            .eq("tenant_id", tenantId)
+            .is("deleted_at", null)
             .or(`order_number.ilike.${pattern},description.ilike.${pattern}`)
             .limit(8),
           supabase
             .from("customers" as any)
-            .select("id,name,phone,customer_code,vehicles(id,brand,model,year,plate_number,plate_letters,vin_number,customer_id)")
+            .select("id,name,phone,customer_code")
+            .eq("tenant_id", tenantId)
+            .is("deleted_at", null)
             .or(`name.ilike.${pattern},phone.ilike.${pattern},customer_code.ilike.${pattern}`)
             .limit(6),
         ]);
@@ -306,11 +342,18 @@ export default function EstimateForm() {
           customer: o.customer || null,
           vehicle: o.vehicle || null,
         }));
-        const customerVehicleRows = ((customersRes.data || []) as any[]).flatMap((c): EstimateSearchResult[] => {
-          const customerVehicles = Array.isArray(c.vehicles) ? c.vehicles : [];
-          if (customerVehicles.length === 0) return [{ type: "vehicle", id: `customer-${c.id}`, title: `${c.customer_code || ""} ${c.name || "Customer"}`.trim(), subtitle: c.phone || "", customer_id: c.id, vehicle_id: null, claim_id: null, work_order_id: null, customer: c, vehicle: null }];
-          return customerVehicles.map((v: any) => ({ type: "vehicle", id: v.id, title: `${[v.plate_letters, v.plate_number].filter(Boolean).join(" ").trim() || "Vehicle"} • ${[v.brand, v.model, v.year].filter(Boolean).join(" ")}`, subtitle: `${c.customer_code || ""} ${c.name || ""} ${c.phone || ""}`.trim(), customer_id: c.id, vehicle_id: v.id, claim_id: null, work_order_id: null, customer: c, vehicle: v }));
-        });
+        const customerVehicleRows = ((customersRes.data || []) as any[]).map((c): EstimateSearchResult => ({
+          type: "vehicle",
+          id: `customer-${c.id}`,
+          title: `${c.customer_code || ""} ${c.name || "Customer"}`.trim(),
+          subtitle: c.phone || "",
+          customer_id: c.id,
+          vehicle_id: null,
+          claim_id: null,
+          work_order_id: null,
+          customer: c,
+          vehicle: null,
+        }));
         const uniqueResults = new Map<string, EstimateSearchResult>();
         [...claimRows, ...orderRows, ...vehicleRows, ...customerVehicleRows].forEach((row) => uniqueResults.set(`${row.type}-${row.id}`, row));
         setSearchResults([...uniqueResults.values()].slice(0, 12));
@@ -324,21 +367,21 @@ export default function EstimateForm() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [searchTerm]);
+  }, [profile?.tenant_id, searchTerm]);
 
   useEffect(() => {
-    if (!lookups || isEdit) return;
+    if (!linkedRecordsQuery.data || isEdit) return;
     setForm((current) => {
       const next = { ...current };
       if (current.claim_id) {
-        const claim = lookups.claims.find((claim: any) => claim.id === current.claim_id) as any;
+        const claim = linkedRecordsQuery.data.claim as any;
         if (claim) {
           next.customer_id = next.customer_id || claim.customer_id || null;
           next.vehicle_id = next.vehicle_id || claim.vehicle_id || null;
         }
       }
       if (current.work_order_id) {
-        const workOrder = lookups.workOrders.find((order: any) => order.id === current.work_order_id) as any;
+        const workOrder = linkedRecordsQuery.data.workOrder as any;
         if (workOrder) {
           next.customer_id = next.customer_id || workOrder.customer_id || null;
           next.vehicle_id = next.vehicle_id || workOrder.vehicle_id || null;
@@ -347,24 +390,24 @@ export default function EstimateForm() {
       }
       return next;
     });
-  }, [isEdit, lookups]);
+  }, [isEdit, linkedRecordsQuery.data]);
 
   const totals = useMemo(() => calculateEstimateTotals(items, Number(form.vat_rate ?? 5), Boolean(form.vat_enabled)), [form.vat_enabled, form.vat_rate, items]);
   const selectedCustomer = useMemo<any>(
-    () => lookups?.customers.find((customer: any) => customer.id === form.customer_id) || (selectedRecord?.customer as any) || null,
-    [form.customer_id, lookups?.customers, selectedRecord],
+    () => linkedRecordsQuery.data?.customer || (selectedRecord?.customer as any) || null,
+    [linkedRecordsQuery.data?.customer, selectedRecord],
   );
   const selectedVehicle = useMemo<any>(
-    () => lookups?.vehicles.find((vehicle: any) => vehicle.id === form.vehicle_id) || (selectedRecord?.vehicle as any) || null,
-    [form.vehicle_id, lookups?.vehicles, selectedRecord],
+    () => linkedRecordsQuery.data?.vehicle || (selectedRecord?.vehicle as any) || null,
+    [linkedRecordsQuery.data?.vehicle, selectedRecord],
   );
   const selectedClaim = useMemo<any>(
-    () => lookups?.claims.find((claim: any) => claim.id === form.claim_id) || null,
-    [form.claim_id, lookups?.claims],
+    () => linkedRecordsQuery.data?.claim || null,
+    [linkedRecordsQuery.data?.claim],
   );
   const selectedWorkOrder = useMemo<any>(
-    () => lookups?.workOrders.find((order: any) => order.id === form.work_order_id) || null,
-    [form.work_order_id, lookups?.workOrders],
+    () => linkedRecordsQuery.data?.workOrder || null,
+    [linkedRecordsQuery.data?.workOrder],
   );
 
   const saveMut = useMutation({
@@ -430,7 +473,7 @@ export default function EstimateForm() {
   }
 
   function onClaimChange(claimId: string) {
-    const claim = lookups?.claims.find((c: any) => c.id === claimId) as any;
+    const claim = selectedClaim?.id === claimId ? selectedClaim : null;
     setForm({
       ...form,
       claim_id: claimId === "none" ? null : claimId,
@@ -669,7 +712,7 @@ export default function EstimateForm() {
             <SelectTrigger><SelectValue placeholder="اختر العميل" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">— بدون —</SelectItem>
-              {lookups?.customers.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.customer_code || "CUST"} • {c.name}</SelectItem>)}
+              {selectedCustomer?.id && <SelectItem value={selectedCustomer.id}>{selectedCustomer.customer_code || "CUST"} • {selectedCustomer.name}</SelectItem>}
             </SelectContent>
           </Select>
         </div>
@@ -679,7 +722,7 @@ export default function EstimateForm() {
             <SelectTrigger><SelectValue placeholder="اختر المركبة" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">— بدون —</SelectItem>
-              {lookups?.vehicles.map((v: any) => <SelectItem key={v.id} value={v.id}>{v.plate_number || "—"} • {[v.brand || v.make, v.model].filter(Boolean).join(" ")}</SelectItem>)}
+              {selectedVehicle?.id && <SelectItem value={selectedVehicle.id}>{selectedVehicle.plate_number || "—"} • {[selectedVehicle.brand || selectedVehicle.make, selectedVehicle.model].filter(Boolean).join(" ")}</SelectItem>}
             </SelectContent>
           </Select>
         </div>
@@ -690,7 +733,7 @@ export default function EstimateForm() {
             <SelectTrigger><SelectValue placeholder="اختر المطالبة" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">— بدون —</SelectItem>
-              {lookups?.claims.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.claim_number} • {c.insurance_company}</SelectItem>)}
+              {selectedClaim?.id && <SelectItem value={selectedClaim.id}>{selectedClaim.claim_number} • {selectedClaim.insurance_company}</SelectItem>}
             </SelectContent>
           </Select>
         </div>
@@ -701,7 +744,7 @@ export default function EstimateForm() {
             <SelectTrigger><SelectValue placeholder="اختر أمر العمل" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">— بدون —</SelectItem>
-              {lookups?.workOrders.map((w: any) => <SelectItem key={w.id} value={w.id}>{w.order_number} • {w.status}</SelectItem>)}
+              {selectedWorkOrder?.id && <SelectItem value={selectedWorkOrder.id}>{selectedWorkOrder.order_number} • {selectedWorkOrder.status}</SelectItem>}
             </SelectContent>
           </Select>
         </div>
@@ -712,7 +755,7 @@ export default function EstimateForm() {
               <SelectTrigger><SelectValue placeholder="اختر التقدير الأصلي" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— اختر —</SelectItem>
-                {lookups?.estimates.map((e: any) => <SelectItem key={e.id} value={e.id}>{e.estimate_number} • {formatOMR(e.total)}</SelectItem>)}
+                {parentEstimatesQuery.data?.map((e: any) => <SelectItem key={e.id} value={e.id}>{e.estimate_number} • {formatOMR(e.total)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 export interface InspectionRecord {
   id: string;
@@ -52,20 +53,10 @@ export function getNextDamageReportNumberFromRecords(records: Array<{ id?: strin
 
 let cache: InspectionRecord[] = [];
 let started = false;
-let tenantId: string | null = null;
 const listeners = new Set<() => void>();
 
 function emit() {
   listeners.forEach((listener) => listener());
-}
-
-async function getTenantId() {
-  if (tenantId) return tenantId;
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return null;
-  const { data } = await supabase.from("profiles").select("tenant_id").eq("user_id", auth.user.id).maybeSingle();
-  tenantId = data?.tenant_id || null;
-  return tenantId;
 }
 
 function mapRow(row: any): InspectionRecord {
@@ -87,13 +78,13 @@ function mapRow(row: any): InspectionRecord {
 }
 
 async function refresh() {
-  const currentTenant = await getTenantId();
+  const currentTenant = await getCurrentTenantId();
   if (!currentTenant) return;
   const { data, error } = await (supabase.from("inspections") as any)
     .select("*,job_order:job_orders(order_number)")
     .eq("tenant_id", currentTenant)
     .order("created_at", { ascending: false })
-    .limit(5000);
+    .limit(500);
   if (error) {
     console.warn("[inspectionsStore] refresh failed", error);
     return;
@@ -104,7 +95,7 @@ async function refresh() {
 
 async function resolveJobOrderId(orderNumber: string) {
   if (!orderNumber || orderNumber === "—") return null;
-  const currentTenant = await getTenantId();
+  const currentTenant = await getCurrentTenantId();
   if (!currentTenant) return null;
   const { data } = await supabase.from("job_orders")
     .select("id")
@@ -115,7 +106,7 @@ async function resolveJobOrderId(orderNumber: string) {
 }
 
 async function saveToCloud(record: InspectionRecord) {
-  const currentTenant = await getTenantId();
+  const currentTenant = await getCurrentTenantId();
   if (!currentTenant) return;
   const jobOrderId = await resolveJobOrderId(record.workOrder);
   const { error } = await (supabase.from("inspections") as any).upsert({
@@ -138,7 +129,7 @@ async function saveToCloud(record: InspectionRecord) {
 }
 
 async function removeFromCloud(id: string) {
-  const currentTenant = await getTenantId();
+  const currentTenant = await getCurrentTenantId();
   if (!currentTenant) return;
   const { error } = await (supabase.from("inspections") as any)
     .delete()
@@ -151,18 +142,29 @@ function ensureStarted() {
   if (started) return;
   started = true;
   void refresh();
-  void getTenantId().then((currentTenant) => {
-    if (!currentTenant) return;
-    supabase
-      .channel(`inspections:${currentTenant}`)
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "inspections",
-        filter: `tenant_id=eq.${currentTenant}`,
-      }, () => void refresh())
-      .subscribe();
-  });
+}
+
+export function applyInspectionRealtimeChange(payload: {
+  eventType?: string;
+  new?: Record<string, unknown>;
+  old?: Record<string, unknown>;
+}) {
+  const eventType = String(payload.eventType || "").toUpperCase();
+  const next = payload.new || {};
+  const previous = payload.old || {};
+  const code = String((next as any).inspection_code || (previous as any).inspection_code || "");
+  const rowId = String((next as any).id || (previous as any).id || "");
+
+  if (eventType === "DELETE") {
+    const before = cache.length;
+    cache = cache.filter((record) => record.id !== code && record.id !== rowId);
+    if (cache.length !== before) emit();
+    return;
+  }
+  if (!code && !rowId) return;
+  const mapped = mapRow(next);
+  cache = [mapped, ...cache.filter((record) => record.id !== mapped.id)].slice(0, 500);
+  emit();
 }
 
 export function findInspectionByPlate(plate: string, kind: "general" | "insurance" = "general"): InspectionRecord | undefined {
@@ -175,15 +177,16 @@ export function findInspectionByPlate(plate: string, kind: "general" | "insuranc
 }
 
 export async function getNextDamageReportNumber(): Promise<string> {
-  const currentTenant = await getTenantId();
+  const currentTenant = await getCurrentTenantId();
   if (!currentTenant) {
     return getNextDamageReportNumberFromRecords(cache);
   }
   const { data, error } = await (supabase.from("inspections") as any)
     .select("inspection_code,inspection_kind")
     .eq("tenant_id", currentTenant)
-    .order("created_at", { ascending: true })
-    .limit(5000);
+    .like("inspection_code", "DR-%")
+    .order("inspection_code", { ascending: false })
+    .limit(1);
   if (error) {
     console.warn("[inspectionsStore] damage report number lookup failed", error);
     return getNextDamageReportNumberFromRecords(cache);

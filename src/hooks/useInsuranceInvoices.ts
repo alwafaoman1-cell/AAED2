@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload } from "@/lib/supabasePayload";
@@ -58,24 +57,6 @@ export interface InsuranceInvoiceInsert {
 
 
 export function useInsuranceInvoices() {
-  const qc = useQueryClient();
-
-  // Realtime sync — unique channel name per hook instance to avoid
-  // "cannot add postgres_changes after subscribe" when the hook mounts in multiple components.
-  useEffect(() => {
-    const channel = supabase
-      .channel(`insurance_invoices_rt_${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "insurance_invoices" },
-        () => qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all })
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [qc]);
-
   return useQuery({
     queryKey: queryKeys.insuranceInvoices.all,
     queryFn: async () => {

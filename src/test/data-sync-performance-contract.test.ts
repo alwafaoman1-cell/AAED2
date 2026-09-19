@@ -29,6 +29,7 @@ describe("data sync performance contract", () => {
     const customers = read("src/lib/customersStore.ts");
     const vehicles = read("src/lib/vehiclesStore.ts");
     const workOrders = read("src/lib/workOrdersStore.ts");
+    const expenses = read("src/lib/expensesStore.ts");
 
     expect(customers).not.toContain("scheduleCustomersRefresh(0)");
     expect(customers).not.toContain("scheduleCustomersRefresh(500)");
@@ -36,6 +37,20 @@ describe("data sync performance contract", () => {
     expect(vehicles).not.toContain("scheduleVehiclesFetch(100)");
     expect(workOrders).not.toContain("setTimeout(() => ensureCloudSync(), 800)");
     expect(workOrders).not.toContain("scheduleCloudFetch(50)");
+    expect(expenses).not.toContain('channel("expenses_store_sync")');
+    expect(expenses).not.toMatch(/if \(typeof window !== "undefined"\) \{\s*hydrateFromCloud\(\)/);
+  });
+
+  it("keeps a single route-scoped realtime owner for expenses and insurance invoices", () => {
+    const realtime = read("src/hooks/useRealtimeSync.ts");
+    const expenses = read("src/lib/expensesStore.ts");
+    const insuranceInvoices = read("src/hooks/useInsuranceInvoices.ts");
+
+    expect(realtime).toContain('if (table === "expenses")');
+    expect(realtime).toContain("applyExpenseRealtimeChange(payload)");
+    expect(expenses).not.toContain(".channel(");
+    expect(insuranceInvoices).not.toContain("insurance_invoices_rt_");
+    expect(insuranceInvoices).not.toContain("postgres_changes");
   });
 
   it("keeps legacy refresh only where compatibility is still required and uses a paged vehicle query", () => {
@@ -69,7 +84,7 @@ describe("data sync performance contract", () => {
     const manager = read("src/components/workorders/NeededPartsManager.tsx");
 
     expect(realtime).toContain('scope: "supervisor"');
-    expect(realtime).toContain('tables: ["job_orders", "job_order_parts"]');
+    expect(realtime).toContain('tables: ["job_orders", "job_order_parts", "expenses"]');
     expect(realtime).toContain("applyWorkOrderRealtimeChange(payload)");
     expect(supervisor).toContain("useRealtimeSync();");
     expect(supervisor).not.toContain("setInterval(() => { refreshWorkOrdersFromCloud(); }, 30000)");

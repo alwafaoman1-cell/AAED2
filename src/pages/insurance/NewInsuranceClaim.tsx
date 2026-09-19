@@ -111,10 +111,10 @@ export default function NewInsuranceClaim() {
   const { user } = useAuth();
   const [params] = useSearchParams();
   const createClaim = useCreateClaim();
-  const { data: companies = [] } = useInsuranceCompanies();
 
   const [step, setStep] = useState<Step>(0);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const { data: companies = [] } = useInsuranceCompanies(step === 0 && !!draft.companyId);
   const [savedDraftAt, setSavedDraftAt] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const draftHydratedRef = useRef(false);
@@ -848,20 +848,50 @@ function Step1({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [vehicleSearchLoading, setVehicleSearchLoading] = useState(false);
   const [vehicleMatch, setVehicleMatch] = useState<VehicleIdentityMatch | null>(null);
   const [vehicleLookupLoading, setVehicleLookupLoading] = useState(false);
 
   useEffect(() => {
     if (!pickerOpen) return;
-    (async () => {
-      const { data } = await supabase
-        .from("vehicles")
-        .select("id, plate_number, plate_letters, plate_country, brand, model, year, color, customer_id, customers(name, phone)")
-        .order("created_at", { ascending: false })
-        .limit(200);
-      setVehicles((data as any[]) || []);
-    })();
-  }, [pickerOpen]);
+    const term = search.trim();
+    if (term.length < 2) {
+      setVehicles([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setVehicleSearchLoading(true);
+      void (async () => {
+        const tenant = await resolveTenantForClaim();
+        if (cancelled) return;
+        const escaped = term.replace(/[%_,()]/g, " ").trim();
+        const { data, error } = await supabase
+          .from("vehicles")
+          .select("id, plate_number, plate_letters, plate_country, brand, model, year, color, customer_id, customers(name, phone)")
+          .eq("tenant_id", tenant)
+          .is("deleted_at", null)
+          .or(`plate_number.ilike.%${escaped}%,plate_letters.ilike.%${escaped}%,brand.ilike.%${escaped}%,model.ilike.%${escaped}%`)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (cancelled) return;
+        if (error) {
+          toast.error("تعذر البحث عن المركبات");
+          setVehicles([]);
+          return;
+        }
+        setVehicles((data as any[]) || []);
+      })().catch(() => {
+        if (!cancelled) toast.error("تعذر البحث عن المركبات");
+      }).finally(() => {
+        if (!cancelled) setVehicleSearchLoading(false);
+      });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [pickerOpen, search]);
 
   useEffect(() => {
     let cancelled = false;
@@ -890,17 +920,7 @@ function Step1({
     };
   }, [draft.vehicleId, draft.vehiclePlate, draft.vehicleVin, draft.vehicleMake, draft.vehicleModel, draft.vehicleYear, draft.vehicleColor]);
 
-  const filtered = useMemo(() => {
-    const t = search.trim().toLowerCase();
-    if (!t) return vehicles.slice(0, 50);
-    return vehicles
-      .filter((v) =>
-        [formatVehiclePlateForClaim(v), v.plate_number, v.plate_letters, v.brand, v.model, v.customers?.name, v.customers?.phone]
-          .filter(Boolean)
-          .some((x) => String(x).toLowerCase().includes(t)),
-      )
-      .slice(0, 50);
-  }, [search, vehicles]);
+  const filtered = useMemo(() => vehicles.slice(0, 20), [vehicles]);
 
   function pickVehicle(v: any) {
     update({
@@ -1160,10 +1180,14 @@ function Step1({
               <Button variant="ghost" size="icon" onClick={() => setPickerOpen(false)}><X size={14} /></Button>
             </div>
             <div className="p-3 border-b border-border">
-              <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث برقم اللوحة أو الماركة أو اسم المالك..." />
+              <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث برقم اللوحة أو الماركة أو الموديل..." />
             </div>
             <div className="overflow-auto flex-1 divide-y divide-border">
-              {filtered.length === 0 ? (
+              {vehicleSearchLoading ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">جارٍ البحث…</div>
+              ) : search.trim().length < 2 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">اكتب حرفين على الأقل للبحث في المركبات.</div>
+              ) : filtered.length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
                   لا توجد مركبات. أغلق هذه النافذة وأدخل بياناتها يدوياً، أو سجّلها أولاً من صفحة المركبات.
                 </div>

@@ -40,13 +40,13 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
 const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean; tables: string[] }> = [
   {
     scope: "dashboard",
-    test: (path) => path === "/" || path.startsWith("/dashboard"),
+    test: (path) => path === "/" || path === "/dashboard",
     tables: [],
   },
   {
     scope: "work_order_detail",
     test: (path) => /^\/work-orders\/[^/]+/.test(path),
-    tables: ["job_orders", "job_order_parts", "job_order_logs", "insurance_claims", "insurance_invoices", "claim_payments", "sales_documents", "sales_payments"],
+    tables: ["job_orders", "job_order_parts", "job_order_logs", "insurance_claims", "insurance_invoices", "claim_payments", "sales_documents", "sales_payments", "expenses"],
   },
   {
     scope: "work_orders_list",
@@ -56,7 +56,7 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   {
     scope: "supervisor",
     test: (path) => path === "/supervisor" || path === "/supervisor-app",
-    tables: ["job_orders", "job_order_parts"],
+    tables: ["job_orders", "job_order_parts", "expenses"],
   },
   {
     scope: "claim_detail",
@@ -71,7 +71,7 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
         !path.startsWith("/insurance/estimates") &&
         !path.startsWith("/insurance/documents")
       ),
-    tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicle_media"],
+    tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicle_media", "expenses"],
   },
   {
     scope: "claims_list",
@@ -89,14 +89,29 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
     tables: ["vehicles", "vehicle_media", "vehicle_entries", "vehicle_handover_records", "job_orders", "job_order_parts", "insurance_claims", "claim_audit_logs", "insurance_invoices", "claim_payments", "expenses", "sales_documents", "sales_payments"],
   },
   {
+    scope: "customers_list",
+    test: (path) => path === "/customers",
+    tables: ["customers"],
+  },
+  {
     scope: "vehicles_list",
     test: (path) => path === "/vehicles",
     tables: ["vehicles", "vehicle_media"],
   },
   {
+    scope: "inspections",
+    test: (path) => path === "/inspection" || path.startsWith("/inspection/"),
+    tables: ["inspections", "damage_markers"],
+  },
+  {
     scope: "accounting",
     test: (path) => path.startsWith("/accounting") || path.startsWith("/insurance/accounting"),
     tables: ["insurance_invoices", "claim_payments", "expenses", "sales_documents", "sales_payments"],
+  },
+  {
+    scope: "operations_apps",
+    test: (path) => path === "/manager-app" || path === "/accountant" || path === "/dashboard/executive",
+    tables: ["job_orders", "expenses", "sales_documents", "sales_payments", "insurance_invoices", "claim_payments"],
   },
   {
     scope: "reports",
@@ -181,10 +196,20 @@ export function useRealtimeSync() {
             .then(({ applyWorkOrderRealtimeChange }) => applyWorkOrderRealtimeChange(payload))
             .catch((error) => console.warn("[realtime:job_orders]", error));
         }
-        if (table === "expenses" && realtimeScope.scope === "work_orders_list") {
-          void import("@/lib/workOrdersStore")
-            .then(({ refreshWorkOrdersFromCloud }) => refreshWorkOrdersFromCloud())
-            .catch((error) => console.warn("[realtime:work-order-costs]", error));
+        if (table === "expenses") {
+          void import("@/lib/expensesStore")
+            .then(({ applyExpenseRealtimeChange }) => applyExpenseRealtimeChange(payload))
+            .catch((error) => console.warn("[realtime:expenses]", error));
+          if (realtimeScope.scope === "work_orders_list") {
+            void import("@/lib/workOrdersStore")
+              .then(({ refreshWorkOrderActualCostFromExpenseChange }) => refreshWorkOrderActualCostFromExpenseChange(payload))
+              .catch((error) => console.warn("[realtime:work-order-costs]", error));
+          }
+        }
+        if (table === "inspections") {
+          void import("@/lib/inspectionsStore")
+            .then(({ applyInspectionRealtimeChange }) => applyInspectionRealtimeChange(payload))
+            .catch((error) => console.warn("[realtime:inspections]", error));
         }
         schedule(keys);
       });

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { smartBack } from "@/lib/smartBack";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -29,9 +30,11 @@ import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { archiveCustomer } from "@/lib/deletePolicy";
 
-import { customersStore, refreshCustomersFromCloud } from "@/lib/customersStore";
-import { getWorkOrders } from "@/lib/workOrdersStore";
-import { vehiclesStore } from "@/lib/vehiclesStore";
+import { customersStore, fetchCustomerByIdFromCloud, refreshCustomersFromCloud } from "@/lib/customersStore";
+import { fetchWorkOrderListPage, getWorkOrders } from "@/lib/workOrdersStore";
+import { fetchVehiclesByCustomerId, vehiclesStore } from "@/lib/vehiclesStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   depositsStore, getCustomerDepositBalance, type DepositRecord,
 } from "@/lib/depositsStore";
@@ -80,8 +83,10 @@ function avatarColor(seed: string) {
 
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
+  const { profile } = useAuth();
   const navigate = useNavigate();
   const [tick, setTick] = useState(0);
+  const [detailLoading, setDetailLoading] = useState(true);
 
   // dialogs
   const [editOpen, setEditOpen] = useState(false);
@@ -109,6 +114,25 @@ export default function CustomerDetail() {
   useEffect(() => appointmentsStore.subscribe(() => setTick((t) => t + 1)), []);
   useEffect(() => auditLogStore.subscribe(() => setTick((t) => t + 1)), []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!id) {
+      setDetailLoading(false);
+      return () => { cancelled = true; };
+    }
+    if (customersStore.getById(id)) {
+      setDetailLoading(false);
+      return () => { cancelled = true; };
+    }
+    setDetailLoading(true);
+    void fetchCustomerByIdFromCloud(id)
+      .catch((error) => console.warn("[CustomerDetail] detail fetch failed", error))
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [id]);
+
   const allCustomers = useMemo(() => customersStore.getAll(), [tick]);
   const customer = useMemo(() => (id ? customersStore.getById(id) : undefined), [id, tick]);
   const customerIndex = useMemo(
@@ -119,12 +143,30 @@ export default function CustomerDetail() {
   const customerName = customer?.name || "";
   const k = useMemo(() => normalize(customerName), [customerName]);
 
-  const orders = useMemo(
+  const legacyOrders = useMemo(
     () => getWorkOrders().filter((o) => normalize(o.customer) === k)
       .sort((a, b) => b.entryDate.localeCompare(a.entryDate)),
     [k, tick]
   );
-  const vehicles = useMemo(() => {
+  const customerOrdersQuery = useQuery({
+    queryKey: queryKeys.jobOrders.list({ tenantId: profile?.tenant_id, customerId: id }),
+    queryFn: async () => {
+      const result = await fetchWorkOrderListPage({
+        tenantId: profile!.tenant_id,
+        page: 1,
+        pageSize: 100,
+        search: customerName,
+        filters: { archive: "all" },
+      });
+      return result.rows.filter((order) => order.customerId === id);
+    },
+    enabled: Boolean(profile?.tenant_id && id && customerName),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+  const orders = customerOrdersQuery.data || legacyOrders;
+
+  const legacyVehicles = useMemo(() => {
     const registered = vehiclesStore.getAll().filter((v) => normalize(v.owner) === k);
     const map = new Map<string, any>();
     registered.forEach((v) => { if (v.plate) map.set(v.plate, v); });
@@ -150,15 +192,32 @@ export default function CustomerDetail() {
       }
     });
     return Array.from(map.values());
-  }, [k, orders, customerName, tick]);
+  }, [k, orders, customerName]);
+  const customerVehiclesQuery = useQuery({
+    queryKey: queryKeys.vehicles.byCustomer(id),
+    queryFn: () => fetchVehiclesByCustomerId(id!),
+    enabled: Boolean(id && customer),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+  const vehicles = customerVehiclesQuery.data || legacyVehicles;
   const claims = useMemo(
     () => orders.filter((o) => o.claimNumber && o.claimNumber !== "-"),
     [orders]
   );
-  const stats = useMemo(
-    () => customer ? customersStore.getStats(customer) : { visits: 0, totalSpent: 0, vehiclesCount: 0, pendingInvoices: 0 },
-    [customer, tick]
-  );
+  const stats = useMemo(() => {
+    if (!customer) return { visits: 0, totalSpent: 0, vehiclesCount: 0, pendingInvoices: 0 };
+    if (customerOrdersQuery.data || customerVehiclesQuery.data) {
+      return {
+        visits: orders.length,
+        totalSpent: orders.reduce((sum, order) => sum + Number(order.totalCost || 0), 0),
+        vehiclesCount: vehicles.length,
+        pendingInvoices: orders.filter((order) => !["تم التسليم", "مغلق"].includes(order.status)).length,
+        lastVisit: orders[0]?.entryDate,
+      };
+    }
+    return customersStore.getStats(customer);
+  }, [customer, customerOrdersQuery.data, customerVehiclesQuery.data, orders, vehicles, tick]);
 
   const depositBalance = useMemo(() => getCustomerDepositBalance(customerName), [customerName, tick]);
   const customerDeposits = useMemo(
@@ -181,6 +240,14 @@ export default function CustomerDetail() {
   useEffect(() => {
     if (customer) setNotes(customer.notes || "");
   }, [customer?.id]);
+
+  if (detailLoading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-sm text-muted-foreground" dir="rtl">
+        جارٍ تحميل بيانات العميل...
+      </div>
+    );
+  }
 
   if (!customer) {
     return (

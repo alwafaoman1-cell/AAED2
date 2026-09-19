@@ -57,6 +57,12 @@ function normalize(s: string): string {
   return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+export interface CustomerListPageResult {
+  rows: Array<{ customer: Customer; stats: CustomerStats }>;
+  pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
+  summary: { total: number; companies: number; active: number; vip: number; totalRevenue: number };
+}
+
 function normalizeCustomerName(s: string): string {
   return normalize(s).replace(/[^\p{L}\p{N}\s]/gu, "");
 }
@@ -91,6 +97,61 @@ function rowToCustomer(r: any): Customer {
     legalName: r.legal_name || undefined,
     buyerType: r.buyer_type || r.type || "individual",
     createdAt: r.created_at,
+  };
+}
+
+export async function fetchCustomerListPage(input: {
+  tenantId: string;
+  page: number;
+  pageSize: number;
+  search?: string;
+  type?: "all" | CustomerType;
+  tag?: "all" | CustomerTag;
+}): Promise<CustomerListPageResult> {
+  const page = Math.max(1, Number(input.page) || 1);
+  const pageSize = Math.min(100, Math.max(10, Number(input.pageSize) || 25));
+  const { data, error } = await (supabase.rpc as any)("customers_list_rpc", {
+    p_tenant_id: input.tenantId,
+    p_page: page,
+    p_page_size: pageSize,
+    p_search: input.search?.trim() || "",
+    p_type: input.type || "all",
+    p_tag: input.tag || "all",
+  });
+  if (error) throw error;
+  const payload = data && typeof data === "object" ? data as Record<string, any> : {};
+  const rawRows = Array.isArray(payload.rows) ? payload.rows : [];
+  const rows = rawRows.map((raw: any) => {
+    const customer = { ...rowToCustomer(raw), tag: (raw._tag || "regular") as CustomerTag };
+    const stats = raw._stats || {};
+    return {
+      customer,
+      stats: {
+        visits: Number(stats.visits || 0),
+        totalSpent: Number(stats.totalSpent || 0),
+        vehiclesCount: Number(stats.vehiclesCount || 0),
+        pendingInvoices: Number(stats.pendingInvoices || 0),
+        lastVisit: stats.lastVisit || undefined,
+      },
+    };
+  });
+  const pagination = payload.pagination || {};
+  const summary = payload.summary || {};
+  return {
+    rows,
+    pagination: {
+      page: Number(pagination.page || page),
+      pageSize: Number(pagination.pageSize || pageSize),
+      totalRows: Number(pagination.totalRows || 0),
+      totalPages: Number(pagination.totalPages || 0),
+    },
+    summary: {
+      total: Number(summary.total || 0),
+      companies: Number(summary.companies || 0),
+      active: Number(summary.active || 0),
+      vip: Number(summary.vip || 0),
+      totalRevenue: Number(summary.total_revenue || 0),
+    },
   };
 }
 
@@ -154,6 +215,34 @@ export async function searchCustomersFromCloud(search: string, limit = 12): Prom
     persist();
   }
   return matches;
+}
+
+/**
+ * Tenant-scoped detail lookup used by direct customer routes.
+ * List pagination must not be treated as the source of truth for detail pages.
+ */
+export async function fetchCustomerByIdFromCloud(id: string): Promise<Customer | null> {
+  if (!isUuid(id)) return null;
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+
+  const { data, error } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("id", id)
+    .is("deleted_at", null)
+    .or("archived.is.null,archived.eq.false")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+
+  const customer = rowToCustomer(data);
+  const index = cache.findIndex((item) => item.id === customer.id);
+  if (index >= 0) cache[index] = customer;
+  else cache.unshift(customer);
+  persist();
+  return customer;
 }
 
 function scheduleCustomersRefresh(delay = 250) {

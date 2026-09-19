@@ -19,8 +19,8 @@ export default function InsuranceCompanyAutocomplete({
   onChange,
   placeholder,
 }: Props) {
-  const { data: companies } = useInsuranceCompanies();
   const [open, setOpen] = useState(false);
+  const { data: companies } = useInsuranceCompanies(open || !!companyId);
 
   const filtered = useMemo(() => {
     const q = value.trim().toLowerCase();

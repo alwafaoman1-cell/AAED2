@@ -6,7 +6,7 @@ import { translateAr } from "./autoDictionary";
 const AR_REGEX = /[\u0600-\u06FF]/;
 const EMAIL_OR_URL_REGEX = /(?:https?:\/\/|www\.|mailto:|[\w.+-]+@[\w.-]+\.[a-z]{2,})/i;
 const DOCUMENT_NUMBER_REGEX =
-  /(?:\b(?:VIN|WO|INV|EST|DR|ENT|LPO|CUST)[-:/\w]*\d|\b[A-HJ-NPR-Z0-9]{17}\b)/i;
+  /(?:\b(?:VIN|WO|INV|EST|DR|ENT|LPO|CUST)[A-Za-z0-9_:/-]*\d|\b[A-HJ-NPR-Z0-9]{17}\b)/i;
 const FILE_NAME_REGEX = /\.[a-z0-9]{2,8}(?:[?#].*)?$/i;
 
 /**

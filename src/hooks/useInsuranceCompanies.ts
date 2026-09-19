@@ -32,9 +32,10 @@ export type InsuranceCompanyInsert = Omit<
   "id" | "created_at" | "updated_at"
 > & { id?: string };
 
-export function useInsuranceCompanies() {
+export function useInsuranceCompanies(enabled = true) {
   return useQuery({
     queryKey: queryKeys.insuranceCompanies.all,
+    enabled,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("insurance_companies" as any)

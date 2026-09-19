@@ -19,6 +19,11 @@ import { canDelete, canEdit } from "@/lib/permissions";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import { archiveCustomer } from "@/lib/deletePolicy";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
+import { queryKeys } from "@/lib/queryKeys";
+import { fetchCustomerListPage } from "@/lib/customersStore";
+import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 
 const TAG_LABEL: Record<CustomerTag, string> = { vip: "VIP", regular: "عادي", new: "جديد" };
 const TAG_STYLE: Record<CustomerTag, string> = {
@@ -29,9 +34,13 @@ const TAG_STYLE: Record<CustomerTag, string> = {
 
 export default function Customers() {
   const { t, i18n } = useTranslation();
+  const { profile } = useAuth();
   const isRtl = i18n.dir() === "rtl";
   const [tick, setTick] = useState(0);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [tagFilter, setTagFilter] = useState<"all" | CustomerTag>("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "individual" | "company">("all");
   const [formOpen, setFormOpen] = useState(false);
@@ -42,25 +51,59 @@ export default function Customers() {
   const navigate = useNavigate();
   // declared below after `filtered` is computed; placeholder removed
 
-  useEffect(() => customersStore.subscribe(() => setTick((t) => t + 1)), []);
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const customersPageQuery = useQuery({
+    queryKey: queryKeys.customers.operationalList(profile?.tenant_id, {
+      page, pageSize, search: debouncedSearch, tagFilter, typeFilter,
+    }),
+    queryFn: () => fetchCustomerListPage({
+      tenantId: profile!.tenant_id,
+      page,
+      pageSize,
+      search: debouncedSearch,
+      tag: tagFilter,
+      type: typeFilter,
+    }),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    gcTime: 300_000,
+    placeholderData: (previous) => previous,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const serverListReady = Boolean(customersPageQuery.data && !customersPageQuery.isError);
+
+  useEffect(() => {
+    if (!customersPageQuery.isError) return;
+    const unsubscribe = customersStore.subscribe(() => setTick((t) => t + 1));
     void refreshCustomersFromCloud();
-  }, []);
+    return unsubscribe;
+  }, [customersPageQuery.isError]);
   useEffect(() => {
     registerRestoreHandler("customer", (p) => customersStore.restore(p as Customer));
   }, []);
+
+  useEffect(() => setPage(1), [tagFilter, typeFilter, pageSize]);
 
   const customers = useMemo(() => {
     void tick;
     return customersStore.getAll();
   }, [tick]);
 
-  const enriched = useMemo(
-    () => customers.map((c) => ({ customer: c, stats: customersStore.getStats(c) })),
-    [customers],
-  );
+  const enriched = useMemo(() => serverListReady
+    ? customersPageQuery.data!.rows
+    : customers.map((c) => ({ customer: c, stats: customersStore.getStats(c) })),
+  [customers, customersPageQuery.data, serverListReady]);
 
   const filtered = useMemo(() => {
+    if (serverListReady) return enriched;
     return enriched.filter(({ customer }) => {
       if (tagFilter !== "all" && customer.tag !== tagFilter) return false;
       const cType = customer.type || "individual";
@@ -75,16 +118,30 @@ export default function Customers() {
         (customer.commercialRegistration || "").toLowerCase().includes(q)
       );
     });
-  }, [enriched, search, tagFilter, typeFilter]);
+  }, [enriched, search, tagFilter, typeFilter, serverListReady]);
+
+  const visibleCustomers = useMemo(() => serverListReady
+    ? filtered
+    : filtered.slice((page - 1) * pageSize, page * pageSize),
+  [filtered, page, pageSize, serverListReady]);
+  const totalPages = serverListReady
+    ? Math.max(1, customersPageQuery.data!.pagination.totalPages)
+    : Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   // bulk selection (id = customer.id)
-  const bulkItems = useMemo(() => filtered.map(({ customer }) => ({ id: customer.id, customer })), [filtered]);
+  const bulkItems = useMemo(() => visibleCustomers.map(({ customer, stats }) => ({ id: customer.id, customer, stats })), [visibleCustomers]);
   const bulk = useBulkSelection(bulkItems);
 
-  const totalRevenue = enriched.reduce((s, e) => s + e.stats.totalSpent, 0);
-  const activeCount = enriched.filter((e) => e.stats.visits > 0).length;
-  const vipCount = customers.filter((c) => c.tag === "vip").length;
-  const companyCount = customers.filter((c) => c.type === "company").length;
+  const serverSummary = serverListReady ? customersPageQuery.data!.summary : null;
+  const totalCustomers = serverSummary?.total ?? customers.length;
+  const totalRevenue = serverSummary?.totalRevenue ?? enriched.reduce((s, e) => s + e.stats.totalSpent, 0);
+  const activeCount = serverSummary?.active ?? enriched.filter((e) => e.stats.visits > 0).length;
+  const vipCount = serverSummary?.vip ?? customers.filter((c) => c.tag === "vip").length;
+  const companyCount = serverSummary?.companies ?? customers.filter((c) => c.type === "company").length;
 
   async function handleDelete() {
     if (!deleting) return;
@@ -95,7 +152,7 @@ export default function Customers() {
       return;
     }
     customersStore.remove(deleting.id);
-    await refreshCustomersFromCloud().catch(() => {});
+    if (!serverListReady) await refreshCustomersFromCloud().catch(() => {});
     customersStore.remove(deleting.id);
     moveToTrash({
       type: "customer",
@@ -104,6 +161,7 @@ export default function Customers() {
       payload: deleting,
     });
     toast.success(`تم نقل ${deleting.name} للمهملات`);
+    if (serverListReady) await customersPageQuery.refetch();
     setDeleting(null);
   }
 
@@ -132,7 +190,7 @@ export default function Customers() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <StatCard title={isRtl ? "إجمالي العملاء" : "Total Customers"} value={customers.length} icon={Users} variant="info" />
+        <StatCard title={isRtl ? "إجمالي العملاء" : "Total Customers"} value={totalCustomers} icon={Users} variant="info" />
         <StatCard title={isRtl ? "شركات" : "Companies"} value={companyCount} icon={Building2} variant="info" />
         <StatCard title={isRtl ? "عملاء نشطون" : "Active Customers"} value={activeCount} icon={TrendingUp} variant="success" />
         <StatCard title={isRtl ? "عملاء VIP" : "VIP Customers"} value={vipCount} icon={Sparkles} variant="gold" />
@@ -166,7 +224,7 @@ export default function Customers() {
       <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
         {filtered.length === 0 ? (
           <div className="p-10 text-center text-muted-foreground text-sm">
-            {customers.length === 0 ? "لا يوجد عملاء بعد. أضف أول عميل." : "لا توجد نتائج مطابقة."}
+            {totalCustomers === 0 ? "لا يوجد عملاء بعد. أضف أول عميل." : "لا توجد نتائج مطابقة."}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -191,7 +249,7 @@ export default function Customers() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(({ customer, stats }) => (
+                {visibleCustomers.map(({ customer, stats }) => (
                   <tr
                     key={customer.id}
                     onClick={() => navigate(`/customers/${customer.id}`)}
@@ -263,7 +321,24 @@ export default function Customers() {
         )}
       </div>
 
-      <CustomerFormDialog open={formOpen} onOpenChange={setFormOpen} initial={editing} />
+      {(serverListReady ? customersPageQuery.data!.pagination.totalRows : filtered.length) > 0 && (
+        <TablePaginationControls
+          page={page}
+          pageSize={pageSize}
+          totalItems={serverListReady ? customersPageQuery.data!.pagination.totalRows : filtered.length}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      )}
+
+      <CustomerFormDialog
+        open={formOpen}
+        onOpenChange={(open) => {
+          setFormOpen(open);
+          if (!open && serverListReady) void customersPageQuery.refetch();
+        }}
+        initial={editing}
+      />
       <ConfirmDeleteDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
@@ -274,8 +349,7 @@ export default function Customers() {
 
       <BulkActionBar count={bulk.count} onClear={bulk.clear} label="عميل">
         <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => {
-          const rows = bulk.selectedItems.map(({ customer }) => {
-            const stats = customersStore.getStats(customer);
+          const rows = bulk.selectedItems.map(({ customer, stats }) => {
             return [customer.name, customer.phone || "", customer.email || "", customer.tag, stats.visits, stats.totalSpent.toFixed(3), stats.lastVisit || ""];
           });
           exportRowsAsCsv(`customers-${new Date().toISOString().slice(0,10)}`, ["الاسم","الجوال","الإيميل","التصنيف","الزيارات","الإنفاق","آخر زيارة"], rows);
@@ -294,11 +368,12 @@ export default function Customers() {
                 return;
               }
               customersStore.remove(customer.id);
-              await refreshCustomersFromCloud().catch(() => {});
+              if (!serverListReady) await refreshCustomersFromCloud().catch(() => {});
               customersStore.remove(customer.id);
               moveToTrash({ type: "customer", entityId: customer.id, label: `${customer.name}${customer.phone ? ` - ${customer.phone}` : ""}`, payload: customer });
             }
             toast.success(`تم نقل ${bulk.count} عميل للمهملات`);
+            if (serverListReady) await customersPageQuery.refetch();
             bulk.clear();
           }}>
             <Trash2 size={14} /> حذف

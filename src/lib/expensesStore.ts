@@ -121,6 +121,38 @@ let hydrationRequest = 0;
 let hydrationPromise: Promise<void> | null = null;
 const deletedExpenseIds = new Set<string>();
 let expenseQueryClient: QueryClient | null = null;
+let expenseAuthWatcherStarted = false;
+let expenseSessionUserId: string | null = null;
+let expenseTenantId: string | null = null;
+
+function clearExpenseSessionCache(nextUserId: string | null = null) {
+  hydrationRequest += 1;
+  hydrationPromise = null;
+  cache = [];
+  hydrated = false;
+  deletedExpenseIds.clear();
+  expenseSessionUserId = nextUserId;
+  expenseTenantId = null;
+  markCacheChanged();
+  notify();
+}
+
+function ensureExpenseStoreSessionWatcher() {
+  if (expenseAuthWatcherStarted || typeof window === "undefined") return;
+  expenseAuthWatcherStarted = true;
+  supabase.auth.onAuthStateChange((event, session) => {
+    const nextUserId = session?.user?.id ?? null;
+    const userChanged = nextUserId !== expenseSessionUserId;
+    if (event === "SIGNED_OUT" || userChanged || event === "USER_UPDATED") {
+      clearExpenseSessionCache(nextUserId);
+    }
+    if (nextUserId && listeners.size > 0 && (event === "SIGNED_IN" || event === "USER_UPDATED")) {
+      // Supabase advises against awaiting additional SDK calls in the auth
+      // callback. Start the fresh load after the callback has returned.
+      setTimeout(() => { void hydrateFromCloud(); }, 0);
+    }
+  });
+}
 
 export function setExpensesQueryClient(client: QueryClient) {
   expenseQueryClient = client;
@@ -322,19 +354,28 @@ function isMissingAccountingColumnError(error: any): boolean {
 }
 
 async function hydrateFromCloud() {
+  ensureExpenseStoreSessionWatcher();
   if (hydrationPromise) return hydrationPromise;
   const requestId = ++hydrationRequest;
   const revisionAtStart = cacheRevision;
   hydrationPromise = (async () => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
+      const requestedUserId = sessionData.session?.user?.id ?? null;
+      if (!requestedUserId) {
+        if (expenseSessionUserId !== null || cache.length > 0) clearExpenseSessionCache(null);
         hydrated = true;
         notify();
         return;
       }
+      if (expenseSessionUserId && expenseSessionUserId !== requestedUserId) {
+        clearExpenseSessionCache(requestedUserId);
+      } else {
+        expenseSessionUserId = requestedUserId;
+      }
       const tenantId = await getCurrentTenantId();
       if (!tenantId) throw new Error("tenant_not_found");
+      expenseTenantId = tenantId;
       const { data, error } = await supabase
         .from("expenses")
         .select("*")
@@ -343,7 +384,14 @@ async function hydrateFromCloud() {
         .is("archived_at", null)
         .order("date", { ascending: false });
       if (error) throw error;
-      if (requestId !== hydrationRequest) return;
+      const { data: currentSessionData } = await supabase.auth.getSession();
+      const currentUserId = currentSessionData.session?.user?.id ?? null;
+      if (
+        requestId !== hydrationRequest ||
+        currentUserId !== requestedUserId ||
+        expenseSessionUserId !== requestedUserId ||
+        expenseTenantId !== tenantId
+      ) return;
       const cloud = (data || []).map(rowToRecord);
       if (revisionAtStart === cacheRevision) {
         cache = cloud.filter((expense) => !deletedExpenseIds.has(expense.id));
@@ -367,78 +415,61 @@ async function hydrateFromCloud() {
   return hydrationPromise;
 }
 
-// Initial hydration is Supabase-only.
-if (typeof window !== "undefined") {
-  hydrateFromCloud();
+export type ExpenseRealtimePayload = {
+  eventType?: string;
+  new?: Record<string, any>;
+  old?: Record<string, any>;
+};
 
-  // Refresh only for a real sign-in when the store is not already hydrated.
-  // TOKEN_REFRESHED can fire when returning to a tab; do not clear/reload data.
-  supabase.auth.onAuthStateChange((event) => {
-    if (event === "SIGNED_OUT") {
-      hydrationRequest += 1;
-      hydrationPromise = null;
-      cache = [];
-      hydrated = false;
-      deletedExpenseIds.clear();
-      markCacheChanged();
-      notify();
-      return;
-    }
-    if (event === "SIGNED_IN" && !hydrated) {
-      hydrateFromCloud();
-    }
-  });
+/** Applies the single, tenant-scoped central Realtime event to the legacy cache. */
+export async function applyExpenseRealtimeChange(payload: ExpenseRealtimePayload): Promise<void> {
+  ensureExpenseStoreSessionWatcher();
+  const eventType = String(payload?.eventType || "").toUpperCase();
+  const row = payload?.new && Object.keys(payload.new).length ? payload.new : payload?.old;
+  if (!row) return;
 
-  // Realtime mirror: any insert/update/delete from any device updates the cache.
-  try {
-    supabase
-      .channel("expenses_store_sync")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "expenses" },
-        (payload) => {
-          const ev = payload.eventType;
-          if (ev === "INSERT" || ev === "UPDATE") {
-            const rec = rowToRecord(payload.new);
-            if (rec.deletedAt || rec.archivedAt) {
-              cache = cache.filter((x) => x.id !== rec.id);
-              deletedExpenseIds.add(rec.id);
-              markCacheChanged();
-              persistLocal();
-              notify();
-              invalidateExpenseConsumers();
-              return;
-            }
-            deletedExpenseIds.delete(rec.id);
-            const idx = cache.findIndex((x) => x.id === rec.id);
-            if (idx >= 0) cache[idx] = rec;
-            else cache.unshift(rec);
-          } else if (ev === "DELETE") {
-            const oldId = (payload.old as any)?.id;
-            if (oldId) {
-              cache = cache.filter((x) => x.id !== oldId);
-              deletedExpenseIds.add(oldId);
-            }
-          }
-          markCacheChanged();
-          persistLocal();
-          notify();
-          invalidateExpenseConsumers();
-        },
-      )
-      .subscribe();
-  } catch {}
+  const tenantId = expenseTenantId || await getCurrentTenantId();
+  if (!tenantId || (row.tenant_id && row.tenant_id !== tenantId)) return;
+  expenseTenantId = tenantId;
+
+  if (eventType === "INSERT" || eventType === "UPDATE") {
+    const rec = rowToRecord(row);
+    if (rec.deletedAt || rec.archivedAt) {
+      cache = cache.filter((expense) => expense.id !== rec.id);
+      deletedExpenseIds.add(rec.id);
+    } else {
+      deletedExpenseIds.delete(rec.id);
+      const index = cache.findIndex((expense) => expense.id === rec.id);
+      if (index >= 0) cache[index] = rec;
+      else cache.unshift(rec);
+    }
+  } else if (eventType === "DELETE") {
+    const oldId = String(row.id || "").trim();
+    if (!oldId) return;
+    cache = cache.filter((expense) => expense.id !== oldId);
+    deletedExpenseIds.add(oldId);
+  } else {
+    return;
+  }
+
+  markCacheChanged();
+  persistLocal();
+  notify();
+  invalidateExpenseConsumers();
 }
 
 // ---------------- public store API (same shape as before) ----------------
 export const expensesStore = {
   getAll(): ExpenseRecord[] {
+    ensureExpenseStoreSessionWatcher();
     return cache;
   },
   getById(id: string): ExpenseRecord | undefined {
+    ensureExpenseStoreSessionWatcher();
     return cache.find((e) => e.id === id);
   },
   async add(item: ExpenseRecord) {
+    ensureExpenseStoreSessionWatcher();
     // DB id is uuid — normalize legacy "EXP-<ts>" ids to a real uuid so the row inserts.
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.id || "");
     if (!isUuid) {
@@ -497,6 +528,7 @@ export const expensesStore = {
     return saved;
   },
   async update(id: string, patch: Partial<ExpenseRecord>) {
+    ensureExpenseStoreSessionWatcher();
     if (!isUuid(id)) throw new Error("expense_id غير صالح للحفظ في Supabase");
     const idx = cache.findIndex((e) => e.id === id);
     if (idx === -1) throw new Error("المصروف غير موجود في القائمة الحالية");
@@ -555,6 +587,7 @@ export const expensesStore = {
     return cache[idx];
   },
   async remove(id: string): Promise<ExpenseRecord | undefined> {
+    ensureExpenseStoreSessionWatcher();
     if (!isUuid(id)) throw new Error("expense_id غير صالح للحذف في Supabase");
     const idx = cache.findIndex((e) => e.id === id);
     if (idx === -1) throw new Error("المصروف غير موجود في القائمة الحالية");
@@ -588,6 +621,7 @@ export const expensesStore = {
     return removed;
   },
   restore(item: ExpenseRecord) {
+    ensureExpenseStoreSessionWatcher();
     if (cache.some((e) => e.id === item.id)) return;
     deletedExpenseIds.delete(item.id);
     cache = [item, ...cache];
@@ -605,13 +639,16 @@ export const expensesStore = {
     })();
   },
   subscribe(cb: () => void): () => void {
+    ensureExpenseStoreSessionWatcher();
     listeners.add(cb);
+    if (!hydrated && !hydrationPromise) void hydrateFromCloud();
     return () => listeners.delete(cb);
   },
   isHydrated() {
     return hydrated;
   },
   refresh() {
+    ensureExpenseStoreSessionWatcher();
     return hydrateFromCloud();
   },
 };

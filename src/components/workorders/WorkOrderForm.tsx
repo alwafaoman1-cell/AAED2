@@ -138,6 +138,10 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
     vehicle_id: string | null;
   }>>([]);
   const [cloudInsuranceCompanies, setCloudInsuranceCompanies] = useState<string[]>([]);
+  const [claimSearch, setClaimSearch] = useState("");
+  const [claimSearchLoading, setClaimSearchLoading] = useState(false);
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
+  const [companiesLoading, setCompaniesLoading] = useState(false);
   const [vehicleMatch, setVehicleMatch] = useState<VehicleIdentityMatch | null>(null);
   const [vehicleLookupLoading, setVehicleLookupLoading] = useState(false);
   const [useExistingVehicle, setUseExistingVehicle] = useState(false);
@@ -214,29 +218,81 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
   });
 
   useEffect(() => {
+    if (!form.claimId) return;
     let cancelled = false;
-    void Promise.all([
-      supabase
+    void (async () => {
+      const tenant = await getCurrentTenantId();
+      if (!tenant || cancelled) return;
+      const { data } = await supabase
         .from("insurance_claims")
         .select("id,claim_number,insurance_company,customer_id,vehicle_id")
-        .order("created_at", { ascending: false })
-        .limit(1000),
-      supabase
+        .eq("tenant_id", tenant)
+        .eq("id", form.claimId!)
+        .maybeSingle();
+      if (!cancelled && data) setClaims((current) => [data as typeof current[number], ...current.filter((item) => item.id !== data.id)]);
+    })();
+    return () => { cancelled = true; };
+  }, [form.claimId]);
+
+  useEffect(() => {
+    const term = claimSearch.trim();
+    if (term.length < 2) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setClaimSearchLoading(true);
+      void (async () => {
+        const tenant = await getCurrentTenantId();
+        if (!tenant || cancelled) return;
+        const escaped = term.replace(/[%_,()]/g, " ").trim();
+        const { data, error } = await supabase
+          .from("insurance_claims")
+          .select("id,claim_number,insurance_company,customer_id,vehicle_id")
+          .eq("tenant_id", tenant)
+          .is("deleted_at", null)
+          .or(`claim_number.ilike.%${escaped}%,insurance_company.ilike.%${escaped}%`)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (cancelled) return;
+        if (error) {
+          toast.error("تعذر البحث في المطالبات");
+          return;
+        }
+        setClaims((current) => {
+          const selected = current.find((item) => item.id === form.claimId);
+          const results = (data || []) as typeof current;
+          return selected ? [selected, ...results.filter((item) => item.id !== selected.id)] : results;
+        });
+      })().finally(() => { if (!cancelled) setClaimSearchLoading(false); });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [claimSearch, form.claimId]);
+
+  async function loadInsuranceCompanies() {
+    if (companiesLoaded || companiesLoading) return;
+    setCompaniesLoading(true);
+    try {
+      const tenant = await getCurrentTenantId();
+      if (!tenant) return;
+      const { data, error } = await supabase
         .from("insurance_companies")
         .select("name")
+        .eq("tenant_id", tenant)
         .order("name")
-        .limit(500),
-    ]).then(([claimResult, companyResult]) => {
-      if (cancelled) return;
-      setClaims((claimResult.data || []) as typeof claims);
+        .limit(100);
+      if (error) throw error;
       setCloudInsuranceCompanies(
-        (companyResult.data || [])
-          .map((row: { name?: string | null }) => row.name || "")
-          .filter(Boolean),
+        (data || []).map((row: { name?: string | null }) => row.name || "").filter(Boolean),
       );
-    });
-    return () => { cancelled = true; };
-  }, []);
+      setCompaniesLoaded(true);
+    } catch {
+      toast.error("تعذر تحميل شركات التأمين");
+    } finally {
+      setCompaniesLoading(false);
+    }
+  }
 
   const selectedType: WorkOrderType = form.claimId ? "insurance" : (form.workOrderType || "general_customer");
   const companyOptions = Array.from(new Set([...cloudInsuranceCompanies, ...insuranceCompanies]));
@@ -922,7 +978,7 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
           </div>
           {selectedType === "insurance" && <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">شركة التأمين</label>
-            <Select value={form.insurance} onValueChange={v => set("insurance", v)}>
+            <Select value={form.insurance} onValueChange={v => set("insurance", v)} onOpenChange={(open) => { if (open) void loadInsuranceCompanies(); }}>
               <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="اختر" /></SelectTrigger>
               <SelectContent className="bg-card border-border">
                 <SelectItem value="-">-</SelectItem>
@@ -934,15 +990,25 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
             <>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">ربط مطالبة موجودة</label>
+                <Input
+                  value={claimSearch}
+                  onChange={(event) => setClaimSearch(event.target.value)}
+                  placeholder="اكتب حرفين من رقم المطالبة أو شركة التأمين"
+                  className="bg-secondary border-border text-foreground"
+                />
                 <Select value={form.claimId || "manual"} onValueChange={selectClaim}>
                   <SelectTrigger className="bg-secondary border-border text-foreground"><SelectValue placeholder="اختر مطالبة" /></SelectTrigger>
                   <SelectContent className="bg-card border-border">
                     <SelectItem value="manual">رقم مطالبة يدوي — بدون إنشاء مطالبة</SelectItem>
+                    {claimSearchLoading && <SelectItem value="loading" disabled>جارٍ البحث…</SelectItem>}
                     {claims.map((claim) => (
                       <SelectItem key={claim.id} value={claim.id}>
                         {claim.claim_number} — {claim.insurance_company || "بدون شركة"}
                       </SelectItem>
                     ))}
+                    {!claimSearchLoading && claimSearch.trim().length < 2 && !form.claimId && (
+                      <SelectItem value="search-hint" disabled>اكتب حرفين للبحث</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

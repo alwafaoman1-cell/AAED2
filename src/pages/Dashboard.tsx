@@ -26,13 +26,17 @@ import { inventoryStore, type Part } from "@/lib/inventoryStore";
 import { getWorkOrders, refreshWorkOrdersFromCloud, subscribeWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
 import { salesStore, type SalesDoc } from "@/lib/salesStore";
 import { staffStore, type Technician } from "@/lib/staffStore";
-import { refreshVehiclesFromCloud, vehiclesStore } from "@/lib/vehiclesStore";
+import { vehiclesStore } from "@/lib/vehiclesStore";
 import { customersStore, refreshCustomersFromCloud, type Customer } from "@/lib/customersStore";
 import { suppliersStore } from "@/lib/suppliersStore";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
 import { useInsuranceCompanies } from "@/hooks/useInsuranceCompanies";
 import { useCan } from "@/lib/rbac";
 import SupplementsKpiCard from "@/components/dashboard/SupplementsKpiCard";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
+import { queryKeys } from "@/lib/queryKeys";
+import { fetchDashboardOperationalData, searchDashboardOperationalData } from "@/lib/dashboardData";
 
 const statusColors: Record<string, string> = {
   "تحت الإصلاح": "bg-warning/15 text-warning",
@@ -107,6 +111,14 @@ export default function Dashboard() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const localeCode = i18n.language === "en" ? "en-US" : "ar-SA";
+  const { profile } = useAuth();
+
+  // ===== Filters =====
+  const [period, setPeriod] = useState<PeriodKey>("month");
+  const [techFilter, setTechFilter] = useState<string>("all");
+  const [serviceFilter, setServiceFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   // ===== Live data =====
   const [inventory, setInventory] = useState<Part[]>(inventoryStore.getAll());
@@ -115,18 +127,43 @@ export default function Dashboard() {
   const [techs, setTechs] = useState<Technician[]>(staffStore.getAll());
   const [customers, setCustomers] = useState<Customer[]>(customersStore.getAll());
 
+  const dashboardQuery = useQuery({
+    queryKey: queryKeys.dashboard.operational(profile?.tenant_id, { period, techFilter, serviceFilter }),
+    queryFn: () => fetchDashboardOperationalData({
+      tenantId: profile!.tenant_id,
+      period,
+      technician: techFilter,
+      service: serviceFilter,
+    }),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    gcTime: 300_000,
+    placeholderData: (previous) => previous,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const serverDashboardReady = Boolean(dashboardQuery.data && !dashboardQuery.isError);
+
   useEffect(() => { const u = inventoryStore.subscribe(() => setInventory([...inventoryStore.getAll()])); return () => { u(); }; }, []);
-  useEffect(() => { const u = subscribeWorkOrders(() => setOrders([...getWorkOrders()])); return () => { u(); }; }, []);
+  useEffect(() => {
+    if (!dashboardQuery.isError) return;
+    const u = subscribeWorkOrders(() => setOrders([...getWorkOrders()]));
+    return () => { u(); };
+  }, [dashboardQuery.isError]);
   useEffect(() => { const u = salesStore.subscribe(() => setDocs([...salesStore.list()])); return () => { u(); }; }, []);
   useEffect(() => { const u = staffStore.subscribe(() => setTechs([...staffStore.getAll()])); return () => { u(); }; }, []);
-  useEffect(() => { const u = customersStore.subscribe(() => setCustomers([...customersStore.getAll()])); return () => { u(); }; }, []);
   useEffect(() => {
+    if (!dashboardQuery.isError) return;
+    const u = customersStore.subscribe(() => setCustomers([...customersStore.getAll()]));
+    return () => { u(); };
+  }, [dashboardQuery.isError]);
+  useEffect(() => {
+    if (!dashboardQuery.isError) return;
     let cancelled = false;
     const syncDashboardStores = async () => {
       await Promise.allSettled([
         refreshWorkOrdersFromCloud(),
         refreshCustomersFromCloud(),
-        refreshVehiclesFromCloud(),
       ]);
       if (!cancelled) {
         setOrders([...getWorkOrders()]);
@@ -137,28 +174,36 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dashboardQuery.isError]);
 
-  // ===== Filters =====
-  const [period, setPeriod] = useState<PeriodKey>("month");
-  const [techFilter, setTechFilter] = useState<string>("all");
-  const [serviceFilter, setServiceFilter] = useState<string>("all");
-  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
-  const techOptions = useMemo(() => Array.from(new Set(techs.map((x) => x.name))), [techs]);
-  const serviceOptions = useMemo(() => Array.from(new Set(orders.map((o) => (o.serviceType || "").trim()).filter(Boolean))), [orders]);
+  const techOptions = useMemo(() => serverDashboardReady
+    ? dashboardQuery.data!.filterOptions.technicians
+    : Array.from(new Set(techs.map((x) => x.name))), [dashboardQuery.data, serverDashboardReady, techs]);
+  const serviceOptions = useMemo(() => serverDashboardReady
+    ? dashboardQuery.data!.filterOptions.services
+    : Array.from(new Set(orders.map((o) => (o.serviceType || "").trim()).filter(Boolean))), [dashboardQuery.data, orders, serverDashboardReady]);
 
-  const filteredOrders = useMemo(() => orders.filter((o) => {
+  const filteredOrders = useMemo(() => serverDashboardReady
+    ? dashboardQuery.data!.recentOrders
+    : orders.filter((o) => {
     if (!inPeriod(o.entryDate, period)) return false;
     if (techFilter !== "all" && o.technician !== techFilter) return false;
     if (serviceFilter !== "all" && (o.serviceType || "").trim() !== serviceFilter) return false;
     return true;
-  }), [orders, period, techFilter, serviceFilter]);
+    }), [dashboardQuery.data, orders, period, techFilter, serviceFilter, serverDashboardReady]);
 
   const filteredDocs = useMemo(() => docs.filter((d) => inPeriod(d.date, period)), [docs, period]);
 
   // ===== Stats =====
   const stats = useMemo(() => {
+    if (serverDashboardReady) {
+      return { ...dashboardQuery.data!.stats, unpaidInvoices: filteredDocs.filter((d) => d.type === "invoice" && (d.balanceDue || 0) > 0.001).length };
+    }
     const inWorkshop = filteredOrders.filter((o) => !["تم التسليم", "مغلق"].includes(o.status)).length;
     const underInspection = filteredOrders.filter((o) => o.status === "تحت الفحص").length;
     const waitingInsurance = filteredOrders.filter((o) => o.status === "بانتظار الموافقة").length;
@@ -169,38 +214,45 @@ export default function Dashboard() {
     const invoices = filteredDocs.filter((d) => d.type === "invoice");
     const unpaidInvoices = invoices.filter((d) => (d.balanceDue || 0) > 0.001).length;
     return { inWorkshop, underInspection, waitingInsurance, underRepair, readyDelivery, openOrders, closedToday, unpaidInvoices };
-  }, [filteredOrders, filteredDocs, orders]);
+  }, [dashboardQuery.data, filteredOrders, filteredDocs, orders, serverDashboardReady]);
 
   // ===== KPIs =====
   const kpis = useMemo(() => {
-    const total = filteredOrders.length || 1;
-    const closed = filteredOrders.filter((o) => ["تم التسليم", "مغلق"].includes(o.status)).length;
-    const completionRate = (closed / total) * 100;
+    const total = serverDashboardReady ? dashboardQuery.data!.stats.totalOrders : (filteredOrders.length || 1);
+    const closed = serverDashboardReady ? dashboardQuery.data!.stats.completedOrders : filteredOrders.filter((o) => ["تم التسليم", "مغلق"].includes(o.status)).length;
+    const completionRate = total > 0 ? (closed / total) * 100 : 0;
 
-    const closedWithDates = filteredOrders.filter((o) => ["تم التسليم", "مغلق"].includes(o.status) && o.entryDate);
-    const avgDays = closedWithDates.length
-      ? closedWithDates.reduce((s, o) => s + Math.max(0, Math.floor((Date.now() - new Date(o.entryDate).getTime()) / 86400000)), 0) / closedWithDates.length
-      : 0;
+    const closedWithDates = serverDashboardReady ? [] : filteredOrders.filter((o) => ["تم التسليم", "مغلق"].includes(o.status) && o.entryDate);
+    const avgDays = serverDashboardReady
+      ? dashboardQuery.data!.stats.averageDays
+      : closedWithDates.length
+        ? closedWithDates.reduce((s, o) => s + Math.max(0, Math.floor((Date.now() - new Date(o.entryDate).getTime()) / 86400000)), 0) / closedWithDates.length
+        : 0;
 
     const invoices = filteredDocs.filter((d) => d.type === "invoice");
     const totalAmt = invoices.reduce((s, d) => s + (d.total || 0), 0);
     const paidAmt = invoices.reduce((s, d) => s + ((d.total || 0) - (d.balanceDue || 0)), 0);
     const collectionRate = totalAmt > 0 ? (paidAmt / totalAmt) * 100 : 0;
 
-    const activeIds = new Set(filteredOrders.map((o) => (o.customer || "").trim()).filter(Boolean));
-    return { completionRate, avgDays, collectionRate, activeCustomers: activeIds.size };
-  }, [filteredOrders, filteredDocs]);
+    const activeCustomers = serverDashboardReady
+      ? dashboardQuery.data!.stats.activeCustomers
+      : new Set(filteredOrders.map((o) => (o.customer || "").trim()).filter(Boolean)).size;
+    return { completionRate, avgDays, collectionRate, activeCustomers };
+  }, [dashboardQuery.data, filteredOrders, filteredDocs, serverDashboardReady]);
 
   // ===== Service distribution =====
   const serviceData = useMemo(() => {
     const palette = ["hsl(0,72%,51%)", "hsl(42,90%,55%)", "hsl(199,89%,48%)", "hsl(142,70%,45%)", "hsl(270,70%,55%)", "hsl(24,85%,55%)"];
+    if (serverDashboardReady) {
+      return dashboardQuery.data!.serviceDistribution.map((item, i) => ({ ...item, color: palette[i % palette.length] }));
+    }
     const counts = new Map<string, number>();
     filteredOrders.forEach((o) => {
       const k = (o.serviceType || (i18n.language === "en" ? "Other" : "أخرى")).trim() || (i18n.language === "en" ? "Other" : "أخرى");
       counts.set(k, (counts.get(k) || 0) + 1);
     });
     return Array.from(counts.entries()).slice(0, 6).map(([name, value], i) => ({ name, value, color: palette[i % palette.length] }));
-  }, [filteredOrders, i18n.language]);
+  }, [dashboardQuery.data, filteredOrders, i18n.language, serverDashboardReady]);
 
   // ===== Recent + alerts + top techs =====
   const recentOrders = useMemo(() => filteredOrders.slice(0, 5), [filteredOrders]);
@@ -212,7 +264,7 @@ export default function Dashboard() {
     ...outStock.map((p) => ({ text: `${t("inventory.title")}: ${p.name}`, type: "destructive" as const, to: `/inventory/${p.id}`, icon: PackageX })),
     ...lowStock.map((p) => ({ text: `${p.name} — ${p.stock} (${t("inventory.minStock")}: ${p.minStock})`, type: "warning" as const, to: `/inventory/${p.id}`, icon: Package })),
   ];
-  const overdueOrders = orders.filter((o) => {
+  const overdueOrders = serverDashboardReady ? dashboardQuery.data!.overdueOrders : orders.filter((o) => {
     if (["تم التسليم", "مغلق", "جاهز للتسليم"].includes(o.status)) return false;
     if (!o.entryDate) return false;
     return Math.floor((Date.now() - new Date(o.entryDate).getTime()) / 86400000) >= 3;
@@ -224,6 +276,7 @@ export default function Dashboard() {
   const allAlerts = [...inventoryAlerts, ...otherAlerts];
 
   // ===== Live activity =====
+  const activityCustomers = serverDashboardReady ? dashboardQuery.data!.recentCustomers : customers;
   const activities = useMemo(() => {
     type Act = { id: string; ts: number; label: string; sublabel: string; to: string; icon: typeof FileText; tone: string };
     const acts: Act[] = [];
@@ -239,42 +292,58 @@ export default function Dashboard() {
       sublabel: `${d.customerName} — ${(d.total || 0).toLocaleString(localeCode)} ${t("common.currency")}`,
       to: `/sales/${d.type === "quote" ? "quotes" : d.type === "credit_note" ? "credit-notes" : d.type === "return_invoice" ? "returns" : d.type === "recurring_invoice" ? "recurring" : "invoices"}/${d.id}`, icon: FileText, tone: "text-success",
     }));
-    customers.slice(0, 10).forEach((c) => acts.push({
+    activityCustomers.slice(0, 10).forEach((c) => acts.push({
       id: `c-${c.id}`, ts: 0,
       label: `${t("dashboard.activityCustomer")}`,
       sublabel: `${c.name}${c.phone ? ` — ${c.phone}` : ""}`,
       to: `/customers/${c.id}`, icon: Users, tone: "text-info",
     }));
     return acts.sort((a, b) => b.ts - a.ts).slice(0, 8);
-  }, [filteredOrders, filteredDocs, customers, t, localeCode]);
+  }, [filteredOrders, filteredDocs, activityCustomers, t, localeCode]);
 
   // ===== Search =====
-  const { data: insuranceClaims = [] } = useInsuranceClaims();
+  const { data: insuranceClaims = [] } = useInsuranceClaims(dashboardQuery.isError);
   const { data: insuranceCompanies = [] } = useInsuranceCompanies();
+  const dashboardSearchQuery = useQuery({
+    queryKey: queryKeys.dashboard.search(profile?.tenant_id, debouncedSearch),
+    queryFn: () => searchDashboardOperationalData(profile!.tenant_id, debouncedSearch),
+    enabled: serverDashboardReady && Boolean(profile?.tenant_id) && debouncedSearch.length >= 2,
+    staleTime: 30_000,
+    gcTime: 120_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [] as { kind: string; label: string; sub: string; to: string }[];
     const out: { kind: string; label: string; sub: string; to: string }[] = [];
-    orders.forEach((o) => {
-      if (`${o.id} ${o.customer} ${o.plate} ${o.vehicleType} ${o.model}`.toLowerCase().includes(q))
-        out.push({ kind: t("workOrders.title"), label: o.id, sub: `${o.customer} — ${o.plate}`, to: `/work-orders/${o.id}` });
-    });
-    customers.forEach((c) => {
-      if (`${c.name} ${c.phone}`.toLowerCase().includes(q))
-        out.push({ kind: t("customers.title"), label: c.name, sub: c.phone || "", to: `/customers/${c.id}` });
-    });
-    vehiclesStore.getAll().forEach((v) => {
-      if (`${v.plate} ${v.type} ${v.vin || ""} ${v.owner || ""}`.toLowerCase().includes(q))
-        out.push({ kind: t("vehicles.title"), label: v.plate, sub: `${v.type || ""}${v.vin ? ` — ${v.vin}` : ""}`, to: `/vehicles/${encodeURIComponent(v.cloudId || v.id)}` });
-    });
+    if (serverDashboardReady) {
+      const kindLabels: Record<string, string> = {
+        work_order: t("workOrders.title"), customer: t("customers.title"), vehicle: t("vehicles.title"), claim: "تأمين",
+      };
+      (dashboardSearchQuery.data || []).forEach((item) => out.push({ ...item, kind: kindLabels[item.kind] || item.kind }));
+    } else {
+      orders.forEach((o) => {
+        if (`${o.id} ${o.customer} ${o.plate} ${o.vehicleType} ${o.model}`.toLowerCase().includes(q))
+          out.push({ kind: t("workOrders.title"), label: o.id, sub: `${o.customer} — ${o.plate}`, to: `/work-orders/${o.id}` });
+      });
+      customers.forEach((c) => {
+        if (`${c.name} ${c.phone}`.toLowerCase().includes(q))
+          out.push({ kind: t("customers.title"), label: c.name, sub: c.phone || "", to: `/customers/${c.id}` });
+      });
+      vehiclesStore.getAll().forEach((v) => {
+        if (`${v.plate} ${v.type} ${v.vin || ""} ${v.owner || ""}`.toLowerCase().includes(q))
+          out.push({ kind: t("vehicles.title"), label: v.plate, sub: `${v.type || ""}${v.vin ? ` — ${v.vin}` : ""}`, to: `/vehicles/${encodeURIComponent(v.cloudId || v.id)}` });
+      });
+      insuranceClaims.forEach((c: any) => {
+        const txt = `${c.claim_number || ""} ${c.insurance_company || ""} ${c.vehicle_plate || ""} ${c.vehicle_make || ""} ${c.vehicle_model || ""} ${c.customer_name || ""}`.toLowerCase();
+        if (txt.includes(q))
+          out.push({ kind: "تأمين", label: c.claim_number || "—", sub: `${c.insurance_company || ""} — ${c.vehicle_plate || ""}`, to: `/insurance/${c.id}` });
+      });
+    }
     docs.forEach((d) => {
       if (`${d.number} ${d.customerName}`.toLowerCase().includes(q))
         out.push({ kind: t("sales.title"), label: d.number, sub: d.customerName, to: `/sales/${d.type === "quote" ? "quotes" : d.type === "credit_note" ? "credit-notes" : d.type === "return_invoice" ? "returns" : d.type === "recurring_invoice" ? "recurring" : "invoices"}/${d.id}` });
-    });
-    insuranceClaims.forEach((c: any) => {
-      const txt = `${c.claim_number || ""} ${c.insurance_company || ""} ${c.vehicle_plate || ""} ${c.vehicle_make || ""} ${c.vehicle_model || ""} ${c.customer_name || ""}`.toLowerCase();
-      if (txt.includes(q))
-        out.push({ kind: "تأمين", label: c.claim_number || "—", sub: `${c.insurance_company || ""} — ${c.vehicle_plate || ""}`, to: `/insurance/${c.id}` });
     });
     insuranceCompanies.forEach((c: any) => {
       if (`${c.name || ""} ${c.contact_phone || ""}`.toLowerCase().includes(q))
@@ -289,7 +358,7 @@ export default function Dashboard() {
         out.push({ kind: "مورد", label: s.name, sub: s.phone || "", to: `/inventory/suppliers` });
     });
     return out.slice(0, 20);
-  }, [search, orders, customers, docs, insuranceClaims, insuranceCompanies, inventory, t]);
+  }, [search, orders, customers, docs, insuranceClaims, insuranceCompanies, inventory, t, serverDashboardReady, dashboardSearchQuery.data]);
 
   // ===== Layout DnD =====
   const { order, setOrder, reset } = useLayout();

@@ -4,6 +4,8 @@ export const queryKeys = {
   },
   dashboard: {
     summary: (tenantId?: string | null) => ["dashboard", "summary", tenantId ?? ""] as const,
+    operational: (tenantId?: string | null, filters?: unknown) => ["dashboard", "operational", tenantId ?? "", filters ?? ""] as const,
+    search: (tenantId?: string | null, search?: string) => ["dashboard", "search", tenantId ?? "", search ?? ""] as const,
   },
   settings: {
     vehicleStayAlerts: ["settings", "vehicle_stay_alerts"] as const,
@@ -12,11 +14,15 @@ export const queryKeys = {
     all: ["insurance_claims"] as const,
     list: (filters?: unknown) => ["insurance_claims", "list", filters ?? ""] as const,
     detail: (id?: string | null) => ["insurance_claims", id ?? ""] as const,
+    operationalList: (tenantId?: string | null, filters?: unknown) =>
+      ["insurance_claims", "operational_list", tenantId ?? "", filters ?? ""] as const,
   },
   customers: {
     all: ["customers"] as const,
     list: (filters?: unknown) => ["customers", "list", filters ?? ""] as const,
     detail: (id?: string | null) => ["customers", "detail", id ?? ""] as const,
+    operationalList: (tenantId?: string | null, filters?: unknown) =>
+      ["customers", "operational_list", tenantId ?? "", filters ?? ""] as const,
   },
   vehicles: {
     all: ["vehicles"] as const,
@@ -54,6 +60,8 @@ export const queryKeys = {
     list: (filters?: unknown) => ["job_orders", "list", filters ?? ""] as const,
     detail: (id?: string | null) => ["job_orders", "detail", id ?? ""] as const,
     inline: (workOrderId?: string | null) => ["job_order_inline", workOrderId ?? ""] as const,
+    operationalList: (tenantId?: string | null, filters?: unknown) =>
+      ["job_orders", "operational_list", tenantId ?? "", filters ?? ""] as const,
   },
   workOrderFinancials: {
     all: ["work_order_financials"] as const,
@@ -130,6 +138,7 @@ export const queryKeys = {
     list: (filters?: unknown) => ["estimates", "list", filters ?? ""] as const,
     detail: (id?: string | null) => ["estimates", "detail", id ?? ""] as const,
     lookups: ["estimates", "lookups"] as const,
+    linkedRecords: (tenantId?: string | null, ids?: unknown) => ["estimates", "linked_records", tenantId ?? "", ids ?? ""] as const,
   },
   dailyTasks: {
     all: ["daily_tasks"] as const,

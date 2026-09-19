@@ -5,9 +5,18 @@ const store = readFileSync("src/lib/expensesStore.ts", "utf8");
 const app = readFileSync("src/App.tsx", "utf8");
 
 describe("work-order expense query synchronization", () => {
-  it("uses the existing central expense realtime subscription", () => {
-    expect(store.match(/channel\("expenses_store_sync"\)/g)).toHaveLength(1);
-    expect(store.match(/table:\s*"expenses"/g)).toHaveLength(1);
+  it("uses the route-scoped central expense realtime subscription only", () => {
+    const realtime = readFileSync("src/hooks/useRealtimeSync.ts", "utf8");
+    expect(store).not.toContain('channel("expenses_store_sync")');
+    expect(realtime).toContain('if (table === "expenses")');
+    expect(realtime).toContain("applyExpenseRealtimeChange(payload)");
+    expect(realtime).toContain("refreshWorkOrderActualCostFromExpenseChange(payload)");
+  });
+
+  it("does not hydrate or subscribe as an import side effect", () => {
+    expect(store).not.toMatch(/if \(typeof window !== "undefined"\) \{\s*hydrateFromCloud\(\)/);
+    expect(store).not.toContain("expenses_store_sync");
+    expect(store).toContain("if (!hydrated && !hydrationPromise) void hydrateFromCloud()");
   });
 
   it("invalidates expense and financial query caches after expense changes", () => {

@@ -128,9 +128,84 @@ export type ClaimInsert = {
   work_completed_at?: string | null;
 };
 
-export function useInsuranceClaims() {
+export interface InsuranceClaimListInput {
+  tenantId: string;
+  page: number;
+  pageSize: number;
+  search?: string;
+  status?: string;
+  company?: string;
+  employeeId?: string;
+  dateRange?: string;
+  delivery?: string;
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+}
+
+export interface InsuranceClaimListResult {
+  rows: InsuranceClaim[];
+  pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
+  summary: { total: number; estimatedTotal: number };
+  filterOptions: { companies: string[] };
+}
+
+export async function fetchInsuranceClaimListPage(input: InsuranceClaimListInput): Promise<InsuranceClaimListResult> {
+  const page = Math.max(1, Number(input.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(input.pageSize) || 20));
+  const { data, error } = await (supabase.rpc as any)("insurance_claims_list_rpc", {
+    p_tenant_id: input.tenantId,
+    p_page: page,
+    p_page_size: pageSize,
+    p_search: input.search?.trim() || "",
+    p_status: input.status || "all",
+    p_company: input.company || "all",
+    p_employee_id: input.employeeId && input.employeeId !== "all" ? input.employeeId : null,
+    p_date_range: input.dateRange || "all",
+    p_delivery: input.delivery || "all",
+    p_sort_by: input.sortBy || "created_at",
+    p_sort_dir: input.sortDir || "desc",
+  });
+  if (error) throw error;
+  const payload = data && typeof data === "object" ? data as Record<string, any> : {};
+  const pagination = payload.pagination || {};
+  const summary = payload.summary || {};
+  const filterOptions = payload.filterOptions || {};
+  return {
+    rows: Array.isArray(payload.rows) ? payload.rows as InsuranceClaim[] : [],
+    pagination: {
+      page: Number(pagination.page || page),
+      pageSize: Number(pagination.pageSize || pageSize),
+      totalRows: Number(pagination.totalRows || 0),
+      totalPages: Number(pagination.totalPages || 0),
+    },
+    summary: {
+      total: Number(summary.total || 0),
+      estimatedTotal: Number(summary.estimated_total || 0),
+    },
+    filterOptions: {
+      companies: Array.isArray(filterOptions.companies) ? filterOptions.companies.filter(Boolean) : [],
+    },
+  };
+}
+
+export async function fetchAllInsuranceClaimListRows(
+  input: Omit<InsuranceClaimListInput, "page" | "pageSize">,
+  maxRows = 5000,
+): Promise<InsuranceClaim[]> {
+  const rows: InsuranceClaim[] = [];
+  const pageSize = 100;
+  for (let page = 1; rows.length < maxRows; page += 1) {
+    const result = await fetchInsuranceClaimListPage({ ...input, page, pageSize });
+    rows.push(...result.rows);
+    if (page >= result.pagination.totalPages || result.rows.length === 0) break;
+  }
+  return rows.slice(0, maxRows);
+}
+
+export function useInsuranceClaims(enabled = true) {
   return useQuery({
     queryKey: queryKeys.insuranceClaims.all,
+    enabled,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("insurance_claims" as any)

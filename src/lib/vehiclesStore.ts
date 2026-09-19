@@ -246,6 +246,22 @@ export async function fetchVehicleArchivePage(input: { page: number; pageSize: n
   return { rows: (data || []).map(rowToVehicle), total: Number(count || 0), page, pageSize };
 }
 
+/** Bounded detail-page lookup; never hydrates the complete vehicle registry. */
+export async function fetchVehiclesByCustomerId(customerId: string): Promise<Vehicle[]> {
+  if (!isUuid(customerId)) return [];
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+  const { data, error } = await (supabase.from("vehicles") as any)
+    .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,mileage,vin,vin_number,vehicle_cover_image_url,vehicle_thumbnail_url,archived,archived_at,archived_reason,deleted_at,customers(name,phone)")
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  return (data || []).map(rowToVehicle);
+}
+
 function buildFullPlate(r: any) {
   return [r.plate_letters, r.plate_number].filter(Boolean).join(" ").trim();
 }

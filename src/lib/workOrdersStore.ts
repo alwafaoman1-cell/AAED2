@@ -200,6 +200,41 @@ export function normalizeWorkOrderStatus(status: string | null | undefined): str
   }
 }
 
+export interface WorkOrderListPageInput {
+  tenantId: string;
+  page: number;
+  pageSize: number;
+  search?: string;
+  filters?: {
+    archive?: "all" | "active" | "archived";
+    ownership?: "all" | "insurance" | "cash";
+    parts?: "all" | "needed" | "none";
+    age?: "all" | "under_7" | "7_29" | "30_plus" | "11_plus";
+    statuses?: string[];
+    technician?: string;
+    service?: string;
+    insurance?: string;
+    entryFrom?: string;
+    entryTo?: string;
+  };
+}
+
+export interface WorkOrderListPageResult {
+  rows: WorkOrder[];
+  pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
+  summary: {
+    total: number;
+    inProgress: number;
+    ready: number;
+    delivered: number;
+    insurance: number;
+    cash: number;
+    needingParts: number;
+    overdue: number;
+  };
+  filterOptions: { technicians: string[]; services: string[]; insuranceCompanies: string[] };
+}
+
 let cache: WorkOrder[] = [];
 const listeners = new Set<() => void>();
 
@@ -803,6 +838,95 @@ function mapCloudRow(
   };
 }
 
+export async function fetchWorkOrderListPage(input: WorkOrderListPageInput): Promise<WorkOrderListPageResult> {
+  const page = Math.max(1, Number(input.page) || 1);
+  const pageSize = Math.min(100, Math.max(10, Number(input.pageSize) || 20));
+  const { data, error } = await (supabase.rpc as any)("work_orders_list_rpc", {
+    p_tenant_id: input.tenantId,
+    p_page: page,
+    p_page_size: pageSize,
+    p_search: input.search?.trim() || "",
+    p_filters: input.filters || {},
+  });
+  if (error) throw error;
+
+  const payload = data && typeof data === "object" ? data as Record<string, any> : {};
+  const rawRows = Array.isArray(payload.rows) ? payload.rows : [];
+  const rows = rawRows.map((raw: any) => {
+    const customerMap = new Map<string, { name: string; phone?: string | null }>();
+    if (raw.customer_id && raw._customer) {
+      customerMap.set(raw.customer_id, {
+        name: String(raw._customer.name || ""),
+        phone: raw._customer.phone || null,
+      });
+    }
+    const vehicleMap = new Map<string, any>();
+    if (raw.vehicle_id && raw._vehicle) {
+      vehicleMap.set(raw.vehicle_id, {
+        plate: [raw._vehicle.plateLetters, raw._vehicle.plateNumber].filter(Boolean).join(" ").trim(),
+        brand: raw._vehicle.brand,
+        model: raw._vehicle.model,
+        year: raw._vehicle.year,
+        vin: raw._vehicle.vin,
+        color: raw._vehicle.color,
+        imageUrl: raw._vehicle.imageUrl,
+        thumbnailUrl: raw._vehicle.thumbnailUrl,
+      });
+    }
+    const claimMap = new Map<string, ClaimApprovalInfo>();
+    if (raw.claim_id && raw._claim) claimMap.set(raw.claim_id, raw._claim);
+    const actualCosts = new Map<string, number>([[raw.id, Number(raw.actual_expense_cost || 0)]]);
+    const mapped = mapCloudRow(raw, customerMap, vehicleMap, claimMap, actualCosts);
+    const pendingPatch = _pendingPatches.get(mapped.id);
+    return pendingPatch ? { ...mapped, ...pendingPatch } : mapped;
+  });
+
+  const rawPagination = payload.pagination || {};
+  const rawSummary = payload.summary || {};
+  const rawOptions = payload.filterOptions || {};
+  return {
+    rows,
+    pagination: {
+      page: Number(rawPagination.page || page),
+      pageSize: Number(rawPagination.pageSize || pageSize),
+      totalRows: Number(rawPagination.totalRows || 0),
+      totalPages: Number(rawPagination.totalPages || 0),
+    },
+    summary: {
+      total: Number(rawSummary.total || 0),
+      inProgress: Number(rawSummary.in_progress || 0),
+      ready: Number(rawSummary.ready || 0),
+      delivered: Number(rawSummary.delivered || 0),
+      insurance: Number(rawSummary.insurance || 0),
+      cash: Number(rawSummary.cash || 0),
+      needingParts: Number(rawSummary.needing_parts || 0),
+      overdue: Number(rawSummary.overdue || 0),
+    },
+    filterOptions: {
+      technicians: Array.isArray(rawOptions.technicians) ? rawOptions.technicians.map(String) : [],
+      services: Array.isArray(rawOptions.services) ? rawOptions.services.map(String) : [],
+      insuranceCompanies: Array.isArray(rawOptions.insuranceCompanies) ? rawOptions.insuranceCompanies.map(String) : [],
+    },
+  };
+}
+
+export async function fetchAllWorkOrderListRows(
+  input: Omit<WorkOrderListPageInput, "page" | "pageSize">,
+  maximumRows = 2_000,
+): Promise<WorkOrder[]> {
+  const rows: WorkOrder[] = [];
+  let page = 1;
+  let totalPages = 1;
+  do {
+    const result = await fetchWorkOrderListPage({ ...input, page, pageSize: 100 });
+    rows.push(...result.rows);
+    totalPages = result.pagination.totalPages;
+    page += 1;
+    if (rows.length >= maximumRows) break;
+  } while (page <= totalPages);
+  return rows.slice(0, maximumRows);
+}
+
 let cloudBootstrapped = false;
 let cloudFetchTimer: ReturnType<typeof setTimeout> | null = null;
 let cloudFetchInFlight: Promise<void> | null = null;
@@ -1387,6 +1511,48 @@ export async function applyWorkOrderRealtimeChange(payload: WorkOrderRealtimePay
   cache[idx] = pendingPatch ? { ...mapped, ...pendingPatch } : mapped;
   KNOWN_CLOUD_NUMBERS.add(mapped.id);
   persist();
+}
+
+type ExpenseCostRealtimePayload = {
+  eventType?: string;
+  new?: Record<string, any>;
+  old?: Record<string, any>;
+};
+
+/** Recalculates only cached work orders referenced by one expense event. */
+export async function refreshWorkOrderActualCostFromExpenseChange(payload: ExpenseCostRealtimePayload): Promise<void> {
+  const rows = [payload?.new, payload?.old].filter(Boolean) as Record<string, any>[];
+  const references = new Set<string>();
+  for (const row of rows) {
+    for (const value of [row.work_order_id, row.linked_work_order_id, row.meta?.sourceWorkOrderId]) {
+      const reference = String(value || "").trim();
+      if (reference) references.add(reference);
+    }
+  }
+  if (references.size === 0) return;
+
+  const affected = cache.filter((order) => {
+    const aliases = [order.cloudId, order.id, order.displayNumber, order.cloudId ? `WO-${order.cloudId}` : null]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    return aliases.some((alias) => references.has(alias));
+  });
+  if (affected.length === 0) return;
+
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) return;
+  const identities = affected.map((order) => ({ id: order.cloudId || order.id, order_number: order.displayNumber || order.id }));
+  const totals = await fetchActualExpenseCostsForOrders(tenantId, identities);
+  let changed = false;
+  for (const order of affected) {
+    const identity = order.cloudId || order.id;
+    const nextCost = totals.get(identity) || 0;
+    if (order.actualExpenseCost !== nextCost) {
+      order.actualExpenseCost = nextCost;
+      changed = true;
+    }
+  }
+  if (changed) persist();
 }
 
 async function saveNeededPartsToCloud(order: WorkOrder, partsNeeded: NeededPart[]): Promise<WorkOrder> {

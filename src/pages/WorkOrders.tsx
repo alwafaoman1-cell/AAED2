@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search, Filter, Eye, Edit, Printer, Car, FileText, Workflow, QrCode, Camera, Trash2, MoreHorizontal, Search as SearchIcon, Receipt, FilePlus2, FolderOpen, Package, MessageCircle, Shield, Copy, FileSpreadsheet, FilePlus, Phone, Send, SlidersHorizontal, Bookmark, ChevronDown, ChevronUp, RotateCcw, CalendarDays, Banknote } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,8 @@ import WorkOrderExpenseDialog from "@/components/workorders/WorkOrderExpenseDial
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import {
   deleteWorkOrder,
+  fetchAllWorkOrderListRows,
+  fetchWorkOrderListPage,
   getWorkOrders,
   refreshWorkOrdersFromCloud,
   subscribeWorkOrders,
@@ -40,6 +43,8 @@ import {
   normalizeWorkOrderStatus,
   type WorkOrder,
 } from "@/lib/workOrdersStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { queryKeys } from "@/lib/queryKeys";
 import { staffStore } from "@/lib/staffStore";
 import { buildPartsRequestMessage, sendWhatsAppAndLog } from "@/lib/partsWhatsApp";
 import { inspectionsStore } from "@/lib/inspectionsStore";
@@ -211,6 +216,14 @@ const hasOrderValue = (value?: string) => !!(value && value.trim() !== "" && val
 const isInsuranceOrder = (order: WorkOrder) => isInsuranceWorkOrder(order);
 const getWorkOrdersForAdminList = () => getWorkOrders({ includeArchived: true });
 
+function statusFilterToCloudStatuses(statusFilter: string): string[] {
+  if (statusFilter === "repair") return ["received", "inspection", "in_progress"];
+  if (statusFilter === "waiting") return ["waiting_parts"];
+  if (statusFilter === "ready") return ["completed"];
+  if (statusFilter === "delivered") return ["delivered"];
+  return [];
+}
+
 function insuranceReason(order: WorkOrder) {
   if (hasOrderValue(order.insurance)) return order.insurance;
   if (hasOrderValue(order.claimNumber)) return `مطالبة ${order.claimNumber}`;
@@ -240,11 +253,13 @@ function buildWorkOrderHtml(order: WorkOrder) {
 
 export default function WorkOrders() {
   const { t, i18n } = useTranslation();
+  const { profile } = useAuth();
   const isArabic = i18n.language?.startsWith("ar") ?? true;
   const navigate = useNavigate();
   const initialFilters = useMemo(() => loadWorkOrderListFilters(), []);
   const [orders, setOrders] = useState<WorkOrder[]>(getWorkOrdersForAdminList());
   const [searchTerm, setSearchTerm] = useState(initialFilters.searchTerm);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialFilters.searchTerm.trim());
   const [statusFilter, setStatusFilter] = useState(initialFilters.statusFilter);
   const [ownershipFilter, setOwnershipFilter] = useState(initialFilters.ownershipFilter);
   const [technicianFilter, setTechnicianFilter] = useState(initialFilters.technicianFilter);
@@ -328,6 +343,45 @@ export default function WorkOrders() {
   }, [currentFilters]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm]);
+
+  const serverListFilters = useMemo(() => ({
+    archive: archiveFilter === "current" ? "active" as const : archiveFilter as "all" | "archived",
+    ownership: ownershipFilter as "all" | "insurance" | "cash",
+    parts: partsFilter,
+    age: statusFilter === "overdue" ? "11_plus" as const : ageFilter,
+    statuses: statusFilter === "overdue" ? [] : statusFilterToCloudStatuses(statusFilter),
+    technician: technicianFilter === "all" ? undefined : technicianFilter,
+    service: serviceFilter === "all" ? undefined : serviceFilter,
+    insurance: insuranceFilter === "all" ? undefined : insuranceFilter,
+    entryFrom: entryFrom || undefined,
+    entryTo: entryTo || undefined,
+  }), [archiveFilter, ownershipFilter, partsFilter, ageFilter, statusFilter, technicianFilter, serviceFilter, insuranceFilter, entryFrom, entryTo]);
+
+  const workOrdersPageQuery = useQuery({
+    queryKey: queryKeys.jobOrders.operationalList(profile?.tenant_id, {
+      page, pageSize, search: debouncedSearch, filters: serverListFilters,
+    }),
+    queryFn: () => fetchWorkOrderListPage({
+      tenantId: profile!.tenant_id,
+      page,
+      pageSize,
+      search: debouncedSearch,
+      filters: serverListFilters,
+    }),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    gcTime: 300_000,
+    placeholderData: (previous) => previous,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const serverListReady = Boolean(workOrdersPageQuery.data && !workOrdersPageQuery.isError);
+
+  useEffect(() => {
+    if (!workOrdersPageQuery.isError) return;
     let cancelled = false;
     const syncVisibleOrders = () => {
       if (!cancelled) setOrders([...getWorkOrdersForAdminList()]);
@@ -347,7 +401,7 @@ export default function WorkOrders() {
       cancelled = true;
       unsubscribe();
     };
-  }, []);
+  }, [workOrdersPageQuery.isError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -404,16 +458,22 @@ export default function WorkOrders() {
   };
 
   const technicianOptions = useMemo(
-    () => Array.from(new Set(orders.map((order) => order.technician?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
-    [orders],
+    () => serverListReady
+      ? workOrdersPageQuery.data!.filterOptions.technicians
+      : Array.from(new Set(orders.map((order) => order.technician?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
+    [orders, serverListReady, workOrdersPageQuery.data],
   );
   const serviceOptions = useMemo(
-    () => Array.from(new Set(orders.map((order) => order.serviceType?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
-    [orders],
+    () => serverListReady
+      ? workOrdersPageQuery.data!.filterOptions.services
+      : Array.from(new Set(orders.map((order) => order.serviceType?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
+    [orders, serverListReady, workOrdersPageQuery.data],
   );
   const insuranceOptions = useMemo(
-    () => Array.from(new Set(orders.filter(isInsuranceOrder).map((order) => order.insurance?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
-    [orders],
+    () => serverListReady
+      ? workOrdersPageQuery.data!.filterOptions.insuranceCompanies
+      : Array.from(new Set(orders.filter(isInsuranceOrder).map((order) => order.insurance?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b)),
+    [orders, serverListReady, workOrdersPageQuery.data],
   );
 
   const runWorkOrderDelete = async (order: WorkOrder, mode: DeleteMode, reason: string) => {
@@ -427,7 +487,7 @@ export default function WorkOrders() {
     }
 
     const removed = deleteWorkOrder(order.id);
-    await refreshWorkOrdersFromCloud().catch(() => {});
+    if (!serverListReady) await refreshWorkOrdersFromCloud().catch(() => {});
     deleteWorkOrder(order.id);
 
     const trashed = removed || deleteOrder;
@@ -484,11 +544,19 @@ export default function WorkOrders() {
       (archiveFilter === "archived" ? !!o.archivedAt || !!o.deletedAt : !o.archivedAt && !o.deletedAt);
     return matchesSearch && matchesStatus && matchesOwnership && matchesParts && matchesTechnician && matchesService && matchesInsurance && matchesAge && matchesEntryFrom && matchesEntryTo && matchesArchive;
   });
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const filteredResultCount = serverListReady
+    ? workOrdersPageQuery.data!.pagination.totalRows
+    : filtered.length;
+  const totalPages = serverListReady
+    ? Math.max(1, workOrdersPageQuery.data!.pagination.totalPages)
+    : Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginatedOrders = useMemo(
-    () => filtered.slice((page - 1) * pageSize, page * pageSize),
-    [filtered, page, pageSize],
+    () => serverListReady
+      ? workOrdersPageQuery.data!.rows
+      : filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize, serverListReady, workOrdersPageQuery.data],
   );
+  const availableActionOrders = serverListReady ? paginatedOrders : orders;
 
   useEffect(() => {
     setPage(1);
@@ -499,7 +567,21 @@ export default function WorkOrders() {
   }, [page, totalPages]);
 
   // الأوامر التي تحتاج قطع غيار (لأي زر طباعة جماعي)
-  const ordersNeedingParts = orders.filter(o => (o.partsNeeded || []).some(isPartStillNeeded));
+  const ordersNeedingParts = serverListReady
+    ? paginatedOrders.filter(o => (o.partsNeeded || []).some(isPartStillNeeded))
+    : orders.filter(o => (o.partsNeeded || []).some(isPartStillNeeded));
+  const ordersNeedingPartsCount = serverListReady
+    ? workOrdersPageQuery.data!.summary.needingParts
+    : ordersNeedingParts.length;
+
+  async function fetchAllMatchingOrders(overrides: Parameters<typeof fetchAllWorkOrderListRows>[0]["filters"] = serverListFilters) {
+    if (!serverListReady || !profile?.tenant_id) return filtered;
+    return fetchAllWorkOrderListRows({
+      tenantId: profile.tenant_id,
+      search: debouncedSearch,
+      filters: overrides,
+    });
+  }
 
   async function handlePreview(order: WorkOrder) {
     const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
@@ -512,12 +594,13 @@ export default function WorkOrders() {
   }
 
   async function handlePrintAllFiltered() {
-    if (filtered.length === 0) {
+    if (filteredResultCount === 0) {
       toast.error("لا توجد أوامر للطباعة");
       return;
     }
+    const matchingOrders = await fetchAllMatchingOrders();
     const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
-    const printableOrders = await Promise.all(filtered.map(async (order) => {
+    const printableOrders = await Promise.all(matchingOrders.map(async (order) => {
       const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
       return { ...order, trackingToken: portal?.token || order.trackingToken };
     }));
@@ -534,7 +617,7 @@ export default function WorkOrders() {
       buildWorkOrderHtml(printableOrders[0]).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
     }</head><body>${combined}</body></html>`;
     setPreviewHtml(wrapper);
-    setPreviewTitle(`طباعة ${filtered.length} أمر عمل`);
+    setPreviewTitle(`طباعة ${matchingOrders.length} أمر عمل`);
     setShowPreview(true);
   }
 
@@ -543,15 +626,18 @@ export default function WorkOrders() {
     setShowStatus(true);
   }
 
-  function handlePrintAllNeededParts() {
-    if (ordersNeedingParts.length === 0) {
+  async function handlePrintAllNeededParts() {
+    if (ordersNeedingPartsCount === 0) {
       toast.error("لا توجد سيارات تحتاج قطع غيار");
       return;
     }
+    const matchingPartsOrders = serverListReady
+      ? await fetchAllMatchingOrders({ ...serverListFilters, parts: "needed" })
+      : ordersNeedingParts;
     const html = getNeededPartsRequestHtml({
       requestNumber: `PR-ALL-${Date.now().toString().slice(-6)}`,
       date: new Date().toISOString().slice(0, 10),
-      rows: ordersNeedingParts.map((o) => ({
+      rows: matchingPartsOrders.map((o) => ({
         workOrderId: o.id,
         customer: o.customer,
         vehicle: `${o.vehicleType} ${o.model} ${o.year}`.trim(),
@@ -568,17 +654,19 @@ export default function WorkOrders() {
       })),
     });
     setPreviewHtml(html);
-    setPreviewTitle(`طلب قطع غيار — ${ordersNeedingParts.length} سيارة`);
+    setPreviewTitle(`طلب قطع غيار — ${matchingPartsOrders.length} سيارة`);
     setShowPreview(true);
   }
 
   // Stats
-  const inProgress = orders.filter(o => ["تحت الإصلاح", "تحت الفحص"].includes(normalizeWorkOrderStatus(o.status))).length;
-  const ready = orders.filter(o => normalizeWorkOrderStatus(o.status) === "جاهز للتسليم").length;
-  const insuranceCount = orders.filter(isInsuranceOrder).length;
-  const cashCount = orders.length - insuranceCount;
-  const delivered = orders.filter(o => ["تم التسليم", "مغلق"].includes(normalizeWorkOrderStatus(o.status))).length;
-  const overdue = orders.filter(o => {
+  const serverSummary = serverListReady ? workOrdersPageQuery.data!.summary : null;
+  const totalOrders = serverSummary?.total ?? orders.length;
+  const inProgress = serverSummary?.inProgress ?? orders.filter(o => ["تحت الإصلاح", "تحت الفحص"].includes(normalizeWorkOrderStatus(o.status))).length;
+  const ready = serverSummary?.ready ?? orders.filter(o => normalizeWorkOrderStatus(o.status) === "جاهز للتسليم").length;
+  const insuranceCount = serverSummary?.insurance ?? orders.filter(isInsuranceOrder).length;
+  const cashCount = serverSummary?.cash ?? (orders.length - insuranceCount);
+  const delivered = serverSummary?.delivered ?? orders.filter(o => ["تم التسليم", "مغلق"].includes(normalizeWorkOrderStatus(o.status))).length;
+  const overdue = serverSummary?.overdue ?? orders.filter(o => {
     const delay = getOrderDelayStyle(o);
     return delay.days !== null && delay.level !== "green";
   }).length;
@@ -600,13 +688,13 @@ export default function WorkOrders() {
             className={`gap-1.5 h-9 ${partsFilter === "needed" ? "bg-info text-info-foreground hover:bg-info/90" : "text-info hover:bg-info/10"}`}
           >
             <Package size={14} /> {isArabic ? "تحتاج قطع" : "Parts needed"}
-            <span className="text-[10px] bg-background/20 rounded-full px-1.5 py-0.5">{ordersNeedingParts.length}</span>
+            <span className="text-[10px] bg-background/20 rounded-full px-1.5 py-0.5">{ordersNeedingPartsCount}</span>
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={handlePrintAllNeededParts}
-            disabled={ordersNeedingParts.length === 0}
+            disabled={ordersNeedingPartsCount === 0}
             className="h-9 gap-1.5 border-0 text-warning hover:bg-warning/10 disabled:opacity-50"
           >
             <Printer size={14} /> طلب القطع
@@ -615,19 +703,19 @@ export default function WorkOrders() {
             size="sm"
             variant="outline"
             onClick={() => {
-              if (ordersNeedingParts.length === 0) {
+              if (ordersNeedingPartsCount === 0) {
                 toast.error("لا توجد سيارات تحتاج قطع غيار");
                 return;
               }
               toast.info("استخدم مركز واتساب داخل كل أمر عمل لاختيار المستلم وتسجيل الربط الكامل");
             }}
-            disabled={ordersNeedingParts.length === 0}
+            disabled={ordersNeedingPartsCount === 0}
             className="h-9 gap-1.5 border-0 text-success hover:bg-success/10 disabled:opacity-50"
           >
             <MessageCircle size={14} /> واتساب
           </Button>
           <Button size="sm" variant="ghost" onClick={handlePrintAllFiltered} className="h-9 gap-1.5 text-foreground">
-            <Printer size={14} /> طباعة الكل ({filtered.length})
+            <Printer size={14} /> طباعة الكل ({filteredResultCount})
           </Button>
           <Button
             size="sm"
@@ -647,7 +735,7 @@ export default function WorkOrders() {
           className={`text-right bg-card border rounded-xl p-3 transition-all hover:shadow-md hover:-translate-y-0.5 ${statusFilter === "all" ? "border-primary/50 shadow-gold" : "border-border hover:border-primary/30"}`}
         >
           <p className="text-[10px] text-muted-foreground">إجمالي</p>
-          <p className="text-lg font-bold text-foreground">{orders.length}</p>
+          <p className="text-lg font-bold text-foreground">{totalOrders}</p>
         </button>
         <button
           type="button"
@@ -688,7 +776,7 @@ export default function WorkOrders() {
           </div>
           <div className="grid grid-cols-3 rounded-xl border border-border bg-muted/30 p-1 xl:w-[330px]">
             {[
-              ["all", isArabic ? `الكل ${orders.length}` : `All ${orders.length}`],
+              ["all", isArabic ? `الكل ${totalOrders}` : `All ${totalOrders}`],
               ["cash", isArabic ? `كاش ${cashCount}` : `Cash ${cashCount}`],
               ["insurance", isArabic ? `تأمين ${insuranceCount}` : `Insurance ${insuranceCount}`],
             ].map(([value, label]) => (
@@ -780,7 +868,7 @@ export default function WorkOrders() {
             </Button>
           )}
           <span className="mr-auto text-xs text-muted-foreground">
-            {isArabic ? `${filtered.length} نتيجة · يتم حفظ العرض تلقائيًا لمدة 12 ساعة` : `${filtered.length} results · view auto-saved for 12 hours`}
+            {isArabic ? `${filteredResultCount} نتيجة · يتم حفظ العرض تلقائيًا لمدة 12 ساعة` : `${filteredResultCount} results · view auto-saved for 12 hours`}
           </span>
         </div>
 
@@ -852,8 +940,8 @@ export default function WorkOrders() {
               <tr className="border-b border-border bg-secondary/30">
                 <th className="py-3 px-3 w-10">
                   <Checkbox
-                    checked={filtered.length > 0 && selectedIds.size === filtered.length}
-                    onCheckedChange={(v) => setSelectedIds(v ? new Set(filtered.map(o => o.id)) : new Set())}
+                    checked={paginatedOrders.length > 0 && paginatedOrders.every((order) => selectedIds.has(order.id))}
+                    onCheckedChange={(v) => setSelectedIds(v ? new Set(paginatedOrders.map(o => o.id)) : new Set())}
                   />
                 </th>
                 {WORK_ORDER_COLUMNS.map((column) => isColumnVisible(column.key) && (
@@ -1155,11 +1243,11 @@ export default function WorkOrders() {
             </tbody>
           </table>
         </div>
-        {filtered.length === 0 && (
+        {filteredResultCount === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Car size={40} className="mx-auto mb-3 opacity-30" />
             <p>
-              {isLoadingCloudOrders
+              {workOrdersPageQuery.isLoading || isLoadingCloudOrders
                 ? "جاري تحميل أوامر العمل من السحابة..."
                 : cloudOrdersError
                   ? cloudOrdersError
@@ -1167,11 +1255,11 @@ export default function WorkOrders() {
             </p>
           </div>
         )}
-        {filtered.length > 0 && (
+        {filteredResultCount > 0 && (
           <TablePaginationControls
             page={page}
             pageSize={pageSize}
-            totalItems={filtered.length}
+            totalItems={filteredResultCount}
             onPageChange={setPage}
             onPageSizeChange={setPageSize}
           />
@@ -1254,8 +1342,8 @@ export default function WorkOrders() {
             </article>
           );
         })}
-        {filtered.length > 0 && (
-          <TablePaginationControls page={page} pageSize={pageSize} totalItems={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+        {filteredResultCount > 0 && (
+          <TablePaginationControls page={page} pageSize={pageSize} totalItems={filteredResultCount} onPageChange={setPage} onPageSizeChange={setPageSize} />
         )}
       </div>
 
@@ -1321,6 +1409,7 @@ export default function WorkOrders() {
             return;
           }
           setOrders([...getWorkOrdersForAdminList()]);
+          if (serverListReady) await workOrdersPageQuery.refetch();
           closeDeleteDialog();
         }}
       />
@@ -1334,6 +1423,7 @@ export default function WorkOrders() {
                 await updateWorkOrderInCloud(id, { status });
               }
               toast.success(`تم تحديث حالة ${selectedIds.size} أمر إلى "${status}"`);
+              if (serverListReady) await workOrdersPageQuery.refetch();
               setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
             } catch (error: any) {
@@ -1354,6 +1444,7 @@ export default function WorkOrders() {
                 await updateWorkOrderInCloud(id, { technician: tech });
               }
               toast.success(`تم إسناد ${selectedIds.size} أمر إلى ${tech}`);
+              if (serverListReady) await workOrdersPageQuery.refetch();
               setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
             } catch (error: any) {
@@ -1373,7 +1464,7 @@ export default function WorkOrders() {
           className="h-8 gap-1"
           onClick={() => {
             const ids = Array.from(selectedIds);
-            const ords = orders.filter((o) => ids.includes(o.id));
+            const ords = availableActionOrders.filter((o) => ids.includes(o.id));
             const headers = ["رقم الأمر","العميل","اللوحة","المركبة","الحالة","الفني","التكلفة"];
             const rows = ords.map((o) => [o.id, o.customer, o.plate, `${o.vehicleType} ${o.model}`, o.status, o.technician || "", actualWorkOrderCost(o).toFixed(3)]);
             const csv = "\uFEFF" + [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -1393,7 +1484,7 @@ export default function WorkOrders() {
           className="h-8 gap-1"
           onClick={async () => {
             const ids = Array.from(selectedIds);
-            const ords = orders.filter(o => ids.includes(o.id));
+            const ords = availableActionOrders.filter(o => ids.includes(o.id));
             if (ords.length === 0) return;
             const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
             const printableOrders = await Promise.all(ords.map(async (order) => {
@@ -1424,15 +1515,16 @@ export default function WorkOrders() {
             try {
               let n = 0;
               for (const id of Array.from(selectedIds)) {
-                const order = orders.find((o) => o.id === id);
+                const order = availableActionOrders.find((o) => o.id === id);
                 if (!order) continue;
                 await archiveWorkOrder(order, "Bulk Archive Work Order");
                 deleteWorkOrder(id);
-                await refreshWorkOrdersFromCloud().catch(() => {});
+                if (!serverListReady) await refreshWorkOrdersFromCloud().catch(() => {});
                 deleteWorkOrder(id);
                 n++;
               }
               toast.success(`تم نقل ${n} أمر إلى الأرشيف`);
+              if (serverListReady) await workOrdersPageQuery.refetch();
               setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
             } catch (error: any) {
@@ -1481,7 +1573,7 @@ export default function WorkOrders() {
         onConfirm={async () => {
           let n = 0;
           for (const id of Array.from(selectedIds)) {
-            const order = orders.find((o) => o.id === id);
+            const order = availableActionOrders.find((o) => o.id === id);
             if (!order) continue;
             try {
               await runWorkOrderDelete(order, deleteMode, deleteReason || "Bulk delete work orders");
@@ -1492,6 +1584,7 @@ export default function WorkOrders() {
             n++;
           }
           toast.success(`تم حذف ${n} أمر عمل`);
+          if (serverListReady) await workOrdersPageQuery.refetch();
           setOrders([...getWorkOrdersForAdminList()]);
           setSelectedIds(new Set());
           setShowBulkDelete(false);

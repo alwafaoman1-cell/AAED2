@@ -15,6 +15,7 @@ import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { useBulkSelection, exportRowsAsCsv } from "@/hooks/useBulkSelection";
 import { useInsuranceClaims, useDeleteClaim } from "@/hooks/useInsuranceClaims";
+import { fetchAllInsuranceClaimListRows, fetchInsuranceClaimListPage } from "@/hooks/useInsuranceClaims";
 import { toEnglishDigits, formatPlateLatin } from "@/lib/numberUtils";
 import ClaimStatusDialog from "@/components/insurance/ClaimStatusDialog";
 import WorkshopOperationsReportDialog from "@/components/insurance/WorkshopOperationsReportDialog";
@@ -30,6 +31,10 @@ import {
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { useInsuranceEmployees } from "@/hooks/useInsuranceEmployees";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
+import { queryKeys } from "@/lib/queryKeys";
+import { toast } from "sonner";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/15 text-warning border-warning/30",
@@ -55,11 +60,12 @@ const QUICK_TEMPLATES = [
 export default function InsuranceClaimsList() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { data: claims = [], isLoading } = useInsuranceClaims();
+  const { profile } = useAuth();
   const { data: insuranceEmployees = [] } = useInsuranceEmployees(null);
   const deleteClaim = useDeleteClaim();
 
   const [search, setSearch] = useState(() => searchParams.get("q") || "");
+  const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get("q") || "");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [employeeFilter, setEmployeeFilter] = useState<string>("all");
@@ -71,6 +77,8 @@ export default function InsuranceClaimsList() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePersistedState<number>("insurance_claims_page_size", 20);
   const [reportOpen, setReportOpen] = useState(false);
+  const [reportClaims, setReportClaims] = useState<InsuranceClaim[] | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
   const [visibleCols, setVisibleCols] = usePersistedState<Record<string, boolean>>("insurance_claims_columns_v2", {
     number: true, vehicle: true, customer: true, insurance_company: true,
     estimated: true, approved: true, duration: true, location: true, status: true,
@@ -89,13 +97,54 @@ export default function InsuranceClaimsList() {
     sortDir === "asc" ? <ArrowUp size={11} className="inline text-primary" /> :
     <ArrowDown size={11} className="inline text-primary" />;
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const listFilters = useMemo(() => ({
+    search: debouncedSearch,
+    status: statusFilter,
+    company: companyFilter,
+    employeeId: employeeFilter,
+    dateRange,
+    delivery: deliveryFilter,
+    sortBy,
+    sortDir,
+  }), [debouncedSearch, statusFilter, companyFilter, employeeFilter, dateRange, deliveryFilter, sortBy, sortDir]);
+
+  const claimsPageQuery = useQuery({
+    queryKey: queryKeys.insuranceClaims.operationalList(profile?.tenant_id, { page, pageSize, ...listFilters }),
+    queryFn: () => fetchInsuranceClaimListPage({
+      tenantId: profile!.tenant_id,
+      page,
+      pageSize,
+      ...listFilters,
+    }),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    gcTime: 300_000,
+    placeholderData: (previous) => previous,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const legacyClaimsQuery = useInsuranceClaims(claimsPageQuery.isError);
+  const serverListReady = Boolean(claimsPageQuery.data && !claimsPageQuery.isError);
+  const claims = serverListReady ? claimsPageQuery.data!.rows : (legacyClaimsQuery.data || []);
+  const isLoading = claimsPageQuery.isLoading || (claimsPageQuery.isError && legacyClaimsQuery.isLoading);
+
   const companies = useMemo(() => {
+    if (serverListReady) return claimsPageQuery.data!.filterOptions.companies;
     const set = new Set<string>();
     claims.forEach((c) => c.insurance_company && set.add(c.insurance_company));
     return Array.from(set).sort();
-  }, [claims]);
+  }, [claims, claimsPageQuery.data, serverListReady]);
 
   const filtered = useMemo(() => {
+    if (serverListReady) return claims;
     const now = Date.now();
     const ranges: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
     return claims.filter((c) => {
@@ -124,9 +173,10 @@ export default function InsuranceClaimsList() {
       }
       return true;
     });
-  }, [claims, search, statusFilter, companyFilter, employeeFilter, dateRange, deliveryFilter]);
+  }, [claims, search, statusFilter, companyFilter, employeeFilter, dateRange, deliveryFilter, serverListReady]);
 
   const sorted = useMemo(() => {
+    if (serverListReady) return filtered;
     const arr = [...filtered];
     const dir = sortDir === "asc" ? 1 : -1;
     const getKey = (c: any): string | number => {
@@ -150,12 +200,14 @@ export default function InsuranceClaimsList() {
       return 0;
     });
     return arr;
-  }, [filtered, sortBy, sortDir]);
+  }, [filtered, sortBy, sortDir, serverListReady]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const totalPages = serverListReady
+    ? Math.max(1, claimsPageQuery.data!.pagination.totalPages)
+    : Math.max(1, Math.ceil(sorted.length / pageSize));
   const paginated = useMemo(
-    () => sorted.slice((page - 1) * pageSize, page * pageSize),
-    [sorted, page, pageSize],
+    () => serverListReady ? sorted : sorted.slice((page - 1) * pageSize, page * pageSize),
+    [sorted, page, pageSize, serverListReady],
   );
 
   useEffect(() => {
@@ -187,9 +239,21 @@ export default function InsuranceClaimsList() {
     return parts.join(" · ");
   }, [deliveryFilter, statusFilter, companyFilter, employeeFilter, insuranceEmployees, search]);
 
-  const exportCsv = () => {
+  const loadAllFilteredClaims = async () => {
+    if (!serverListReady || !profile?.tenant_id) return filtered;
+    return fetchAllInsuranceClaimListRows({ tenantId: profile.tenant_id, ...listFilters });
+  };
+
+  const exportCsv = async () => {
+    let exportClaims: InsuranceClaim[];
+    try {
+      exportClaims = await loadAllFilteredClaims();
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تحميل جميع المطالبات للتصدير");
+      return;
+    }
     const headers = ["رقم المطالبة", "شركة التأمين", "العميل", "السيارة", "اللوحة", "المقدر", "المعتمد", "الحالة", "التاريخ"];
-    const rows = filtered.map((c) => [
+    const rows = exportClaims.map((c) => [
       c.claim_number, c.insurance_company, c.customer?.name || "",
       `${(c as any).vehicle_make || ""} ${(c as any).vehicle_model || ""}`.trim(),
       (c as any).vehicle_plate || "",
@@ -204,7 +268,22 @@ export default function InsuranceClaimsList() {
     URL.revokeObjectURL(url);
   };
 
-  const totalAmount = filtered.reduce((s, c) => s + Number(c.estimated_amount || 0), 0);
+  const totalRows = serverListReady ? claimsPageQuery.data!.pagination.totalRows : sorted.length;
+  const totalAmount = serverListReady
+    ? claimsPageQuery.data!.summary.estimatedTotal
+    : filtered.reduce((s, c) => s + Number(c.estimated_amount || 0), 0);
+
+  async function openWorkshopReport() {
+    setReportLoading(true);
+    try {
+      setReportClaims(await loadAllFilteredClaims());
+      setReportOpen(true);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تحميل بيانات تقرير الورشة");
+    } finally {
+      setReportLoading(false);
+    }
+  }
 
   const bulk = useBulkSelection(filtered);
   function handleBulkDelete() {
@@ -231,7 +310,7 @@ export default function InsuranceClaimsList() {
         <div>
           <h1 className="text-xl md:text-2xl font-bold">جميع المطالبات</h1>
           <p className="text-xs md:text-sm text-muted-foreground">
-            {toEnglishDigits(sorted.length.toLocaleString())} مطالبة — إجمالي{" "}
+            {toEnglishDigits(totalRows.toLocaleString())} مطالبة — إجمالي{" "}
             <span className="font-mono" dir="ltr">{toEnglishDigits(Math.round(totalAmount).toLocaleString("en-US"))} OMR</span>
           </p>
         </div>
@@ -261,10 +340,10 @@ export default function InsuranceClaimsList() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Button variant="outline" onClick={() => setReportOpen(true)} className="gap-2">
+          <Button variant="outline" onClick={() => void openWorkshopReport()} disabled={reportLoading} className="gap-2">
             <FileText size={16} /> تقرير عمليات الورشة
           </Button>
-          <Button variant="outline" onClick={exportCsv} className="gap-2">
+          <Button variant="outline" onClick={() => void exportCsv()} className="gap-2">
             <Download size={16} /> تصدير CSV
           </Button>
           <DropdownMenu>
@@ -374,7 +453,7 @@ export default function InsuranceClaimsList() {
 
         {isLoading ? (
           <div className="p-8 text-center text-muted-foreground">جاري التحميل...</div>
-        ) : !sorted.length ? (
+        ) : !totalRows ? (
           <div className="p-8 text-center text-muted-foreground">
             {claims.length ? "لا توجد نتائج مطابقة" : "لا توجد مطالبات بعد"}
           </div>
@@ -562,7 +641,7 @@ export default function InsuranceClaimsList() {
             <TablePaginationControls
               page={page}
               pageSize={pageSize}
-              totalItems={sorted.length}
+              totalItems={totalRows}
               onPageChange={setPage}
               onPageSizeChange={setPageSize}
             />
@@ -600,7 +679,7 @@ export default function InsuranceClaimsList() {
       <WorkshopOperationsReportDialog
         open={reportOpen}
         onOpenChange={setReportOpen}
-        claims={filtered}
+        claims={reportClaims ?? filtered}
         filterLabel={deliveryFilterLabel}
       />
     </div>
