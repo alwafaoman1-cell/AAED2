@@ -48,18 +48,35 @@ grant execute on function public.seed_default_notification_settings(uuid) to aut
 revoke execute on function public.reserve_message_idempotency(uuid, text, text, text, text) from public, anon, authenticated;
 revoke execute on function public.get_supplement_request_by_token(text) from public, anon, authenticated;
 revoke execute on function public.submit_supplement_decision(text, jsonb, text, text, text, text) from public, anon, authenticated;
-revoke execute on function public.get_public_tracking_base_20260721(text) from public, anon, authenticated;
-revoke execute on function public.get_work_order_for_sign_base_20260721(text) from public, anon, authenticated;
-revoke execute on function public.submit_work_order_signature_base_20260721(text, text, text, text, text) from public, anon, authenticated;
 revoke execute on function public.next_customer_code(uuid, integer) from public, anon, authenticated;
 
 grant execute on function public.reserve_message_idempotency(uuid, text, text, text, text) to service_role;
 grant execute on function public.get_supplement_request_by_token(text) to service_role;
 grant execute on function public.submit_supplement_decision(text, jsonb, text, text, text, text) to service_role;
-grant execute on function public.get_public_tracking_base_20260721(text) to service_role;
-grant execute on function public.get_work_order_for_sign_base_20260721(text) to service_role;
-grant execute on function public.submit_work_order_signature_base_20260721(text, text, text, text, text) to service_role;
 grant execute on function public.next_customer_code(uuid, integer) to service_role;
+
+-- These legacy backing functions exist only on installations that previously
+-- wrapped the public entry points. Keep their privileges locked down when they
+-- exist, but do not fail a clean/current installation where they were never
+-- created or have already been removed.
+do $$
+begin
+  if to_regprocedure('public.get_public_tracking_base_20260721(text)') is not null then
+    execute 'revoke execute on function public.get_public_tracking_base_20260721(text) from public, anon, authenticated';
+    execute 'grant execute on function public.get_public_tracking_base_20260721(text) to service_role';
+  end if;
+
+  if to_regprocedure('public.get_work_order_for_sign_base_20260721(text)') is not null then
+    execute 'revoke execute on function public.get_work_order_for_sign_base_20260721(text) from public, anon, authenticated';
+    execute 'grant execute on function public.get_work_order_for_sign_base_20260721(text) to service_role';
+  end if;
+
+  if to_regprocedure('public.submit_work_order_signature_base_20260721(text, text, text, text, text)') is not null then
+    execute 'revoke execute on function public.submit_work_order_signature_base_20260721(text, text, text, text, text) from public, anon, authenticated';
+    execute 'grant execute on function public.submit_work_order_signature_base_20260721(text, text, text, text, text) to service_role';
+  end if;
+end;
+$$;
 
 -- Trigger-only functions. Revoking direct browser execution does not disable
 -- triggers; PostgreSQL invokes the trigger function through its trigger object.
