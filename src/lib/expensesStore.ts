@@ -46,6 +46,8 @@ export interface ExpenseRecord {
   beneficiary?: string;
   description?: string;
   photo?: string | null;
+  /** Canonical Supabase job_orders.id. Kept separately from the visible order number. */
+  canonicalWorkOrderId?: string;
   linkedWorkOrderId?: string;
   customerId?: string;
   vehicleId?: string;
@@ -202,9 +204,13 @@ function rowToRecord(r: any): ExpenseRecord {
     beneficiary: r.beneficiary || undefined,
     description: r.description || undefined,
     photo,
-    // Prefer the canonical FK introduced by expense classification while
-    // retaining the legacy text relation for older vouchers.
-    linkedWorkOrderId: r.work_order_id || r.linked_work_order_id || undefined,
+    // Keep both identities returned by the database. The classification
+    // trigger intentionally rewrites linked_work_order_id to the current
+    // visible order number, while work_order_id remains the canonical UUID.
+    // Collapsing both into one property caused a valid saved voucher to look
+    // detached when a screen only had the other identity available.
+    canonicalWorkOrderId: r.work_order_id || undefined,
+    linkedWorkOrderId: r.linked_work_order_id || r.work_order_id || undefined,
     customerId: r.customer_id || meta.customerId || undefined,
     vehicleId: r.vehicle_id || meta.vehicleId || undefined,
     claimId: r.claim_id || meta.claimId || undefined,
@@ -226,7 +232,7 @@ function rowToRecord(r: any): ExpenseRecord {
     unitBuyPrice: meta.unitBuyPrice,
     unitSellPrice: meta.unitSellPrice,
     requiredPartId: meta.requiredPartId,
-    sourceWorkOrderId: meta.sourceWorkOrderId,
+    sourceWorkOrderId: meta.sourceWorkOrderId || r.work_order_id || undefined,
     sourceClaimId: meta.sourceClaimId,
     convertedFromRequiredPart: meta.convertedFromRequiredPart,
     duplicateBatchId: meta.duplicateBatchId,
@@ -310,7 +316,9 @@ function recordToRow(e: ExpenseRecord, tenantId: string) {
     // Keep both relations during the compatibility period. New writes must
     // populate the canonical FK so management/report RPCs and work-order
     // screens read the same expense row immediately.
-    work_order_id: e.linkedWorkOrderId && isUuid(e.linkedWorkOrderId) ? e.linkedWorkOrderId : null,
+    work_order_id: e.canonicalWorkOrderId && isUuid(e.canonicalWorkOrderId)
+      ? e.canonicalWorkOrderId
+      : (e.linkedWorkOrderId && isUuid(e.linkedWorkOrderId) ? e.linkedWorkOrderId : null),
     linked_work_order_id: e.linkedWorkOrderId || null,
     customer_id: e.customerId && isUuid(e.customerId) ? e.customerId : null,
     vehicle_id: e.vehicleId && isUuid(e.vehicleId) ? e.vehicleId : null,
@@ -668,7 +676,7 @@ export function getWorkOrderExpenseReferences(workOrder: string | WorkOrderExpen
 
 export function expenseBelongsToWorkOrder(expense: ExpenseRecord, workOrder: string | WorkOrderExpenseIdentity): boolean {
   const refs = new Set(getWorkOrderExpenseReferences(workOrder));
-  return [expense.linkedWorkOrderId, expense.sourceWorkOrderId]
+  return [expense.canonicalWorkOrderId, expense.linkedWorkOrderId, expense.sourceWorkOrderId]
     .map((value) => String(value || "").trim())
     .some((value) => value.length > 0 && refs.has(value));
 }

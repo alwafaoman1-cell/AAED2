@@ -20,13 +20,15 @@ describe("work-order expense persistence and profitability", () => {
     expect(store).toContain("expenseBelongsToWorkOrder");
     expect(store).toContain("workOrder.cloudId");
     expect(store).toContain("workOrder.displayNumber");
+    expect(store).toContain("expense.canonicalWorkOrderId");
     expect(store).toContain("expense.sourceWorkOrderId");
   });
 
   it("writes new work-order vouchers with the canonical cloud relation", () => {
     const store = read("src/lib/expensesStore.ts");
-    expect(store).toContain("work_order_id: e.linkedWorkOrderId && isUuid(e.linkedWorkOrderId)");
-    expect(store).toContain("r.work_order_id || r.linked_work_order_id");
+    expect(store).toContain("canonicalWorkOrderId: r.work_order_id || undefined");
+    expect(store).toContain("linkedWorkOrderId: r.linked_work_order_id || r.work_order_id || undefined");
+    expect(store).toContain("e.canonicalWorkOrderId && isUuid(e.canonicalWorkOrderId)");
     const single = read("src/components/workorders/WorkOrderExpenseDialog.tsx");
     expect(single).toContain("linkedWorkOrderId: order.cloudId || order.id");
     expect(single).toContain("vehicleId: order.vehicleId");
@@ -34,6 +36,7 @@ describe("work-order expense persistence and profitability", () => {
 
     const bulk = read("src/components/workorders/WorkOrderBulkExpenseDialog.tsx");
     expect(bulk).toContain("const canonicalWorkOrderId = order.cloudId || order.id");
+    expect(bulk).toContain("canonicalWorkOrderId: canonicalWorkOrderId");
     expect(bulk).toContain("linkedWorkOrderId: canonicalWorkOrderId");
     expect(bulk).toContain("sourceWorkOrderId: visibleWorkOrderNumber");
     expect(bulk).toContain("vehicleId: order.vehicleId");
