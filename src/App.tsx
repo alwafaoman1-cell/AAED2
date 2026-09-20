@@ -37,6 +37,7 @@ const Users = lazy(() => import("./pages/Users"));
 const WorkOrders = lazy(() => import("./pages/WorkOrders"));
 const WorkOrderNew = lazy(() => import("./pages/WorkOrderNew"));
 const WorkOrderDetail = lazy(() => import("./pages/WorkOrderDetail"));
+const WorkOrderDeliveryPage = lazy(() => import("./pages/WorkOrderDeliveryPage"));
 const Inspection = lazy(() => import("./pages/Inspection"));
 const InspectionReportPage = lazy(() => import("./pages/InspectionReportPage"));
 const InsuranceInspectionPage = lazy(() => import("./pages/InsuranceInspectionPage"));
@@ -292,6 +293,7 @@ const App = () => (
               <Route path="/apps" element={<AppsHub />} />
               <Route path="/work-orders" element={<WorkOrders />} />
               <Route path="/work-orders/new" element={<WorkOrderNew />} />
+              <Route path="/work-orders/:id/delivery" element={<WorkOrderDeliveryPage />} />
               <Route path="/work-orders/:id" element={<WorkOrderDetail />} />
               <Route path="/inspection" element={<Inspection />} />
               <Route path="/inspection/insurance/new" element={<InsuranceInspectionPage />} />

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, Upload, X, Loader2, PackageCheck, FileSignature, FileCheck2 } from "lucide-react";
 import { toast } from "sonner";
-import VehicleDeliveryReceiptDialog from "@/components/workorders/VehicleDeliveryReceiptDialog";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { getWorkOrderById, refreshWorkOrdersFromCloud } from "@/lib/workOrdersStore";
 import AiExtractButton from "@/components/ai/AiExtractButton";
@@ -55,6 +55,7 @@ async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
 }
 
 export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, initial, onSaved }: Props) {
+  const navigate = useNavigate();
   const [deliveryPhotos, setDeliveryPhotos] = useState<string[]>(initial?.delivery_photos ?? []);
   const [satisfactionPhotos, setSatisfactionPhotos] = useState<string[]>(initial?.satisfaction_photos ?? []);
   const [receiverIdPhoto, setReceiverIdPhoto] = useState<string | null>(initial?.receiver_id_photo ?? null);
@@ -67,8 +68,6 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
   const [uploading, setUploading] = useState<SlotKey | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [receiptOpen, setReceiptOpen] = useState(false);
-  const [woForDialog, setWoForDialog] = useState<WorkOrder | null>(null);
   const [loadingWo, setLoadingWo] = useState(false);
 
   /** Fetch linked job order from Supabase and adapt to local WorkOrder shape. */
@@ -137,8 +136,20 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
   async function openReceiptDialog() {
     const wo = await ensureWorkOrder();
     if (!wo) return;
-    setWoForDialog(wo);
-    setReceiptOpen(true);
+    navigate(`/work-orders/${encodeURIComponent(wo.displayNumber || wo.id)}/delivery`, {
+      state: {
+        returnTo: `/insurance/${claimId}`,
+        deliveryDraft: {
+          date: deliveryDate,
+          receiverType: "customer",
+          receiverName,
+          receiverIdNumber,
+          satisfactionNotes: notes,
+          idPhotoDataUrl: receiverIdPhoto,
+          deliveryPhotoUrls: deliveryPhotos,
+        },
+      },
+    });
   }
 
   const upload = async (file: File, category: "delivery" | "satisfaction" | "receiver_id"): Promise<string | null> => {
@@ -454,26 +465,6 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
         </div>
       </CardContent>
 
-      {woForDialog && (
-        <VehicleDeliveryReceiptDialog
-          open={receiptOpen}
-          onOpenChange={setReceiptOpen}
-          order={woForDialog}
-          deliveryDraft={{
-            date: deliveryDate,
-            receiverType: "customer",
-            receiverName,
-            receiverIdNumber,
-            satisfactionNotes: notes,
-            idPhotoDataUrl: receiverIdPhoto,
-            deliveryPhotoUrls: deliveryPhotos,
-          }}
-          onFinalized={() => {
-            setReceiptOpen(false);
-            onSaved?.();
-          }}
-        />
-      )}
     </Card>
   );
 }

@@ -76,7 +76,6 @@ import SmartCustomerSendBar from "@/components/workorders/SmartCustomerSendBar";
 import { isUuid } from "@/lib/uuid";
 import { extractWorkOrderNumber } from "@/lib/workOrderNumber";
 // PortalNotesPending moved to /messages
-import VehicleDeliveryReceiptDialog from "@/components/workorders/VehicleDeliveryReceiptDialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -220,7 +219,6 @@ export default function WorkOrderDetail() {
   const statusDirtyRef = useRef(false);
   const photoDirtyRef = useRef(false);
   const [partsRequestDate, setPartsRequestDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [deliveryReceiptOpen, setDeliveryReceiptOpen] = useState(false);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
   const [convertPart, setConvertPart] = useState<NeededPart | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<WorkOrderLinkedInvoice | null>(null);
@@ -1087,7 +1085,9 @@ export default function WorkOrderDetail() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setDeliveryReceiptOpen(true)}
+              onClick={() => navigate(`/work-orders/${encodeURIComponent(order.displayNumber || order.id)}/delivery`, {
+                state: { returnTo: `/work-orders/${encodeURIComponent(order.displayNumber || order.id)}` },
+              })}
               className="h-9 gap-1.5 border-success/40 text-success hover:bg-success/10"
             >
               <FileText size={14} /> خروج وتسليم المركبة
@@ -1707,7 +1707,9 @@ export default function WorkOrderDetail() {
         open={statusOpen}
         onOpenChange={setStatusOpen}
         cloudJobOrderId={cloudJobOrderId}
-        onRequestHandover={() => setDeliveryReceiptOpen(true)}
+        onRequestHandover={() => navigate(`/work-orders/${encodeURIComponent(order.displayNumber || order.id)}/delivery`, {
+          state: { returnTo: `/work-orders/${encodeURIComponent(order.displayNumber || order.id)}` },
+        })}
       />
       <StagePhotosDialog
         orderId={photosOpen ? order.id : null}
@@ -1761,17 +1763,6 @@ export default function WorkOrderDetail() {
         title={previewTitle}
       />
 
-      <VehicleDeliveryReceiptDialog
-        open={deliveryReceiptOpen}
-        onOpenChange={setDeliveryReceiptOpen}
-        order={order}
-        onFinalized={() => {
-          setDeliveryReceiptOpen(false);
-          void fetchWorkOrderFromCloudByIdentifier(id).then((fresh) => {
-            if (fresh) setOrder(fresh);
-          });
-        }}
-      />
       <WorkOrderExpenseDialog
         order={editingExpense ? order : null}
         open={!!editingExpense}

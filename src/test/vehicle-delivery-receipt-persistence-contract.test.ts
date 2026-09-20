@@ -66,4 +66,21 @@ describe("vehicle delivery receipt persistence contract", () => {
     expect(claimDelivery).toContain("متابعة واعتماد الخروج والتسليم");
     expect(claimDelivery).not.toContain("handleSave(true)");
   });
+
+  it("opens the vehicle handover as a standalone page from work orders and claims", () => {
+    const app = read("src/App.tsx");
+    const page = read("src/pages/WorkOrderDeliveryPage.tsx");
+    const detail = read("src/pages/WorkOrderDetail.tsx");
+    const claimDelivery = read("src/components/insurance/ClaimDeliverySection.tsx");
+    const receipt = read("src/components/workorders/VehicleDeliveryReceiptDialog.tsx");
+
+    expect(app).toContain('path="/work-orders/:id/delivery"');
+    expect(page).toContain('presentation="page"');
+    expect(page).toContain("fetchWorkOrderFromCloudByIdentifier");
+    expect(detail).toContain("/delivery`");
+    expect(detail).not.toContain("deliveryReceiptOpen");
+    expect(claimDelivery).toContain("/delivery`");
+    expect(claimDelivery).not.toContain("<VehicleDeliveryReceiptDialog");
+    expect(receipt).toContain('presentation?: "dialog" | "page"');
+  });
 });

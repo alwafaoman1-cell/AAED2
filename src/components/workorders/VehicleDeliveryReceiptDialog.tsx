@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ElementType } from "react";
 import { useNavigate } from "react-router-dom";
 import { Printer, FileSignature, Trash2, Eraser, FileCheck2, Save, Loader2, CheckCircle2, LockKeyhole } from "lucide-react";
 import { ResponsiveDialog, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogFooter } from "@/components/ui/responsive-dialog";
@@ -28,6 +28,7 @@ import { salesStore } from "@/lib/salesStore";
 import { supabase } from "@/integrations/supabase/client";
 import { ShieldCheck } from "lucide-react";
 import type { WorkOrder } from "@/lib/workOrdersStore";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface Props {
@@ -36,9 +37,10 @@ interface Props {
   order: WorkOrder;
   deliveryDraft?: VehicleDeliveryReceiptDraft;
   onFinalized?: (record: VehicleDeliveryReceiptDraft) => void;
+  presentation?: "dialog" | "page";
 }
 
-export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order, deliveryDraft, onFinalized }: Props) {
+export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order, deliveryDraft, onFinalized, presentation = "dialog" }: Props) {
   const navigate = useNavigate();
   const [date, setDate] = useState(() => getDeliveredDateInputValue(deliveryDraft?.date));
   const [recordId, setRecordId] = useState<string | null>(deliveryDraft?.recordId || null);
@@ -336,19 +338,23 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
     }
   }
 
-  return (
+  const standalone = presentation === "page";
+  const HeaderComponent: ElementType = standalone ? "div" : ResponsiveDialogHeader;
+  const TitleComponent: ElementType = standalone ? "h1" : ResponsiveDialogTitle;
+  const FooterComponent: ElementType = standalone ? "div" : ResponsiveDialogFooter;
+
+  const receiptContent = (
     <>
-      <ResponsiveDialog open={open} onOpenChange={onOpenChange} className="max-w-3xl">
-          <ResponsiveDialogHeader>
-            <ResponsiveDialogTitle className="flex items-center gap-2">
+          <HeaderComponent className={standalone ? "border-b border-border px-5 py-4" : undefined}>
+            <TitleComponent className={cn("flex items-center gap-2", standalone && "text-xl font-semibold")}>
               <FileSignature size={18} className="text-success" />
               نموذج خروج وتسليم المركبة
               {recordStatus === "finalized" && <Badge className="gap-1 bg-emerald-600"><LockKeyhole size={11} /> نهائي</Badge>}
               {recordStatus === "cancelled" && <Badge variant="destructive" className="gap-1"><LockKeyhole size={11} /> ملغي ومحفوظ</Badge>}
-            </ResponsiveDialogTitle>
-          </ResponsiveDialogHeader>
+            </TitleComponent>
+          </HeaderComponent>
 
-          <div className="space-y-4 py-2 max-h-[70vh] overflow-y-auto pr-1">
+          <div className={cn("space-y-4 py-2 pr-1", standalone ? "px-5 py-5" : "max-h-[70vh] overflow-y-auto")}>
             {loadingDraft && (
               <div className="flex items-center justify-center gap-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" /> تحميل بيانات الإقرار المحفوظة…
@@ -498,7 +504,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
             </div>
           </div>
 
-          <ResponsiveDialogFooter className="flex flex-col sm:flex-row gap-2">
+          <FooterComponent className={cn("flex flex-col gap-2 sm:flex-row", standalone && "sticky bottom-0 z-10 border-t border-border bg-card/95 px-5 py-4 backdrop-blur")}>
             <Button variant="outline" onClick={() => onOpenChange(false)} className="sm:flex-1">إلغاء</Button>
             <Button
               type="button"
@@ -549,8 +555,21 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
             <Button disabled={savingDraft || loadingDraft} onClick={() => void handlePreview()} className="sm:flex-1 gap-2 bg-success hover:bg-success/90 text-white">
               <Printer size={16} /> معاينة وطباعة الإقرار
             </Button>
-          </ResponsiveDialogFooter>
-      </ResponsiveDialog>
+          </FooterComponent>
+    </>
+  );
+
+  return (
+    <>
+      {standalone ? (
+        <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          {receiptContent}
+        </section>
+      ) : (
+        <ResponsiveDialog open={open} onOpenChange={onOpenChange} className="max-w-3xl">
+          {receiptContent}
+        </ResponsiveDialog>
+      )}
 
       <PdfPreviewDialog
         open={pdfOpen}
