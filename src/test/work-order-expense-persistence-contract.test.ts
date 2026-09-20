@@ -102,13 +102,20 @@ describe("work-order expense persistence and profitability", () => {
     expect(source).toContain("رقم فاتورة المورد");
   });
 
-  it("uses the shared UUID/display-number matcher before syncing a work-order invoice", () => {
+  it("keeps expense saving separate from explicit manual invoice creation", () => {
     const dialog = read("src/components/workorders/WorkOrderBulkExpenseDialog.tsx");
     const sync = read("src/lib/workOrderInvoiceSync.ts");
     const detail = read("src/pages/WorkOrderDetail.tsx");
+    const editor = read("src/components/sales/SalesDocEditorPage.tsx");
 
-    expect(dialog).toContain("expenseBelongsToWorkOrder(expense, order)");
-    expect(dialog).toContain("createdRecords.length === 0 || unlinkedRecords.length > 0");
+    expect(dialog).not.toContain("autoInvoice");
+    expect(dialog).not.toContain("syncWorkOrderInvoiceFromExpenses");
+    expect(dialog).not.toContain("salesStore.issueInvoice");
+    expect(dialog).not.toContain("تم رفض إنشاء الفاتورة");
+    expect(dialog).toContain("إنشاء الفاتورة يتم يدويًا من زر الفاتورة داخل أمر العمل");
+    expect(detail).toContain("/sales/invoices/new?fromWorkOrder=${order.id}");
+    expect(editor).toContain("getExpensesForWorkOrder(wo)");
+    expect(editor).toContain("e.unitSellPrice");
     expect(sync).toContain("getExpensesForWorkOrder(order)");
     expect(sync).not.toContain("e.linkedWorkOrderId === orderId");
     expect(detail).toContain("onSaved={() => setExpenseTick((value) => value + 1)}");

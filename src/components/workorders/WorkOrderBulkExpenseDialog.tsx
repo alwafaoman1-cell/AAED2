@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, Save, Package, X, Receipt, FileText } from "lucide-react";
+import { Plus, Trash2, Save, Package, X, Receipt } from "lucide-react";
 import {
   ResponsiveDialog,
   ResponsiveDialogHeader,
@@ -14,7 +14,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
   employeeCashboxesStore,
@@ -22,15 +21,9 @@ import {
   PAYMENT_METHOD_LABELS,
   type PaymentMethod,
 } from "@/lib/financeSettingsStore";
-import {
-  expenseBelongsToWorkOrder,
-  expensesStore,
-  type ExpenseRecord,
-} from "@/lib/expensesStore";
+import { expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { logActivity } from "@/lib/auditLogStore";
 import type { WorkOrder } from "@/lib/workOrdersStore";
-import { syncWorkOrderInvoiceFromExpenses } from "@/lib/workOrderInvoiceSync";
-import { salesStore } from "@/lib/salesStore";
 import SupplierPicker from "@/components/suppliers/SupplierPicker";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 import { useAuth } from "@/contexts/AuthContext";
@@ -85,7 +78,6 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
   const { profile } = useAuth();
   const tenantId = profile?.tenant_id || "";
   const [items, setItems] = useState<ExpenseItem[]>([]);
-  const [autoInvoice, setAutoInvoice] = useState(true);
   const allowDuplicateOverride = canManageFinance();
 
   const categoryQuery = useQuery({
@@ -208,7 +200,6 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     if (errors.length) return toast.error(errors[0]);
 
     let savedCount = 0;
-    const createdRecords: ExpenseRecord[] = [];
     const saveExpenseRecord = async (record: ExpenseRecord) => {
       try {
         return await expensesStore.add(record);
@@ -277,8 +268,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             unitSellPrice: sell > 0 ? sell : undefined,
             createdAt: new Date().toISOString(),
           };
-          const saved = await saveExpenseRecord(rec);
-          createdRecords.push(saved || rec);
+          await saveExpenseRecord(rec);
           savedAmountForItem += lineAmt;
           savedCount++;
         }
@@ -308,8 +298,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
           createdAt: new Date().toISOString(),
         };
-        const saved = await saveExpenseRecord(rec);
-        createdRecords.push(saved || rec);
+        await saveExpenseRecord(rec);
         savedAmountForItem += totalAmt;
         savedCount++;
       }
@@ -329,30 +318,11 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       return;
     }
 
-    const unlinkedRecords = createdRecords.filter((expense) => !expenseBelongsToWorkOrder(expense, order));
-    if (createdRecords.length === 0 || unlinkedRecords.length > 0) {
-      toast.error("تم رفض إنشاء الفاتورة لأن ربط المصروفات بأمر العمل لم يكتمل. لم يتم عرض نجاح وهمي.");
-      return;
-    }
-
-    // مزامنة الفاتورة
-    let invMsg = "";
-    if (autoInvoice) {
-      try {
-        const result = syncWorkOrderInvoiceFromExpenses(order);
-        if (result?.invoice) {
-          const issued = await salesStore.issueInvoice(result.invoice);
-          invMsg = ` • فاتورة ${issued.number} ${result.created ? "أُنشئت" : "حُدّثت"}`;
-        }
-      } catch (e: any) {
-        console.error("invoice sync failed", e);
-        if (e?.message?.includes("تأمين")) {
-          invMsg = " • (لم تُنشأ فاتورة مبيعات — هذا أمر تأميني، أصدرها من المطالبة)";
-        }
-      }
-    }
-
-    toast.success(`✓ حُفظ ${savedCount} سند بإجمالي ${grandExpense.toLocaleString()} ر.ع${invMsg}`);
+    // Expense capture and customer invoicing are intentionally separate
+    // accounting actions. A successful expense save must never create, issue,
+    // update or block a customer invoice. The user can review prices and create
+    // the invoice explicitly from the work-order invoice action.
+    toast.success(`✓ حُفظ ${savedCount} سند بإجمالي ${grandExpense.toLocaleString()} ر.ع — أنشئ الفاتورة يدويًا بعد المراجعة`);
     onSaved?.();
     onOpenChange(false);
   };
@@ -382,13 +352,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             لا توجد أقسام مصروفات مفعلة لأوامر العمل. فعّل التصنيفات من إدارة المصروفات أولًا.
           </div>
         )}
-        {/* Auto-invoice toggle */}
-        <Card className="p-3 bg-success/5 border-success/30">
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <Checkbox checked={autoInvoice} onCheckedChange={(v) => setAutoInvoice(!!v)} />
-            <FileText size={14} className="text-success" />
-            <span className="font-medium">إنشاء/تحديث فاتورة تلقائياً لقطع الغيار (سعر البيع)</span>
-          </label>
+        <Card className="p-3 bg-info/5 border-info/30 text-sm text-muted-foreground">
+          سيتم حفظ المصروف وربطه بأمر العمل فقط. إنشاء الفاتورة يتم يدويًا من زر الفاتورة داخل أمر العمل بعد مراجعة أجرة العمل وأسعار بيع القطع.
         </Card>
 
         {items.map((item, idx) => {
@@ -518,7 +483,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
                   <Separator className="my-3" />
                   <div className="flex items-center justify-between mb-2">
                     <Label className="text-xs flex items-center gap-1.5">
-                      <Package size={12} /> قطع الغيار ({item.parts.length}) — سعر الشراء = مصروف، سعر البيع = إيراد الفاتورة
+                      <Package size={12} /> قطع الغيار ({item.parts.length}) — سعر الشراء = مصروف، وسعر البيع يُستخدم عند إنشاء الفاتورة يدويًا
                     </Label>
                     <Button type="button" size="sm" variant="outline" onClick={() => addPart(item.id)} className="h-7 gap-1">
                       <Plus size={12} /> إضافة قطعة

@@ -1105,6 +1105,8 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "شراء قطع الغيار": "Spare Parts Purchases",
   "بيع قطع الغيار": "Spare Parts Sales",
   "ربحية قطع الغيار": "Spare Parts Profit",
+  "سيتم حفظ المصروف وربطه بأمر العمل فقط. إنشاء الفاتورة يتم يدويًا من زر الفاتورة داخل أمر العمل بعد مراجعة أجرة العمل وأسعار بيع القطع.": "The expense will only be saved and linked to the work order. Create the invoice manually from the work-order invoice action after reviewing labour charges and parts selling prices.",
+  ") — سعر الشراء = مصروف، وسعر البيع يُستخدم عند إنشاء الفاتورة يدويًا": ") — Purchase price = expense; selling price is used when creating the invoice manually",
   "تعذر فتح رابط التوقيع": "Unable to Open Signature Link",
   "توقيع دخول واستلام المركبة": "Vehicle Entry & Receipt Signature",
   "بيانات المركبة / Vehicle": "Vehicle Details",
