@@ -33,14 +33,10 @@ import {
 } from "@/lib/insuranceCollectionReport";
 import { toast } from "sonner";
 import { isCollectedInsurancePayment } from "@/lib/insurancePaymentStatus";
-
-const CLAIM_STATUS_AR: Record<string, string> = {
-  pending: "بانتظار الاعتماد",
-  approved: "قيد العمل",
-  paid: "مدفوعة",
-  rejected: "مرفوضة",
-  cancelled: "ملغاة",
-};
+import {
+  getInsuranceClaimOperationalStatus,
+  isInsuranceClaimReceivableEligible,
+} from "@/lib/insuranceClaimFinancialState";
 
 const BASIS_LABELS: Record<AgingBasis, string> = {
   approval_date: "من تاريخ الاعتماد",
@@ -115,26 +111,78 @@ export default function InsuranceCompanyDetail() {
     return map;
   }, [allInvoices, claims]);
 
+  const financialClaims = useMemo(
+    () => claims.filter((claim) => isInsuranceClaimReceivableEligible(claim as any, claimInvoiceMap.has(claim.id))),
+    [claims, claimInvoiceMap],
+  );
+  const financialClaimIds = useMemo(
+    () => new Set(financialClaims.map((claim) => claim.id)),
+    [financialClaims],
+  );
   const companyInvoices = useMemo(
-    () => Array.from(claimInvoiceMap.values()),
-    [claimInvoiceMap],
+    () => Array.from(claimInvoiceMap.values()).filter((invoice) => financialClaimIds.has(invoice.claim_id)),
+    [claimInvoiceMap, financialClaimIds],
+  );
+  const financialPayments = useMemo(
+    () => accountingPayments.filter((payment) => financialClaimIds.has(payment.claim_id)),
+    [accountingPayments, financialClaimIds],
   );
 
   /** الدين الفعلي للمطالبة (شامل VAT) */
   const claimReceivable = (c: any): number => {
     const inv = claimInvoiceMap.get(c.id);
+    if (!isInsuranceClaimReceivableEligible(c, Boolean(inv))) return 0;
     if (inv) return Number(inv.total) || 0;
     return calculateVatExclusive(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate).totalIncludingVat;
   };
 
-  const claimApprovalBreakdown = (c: any) =>
-    calculateVatExclusive(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate);
+  const claimApprovalBreakdown = (c: any) => {
+    const inv = claimInvoiceMap.get(c.id);
+    if (!isInsuranceClaimReceivableEligible(c, Boolean(inv))) return calculateVatExclusive(0, vatRate);
+    return calculateVatExclusive(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate);
+  };
 
-  const totalApproved = claims.reduce((s, c) => s + claimReceivable(c), 0);
-  const totalPaid = accountingPayments
-    .filter(isCollectedInsurancePayment)
-    .reduce((s, p) => s + Number(p.amount), 0);
-  const remaining = +(totalApproved - totalPaid).toFixed(3);
+  const claimFinancialBreakdown = (c: any) => {
+    const invoice = claimInvoiceMap.get(c.id);
+    if (!isInsuranceClaimReceivableEligible(c, Boolean(invoice))) {
+      return { net: 0, vat: 0, gross: 0 };
+    }
+    if (invoice) {
+      return {
+        net: Number(invoice.subtotal) || 0,
+        vat: Number(invoice.vat) || 0,
+        gross: Number(invoice.total) || 0,
+      };
+    }
+    const fallback = claimApprovalBreakdown(c);
+    return {
+      net: fallback.subtotalBeforeVat,
+      vat: fallback.vatAmount,
+      gross: fallback.totalIncludingVat,
+    };
+  };
+
+  const claimCollected = (c: any): number => {
+    if (!isInsuranceClaimReceivableEligible(c, claimInvoiceMap.has(c.id))) return 0;
+    return accountingPayments
+      .filter((payment) => payment.claim_id === c.id && isCollectedInsurancePayment(payment))
+      .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  };
+
+  const claimSettlementDiscount = (c: any): number => {
+    if (!isInsuranceClaimReceivableEligible(c, claimInvoiceMap.has(c.id))) return 0;
+    return Number(claimInvoiceMap.get(c.id)?.settlement_discount_amount) || 0;
+  };
+
+  const claimRemaining = (c: any): number => +Math.max(
+    0,
+    claimReceivable(c) - claimCollected(c) - claimSettlementDiscount(c),
+  ).toFixed(3);
+
+  const totalApproved = financialClaims.reduce((sum, claim) => sum + claimReceivable(claim), 0);
+  const totalPaid = financialClaims.reduce((sum, claim) => sum + claimCollected(claim), 0);
+  const totalSettlementDiscount = financialClaims.reduce((sum, claim) => sum + claimSettlementDiscount(claim), 0);
+  const remaining = +financialClaims.reduce((sum, claim) => sum + claimRemaining(claim), 0).toFixed(3);
 
   // ── Aging مرن ──
   const [agingBasis, setAgingBasis] = useState<AgingBasis>("approval_date");
@@ -143,8 +191,12 @@ export default function InsuranceCompanyDetail() {
 
   // أعمار الديون تستخدم نفس مصدر الدين (فاتورة شامل VAT أو fallback مع VAT)
   const claimsForAging = useMemo(
-    () => claims.map((c) => ({ ...c, approved_amount: claimReceivable(c) })),
-    [claims, claimInvoiceMap, vatRate],
+    () => financialClaims.map((c) => ({
+      ...c,
+      status: c.status === "pending" && claimInvoiceMap.has(c.id) ? "approved" : c.status,
+      approved_amount: claimReceivable(c),
+    })),
+    [financialClaims, claimInvoiceMap, vatRate],
   );
 
   const agingRows = useMemo(
@@ -175,8 +227,8 @@ export default function InsuranceCompanyDetail() {
   };
 
   const filteredPayments = useMemo(
-    () => accountingPayments.filter((p) => inRange(p.payment_date)),
-    [accountingPayments, periodFrom, periodTo],
+    () => financialPayments.filter((p) => inRange(p.payment_date)),
+    [financialPayments, periodFrom, periodTo],
   );
 
   // ── القيود المحاسبية للشركة (من journalStore) ──
@@ -229,6 +281,10 @@ export default function InsuranceCompanyDetail() {
     () => new Map(collectionExportRows.map((row) => [row.claimId, row])),
     [collectionExportRows],
   );
+  const statementClaims = useMemo(
+    () => reportClaims.filter((claim) => (collectionRowByClaimId.get(claim.id)?.totalIncludingVat ?? 0) > 0.001),
+    [reportClaims, collectionRowByClaimId],
+  );
 
   const statementHtml = useMemo(() => {
     if (!company || !statementOpen) return "";
@@ -248,16 +304,16 @@ export default function InsuranceCompanyDetail() {
       periodFrom: periodFrom || undefined,
       periodTo: periodTo || undefined,
       vatRate,
-      claims: reportClaims.map((c) => ({
+      claims: statementClaims.map((c) => ({
         claim_number: c.claim_number,
         created_at: c.approved_at ?? c.created_at,
-        estimated_amount: Number(c.estimated_amount) || 0,
-        approved_amount: Number(c.approved_amount) || 0,
+        estimated_amount: collectionRowByClaimId.get(c.id)?.approvedBeforeVat ?? 0,
+        approved_amount: collectionRowByClaimId.get(c.id)?.approvedBeforeVat ?? 0,
         status: c.status,
       })),
       invoices: companyInvoices
         .filter((inv) => inRange(invoiceDateValue(inv) || inv.issued_at))
-        .filter((inv) => reportClaims.some((c) => c.id === inv.claim_id))
+        .filter((inv) => statementClaims.some((c) => c.id === inv.claim_id))
         .map((inv) => {
           const claim = claims.find((c) => c.id === inv.claim_id);
           return {
@@ -271,7 +327,8 @@ export default function InsuranceCompanyDetail() {
           };
         }),
       payments: filteredPayments
-        .filter((p) => reportClaims.some((c) => c.id === p.claim_id))
+        .filter(isCollectedInsurancePayment)
+        .filter((p) => statementClaims.some((c) => c.id === p.claim_id))
         .map((p) => ({
           payment_number: p.payment_number,
           payment_date: p.payment_date,
@@ -281,7 +338,7 @@ export default function InsuranceCompanyDetail() {
           reference_number: p.reference_number,
         })),
     });
-  }, [company, statementOpen, reportClaims, filteredPayments, companyInvoices, claims, vatRate, periodFrom, periodTo]);
+  }, [company, statementOpen, statementClaims, collectionRowByClaimId, filteredPayments, companyInvoices, claims, vatRate, periodFrom, periodTo]);
 
   const workshopHtml = useMemo(() => {
     if (!company || !workshopOpen) return "";
@@ -329,7 +386,7 @@ export default function InsuranceCompanyDetail() {
         vehicleNo: formatPlateLatin(linkedPlate || inlinePlate || "—"),
         vehicleMakeModel: [vehicleMake, vehicleModel, vehicleYear].filter(Boolean).join(" ") || undefined,
         customerName: (c as any).customer?.name || (c as any).vehicle_owner_name || "—",
-        status: delivered ? "تم التسليم" : (CLAIM_STATUS_AR[c.status] ?? c.status),
+        status: getInsuranceClaimOperationalStatus(c as any),
         inWorkshopDays: days,
         estimatedAmount: estimated,
         approvedAmount: approved,
@@ -543,11 +600,12 @@ export default function InsuranceCompanyDetail() {
       <AuditPanel
         claims={claims as any}
         invoices={companyInvoices}
-        payments={accountingPayments}
+        payments={financialPayments}
         vatRate={vatRate}
         claimReceivable={claimReceivable}
         totalReceivable={totalApproved}
         totalPaid={totalPaid}
+        totalSettlementDiscount={totalSettlementDiscount}
         remaining={remaining}
       />
 
@@ -561,18 +619,14 @@ export default function InsuranceCompanyDetail() {
             className="gap-2"
             onClick={() => {
               const rows = claims.map((c) => {
-                const cPays = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
-                const paid = cPays.reduce((s, p) => s + Number(p.amount), 0);
+                const paid = claimCollected(c);
                 const inv = claimInvoiceMap.get(c.id);
-                const fallback = claimApprovalBreakdown(c);
-                const net = inv ? Number(inv.subtotal) || 0 : fallback.subtotalBeforeVat;
-                const vat = inv ? Number(inv.vat) || 0 : fallback.vatAmount;
-                const gross = claimReceivable(c);
-                const rem = +(gross - paid).toFixed(3);
+                const { net, vat, gross } = claimFinancialBreakdown(c);
+                const rem = claimRemaining(c);
                 return {
                   claim_number: c.claim_number,
                   company: company.name,
-                  status: CLAIM_STATUS_AR[c.status] ?? c.status,
+                  status: getInsuranceClaimOperationalStatus(c as any),
                   net, vat, gross, paid, remaining: rem,
                   invoice: inv?.invoice_number ?? "",
                 };
@@ -617,14 +671,10 @@ export default function InsuranceCompanyDetail() {
               {claims.length === 0 ? (
                 <tr><td colSpan={13} className="py-6 text-center text-muted-foreground">لا توجد مطالبات</td></tr>
               ) : claims.map((c) => {
-                const cPayments = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
-                const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
+                const paid = claimCollected(c);
                 const inv = claimInvoiceMap.get(c.id);
-                const fallback = claimApprovalBreakdown(c);
-                const net = inv ? Number(inv.subtotal) || 0 : fallback.subtotalBeforeVat;
-                const vat = inv ? Number(inv.vat) || 0 : fallback.vatAmount;
-                const gross = claimReceivable(c);
-                const rem = +(gross - paid).toFixed(3);
+                const { net, vat, gross } = claimFinancialBreakdown(c);
+                const rem = claimRemaining(c);
                 const ageRow = agingRows.find((r) => r.claimId === c.id);
                 const arrival = (c as any).workshop_arrival_date ?? null;
                 const delivered = (c as any).delivered_at ?? null;
@@ -640,7 +690,7 @@ export default function InsuranceCompanyDetail() {
                     <td className="py-2.5 px-4 text-xs">{arrival ? formatDateLatin(arrival) : <span className="text-muted-foreground">—</span>}</td>
                     <td className="py-2.5 px-4 text-xs">{delivered ? formatDateLatin(delivered) : <span className="text-muted-foreground">—</span>}</td>
                     <td className="py-2.5 px-4 text-xs">{inv ? formatDateLatin(invoiceDateValue(inv) || inv.issued_at) : <span className="text-muted-foreground">—</span>}</td>
-                    <td className="py-2.5 px-4 text-xs">{CLAIM_STATUS_AR[c.status] ?? c.status}</td>
+                    <td className="py-2.5 px-4 text-xs">{getInsuranceClaimOperationalStatus(c as any)}</td>
                     <td className="py-2.5 px-4">{net.toLocaleString()} ر.ع</td>
                     <td className="py-2.5 px-4 text-muted-foreground">{vat.toLocaleString()} ر.ع</td>
                     <td className="py-2.5 px-4 font-semibold">{gross.toLocaleString()} ر.ع</td>
@@ -669,16 +719,11 @@ export default function InsuranceCompanyDetail() {
             </tbody>
             {claims.length > 0 && (() => {
               const sums = claims.reduce((a, c) => {
-                const cPays = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
-                const paid = cPays.reduce((s, p) => s + Number(p.amount), 0);
-                const inv = claimInvoiceMap.get(c.id);
-                const fallback = claimApprovalBreakdown(c);
-                const net = inv ? Number(inv.subtotal) || 0 : fallback.subtotalBeforeVat;
-                const vat = inv ? Number(inv.vat) || 0 : fallback.vatAmount;
-                const gross = claimReceivable(c);
-                return { net: a.net + net, vat: a.vat + vat, gross: a.gross + gross, paid: a.paid + paid };
-              }, { net: 0, vat: 0, gross: 0, paid: 0 });
-              const rem = +(sums.gross - sums.paid).toFixed(3);
+                const paid = claimCollected(c);
+                const { net, vat, gross } = claimFinancialBreakdown(c);
+                return { net: a.net + net, vat: a.vat + vat, gross: a.gross + gross, paid: a.paid + paid, remaining: a.remaining + claimRemaining(c) };
+              }, { net: 0, vat: 0, gross: 0, paid: 0, remaining: 0 });
+              const rem = +sums.remaining.toFixed(3);
               return (
                 <tfoot>
                   <tr className="bg-secondary/50 border-t-2 border-border font-bold">
@@ -838,6 +883,7 @@ function AuditPanel({
   claimReceivable,
   totalReceivable,
   totalPaid,
+  totalSettlementDiscount,
   remaining,
 }: {
   claims: any[];
@@ -847,6 +893,7 @@ function AuditPanel({
   claimReceivable: (c: any) => number;
   totalReceivable: number;
   totalPaid: number;
+  totalSettlementDiscount: number;
   remaining: number;
 }) {
   // كشف تكرار الفواتير لنفس المطالبة (status != cancelled)
@@ -924,18 +971,18 @@ function AuditPanel({
           <div className="text-[10px] text-muted-foreground">إجمالي: {invoicesTotal.toLocaleString()} ر.ع</div>
         </div>
         <div className="p-3 bg-secondary/30 rounded">
-          <div className="text-xs text-muted-foreground">عدد الدفعات (غير المرتجعة)</div>
-          <div className="text-lg font-bold">{payments.filter((p) => p.status !== "bounced").length}</div>
+          <div className="text-xs text-muted-foreground">عدد الدفعات المحصلة</div>
+          <div className="text-lg font-bold">{payments.filter(isCollectedInsurancePayment).length}</div>
         </div>
         <div className="p-3 bg-info/10 rounded">
           <div className="text-xs text-muted-foreground">إجمالي الدين</div>
           <div className="text-lg font-bold">{totalReceivable.toLocaleString()} ر.ع</div>
         </div>
         <div className={`p-3 rounded ${remaining > 0.01 ? "bg-warning/10" : "bg-success/10"}`}>
-          <div className="text-xs text-muted-foreground">المتبقي = الدين − المدفوع</div>
+          <div className="text-xs text-muted-foreground">المتبقي الفعلي بعد التحصيل والتسويات</div>
           <div className="text-lg font-bold">{remaining.toLocaleString()} ر.ع</div>
           <div className="text-[10px] text-muted-foreground">
-            ({totalReceivable.toLocaleString()} − {totalPaid.toLocaleString()})
+            ({totalReceivable.toLocaleString()} − {totalPaid.toLocaleString()} − {totalSettlementDiscount.toLocaleString()})
           </div>
         </div>
       </div>

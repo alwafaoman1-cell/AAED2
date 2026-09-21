@@ -6,6 +6,10 @@ import type { ClaimPayment } from "@/hooks/useClaimPayments";
 import { calculateVatExclusive, roundMoney } from "@/lib/money";
 import { formatDateLatin, formatPlateLatin, toEnglishDigits } from "@/lib/numberUtils";
 import { isCollectedInsurancePayment } from "@/lib/insurancePaymentStatus";
+import {
+  getInsuranceClaimOperationalStatus,
+  isInsuranceClaimReceivableEligible,
+} from "@/lib/insuranceClaimFinancialState";
 
 export const INSURANCE_COLLECTION_HEADERS = [
   "رقم المطالبة",
@@ -137,14 +141,7 @@ function customerName(claim: InsuranceClaim): string {
 }
 
 function getClaimStatus(claim: InsuranceClaim): string {
-  const map: Record<string, string> = {
-    pending: "بانتظار الاعتماد",
-    approved: "قيد العمل",
-    paid: "مدفوعة",
-    rejected: "مرفوضة",
-    cancelled: "ملغاة",
-  };
-  return map[claim.status] || String(claim.status || "—");
+  return getInsuranceClaimOperationalStatus(claim as any);
 }
 
 function chooseLatestInvoice(invoices: InsuranceInvoice[]): InsuranceInvoice | null {
@@ -247,15 +244,22 @@ export function buildInsuranceCollectionRows(options: BuildInsuranceCollectionRo
       const started = claimDate(claim, "work_started_at", "repair_started_at");
       const completed = claimDate(claim, "work_completed_at", "quality_checked_at");
       const delivered = claimDate(claim, "delivered_at", "vehicle_delivered_at");
-      const fallbackSubtotal = roundMoney(Number(claim.approved_amount || claim.estimated_amount || 0));
-      const subtotal = invoice ? roundMoney(invoice.subtotal || fallbackSubtotal) : fallbackSubtotal;
-      const vat = invoice && invoice.vat !== null && invoice.vat !== undefined
+      const receivableEligible = isInsuranceClaimReceivableEligible(claim as any, Boolean(invoice));
+      const fallbackSubtotal = receivableEligible
+        ? roundMoney(Number(claim.approved_amount || claim.estimated_amount || 0))
+        : 0;
+      const subtotal = receivableEligible
+        ? (invoice ? roundMoney(invoice.subtotal || fallbackSubtotal) : fallbackSubtotal)
+        : 0;
+      const vat = receivableEligible && invoice && invoice.vat !== null && invoice.vat !== undefined
         ? roundMoney(invoice.vat)
-        : calculateVatExclusive(subtotal).vatAmount;
-      const total = invoice ? roundMoney(invoice.total || subtotal + vat) : calculateVatExclusive(subtotal).totalIncludingVat;
-      const paid = paymentSum(claim.id, invoice, payments);
-      const settlementDiscount = Number(invoice?.settlement_discount_amount || 0);
-      const status = collectionStatus(invoice, paid, total, settlementDiscount);
+        : (receivableEligible ? calculateVatExclusive(subtotal).vatAmount : 0);
+      const total = receivableEligible
+        ? (invoice ? roundMoney(invoice.total || subtotal + vat) : calculateVatExclusive(subtotal).totalIncludingVat)
+        : 0;
+      const paid = receivableEligible ? paymentSum(claim.id, invoice, payments) : 0;
+      const settlementDiscount = receivableEligible ? Number(invoice?.settlement_discount_amount || 0) : 0;
+      const status = receivableEligible ? collectionStatus(invoice, paid, total, settlementDiscount) : "غير مفوتر";
       const remaining = roundMoney(Math.max(0, total - paid - settlementDiscount));
       const invDate = invoiceDateValue(invoice);
       const sortDate = delivered || invDate || estimateDate || claim.created_at;

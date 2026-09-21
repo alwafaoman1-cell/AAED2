@@ -1173,6 +1173,8 @@
   "المتبقي": "Balance",
   "المتبقي (شامل الضريبة)": "Remaining (tax included)",
   "المتبقي = الدين − المدفوع": "Remaining = Debt − Paid",
+  "عدد الدفعات المحصلة": "Collected Payments Count",
+  "المتبقي الفعلي بعد التحصيل والتسويات": "Actual Remaining After Collections and Settlements",
   "المتبقي المستحق": "The remaining amount due",
   "المتبقي على شركة التأمين:": "Remaining on the insurance company:",
   "المتبقي:": "Remaining:",

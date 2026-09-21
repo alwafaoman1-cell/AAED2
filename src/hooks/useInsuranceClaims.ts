@@ -69,7 +69,7 @@ export interface InsuranceClaim {
   work_completed_at: string | null;
   delivered_at: string | null;
   // joined
-  customer?: { name: string; phone: string | null };
+  customer?: { name: string; phone: string | null; customer_code?: string | null };
   vehicle?: {
     brand: string;
     model: string;
@@ -211,7 +211,7 @@ export function useInsuranceClaims(enabled = true) {
         .from("insurance_claims" as any)
         .select(`
           *,
-          customer:customers(name, phone),
+          customer:customers(name, phone, customer_code),
           vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
           job_order:job_orders!insurance_claims_job_order_id_fkey(order_number, status)
         `)
@@ -272,7 +272,7 @@ export function useClaim(id: string | undefined) {
         .from("insurance_claims" as any)
         .select(`
           *,
-          customer:customers(name, phone),
+          customer:customers(name, phone, customer_code),
           vehicle:vehicles(brand, model, plate_number, plate_letters, plate_country, year, vin_number, vehicle_cover_image_url, vehicle_thumbnail_url),
           job_order:job_orders!insurance_claims_job_order_id_fkey(order_number, status)
         `)
@@ -514,7 +514,7 @@ export function useCustomers() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("customers")
-        .select("id, name, phone")
+        .select("id, name, phone, customer_code")
         .order("name");
       if (error) throw error;
       return data;

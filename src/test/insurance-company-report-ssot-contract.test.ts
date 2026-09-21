@@ -108,6 +108,49 @@ describe("insurance company report SSOT", () => {
     expect(filterInsuranceCollectionRows(clearedRows, "pending_collection")).toHaveLength(0);
   });
 
+  it("does not create receivables from pending or rejected estimates", () => {
+    const claim = (id: string, status: string, approvedAmount: number) => ({
+      id,
+      tenant_id: "tenant-1",
+      claim_number: id,
+      insurance_company: "Insurer",
+      insurance_company_id: "company-1",
+      status,
+      approved_amount: approvedAmount,
+      estimated_amount: approvedAmount,
+      created_at: "2026-08-01T00:00:00Z",
+    }) as any;
+
+    const rows = buildInsuranceCollectionRows({
+      claims: [
+        claim("pending", "pending", 500),
+        claim("rejected", "rejected", 700),
+        claim("approved", "approved", 100),
+        claim("cancelled", "cancelled", 900),
+      ],
+      invoices: [],
+      payments: [],
+      companyId: "company-1",
+      pendingCollectionOnly: false,
+    });
+
+    expect(rows.map((item) => item.claimId)).toEqual(["approved", "pending", "rejected"]);
+    expect(rows.find((item) => item.claimId === "pending")?.totalIncludingVat).toBe(0);
+    expect(rows.find((item) => item.claimId === "rejected")?.totalIncludingVat).toBe(0);
+    expect(rows.find((item) => item.claimId === "approved")?.totalIncludingVat).toBe(105);
+    expect(filterInsuranceCollectionRows(rows, "pending_collection")).toHaveLength(0);
+  });
+
+  it("uses one financial eligibility rule throughout the company page", () => {
+    const page = readFileSync("src/pages/insurance/InsuranceCompanyDetail.tsx", "utf8");
+    expect(page).toContain("isInsuranceClaimReceivableEligible");
+    expect(page).toContain("getInsuranceClaimOperationalStatus");
+    expect(page).toContain("payments={financialPayments}");
+    expect(page).toContain("const statementClaims = useMemo");
+    expect(page).toContain("collectionRowByClaimId.get(c.id)?.approvedBeforeVat ?? 0");
+    expect(page).not.toContain('p.status !== "bounced"');
+  });
+
   it("labels the filter by its actual invoice-based rule", () => {
     const page = readFileSync("src/pages/insurance/InsuranceCompanyDetail.tsx", "utf8");
     expect(page).toContain("فواتير صادرة وبانتظار التحصيل");

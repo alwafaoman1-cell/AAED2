@@ -2667,7 +2667,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 </div>
                 <div className="rounded-lg border border-border bg-muted/30 p-3">
                   <div className="text-[11px] text-muted-foreground">Customer Code</div>
-                  <div className="font-mono text-xs truncate" dir="ltr">{displayCustomerCode(customer || { id: customerId })}</div>
+                  <div className="font-mono text-xs truncate" dir="ltr">
+                    {displayCustomerCode(customer || (existing as any)?.customer || { id: customerId })}
+                  </div>
                 </div>
                 <div className="rounded-lg border border-border bg-muted/30 p-3">
                   <div className="text-[11px] text-muted-foreground">موقع المركبة</div>
