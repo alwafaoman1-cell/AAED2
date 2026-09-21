@@ -3,6 +3,7 @@
 import { getTemplateSettings, type PdfTemplateSettings } from "./pdfGenerator";
 import { renderWithCustomTemplate } from "./printTemplates/resolver";
 import { splitVatInclusiveAmount } from "./workOrderCosting";
+import { isCollectedInsurancePayment } from "./insurancePaymentStatus";
 
 export interface StatementClaim {
   claim_number: string;
@@ -86,7 +87,7 @@ export function getInsuranceStatementHtml(data: StatementData): string {
     }, 0);
   const totalInvoiced = +(invoiceDebit0 + fallbackDebit0).toFixed(3);
   const totalPaid = data.payments
-    .filter((p: any) => p.status !== "bounced")
+    .filter(isCollectedInsurancePayment)
     .reduce((s, p: any) => s + (Number(p.amount) || 0), 0);
   try {
     const custom = renderWithCustomTemplate("insurance_statement", {
@@ -103,7 +104,7 @@ export function getInsuranceStatementHtml(data: StatementData): string {
   // ── Build unified ledger — Single Source of Truth ──
   // Debit  = invoice.total (VAT-exclusive input + VAT on top) for every active (non-cancelled) invoice.
   //          Claims without an invoice fall back to approved/estimated as a VAT-exclusive input + VAT on top total.
-  // Credit = every non-bounced claim payment.
+  // Credit = cleared claim payments only. Pending cheques remain uncollected.
   type Row = { date: string; ref: string; desc: string; debit: number; credit: number };
   const rows: Row[] = [];
   const vatRate = data.vatRate ?? 0.05;
@@ -139,7 +140,7 @@ export function getInsuranceStatementHtml(data: StatementData): string {
   });
 
   data.payments
-    .filter((p) => p.status !== "bounced")
+    .filter(isCollectedInsurancePayment)
     .forEach((p) => {
       rows.push({
         date: p.payment_date,

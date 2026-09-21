@@ -5,6 +5,7 @@ import type { InsuranceInvoice } from "@/hooks/useInsuranceInvoices";
 import type { ClaimPayment } from "@/hooks/useClaimPayments";
 import { calculateVatExclusive, roundMoney } from "@/lib/money";
 import { formatDateLatin, formatPlateLatin, toEnglishDigits } from "@/lib/numberUtils";
+import { isCollectedInsurancePayment } from "@/lib/insurancePaymentStatus";
 
 export const INSURANCE_COLLECTION_HEADERS = [
   "رقم المطالبة",
@@ -157,10 +158,13 @@ function chooseLatestInvoice(invoices: InsuranceInvoice[]): InsuranceInvoice | n
 }
 
 function paymentSum(claimId: string, invoice: InsuranceInvoice | null, payments: ClaimPayment[]): number {
-  const sum = payments
-    .filter((payment) => payment.claim_id === claimId && payment.status !== "bounced")
+  const claimPayments = payments.filter((payment) => payment.claim_id === claimId);
+  const sum = claimPayments
+    .filter(isCollectedInsurancePayment)
     .reduce((total, payment) => roundMoney(total + Number(payment.amount || 0)), 0);
-  if (sum > 0) return roundMoney(sum);
+  // Once payment rows exist they are the SSOT. Do not revive a stale invoice.paid_amount
+  // while the only recorded cheque/payment is still pending or bounced.
+  if (claimPayments.length > 0) return roundMoney(sum);
   return roundMoney(invoice?.paid_amount || 0);
 }
 

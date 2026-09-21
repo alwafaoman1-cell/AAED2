@@ -3,6 +3,7 @@
 import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
 import type { ClaimPayment } from "@/hooks/useClaimPayments";
 import type { InsuranceCompany } from "@/hooks/useInsuranceCompanies";
+import { isCollectedInsurancePayment } from "@/lib/insurancePaymentStatus";
 
 export type AgingBasis =
   | "approval_date"
@@ -80,7 +81,7 @@ export function computeAging(
 
   claims.forEach((c) => {
     if (c.status !== "approved" && c.status !== "paid") return;
-    const cPayments = payments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
+    const cPayments = payments.filter((p) => p.claim_id === c.id && isCollectedInsurancePayment(p));
     const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
     const approved = Number(c.approved_amount) || Number(c.estimated_amount) || 0;
     const remaining = approved - paid;

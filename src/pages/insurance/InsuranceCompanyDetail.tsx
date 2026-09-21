@@ -32,6 +32,7 @@ import {
   type InsuranceCollectionReportFilter,
 } from "@/lib/insuranceCollectionReport";
 import { toast } from "sonner";
+import { isCollectedInsurancePayment } from "@/lib/insurancePaymentStatus";
 
 const CLAIM_STATUS_AR: Record<string, string> = {
   pending: "بانتظار الاعتماد",
@@ -131,7 +132,7 @@ export default function InsuranceCompanyDetail() {
 
   const totalApproved = claims.reduce((s, c) => s + claimReceivable(c), 0);
   const totalPaid = accountingPayments
-    .filter((p) => p.status !== "bounced")
+    .filter(isCollectedInsurancePayment)
     .reduce((s, p) => s + Number(p.amount), 0);
   const remaining = +(totalApproved - totalPaid).toFixed(3);
 
@@ -285,7 +286,7 @@ export default function InsuranceCompanyDetail() {
   const workshopHtml = useMemo(() => {
     if (!company || !workshopOpen) return "";
     const rows: WorkshopReportRow[] = reportClaims.map((c) => {
-      const cPayments = accountingPayments.filter((p) => p.claim_id === c.id && p.status !== "bounced");
+      const cPayments = accountingPayments.filter((p) => p.claim_id === c.id && isCollectedInsurancePayment(p));
       const paid = cPayments.reduce((s, p) => s + Number(p.amount), 0);
       const collectionRow = collectionRowByClaimId.get(c.id);
       const approved = (collectionRow?.approvedBeforeVat ?? Number(c.approved_amount)) || 0;
@@ -442,7 +443,7 @@ export default function InsuranceCompanyDetail() {
                 <SelectItem value="in_garage">داخل الورشة حالياً</SelectItem>
                 <SelectItem value="delivered">تم تسليمها</SelectItem>
                 <SelectItem value="paid">تم تحصيلها</SelectItem>
-                <SelectItem value="pending_collection">مكتملة وبانتظار التحصيل</SelectItem>
+                <SelectItem value="pending_collection">فواتير صادرة وبانتظار التحصيل</SelectItem>
                 <SelectItem value="overdue">متأخرة (+30 يوم)</SelectItem>
               </SelectContent>
             </Select>

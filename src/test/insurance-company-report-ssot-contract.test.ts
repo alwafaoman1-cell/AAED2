@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  buildInsuranceCollectionRows,
   filterInsuranceCollectionRows,
   type InsuranceCollectionRow,
 } from "@/lib/insuranceCollectionReport";
@@ -56,6 +57,62 @@ describe("insurance company report SSOT", () => {
     expect(page).toContain("new Set(collectionExportRows.map((row) => row.claimId))");
     expect(page).toContain("exportInsuranceCollectionRowsToXlsx(\n        collectionExportRows,");
     expect(page).toContain("تقرير عمليات الورشة ({collectionExportRows.length})");
+  });
+
+  it("counts only cleared payments as collected and keeps pending cheques outstanding", () => {
+    const claim = {
+      id: "claim-1",
+      tenant_id: "tenant-1",
+      claim_number: "C-1",
+      insurance_company: "Insurer",
+      insurance_company_id: "company-1",
+      status: "approved",
+      approved_amount: 100,
+      estimated_amount: 100,
+      created_at: "2026-08-01T00:00:00Z",
+    } as any;
+    const invoice = {
+      id: "invoice-1",
+      claim_id: "claim-1",
+      insurance_company_id: "company-1",
+      invoice_number: "INV-1",
+      subtotal: 100,
+      vat: 5,
+      total: 105,
+      paid_amount: 105,
+      status: "issued",
+      invoice_date: "2026-08-02",
+      issued_at: "2026-08-02T00:00:00Z",
+      created_at: "2026-08-02T00:00:00Z",
+    } as any;
+    const payment = (status: "pending" | "cleared") => ({
+      claim_id: "claim-1",
+      amount: 105,
+      status,
+    }) as any;
+
+    const pendingRows = buildInsuranceCollectionRows({
+      claims: [claim], invoices: [invoice], payments: [payment("pending")],
+      companyId: "company-1", pendingCollectionOnly: false,
+    });
+    expect(pendingRows[0].paidAmount).toBe(0);
+    expect(pendingRows[0].remainingAmount).toBe(105);
+    expect(filterInsuranceCollectionRows(pendingRows, "pending_collection")).toHaveLength(1);
+
+    const clearedRows = buildInsuranceCollectionRows({
+      claims: [claim], invoices: [invoice], payments: [payment("cleared")],
+      companyId: "company-1", pendingCollectionOnly: false,
+    });
+    expect(clearedRows[0].paidAmount).toBe(105);
+    expect(clearedRows[0].remainingAmount).toBe(0);
+    expect(filterInsuranceCollectionRows(clearedRows, "pending_collection")).toHaveLength(0);
+  });
+
+  it("labels the filter by its actual invoice-based rule", () => {
+    const page = readFileSync("src/pages/insurance/InsuranceCompanyDetail.tsx", "utf8");
+    expect(page).toContain("فواتير صادرة وبانتظار التحصيل");
+    expect(page).toContain("isCollectedInsurancePayment");
+    expect(page).not.toContain('<SelectItem value="pending_collection">مكتملة وبانتظار التحصيل</SelectItem>');
   });
 
   it("does not classify a real collection number allocated to several claims as a duplicate", () => {

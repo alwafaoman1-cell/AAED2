@@ -5,7 +5,7 @@ import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
   Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Sparkles, Phone,
-  DollarSign, PackageCheck, Download, ChevronDown, Undo2, Pencil,
+  DollarSign, PackageCheck, Download, ChevronDown, Undo2, Pencil, Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,6 +88,7 @@ import { buildCancelledClaimVehicleHandoverHtml } from "@/lib/cancelledClaimVehi
 import { cancelLatestFinalizedVehicleHandover } from "@/lib/vehicleDeliveryReceipt";
 import ReopenClaimDialog from "@/components/insurance/ReopenClaimDialog";
 import { buildReopenCancelledClaimPatch, type ReopenClaimTargetStatus } from "@/lib/claimReopen";
+import { buildClaimCopyReference } from "@/lib/claimCopyReference";
 
 
 const insuranceCompanies = [
@@ -360,6 +361,24 @@ export default function InsuranceClaimDetail() {
 
   const customer = customers?.find((c) => c.id === customerId);
   const vehicle = vehicles?.find((v) => v.id === vehicleId);
+  const claimVehicleSnapshot = (existing as any)?.vehicle;
+  const claimCopyReference = useMemo(() => buildClaimCopyReference({
+    claimNumber,
+    vehicleMake: vehicle?.brand || claimVehicleSnapshot?.brand || vehicleMake,
+    vehicleModel: vehicle?.model || claimVehicleSnapshot?.model || vehicleModel,
+    plateNumber: vehicle?.plate_number || claimVehicleSnapshot?.plate_number || vehiclePlate,
+    plateLetters: (vehicle as any)?.plate_letters || claimVehicleSnapshot?.plate_letters,
+  }), [claimNumber, claimVehicleSnapshot, vehicle, vehicleMake, vehicleModel, vehiclePlate]);
+
+  const copyClaimReference = async () => {
+    if (!claimCopyReference) return;
+    try {
+      await navigator.clipboard.writeText(claimCopyReference);
+      toast.success("تم نسخ بيانات المطالبة والمركبة");
+    } catch {
+      toast.error("تعذر نسخ بيانات المطالبة والمركبة");
+    }
+  };
 
   // Auto-fill owner from selected customer
   useEffect(() => {
@@ -2615,6 +2634,26 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <div className="text-xs text-muted-foreground font-mono" dir="ltr">
                     {(vehicle?.plate_number || vehiclePlate || "—")} · {(vehicle as any)?.vin_number || vehicleVin || "VIN —"}
                   </div>
+                  {claimCopyReference && (
+                    <div className="mt-2 flex max-w-2xl items-center gap-2 rounded-lg border border-primary/20 bg-background/80 p-2 shadow-sm">
+                      <code
+                        dir="ltr"
+                        className="min-w-0 flex-1 select-all break-all text-left text-sm font-bold tracking-wide text-foreground"
+                      >
+                        {claimCopyReference}
+                      </code>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 gap-1.5"
+                        onClick={() => void copyClaimReference()}
+                        aria-label="نسخ بيانات المطالبة والمركبة"
+                      >
+                        <Copy size={14} /> نسخ
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:min-w-[560px]">
