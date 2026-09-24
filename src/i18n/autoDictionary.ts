@@ -1142,6 +1142,20 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "تعذر تحميل الصور مؤقتًا. بيانات المركبة والتوقيع ما زالت متاحة.": "Photos are temporarily unavailable. Vehicle details and signing remain available.",
   "لا توجد صور مرفوعة على نموذج الدخول.": "No photos are attached to the vehicle entry form.",
   "الصور جزء من توثيق حالة المركبة وقت الدخول، وروابط عرضها مؤقتة ومحمية برابط التوقيع.": "Photos document the vehicle condition at entry. Their viewing links are temporary and protected by the signature link.",
+  "إنشاء/معاينة تقدير الإصلاح": "Create / Preview Repair Estimate",
+  "فتح/تحديث تقدير الإصلاح": "Open / Update Repair Estimate",
+  "فتح البريد وتسجيل الإرسال": "Open Email and Record Sending",
+  "تم تعديل بيانات التقدير بعد آخر إرسال. افتح التقدير لمراجعة النسخة الحالية ثم أعد إرسالها لشركة التأمين.": "The estimate was modified after it was last sent. Review the current revision, then resend it to the insurance company.",
+  "ℹ️ سيتم فتح تطبيق البريد لديك مع تجهيز كل الروابط. عند تضمين تقدير الإصلاح، يسجل النظام المراجعة الحالية كمرسلة؛ ولا ينشئ نسخة مكررة من الملف.": "ℹ️ Your email application will open with all links prepared. When the repair estimate is included, the current revision is recorded as sent without creating a duplicate file.",
+  "تقدير الإصلاح: غير مُنشأ": "Repair Estimate: Not Created",
+  "تقدير الإصلاح: مسودة": "Repair Estimate: Draft",
+  "تقدير الإصلاح: جاهز للإرسال": "Repair Estimate: Ready to Send",
+  "تقدير الإصلاح: تم الإرسال": "Repair Estimate: Sent",
+  "تقدير الإصلاح: تم التعديل بعد الإرسال": "Repair Estimate: Modified After Sending",
+  "غير مُنشأ": "Not Created",
+  "مسودة": "Draft",
+  "جاهز للإرسال": "Ready to Send",
+  "تم التعديل بعد الإرسال": "Modified After Sending",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

@@ -5,6 +5,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { generatePdfFromHtml } from "./htmlToPdf";
 import { isUuid } from "@/lib/uuid";
+import { recordClaimEstimateDocument } from "@/lib/claimEstimateLifecycle";
 
 export type ClaimDocCategory =
   | "claim_estimate"   // تقدير المطالبة
@@ -75,9 +76,15 @@ export async function saveClaimDocument(opts: SaveClaimDocOpts): Promise<{
     if (!tenantId) return null;
     if (!isUuid(opts.claimId)) return null;
 
+    const isCanonicalEstimate = opts.category === "claim_estimate";
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const safeName = opts.fileBaseName.replace(/[^A-Za-z0-9._-]/g, "_");
-    const path = `${tenantId}/${opts.claimId}/${opts.category}/${stamp}-${safeName}.pdf`;
+    // A claim has one canonical repair-estimate file. Reopening the preview
+    // replaces this object instead of creating another attachment. Other
+    // document categories intentionally keep their timestamped archive.
+    const path = isCanonicalEstimate
+      ? `${tenantId}/${opts.claimId}/${opts.category}/current-estimate.pdf`
+      : `${tenantId}/${opts.claimId}/${opts.category}/${stamp}-${safeName}.pdf`;
 
     // توليد PDF حقيقي من HTML (بدون تنزيل تلقائي)
     let blob: Blob;
@@ -92,10 +99,12 @@ export async function saveClaimDocument(opts: SaveClaimDocOpts): Promise<{
       // fallback: ارفع HTML الأصلي إذا تعذّر تحويل PDF
       console.warn("PDF generation failed, falling back to HTML:", pdfErr);
       const htmlBlob = new Blob([opts.htmlContent], { type: "text/html;charset=utf-8" });
-      const fallbackPath = path.replace(/\.pdf$/i, ".html");
+      const fallbackPath = isCanonicalEstimate
+        ? `${tenantId}/${opts.claimId}/${opts.category}/current-estimate.html`
+        : path.replace(/\.pdf$/i, ".html");
       const { error: upErr } = await supabase.storage
         .from("insurance-docs")
-        .upload(fallbackPath, htmlBlob, { upsert: false, contentType: "text/html" });
+        .upload(fallbackPath, htmlBlob, { upsert: isCanonicalEstimate, contentType: "text/html" });
       if (upErr) {
         console.warn("upload fallback HTML failed", upErr);
         return null;
@@ -104,6 +113,14 @@ export async function saveClaimDocument(opts: SaveClaimDocOpts): Promise<{
       const pub = { publicUrl: signed?.signedUrl ?? "" };
       const url = pub?.publicUrl ?? "";
       const { data: userRes } = await supabase.auth.getUser();
+      if (isCanonicalEstimate) {
+        await recordClaimEstimateDocument({
+          claimId: opts.claimId,
+          htmlContent: opts.htmlContent,
+          storagePath: fallbackPath,
+          estimateNumber: String(opts.meta?.estimate_number || "") || null,
+        });
+      }
       await supabase.from("claim_audit_logs").insert({
         tenant_id: tenantId as string,
         claim_id: opts.claimId,
@@ -133,7 +150,7 @@ export async function saveClaimDocument(opts: SaveClaimDocOpts): Promise<{
 
     const { error: upErr } = await supabase.storage
       .from("insurance-docs")
-      .upload(path, blob, { upsert: false, contentType: "application/pdf" });
+      .upload(path, blob, { upsert: isCanonicalEstimate, contentType: "application/pdf" });
 
     if (upErr) {
       console.warn("upload claim doc failed", upErr);
@@ -146,6 +163,14 @@ export async function saveClaimDocument(opts: SaveClaimDocOpts): Promise<{
 
     // سجل تدقيق
     const { data: userRes } = await supabase.auth.getUser();
+    if (isCanonicalEstimate) {
+      await recordClaimEstimateDocument({
+        claimId: opts.claimId,
+        htmlContent: opts.htmlContent,
+        storagePath: path,
+        estimateNumber: String(opts.meta?.estimate_number || "") || null,
+      });
+    }
     await supabase.from("claim_audit_logs").insert({
       tenant_id: tenantId as string,
       claim_id: opts.claimId,

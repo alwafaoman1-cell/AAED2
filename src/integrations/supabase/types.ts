@@ -3666,6 +3666,18 @@ export type Database = {
           auto_job_order_id: string | null
           claim_number: string
           claim_registered_at: string | null
+          claim_estimate_content_hash: string | null
+          claim_estimate_document_status: string
+          claim_estimate_generated_at: string | null
+          claim_estimate_generated_by: string | null
+          claim_estimate_modified_at: string | null
+          claim_estimate_modified_by: string | null
+          claim_estimate_number: string | null
+          claim_estimate_revision: number
+          claim_estimate_sent_at: string | null
+          claim_estimate_sent_by: string | null
+          claim_estimate_sent_revision: number | null
+          claim_estimate_storage_path: string | null
           cancelled_handover_signature_data_url: string | null
           cancelled_handover_signed_at: string | null
           created_at: string
@@ -3767,6 +3779,18 @@ export type Database = {
           auto_job_order_id?: string | null
           claim_number: string
           claim_registered_at?: string | null
+          claim_estimate_content_hash?: string | null
+          claim_estimate_document_status?: string
+          claim_estimate_generated_at?: string | null
+          claim_estimate_generated_by?: string | null
+          claim_estimate_modified_at?: string | null
+          claim_estimate_modified_by?: string | null
+          claim_estimate_number?: string | null
+          claim_estimate_revision?: number
+          claim_estimate_sent_at?: string | null
+          claim_estimate_sent_by?: string | null
+          claim_estimate_sent_revision?: number | null
+          claim_estimate_storage_path?: string | null
           cancelled_handover_signature_data_url?: string | null
           cancelled_handover_signed_at?: string | null
           created_at?: string
@@ -3868,6 +3892,18 @@ export type Database = {
           auto_job_order_id?: string | null
           claim_number?: string
           claim_registered_at?: string | null
+          claim_estimate_content_hash?: string | null
+          claim_estimate_document_status?: string
+          claim_estimate_generated_at?: string | null
+          claim_estimate_generated_by?: string | null
+          claim_estimate_modified_at?: string | null
+          claim_estimate_modified_by?: string | null
+          claim_estimate_number?: string | null
+          claim_estimate_revision?: number
+          claim_estimate_sent_at?: string | null
+          claim_estimate_sent_by?: string | null
+          claim_estimate_sent_revision?: number | null
+          claim_estimate_storage_path?: string | null
           cancelled_handover_signature_data_url?: string | null
           cancelled_handover_signed_at?: string | null
           created_at?: string
@@ -9357,6 +9393,19 @@ export type Database = {
       }
     }
     Functions: {
+      mark_claim_estimate_sent: {
+        Args: { p_claim_id: string }
+        Returns: Json
+      }
+      record_claim_estimate_document: {
+        Args: {
+          p_claim_id: string
+          p_content_hash: string
+          p_estimate_number?: string
+          p_storage_path: string
+        }
+        Returns: Json
+      }
       accounting_approve_opening_balance_batch: {
         Args: { p_batch_id: string }
         Returns: {

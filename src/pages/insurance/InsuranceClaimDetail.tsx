@@ -89,6 +89,8 @@ import { cancelLatestFinalizedVehicleHandover } from "@/lib/vehicleDeliveryRecei
 import ReopenClaimDialog from "@/components/insurance/ReopenClaimDialog";
 import { buildReopenCancelledClaimPatch, type ReopenClaimTargetStatus } from "@/lib/claimReopen";
 import { buildClaimCopyReference } from "@/lib/claimCopyReference";
+import ClaimEstimateStatusBadge from "@/components/insurance/ClaimEstimateStatusBadge";
+import { markClaimEstimateSent, readClaimEstimateLifecycle } from "@/lib/claimEstimateLifecycle";
 
 
 const insuranceCompanies = [
@@ -252,6 +254,7 @@ export default function InsuranceClaimDetail() {
     if (!id) return;
     queryClient.invalidateQueries({ queryKey: queryKeys.claimMedia.list(id) });
     queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
   };
   const [savingStage, setSavingStage] = useState(false);
   const [insuranceSectionOpen, setInsuranceSectionOpen] = useState(false);
@@ -296,6 +299,10 @@ export default function InsuranceClaimDetail() {
   const { data: vehicles } = useVehiclesByCustomer(customerId || null);
   const { data: insuranceCo } = useInsuranceCompany(companyId || undefined);
   const queryClient = useQueryClient();
+  const claimEstimateLifecycle = useMemo(
+    () => readClaimEstimateLifecycle(existing),
+    [existing],
+  );
   const vehicleEntryByClaimQuery = useQuery({
     queryKey: queryKeys.vehicleEntries.byClaim(isNew ? null : id),
     queryFn: () => getVehicleEntryByClaimId(id!),
@@ -683,7 +690,7 @@ export default function InsuranceClaimDetail() {
     }
   }, [estimationType, uplItems.length]);
 
-  const { data: claimEstimateNumber } = useQuery({
+  const { data: computedClaimEstimateNumber } = useQuery({
     queryKey: queryKeys.claimEstimateNumber((existing as any)?.tenant_id, id),
     enabled: !!id && !isNew && !!(existing as any)?.tenant_id,
     queryFn: async () => {
@@ -712,6 +719,7 @@ export default function InsuranceClaimDetail() {
       return formatClaimEstimateNumber(targetYear, index + 1);
     },
   });
+  const claimEstimateNumber = (existing as any)?.claim_estimate_number || computedClaimEstimateNumber;
 
   // ── Save ──
   const buildPayload = async () => {
@@ -2457,6 +2465,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     claim_lpo_saved: "تم حفظ بيانات LPO",
     insurance_invoice_created: "تم إنشاء فاتورة التأمين",
     document_generated: "تم إنشاء مستند للمطالبة",
+    claim_estimate_sent: "تم تسجيل إرسال تقدير الإصلاح",
   };
   const auditCategoryLabels: Record<string, string> = {
     workflow: "سير العمل",
@@ -2538,6 +2547,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 <>
                   <span className="opacity-50">•</span>
                   <Badge className={statusMeta[status].cls}>{statusMeta[status].label}</Badge>
+                  <ClaimEstimateStatusBadge claim={existing} />
                 </>
               )}
               {!isNew && (existing as any)?.delivered_at && (
@@ -2625,6 +2635,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-xl font-bold text-foreground">{claimNumber || "مطالبة جديدة"}</h2>
                     <Badge className={statusMeta[status]?.cls}>{statusMeta[status]?.label || status}</Badge>
+                    <ClaimEstimateStatusBadge claim={existing} compact />
                     <Badge variant="outline">{activeInvoice ? `فاتورة #${(activeInvoice as any).invoice_number}` : "لا توجد فاتورة"}</Badge>
                     <Badge variant={paymentRemaining <= 0 && paidTotal > 0 ? "default" : "secondary"}>{paymentStatusLabel}</Badge>
                   </div>
@@ -2763,11 +2774,16 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 </Label>
               </div>
               <Button variant="outline" size="sm" onClick={() => setShowPdf(true)} className="gap-1.5">
-                <Printer size={14} /> طباعة تقدير الإصلاح
+                <Printer size={14} /> {claimEstimateLifecycle.status === "not_created" ? "إنشاء/معاينة تقدير الإصلاح" : "فتح/تحديث تقدير الإصلاح"}
               </Button>
               <Button variant="outline" size="sm" onClick={handleDownloadEstimatePdf} className="gap-1.5">
                 <Download size={14} /> تحميل تقدير الإصلاح
               </Button>
+              {claimEstimateLifecycle.status === "modified_after_send" && (
+                <div className="basis-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                  تم تعديل بيانات التقدير بعد آخر إرسال. افتح التقدير لمراجعة النسخة الحالية ثم أعد إرسالها لشركة التأمين.
+                </div>
+              )}
               {hasLinkedWorkOrder ? (
                 <Button variant="outline" size="sm" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-1.5">
                   <Wrench size={14} /> فتح أمر العمل
@@ -4108,6 +4124,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             });
             refreshClaimMedia();
             return res?.url ?? null;
+          }}
+          onEstimateSent={async () => {
+            await markClaimEstimateSent(id);
+            refreshClaimMedia();
           }}
         />
       )}

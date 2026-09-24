@@ -30,6 +30,8 @@ interface Props {
   buildAndSaveEstimatePdf?: () => Promise<string | null>;
   /** يبني PDF الملخص الشامل ويحفظه ويعيد الرابط العام */
   buildAndSaveSummaryPdf?: () => Promise<string | null>;
+  /** يسجّل أن المراجعة الحالية من تقدير الإصلاح جرى تجهيزها للإرسال */
+  onEstimateSent?: () => Promise<void>;
 }
 
 const PUBLIC_BUCKET = "insurance-docs";
@@ -55,6 +57,7 @@ export default function SendInsuranceEmailDialog({
   damagePhotos, workOrderPhotos = [],
   savedDocs,
   buildAndSaveEstimatePdf, buildAndSaveSummaryPdf,
+  onEstimateSent,
 }: Props) {
   const [to, setTo] = useState(defaultEmail);
   const [cc, setCc] = useState(defaultCc);
@@ -137,9 +140,15 @@ export default function SendInsuranceEmailDialog({
     setBusy(true);
     try {
       const freshDocs: { url: string; label: string }[] = [];
+      const selectedSavedEstimate = savedDocs.some(
+        (document) => document.category === "claim_estimate" && selectedDocs[document.id],
+      );
+      let estimateIncluded = selectedSavedEstimate;
       if (includeFreshEstimate && buildAndSaveEstimatePdf) {
         const url = await buildAndSaveEstimatePdf();
-        if (url) freshDocs.push({ url, label: "تقدير المطالبة (أحدث نسخة)" });
+        if (!url) throw new Error("تعذر حفظ نسخة تقدير الإصلاح الحالية. لم يتم تسجيل الإرسال.");
+        freshDocs.push({ url, label: "تقدير المطالبة (المراجعة الحالية)" });
+        estimateIncluded = true;
       }
       if (includeFreshSummary && buildAndSaveSummaryPdf) {
         const url = await buildAndSaveSummaryPdf();
@@ -151,8 +160,13 @@ export default function SendInsuranceEmailDialog({
       params.set("body", body);
       if (cc.trim()) params.set("cc", cc.trim());
       const mailto = `mailto:${encodeURIComponent(to.trim())}?${params.toString().replace(/\+/g, "%20")}`;
+      if (estimateIncluded && onEstimateSent) {
+        await onEstimateSent();
+      }
       window.location.href = mailto;
-      toast.success("تم فتح تطبيق البريد لإرسال التقرير");
+      toast.success(estimateIncluded
+        ? "تم فتح البريد وتسجيل إرسال مراجعة التقدير الحالية"
+        : "تم فتح تطبيق البريد لإرسال التقرير");
       onOpenChange(false);
     } catch (e: any) {
       toast.error(e?.message ?? "تعذر تجهيز البريد");
@@ -284,7 +298,7 @@ export default function SendInsuranceEmailDialog({
           </div>
 
           <p className="text-[11px] text-muted-foreground bg-info/5 border border-info/20 rounded p-2">
-            ℹ️ سيتم فتح تطبيق البريد لديك مع تجهيز كل الروابط (PDF + صور). الروابط مباشرة وقابلة للتنزيل من قِبل شركة التأمين.
+            ℹ️ سيتم فتح تطبيق البريد لديك مع تجهيز كل الروابط. عند تضمين تقدير الإصلاح، يسجل النظام المراجعة الحالية كمرسلة؛ ولا ينشئ نسخة مكررة من الملف.
           </p>
         </div>
 
@@ -293,7 +307,7 @@ export default function SendInsuranceEmailDialog({
             <Copy size={14} /> نسخ النص
           </Button>
           <Button onClick={handleSend} disabled={busy || !to.trim()} className="gap-1.5">
-            <Mail size={14} /> فتح البريد وإرسال
+            <Mail size={14} /> فتح البريد وتسجيل الإرسال
           </Button>
         </DialogFooter>
       </DialogContent>

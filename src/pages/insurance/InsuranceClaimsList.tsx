@@ -35,6 +35,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { queryKeys } from "@/lib/queryKeys";
 import { toast } from "sonner";
+import ClaimEstimateStatusBadge from "@/components/insurance/ClaimEstimateStatusBadge";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/15 text-warning border-warning/30",
@@ -603,6 +604,7 @@ export default function InsuranceClaimsList() {
                                   <AlertTriangle size={10} /> لم يصل
                                 </Badge>
                               )}
+                              <ClaimEstimateStatusBadge claim={c} compact className="text-[10px]" />
                             </div>
                           </td>
                         )}
