@@ -36,8 +36,10 @@ import TemplatePicker from "@/components/print/TemplatePicker";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { roundMoney } from "@/lib/money";
 import { getInvoiceHtml, getQuoteHtml, getTemplateSettings } from "@/lib/pdfGenerator";
+import { getCashInvoiceInsuranceStyleHtml } from "@/lib/pdfGenerator";
 import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
 import UnifiedSendButton from "@/components/UnifiedSendButton";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   type: SalesDocType;
@@ -62,6 +64,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   const [pdfHtml, setPdfHtml] = useState<string>("");
   const [showPdf, setShowPdf] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string>("");
+  const [printLayout, setPrintLayout] = useState<"cash" | "insurance_style">("cash");
   const [confirmCfg, setConfirmCfg] = useState<{
     title: string; description: string; onConfirm: () => void;
   } | null>(null);
@@ -158,9 +161,66 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
       paidTotal: doc.paidTotal || 0,
       balanceDue: doc.balanceDue,
     };
-    return type === "quote"
-      ? getQuoteHtml({ ...baseData, quoteNumber: doc.number })
-      : injectQrIntoInvoice(getInvoiceHtml(baseData), qrDataUrl, isAr);
+    if (type === "quote") return getQuoteHtml({ ...baseData, quoteNumber: doc.number });
+
+    if (type === "invoice" && printLayout === "insurance_style") {
+      let customer: {
+        phone?: string | null;
+        address?: string | null;
+        tax_number?: string | null;
+        vat_number?: string | null;
+        commercial_registration?: string | null;
+        cr_number?: string | null;
+      } | null = null;
+      if (doc.customerId) {
+        const result = await supabase
+          .from("customers")
+          .select("phone,address,tax_number,vat_number,commercial_registration,cr_number")
+          .eq("id", doc.customerId)
+          .maybeSingle();
+        customer = result.data;
+      }
+      const colorField = (doc.customField || []).find((field) => /color|colour|اللون/i.test(field.label));
+      return getCashInvoiceInsuranceStyleHtml({
+        docType: "invoice",
+        template: "default",
+        number: doc.number,
+        invoiceNumber: doc.number,
+        issueDate: doc.date,
+        dueDate: doc.dueDate,
+        paymentDueDate: doc.dueDate,
+        customerName: doc.customerName,
+        customerPhone: (doc as any).customerPhone || customer?.phone || undefined,
+        customerAddress: doc.customerAddress || customer?.address || undefined,
+        customerTaxNumber: doc.customerTaxNo || customer?.vat_number || customer?.tax_number || undefined,
+        customerCommercialRegistration: customer?.commercial_registration || customer?.cr_number || undefined,
+        referenceNumber: doc.documentReference || doc.fromDocId || doc.number,
+        vehiclePlate: doc.vehicle?.plate || "—",
+        vehicleInfo: [doc.vehicle?.make, doc.vehicle?.model].filter(Boolean).join(" ")
+          + (doc.vehicle?.year ? ` - ${doc.vehicle.year}` : "") || "—",
+        vehicleVin: doc.vehicle?.vin,
+        vehicleColor: colorField?.value,
+        paymentTerms: doc.paymentTerms,
+        customFields: doc.customField || [],
+        items: doc.items.map((item) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.quantity > 0
+            ? ((item.quantity * item.unitPrice) * (1 - (item.discount || 0) / 100)) / item.quantity
+            : 0,
+          discount: 0,
+          tax: item.tax,
+        })),
+        subtotal: doc.subtotal,
+        discountTotal: doc.discountTotal,
+        taxTotal: doc.taxTotal,
+        total: doc.total,
+        notes: doc.notes,
+        qrDataUrl,
+      });
+    }
+
+    return injectQrIntoInvoice(getInvoiceHtml(baseData), qrDataUrl, isAr);
   }
 
   async function buildAndShowPdf() {
@@ -180,7 +240,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
     buildHtml().then((h) => { if (!cancelled) setPreviewHtml(h); }).catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, tick]);
+  }, [doc, tick, printLayout]);
 
   if (!doc) {
     return (
@@ -228,6 +288,17 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {type === "invoice" && (
+            <Select value={printLayout} onValueChange={(value) => setPrintLayout(value as "cash" | "insurance_style")}>
+              <SelectTrigger className="h-9 w-[190px] text-xs" aria-label={isAr ? "اختيار قالب الطباعة" : "Select print template"}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="cash">{isAr ? "قالب فاتورة الكاش" : "Cash invoice template"}</SelectItem>
+                <SelectItem value="insurance_style">{isAr ? "تصميم التأمين — بيانات العميل" : "Insurance design — customer data"}</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <TemplatePicker docType={(type === "quote" ? "quote" : "tax_invoice") as any} size="sm" />
           <UnifiedSendButton
             ctx={{

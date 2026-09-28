@@ -1565,6 +1565,25 @@ export interface InsuranceTaxInvoiceData extends InsuranceEstimateData {
   qrDataUrl?: string;             // Data-URL لرمز ZATCA TLV
   paymentDueDate?: string;        // تاريخ استحقاق السداد
   lpoNumber?: string;             // رقم أمر الشراء الصادر من شركة التأمين (LPO)
+  /** Share the visual layout without mixing cash and insurance accounting. */
+  recipientKind?: "insurance" | "customer";
+  recipientReference?: string;
+  recipientPhone?: string;
+}
+
+export interface CashInvoiceInsuranceStyleData extends AdvancedDocData {
+  invoiceNumber: string;
+  qrDataUrl?: string;
+  paymentDueDate?: string;
+  referenceNumber?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  customerTaxNumber?: string;
+  customerCommercialRegistration?: string;
+  vehiclePlate?: string;
+  vehicleInfo?: string;
+  vehicleVin?: string;
+  vehicleColor?: string;
 }
 
 function invoiceRefEscape(value: unknown): string {
@@ -1753,6 +1772,7 @@ function renderInsuranceTaxInvoiceReferenceClean(data: InsuranceTaxInvoiceData):
 
 function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData): string {
   const s = getTemplateSettings();
+  const isCustomerInvoice = data.recipientKind === "customer";
   const subtotal = Number(data.subtotal || 0);
   const vatAmount = Number(data.taxTotal ?? Math.max(0, Number(data.total || 0) - subtotal));
   const total = Number(data.total || Number((subtotal + vatAmount).toFixed(3)));
@@ -1763,6 +1783,10 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     contact: invoiceRefCustom(data, ["contact", "responsible", "employee", "مسؤول"]),
     insuranceLogoUrl: invoiceRefCustom(data, ["insurance logo", "logo url", "شعار التأمين"]),
   };
+  const recipientName = isCustomerInvoice ? data.customerName : data.insuranceCompany;
+  const recipientReference = isCustomerInvoice ? (data.recipientReference || "—") : (data.claimNumber || "—");
+  const recipientCommercialRegistration = data.insuranceCommercialRegistration || "—";
+  const recipientTaxNumber = data.insuranceTaxNumber || "—";
   const [vehicleNameRaw = "", vehicleYearRaw = ""] = String(data.vehicleInfo || "").split(" - ");
   const vehicleName = vehicleNameRaw || data.vehicleInfo || "—";
   const vehicleYear = vehicleYearRaw || "";
@@ -1773,19 +1797,21 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     : `<div class="brand-fallback">ALWAFA</div>`;
   const insuranceLogoHtml = custom.insuranceLogoUrl
     ? `<img src="${invoiceRefEscape(custom.insuranceLogoUrl)}" alt="Insurance logo"/>`
-    : `<div class="insurance-logo-fallback">${invoiceRefEscape(String(data.insuranceCompany || "INS").slice(0, 2).toUpperCase())}</div>`;
+    : `<div class="insurance-logo-fallback">${invoiceRefEscape(isCustomerInvoice ? "CU" : String(data.insuranceCompany || "INS").slice(0, 2).toUpperCase())}</div>`;
   const signatureHtml = s.signatureUrl ? `<img src="${invoiceRefEscape(s.signatureUrl)}" alt="Signature"/>` : "";
   const stampHtml = s.stampEnabled && s.stampOnInvoice && s.stampUrl
     ? `<img src="${invoiceRefEscape(s.stampUrl)}" alt="Company stamp"/>`
     : "";
   const items = Array.isArray(data.items) ? data.items.filter((item) => String(item.description || "").trim()) : [];
   const itemRows = (items.length ? items : [{
-    description: `خدمة إصلاح شامل وفق رقم المطالبة<br/><strong>${invoiceRefEscape(data.claimNumber)}</strong>`,
+    description: isCustomerInvoice
+      ? `خدمات صيانة وإصلاح<br/><strong>${invoiceRefEscape(data.invoiceNumber)}</strong>`
+      : `خدمة إصلاح شامل وفق رقم المطالبة<br/><strong>${invoiceRefEscape(data.claimNumber)}</strong>`,
     quantity: 1,
     unitPrice: subtotal,
   }]).map((item: any, index: number) => {
-    const qty = Number(item.quantity || 1);
-    const rate = Number(item.unitPrice || item.unit_price || subtotal);
+    const qty = Number(item.quantity ?? 1);
+    const rate = Number(item.unitPrice ?? item.unit_price ?? subtotal);
     const lineTotal = Number((qty * rate).toFixed(3));
     return `<tr>
       <td class="c mono">${index + 1}</td>
@@ -1845,9 +1871,9 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
       <div class="company"><div class="meta">${companyMetaHtml}</div></div>
     </header>
     <section class="card claim-card">
-      <div class="claim-left"><div class="label-ar">رقم المطالبة</div><div class="label-en">CLAIM</div><div class="big mono">${invoiceRefEscape(data.claimNumber || "—")}</div>${data.lpoNumber ? `<div class="lpo-under-claim">LPO - ${invoiceRefEscape(data.lpoNumber)}</div>` : ""}</div>
+      <div class="claim-left"><div class="label-ar">${isCustomerInvoice ? "مرجع الفاتورة" : "رقم المطالبة"}</div><div class="label-en">${isCustomerInvoice ? "INVOICE REFERENCE" : "CLAIM"}</div><div class="big mono">${invoiceRefEscape(recipientReference)}</div>${!isCustomerInvoice && data.lpoNumber ? `<div class="lpo-under-claim">LPO - ${invoiceRefEscape(data.lpoNumber)}</div>` : ""}</div>
       <div class="claim-mid"><div class="insurance-logo">${insuranceLogoHtml}</div></div>
-      <div class="claim-right"><div class="label-ar">شركة التأمين</div><div class="label-en">INSURANCE PROVIDER</div><div class="big">${invoiceRefEscape(data.insuranceCompany || "—")}</div></div>
+      <div class="claim-right"><div class="label-ar">${isCustomerInvoice ? "العميل" : "شركة التأمين"}</div><div class="label-en">${isCustomerInvoice ? "CUSTOMER" : "INSURANCE PROVIDER"}</div><div class="big">${invoiceRefEscape(recipientName || "—")}</div></div>
     </section>
     <section class="card vehicle-card">
       <div class="vehicle-cell"><div class="label-ar">اللون</div><div class="label-en">COLOR</div><div class="value">${invoiceRefEscape(custom.color || "—")}</div></div>
@@ -1857,9 +1883,9 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     </section>
     <section class="card bill-card">
       <div class="bill-cell"><div class="label-ar">تاريخ الاستحقاق</div><div class="label-en">DUE DATE</div><div class="value mono">${invoiceRefEscape(dueDate)}</div></div>
-      <div class="bill-cell"><div class="label-ar">السجل التجاري</div><div class="label-en">COMMERCIAL REG</div><div class="value mono">${invoiceRefEscape(data.insuranceCommercialRegistration || "—")}</div></div>
-      <div class="bill-cell"><div class="label-ar">رقم الضريبة</div><div class="label-en">VAT REG NO.</div><div class="value mono">${invoiceRefEscape(data.insuranceTaxNumber || "—")}</div></div>
-      <div class="bill-cell bill-to"><div class="label-ar">الفواتير إلى</div><div class="label-en">BILLED TO</div><div class="value">${invoiceRefEscape(data.insuranceCompany || "—")}</div>${custom.contact ? `<div class="value" style="font-size:9.5px;font-weight:600">${invoiceRefEscape(custom.contact)}</div>` : ""}<div class="value" style="font-size:9px;font-weight:500">${invoiceRefEscape(billToAddress)}</div></div>
+      <div class="bill-cell"><div class="label-ar">السجل التجاري</div><div class="label-en">COMMERCIAL REG</div><div class="value mono">${invoiceRefEscape(recipientCommercialRegistration)}</div></div>
+      <div class="bill-cell"><div class="label-ar">رقم الضريبة</div><div class="label-en">VAT REG NO.</div><div class="value mono">${invoiceRefEscape(recipientTaxNumber)}</div></div>
+      <div class="bill-cell bill-to"><div class="label-ar">الفواتير إلى</div><div class="label-en">BILLED TO</div><div class="value">${invoiceRefEscape(recipientName || "—")}</div>${data.recipientPhone ? `<div class="value mono" style="font-size:9.5px;font-weight:600">${invoiceRefEscape(data.recipientPhone)}</div>` : custom.contact ? `<div class="value" style="font-size:9.5px;font-weight:600">${invoiceRefEscape(custom.contact)}</div>` : ""}<div class="value" style="font-size:9px;font-weight:500">${invoiceRefEscape(billToAddress)}</div></div>
     </section>
     <table class="items"><thead><tr><th style="width:18mm">#</th><th>الوصف<br/><span class="label-en">DESCRIPTION</span></th><th style="width:26mm">الكمية<br/><span class="label-en">QTY</span></th><th style="width:38mm">السعر (ر.ع)<br/><span class="label-en">RATE</span></th><th style="width:32mm">الإجمالي (ر.ع)<br/><span class="label-en">TOTAL</span></th></tr></thead><tbody>${itemRows}</tbody></table>
     <section class="summary-row">
@@ -1878,6 +1904,33 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     <footer class="footer"><div class="thanks"><span>شكراً لتعاملكم معنا</span><span>THANK YOU FOR YOUR BUSINESS</span></div></footer>
   </div>`;
   return wrapHtml(`Tax Invoice ${data.invoiceNumber}`, styles, body);
+}
+
+/**
+ * Cash sales document rendered with the insurance invoice visual layout only.
+ * The source, accounting, payments and identifiers remain cash-invoice data.
+ */
+export function getCashInvoiceInsuranceStyleHtml(data: CashInvoiceInsuranceStyleData): string {
+  return renderInsuranceTaxInvoiceAlwafaReference({
+    ...data,
+    recipientKind: "customer",
+    recipientReference: data.referenceNumber || data.number,
+    recipientPhone: data.customerPhone,
+    insuranceCompany: data.customerName,
+    claimNumber: "",
+    insuranceCommercialRegistration: data.customerCommercialRegistration,
+    insuranceTaxNumber: data.customerTaxNumber,
+    insuranceAddress: data.customerAddress,
+    vehiclePlate: data.vehiclePlate,
+    vehicleInfo: data.vehicleInfo,
+    invoiceNumber: data.invoiceNumber,
+    paymentDueDate: data.paymentDueDate,
+    customFields: [
+      ...(data.customFields || []),
+      { label: "vin", value: data.vehicleVin || "" },
+      { label: "color", value: data.vehicleColor || "" },
+    ],
+  });
 }
 
 export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): string {
