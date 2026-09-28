@@ -374,7 +374,7 @@ export default function WorkOrders() {
     enabled: Boolean(profile?.tenant_id),
     staleTime: 30_000,
     gcTime: 300_000,
-    placeholderData: (previous) => previous,
+    // Different filters must never render rows from the previous query while loading.
     refetchOnWindowFocus: false,
     retry: false,
   });
