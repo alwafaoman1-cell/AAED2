@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, Save, Package, X, Receipt } from "lucide-react";
+import { Plus, Trash2, Save, Package, X, Receipt, Loader2 } from "lucide-react";
 import {
   ResponsiveDialog,
   ResponsiveDialogHeader,
@@ -78,6 +78,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
   const { profile } = useAuth();
   const tenantId = profile?.tenant_id || "";
   const [items, setItems] = useState<ExpenseItem[]>([]);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const allowDuplicateOverride = canManageFinance();
 
   const categoryQuery = useQuery({
@@ -184,7 +186,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     );
   }, 0);
 
-  const saveAll = async () => {
+  const performSaveAll = async () => {
     if (!order) return;
     const canonicalWorkOrderId = order.cloudId || order.id;
     const visibleWorkOrderNumber = order.displayNumber || order.id;
@@ -200,6 +202,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     if (errors.length) return toast.error(errors[0]);
 
     let savedCount = 0;
+    const savedVoucherNumbers: string[] = [];
     const saveExpenseRecord = async (record: ExpenseRecord) => {
       try {
         return await expensesStore.add(record);
@@ -268,7 +271,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
             unitSellPrice: sell > 0 ? sell : undefined,
             createdAt: new Date().toISOString(),
           };
-          await saveExpenseRecord(rec);
+          const saved = await saveExpenseRecord(rec);
+          savedVoucherNumbers.push(saved.voucherNumber);
           savedAmountForItem += lineAmt;
           savedCount++;
         }
@@ -298,7 +302,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           linkedVehicleName: `${order.vehicleType} ${order.model} — ${order.plate}`,
           createdAt: new Date().toISOString(),
         };
-        await saveExpenseRecord(rec);
+        const saved = await saveExpenseRecord(rec);
+        savedVoucherNumbers.push(saved.voucherNumber);
         savedAmountForItem += totalAmt;
         savedCount++;
       }
@@ -314,7 +319,9 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       });
     }
     } catch (error: any) {
-      toast.error(error?.message || "تعذر حفظ المصروفات في Supabase");
+      toast.error(savedCount > 0
+        ? `حُفظ ${savedCount} سند (${savedVoucherNumbers.join("، ")}) قبل توقف العملية. لا تُعد إدخال هذه البنود. ${error?.message || "تحقق من البنود المتبقية."}`
+        : error?.message || "تعذر حفظ المصروفات في Supabase");
       return;
     }
 
@@ -327,10 +334,24 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     onOpenChange(false);
   };
 
+  const saveAll = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await performSaveAll();
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تأكيد حفظ سندات الصرف في Supabase");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
   if (!order) return null;
 
   return (
-    <ResponsiveDialog open={open} onOpenChange={onOpenChange} className="max-w-5xl">
+    <ResponsiveDialog open={open} onOpenChange={(nextOpen) => { if (!savingRef.current) onOpenChange(nextOpen); }} className="max-w-5xl">
       <ResponsiveDialogHeader>
         <ResponsiveDialogTitle className="flex items-center gap-2">
           <Receipt size={18} className="text-primary" />
@@ -550,9 +571,9 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           {grandRevenue > 0 && <span><span className="text-muted-foreground">ربح: </span><span className={`font-bold font-mono ${grandProfit >= 0 ? "text-success" : "text-destructive"}`}>{grandProfit.toLocaleString()}</span></span>}
           <span className="text-muted-foreground">({items.length} بند)</span>
         </div>
-        <Button variant="outline" onClick={() => onOpenChange(false)}>إلغاء</Button>
-        <Button onClick={saveAll} className="gap-2" disabled={categoryQuery.isLoading || categoryQuery.isError || departments.length === 0}>
-          <Save size={16} /> حفظ الكل
+        <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>إلغاء</Button>
+        <Button onClick={saveAll} className="gap-2" aria-busy={saving} disabled={saving || categoryQuery.isLoading || categoryQuery.isError || departments.length === 0}>
+          {saving ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Save size={16} />} {saving ? "جارٍ حفظ البنود والتحقق..." : "حفظ الكل"}
         </Button>
       </ResponsiveDialogFooter>
     </ResponsiveDialog>

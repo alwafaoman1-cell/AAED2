@@ -99,6 +99,12 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
     if (c) { toast.success(isAr ? "تم النسخ" : "Copied"); navigate(`${listRoute}/${c.id}`); }
   }
   function setDraft() {
+    if (doc.type === "invoice" && (doc.invoiceStatus === "issued" || doc.invoiceStatus === "credited" || !!doc.issuedAt)) {
+      toast.error(isAr
+        ? "لا يمكن إعادة الفاتورة الصادرة إلى مسودة. استخدم مسار التصحيح الرسمي."
+        : "An issued invoice cannot be converted back to a draft. Use the formal correction process.");
+      return;
+    }
     salesStore.setStatus(doc.id, "draft");
     toast.success(isAr ? "تم التحويل لمسودة" : "Converted to draft");
   }
@@ -253,10 +259,12 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
   const currency = doc.currency === "OMR" ? "ر.ع" : doc.currency;
   const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
-  const isLockedIssuedDocument = isFinancialDocument && type !== "invoice" && doc.status !== "draft";
+  const isLockedIssuedDocument = isFinancialDocument && (type === "invoice"
+    ? doc.invoiceStatus === "issued" || doc.invoiceStatus === "credited" || !!doc.issuedAt
+    : doc.status !== "draft");
   const blockIssuedEdit = () => toast.error(isAr
-    ? "لا يمكن تعديل فاتورة صادرة. استخدم إلغاء أو إشعار دائن."
-    : "Issued invoices cannot be edited. Use cancellation or a credit note.");
+    ? "لا يمكن تعديل الفاتورة الصادرة أو رقمها الرسمي. راجع الدفعات ثم أصدر إشعارًا دائنًا وفاتورة بديلة مع ربطهما محاسبيًا."
+    : "An issued invoice and its official number cannot be edited. Review payments, then issue a linked credit note and replacement invoice.");
 
   return (
     <div className="space-y-3" dir={isRtl ? "rtl" : "ltr"}>
@@ -421,9 +429,15 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuItem onClick={() => setShowAppt(true)}><CalendarPlus className="h-4 w-4 me-2" /> {isAr ? "ترتيب موعد" : "Schedule"}</DropdownMenuItem>
-            <DropdownMenuItem onClick={setDraft}><FileEdit className="h-4 w-4 me-2" /> {isAr ? "تحويل إلى مسودة" : "Convert to draft"}</DropdownMenuItem>
+            {!isLockedIssuedDocument && <DropdownMenuItem onClick={setDraft}><FileEdit className="h-4 w-4 me-2" /> {isAr ? "تحويل إلى مسودة" : "Convert to draft"}</DropdownMenuItem>}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={doDelete} className="text-destructive">
+            <DropdownMenuItem onClick={() => setConfirmCfg({
+              title: isAr ? "تأكيد حذف المستند" : "Confirm document deletion",
+              description: isAr
+                ? "سيُحذف المستند منطقيًا وتُعكس القيود وتُزال سندات القبض والدفعات المرتبطة به. هذا ليس مسار تصحيح رقم الفاتورة. هل تريد المتابعة؟"
+                : "This soft-deletes the document, reverses entries and removes linked receipts and payments. This is not an invoice-number correction. Continue?",
+              onConfirm: () => { void doDelete(); },
+            })} className="text-destructive">
               <Trash2 className="h-4 w-4 me-2" /> {isAr ? "حذف" : "Delete"}
             </DropdownMenuItem>
           </DropdownMenuContent>

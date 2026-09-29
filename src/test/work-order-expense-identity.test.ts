@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   expenseBelongsToWorkOrder,
+  expenseHasPersistedWorkOrderLink,
   type ExpenseRecord,
 } from "@/lib/expensesStore";
 
@@ -42,5 +43,15 @@ describe("work-order expense identity", () => {
       id: "WO-C-26-0126",
       cloudId: canonicalId,
     })).toBe(false);
+  });
+
+  it("does not mistake intended metadata for a persisted canonical work-order link", () => {
+    const requested = { canonicalWorkOrderId: canonicalId, linkedWorkOrderId: canonicalId };
+    const returned = {
+      sourceWorkOrderId: canonicalId,
+      linkedWorkOrderId: "WO-C-26-0126",
+    } as ExpenseRecord;
+    expect(expenseHasPersistedWorkOrderLink(returned, requested)).toBe(false);
+    expect(expenseHasPersistedWorkOrderLink({ ...returned, canonicalWorkOrderId: canonicalId }, requested)).toBe(true);
   });
 });

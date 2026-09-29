@@ -23,6 +23,7 @@ import {
   Eye,
   Send,
   Wallet,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -30,6 +31,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   getWorkOrderById,
@@ -49,7 +51,8 @@ import {
 } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
 import { inspectionsStore } from "@/lib/inspectionsStore";
-import { getExpensesForWorkOrder, expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
+import { getExpensesForWorkOrder, fetchExpensesForWorkOrder, expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
+import { queryKeys } from "@/lib/queryKeys";
 import { Checkbox } from "@/components/ui/checkbox";
 import { canDelete, canEdit, canManageFinance } from "@/lib/permissions";
 import { moveToTrash } from "@/lib/trashStore";
@@ -228,6 +231,11 @@ export default function WorkOrderDetail() {
   const [laborDraft, setLaborDraft] = useState(0);
   const [savingLabor, setSavingLabor] = useState(false);
   const financialQuery = useWorkOrderFinancials(order);
+  const orderExpensesQuery = useQuery({
+    queryKey: [...queryKeys.expenseManagement.all, "work_order", order?.cloudId || order?.id || ""],
+    enabled: !!order,
+    queryFn: () => fetchExpensesForWorkOrder(order!),
+  });
 
   const allowEdit = canEdit();
   const allowDelete = canDelete();
@@ -403,8 +411,16 @@ export default function WorkOrderDetail() {
   const linkedVouchers = useMemo(() => {
     // The store revision intentionally refreshes this derived external-store view.
     void expenseTick;
-    return order ? getExpensesForWorkOrder(order) : [];
-  }, [order, expenseTick]);
+    if (!order) return [];
+    // A completed scoped cloud query is authoritative; the legacy cache can
+    // contain older metadata-only links. Include the cache only while a fresh
+    // query is loading so a newly saved voucher appears without delay.
+    if (orderExpensesQuery.isSuccess && !orderExpensesQuery.isFetching) return orderExpensesQuery.data;
+    const merged = new Map<string, ExpenseRecord>();
+    for (const expense of orderExpensesQuery.data || []) merged.set(expense.id, expense);
+    for (const expense of getExpensesForWorkOrder(order)) merged.set(expense.id, expense);
+    return [...merged.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }, [order, expenseTick, orderExpensesQuery.data, orderExpensesQuery.isSuccess, orderExpensesQuery.isFetching]);
   const vouchersTotal = linkedVouchers.reduce((s, v) => s + (Number(v.amount) || 0), 0);
   const partsExpenseTotal = linkedVouchers.reduce((sum, expense) => {
     const text = `${expense.expenseType || ""} ${expense.categoryName || ""} ${expense.description || ""}`.toLowerCase();
@@ -1564,8 +1580,13 @@ export default function WorkOrderDetail() {
           <p className="mb-3 text-[10px] text-muted-foreground">
             الإيراد من الفواتير المعتمدة قبل الضريبة فقط، والتكلفة من سندات الصرف الفعلية المرتبطة بأمر العمل. التقديرات لا تدخل في الربح الفعلي.
           </p>
-          {!expensesReady ? (
-            <p className="text-xs text-muted-foreground text-center py-4">جاري تحميل سندات الصرف المرتبطة…</p>
+          {orderExpensesQuery.isError && linkedVouchers.length === 0 ? (
+            <div className="py-4 text-center text-xs text-destructive">
+              تعذر تحميل سندات الصرف من Supabase. لا يمكن تأكيد عدم وجود مصروفات.
+              <Button variant="outline" size="sm" className="mx-2" onClick={() => void orderExpensesQuery.refetch()}>إعادة المحاولة</Button>
+            </div>
+          ) : orderExpensesQuery.isPending && linkedVouchers.length === 0 ? (
+            <p role="status" className="flex items-center justify-center gap-2 text-xs text-muted-foreground py-4"><Loader2 size={14} className="animate-spin" aria-hidden="true" /> جاري تحميل سندات الصرف المرتبطة…</p>
           ) : linkedVouchers.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-4">لا توجد سندات</p>
           ) : (

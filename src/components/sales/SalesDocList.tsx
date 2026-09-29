@@ -295,7 +295,7 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
       </div>
 
       <BulkActionBar count={selected.size} onClear={() => setSelected(new Set())} label={isAr ? "مستند" : "doc"}>
-        <Select onValueChange={(s) => {
+        {type !== "invoice" && <Select onValueChange={(s) => {
           selected.forEach((id) => salesStore.setStatus(id, s as SalesDocStatus));
           toast.success(isAr ? `تم تحديث الحالة` : "Status updated");
           setSelected(new Set());
@@ -306,7 +306,7 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
           </SelectContent>
-        </Select>
+        </Select>}
         <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => {
           const ids = Array.from(selected);
           const docs = salesStore.list({ type }).filter((d) => ids.includes(d.id));

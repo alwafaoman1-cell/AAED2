@@ -479,8 +479,8 @@ export const expensesStore = {
   async add(item: ExpenseRecord) {
     ensureExpenseStoreSessionWatcher();
     // DB id is uuid — normalize legacy "EXP-<ts>" ids to a real uuid so the row inserts.
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.id || "");
-    if (!isUuid) {
+    const hasUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.id || "");
+    if (!hasUuid) {
       const newId = (crypto as any)?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
       item.id = newId; // mutate so caller keeps a valid reference
     }
@@ -533,6 +533,10 @@ export const expensesStore = {
     persistLocal();
     notify();
     invalidateExpenseConsumers();
+    if ((item.canonicalWorkOrderId || item.linkedWorkOrderId || item.sourceWorkOrderId)
+      && !expenseHasPersistedWorkOrderLink(saved, item)) {
+      throw new Error(`حُفظ سند الصرف ${saved.voucherNumber} في Supabase لكن لم يُربط بأمر العمل. لا تُعد إضافته؛ افتح السند وصحح الربط.`);
+    }
     return saved;
   },
   async update(id: string, patch: Partial<ExpenseRecord>) {
@@ -592,6 +596,10 @@ export const expensesStore = {
     persistLocal();
     notify();
     invalidateExpenseConsumers();
+    if ((next.canonicalWorkOrderId || next.linkedWorkOrderId || next.sourceWorkOrderId)
+      && !expenseHasPersistedWorkOrderLink(cache[idx], next)) {
+      throw new Error(`حُدّث سند الصرف ${cache[idx].voucherNumber} في Supabase لكن فقد ربطه بأمر العمل. افتح السند وصحح الربط.`);
+    }
     return cache[idx];
   },
   async remove(id: string): Promise<ExpenseRecord | undefined> {
@@ -681,11 +689,56 @@ export function expenseBelongsToWorkOrder(expense: ExpenseRecord, workOrder: str
     .some((value) => value.length > 0 && refs.has(value));
 }
 
+/** Metadata can retain an intended link even when the database FK was not saved. */
+export function expenseHasPersistedWorkOrderLink(saved: ExpenseRecord, requested: Partial<ExpenseRecord>): boolean {
+  const expectedUuid = [requested.canonicalWorkOrderId, requested.linkedWorkOrderId, requested.sourceWorkOrderId]
+    .find((value) => isUuid(value || ""));
+  if (expectedUuid) return saved.canonicalWorkOrderId === expectedUuid;
+  const refs = [requested.linkedWorkOrderId, requested.sourceWorkOrderId].filter(Boolean);
+  return refs.some((ref) => saved.linkedWorkOrderId === ref);
+}
+
 export function getExpensesForWorkOrder(workOrder: string | WorkOrderExpenseIdentity): ExpenseRecord[] {
   return expensesStore
     .getAll()
     .filter((expense) => expenseBelongsToWorkOrder(expense, workOrder) && !expense.deletedAt && !expense.archivedAt)
     .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/** Fetch this order's vouchers from cloud independently of the capped legacy cache. */
+export async function fetchExpensesForWorkOrder(workOrder: string | WorkOrderExpenseIdentity): Promise<ExpenseRecord[]> {
+  const refs = getWorkOrderExpenseReferences(workOrder);
+  if (!refs.length) return [];
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+  const canonicalId = refs.find(isUuid);
+  const load = async (column: "linked_work_order_id" | "work_order_id", values: string[]) => {
+    const rows: Record<string, any>[] = [];
+    const pageSize = 500;
+    for (let offset = 0; ; offset += pageSize) {
+      const result = await supabase.from("expenses").select("*")
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
+        .is("archived_at", null)
+        .in(column, values)
+        .range(offset, offset + pageSize - 1);
+      if (result.error) throw result.error;
+      rows.push(...(result.data || []));
+      if ((result.data || []).length < pageSize) return rows;
+    }
+  };
+  const results = await Promise.all([
+    load("linked_work_order_id", refs),
+    ...(canonicalId ? [load("work_order_id", [canonicalId])] : []),
+  ]);
+  const byId = new Map<string, ExpenseRecord>();
+  for (const rows of results) {
+    for (const row of rows) {
+      const record = rowToRecord(row);
+      if (expenseBelongsToWorkOrder(record, workOrder)) byId.set(record.id, record);
+    }
+  }
+  return [...byId.values()].sort((a, b) => b.date.localeCompare(a.date));
 }
 export function getExpensesTotalForWorkOrder(workOrder: string | WorkOrderExpenseIdentity): number {
   return getExpensesForWorkOrder(workOrder).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);

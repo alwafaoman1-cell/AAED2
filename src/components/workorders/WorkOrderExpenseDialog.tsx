@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Save, X, Trash2, Pencil, Plus, Receipt, Package, Eye } from "lucide-react";
+import { Save, X, Trash2, Pencil, Plus, Receipt, Package, Eye, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   employeeCashboxesStore,
@@ -53,6 +53,8 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
   const { profile } = useAuth();
   const tenantId = profile?.tenant_id || "";
   const [expenseTick, force] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState("");
@@ -251,7 +253,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     setUnitSellPrice("");
   };
 
-  const handleSave = async () => {
+  const performSave = async () => {
     if (!order) return;
     const value = parseFloat(amount);
     if (!value || value <= 0) return toast.error("أدخل مبلغاً صحيحاً");
@@ -425,6 +427,20 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
     onOpenChange(false);
   };
 
+  const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await performSave();
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تأكيد حفظ سند الصرف في Supabase");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deleteId || !order) return;
     const rec = expensesStore.getById(deleteId);
@@ -456,7 +472,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={(nextOpen) => { if (!savingRef.current) onOpenChange(nextOpen); }}>
         <DialogContent dir="rtl" className="max-w-3xl max-h-[90vh] overflow-y-auto bg-card border-border">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-foreground">
@@ -714,9 +730,10 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
               <Button
                 onClick={handleSave}
                 className="gap-2 gradient-gold text-primary-foreground"
-                disabled={categoryQuery.isLoading || categoryQuery.isError || departments.length === 0}
+                aria-busy={saving}
+                disabled={saving || categoryQuery.isLoading || categoryQuery.isError || departments.length === 0}
               >
-                <Save size={14} /> {editingId ? "حفظ التعديلات" : "حفظ سند الصرف"}
+                {saving ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Save size={14} />} {saving ? "جارٍ الحفظ والتحقق..." : editingId ? "حفظ التعديلات" : "حفظ سند الصرف"}
               </Button>
             </div>
           </div>
@@ -796,7 +813,7 @@ export default function WorkOrderExpenseDialog({ order, open, onOpenChange, init
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
               <X size={14} className="ml-1" /> إغلاق
             </Button>
           </DialogFooter>

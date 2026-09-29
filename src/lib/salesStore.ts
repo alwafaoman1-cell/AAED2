@@ -574,6 +574,20 @@ export const salesStore = {
     return updateSalesDocumentReferenceCloud(doc, reference);
   },
   async saveDraft(doc: SalesDoc): Promise<SalesDoc> {
+    if (doc.type === "invoice" && isUuid(doc.id)) {
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("تعذّر تحديد المؤسسة");
+      const { data: existing, error } = await (supabase.from("sales_documents") as any)
+        .select("invoice_status,issued_at,doc_number")
+        .eq("tenant_id", tenantId)
+        .eq("id", doc.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (existing && (existing.invoice_status === "issued" || existing.invoice_status === "credited"
+        || existing.issued_at || /^INV-(?:\d{2}|\d{4})-\d{6,}$/.test(String(existing.doc_number || "")))) {
+        throw new Error("الفاتورة الصادرة لا يمكن تعديلها كمسودة؛ استخدم مسار التصحيح الرسمي");
+      }
+    }
     const draft: SalesDoc = doc.type === "invoice" && doc.invoiceStatus !== "issued"
       ? { ...doc, number: "", status: "draft", invoiceStatus: "draft", issuedAt: undefined }
       : doc;
@@ -859,6 +873,9 @@ export const salesStore = {
   setStatus(id: string, status: SalesDocStatus) {
     const doc = salesStore.get(id);
     if (!doc) return;
+    if (doc.type === "invoice" && (doc.invoiceStatus === "issued" || doc.invoiceStatus === "credited" || !!doc.issuedAt)) {
+      throw new Error("حالة الفاتورة الصادرة تُحتسب من الدفعات ولا يمكن تغييرها يدويًا");
+    }
     salesStore.upsert({
       ...doc,
       status,

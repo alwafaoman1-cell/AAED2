@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Trash2, Link as LinkIcon, Wallet, Package, Car, Shield } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Plus, Trash2, Link as LinkIcon, Wallet, Package, Car, Shield, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -105,6 +106,7 @@ function visitPrefillFields(prefillVisit: unknown): Partial<WorkOrder> {
 }
 
 export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit }: Props) {
+  const { i18n } = useTranslation();
   const isEdit = !!initial;
   const prefillVehicleKey = vehiclePrefillFields(prefillVehicle);
   const prefillVisitKey = visitPrefillFields(prefillVisit);
@@ -639,7 +641,9 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
       receptionPhotos = await uploadReceptionPhotos(targetOrderNumber);
     } catch (error: any) {
       console.warn("[WorkOrderForm] image upload skipped", error);
-      toast.warning("Work order saved, but image upload failed because storage bucket is not configured.");
+      toast.warning(i18n.resolvedLanguage?.startsWith("en")
+        ? "Photo upload failed. The work order has not been saved yet; its data will be saved with previously attached photos."
+        : "تعذر رفع الصور. لم يكتمل حفظ أمر العمل بعد؛ ستتم محاولة حفظ بياناته مع الاحتفاظ بالصور السابقة.");
       receptionPhotos = form.photos || [];
     }
     const payload: WorkOrder = {
@@ -1415,11 +1419,11 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
             التالي
           </Button>
         ) : (
-          <Button onClick={() => void handleSubmit()} disabled={saving} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
-            {saving ? "جارٍ الحفظ والرفع…" : isEdit ? "حفظ التعديلات" : "حفظ أمر العمل"}
+          <Button onClick={() => void handleSubmit()} disabled={saving} aria-busy={saving} className="gradient-gold text-primary-foreground flex-1 hover:opacity-90">
+            {saving ? <><Loader2 size={15} className="me-2 animate-spin" aria-hidden="true" /> جارٍ الحفظ والرفع…</> : isEdit ? "حفظ التعديلات" : "حفظ أمر العمل"}
           </Button>
         )}
-        <Button onClick={onClose} variant="outline" className="border-border text-foreground hover:bg-secondary">إلغاء</Button>
+        <Button onClick={onClose} disabled={saving} variant="outline" className="border-border text-foreground hover:bg-secondary">إلغاء</Button>
       </div>
     </div>
   );

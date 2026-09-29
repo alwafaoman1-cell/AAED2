@@ -269,7 +269,11 @@ export async function saveExpense(input: ExpenseInput, userId: string, id?: stri
     if (exactDuplicate) throw exactDuplicate;
     throw new Error(duplicateExpenseMessage(error) || error.message || "تعذر حفظ المصروف");
   }
-  if (!data?.id) throw new Error("لم يتم تأكيد حفظ المصروف"); return data;
+  if (!data?.id) throw new Error("لم يتم تأكيد حفظ المصروف");
+  if (input.expense_scope === "work_order" && data.work_order_id !== input.work_order_id) {
+    throw new Error(`حُفظ السند ${data.voucher_number || data.id} لكن لم يُربط بأمر العمل في Supabase. لا تُعد إدخاله؛ افتح السند وصحح الربط.`);
+  }
+  return data;
 }
 
 export async function softDeleteExpense(tenantId: string, id: string) {

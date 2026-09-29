@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from "react";
+import { Loader2 } from "lucide-react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
+import GlobalMutationStatus from "@/components/GlobalMutationStatus";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { FeatureProvider } from "@/contexts/FeatureContext";
@@ -237,8 +239,9 @@ const AutoTranslateBoot = () => {
 };
 
 const RouteFallback = () => (
-  <div className="flex items-center justify-center min-h-[40vh] text-muted-foreground text-sm">
-    <div className="animate-pulse">جارٍ التحميل…</div>
+  <div role="status" aria-live="polite" className="flex items-center justify-center gap-2 min-h-[40vh] text-muted-foreground text-sm">
+    <Loader2 size={18} className="animate-spin text-primary" aria-hidden="true" />
+    <span>جارٍ تحميل الصفحة…</span>
   </div>
 );
 
@@ -248,6 +251,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <GlobalMutationStatus />
       <BrowserRouter>
         <AuthProvider>
           <FeatureProvider>

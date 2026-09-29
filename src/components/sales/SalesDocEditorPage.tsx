@@ -108,13 +108,16 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
 
   useEffect(() => {
     const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
-    if (id && isFinancialDocument && type !== "invoice" && doc.status !== "draft") {
+    const issuedInvoice = type === "invoice" && (
+      doc.invoiceStatus === "issued" || doc.invoiceStatus === "credited" || !!doc.issuedAt
+    );
+    if (id && isFinancialDocument && (issuedInvoice || (type !== "invoice" && doc.status !== "draft"))) {
       toast.error(isAr
-        ? "لا يمكن تعديل فاتورة صادرة. استخدم إلغاء أو إشعار دائن."
-        : "Issued invoices cannot be edited. Use cancellation or a credit note.");
+        ? "لا يمكن تعديل فاتورة صادرة. يلزم إشعار دائن وفاتورة بديلة بعد مراجعة الدفعات."
+        : "An issued invoice cannot be edited. Review payments, then use a credit note and replacement invoice.");
       navigate(detailRoute(doc.id), { replace: true });
     }
-  }, [id, type, doc.id, doc.status, isAr, navigate, detailRoute]);
+  }, [id, type, doc.id, doc.status, doc.invoiceStatus, doc.issuedAt, isAr, navigate, detailRoute]);
 
   // ===== Tax toggle (per invoice) =====
   const taxSettings = getTemplateSettings();
@@ -276,6 +279,17 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   }
 
   async function save(mode: "draft" | "issue" = "draft") {
+    const existing = id ? salesStore.get(doc.id) : undefined;
+    if (type === "invoice" && existing && (
+      existing.invoiceStatus === "issued"
+      || existing.invoiceStatus === "credited"
+      || !!existing.issuedAt
+    )) {
+      toast.error(isAr
+        ? "الفاتورة الصادرة ورقمها الرسمي لا يُعدّلان من هذا النموذج. يلزم تصحيح رسمي بإشعار دائن وفاتورة جديدة مع مراجعة الدفعات المرتبطة."
+        : "An issued invoice and its official number cannot be edited here. Use a linked credit note and replacement invoice after reviewing linked payments.");
+      return;
+    }
     const trimmedNumber = doc.number.trim();
     if (type !== "invoice" && !trimmedNumber) {
       toast.error(isAr ? "أدخل رقم الفاتورة" : "Invoice number is required");
@@ -303,7 +317,6 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       );
       return;
     }
-    customersStore.getOrCreateByName(doc.customerName);
     const previousNumber = id ? salesStore.get(doc.id)?.number : undefined;
     const numberChanged = !!previousNumber && previousNumber !== trimmedNumber;
     const prepared: SalesDoc = {
@@ -324,13 +337,16 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
 
     setSavingMode(mode);
     try {
+      customersStore.getOrCreateByName(doc.customerName);
       let saved: SalesDoc;
       if (type === "invoice" && prepared.invoiceStatus !== "issued") {
         saved = mode === "issue"
           ? await salesStore.issueInvoice(prepared)
           : await salesStore.saveDraft(prepared);
       } else {
-        saved = salesStore.upsert(prepared);
+        // Wait for Supabase before reporting success; optimistic upsert can
+        // otherwise claim a document was saved after its cloud write failed.
+        saved = await salesStore.saveDraft(prepared);
       }
       toast.success(
         type === "invoice" && mode === "issue"
