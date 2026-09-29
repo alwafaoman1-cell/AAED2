@@ -35,6 +35,7 @@ import {
   ExpensePotentialDuplicateError,
   requestPotentialDuplicateOverride,
 } from "@/lib/expenses/expenseDuplicateGuard";
+import { validateWorkOrderExpenseParts } from "@/lib/expenses/validateWorkOrderExpenseParts";
 
 interface PartLine {
   id: string;
@@ -191,6 +192,7 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
     const canonicalWorkOrderId = order.cloudId || order.id;
     const visibleWorkOrderNumber = order.displayNumber || order.id;
     const errors: string[] = [];
+    if (items.length === 0) errors.push("أضف بند مصروف واحدًا على الأقل قبل الحفظ");
     items.forEach((it, idx) => {
       const amt = computeAmount(it);
       if (!it.departmentId) errors.push(`البند ${idx + 1}: لم يُحدّد القسم`);
@@ -198,10 +200,15 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       else if (!it.cashboxId) errors.push(`البند ${idx + 1}: لم تُحدّد الخزينة`);
       else if (amt <= 0) errors.push(`البند ${idx + 1}: المبلغ صفر`);
       else if (it.beneficiary.trim() && !it.supplierId) errors.push(`البند ${idx + 1}: اختر المورد من القائمة أو أضف موردًا جديدًا`);
+      if (isPartsCat(it)) {
+        const partError = validateWorkOrderExpenseParts(it.parts);
+        if (partError) errors.push(`البند ${idx + 1}: ${partError}`);
+      }
     });
     if (errors.length) return toast.error(errors[0]);
 
     let savedCount = 0;
+    let savedTotal = 0;
     const savedVoucherNumbers: string[] = [];
     const saveExpenseRecord = async (record: ExpenseRecord) => {
       try {
@@ -234,11 +241,10 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       if (partsCat && it.parts.length > 0) {
         // كل قطعة = سجل منفصل (ربح دقيق + يظهر في الفاتورة)
         for (const [pi, p] of it.parts.entries()) {
-          const qty = parseFloat(p.quantity) || 0;
-          const buy = parseFloat(p.unitBuyPrice) || 0;
+          const qty = Number(p.quantity);
+          const buy = Number(p.unitBuyPrice);
           const sell = parseFloat(p.unitSellPrice) || 0;
           const lineAmt = qty * buy;
-          if (qty <= 0 || !p.name.trim()) continue;
           const rec: ExpenseRecord = {
             id: `EXP-${Date.now()}-${pi}-${Math.random().toString(36).slice(2, 6)}`,
             voucherNumber: it.parts.length > 1 ? `${number}-${pi + 1}` : number,
@@ -273,7 +279,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
           };
           const saved = await saveExpenseRecord(rec);
           savedVoucherNumbers.push(saved.voucherNumber);
-          savedAmountForItem += lineAmt;
+          savedAmountForItem += saved.amount;
+          savedTotal += saved.amount;
           savedCount++;
         }
       } else {
@@ -304,7 +311,8 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
         };
         const saved = await saveExpenseRecord(rec);
         savedVoucherNumbers.push(saved.voucherNumber);
-        savedAmountForItem += totalAmt;
+        savedAmountForItem += saved.amount;
+        savedTotal += saved.amount;
         savedCount++;
       }
       if (cb && savedAmountForItem > 0) {
@@ -325,11 +333,16 @@ export default function WorkOrderBulkExpenseDialog({ order, open, onOpenChange, 
       return;
     }
 
+    if (savedCount === 0) {
+      toast.error("لم يُحفظ أي سند في Supabase. راجع أسماء القطع وكمياتها وأسعار شرائها ثم أعد المحاولة.");
+      return;
+    }
+
     // Expense capture and customer invoicing are intentionally separate
     // accounting actions. A successful expense save must never create, issue,
     // update or block a customer invoice. The user can review prices and create
     // the invoice explicitly from the work-order invoice action.
-    toast.success(`✓ حُفظ ${savedCount} سند بإجمالي ${grandExpense.toLocaleString()} ر.ع — أنشئ الفاتورة يدويًا بعد المراجعة`);
+    toast.success(`✓ حُفظ ${savedCount} سند بإجمالي ${savedTotal.toLocaleString()} ر.ع — أنشئ الفاتورة يدويًا بعد المراجعة`);
     onSaved?.();
     onOpenChange(false);
   };
