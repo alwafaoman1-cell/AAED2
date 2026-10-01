@@ -101,6 +101,8 @@ export interface SalesDoc {
   fromDocType?: SalesDocType;
   /** مرجع المستند التجاري مثل رقم طلب الشراء أو العقد. */
   documentReference?: string;
+  /** Optional unused earlier official number requested for a new cash invoice. */
+  requestedInvoiceNumber?: string;
   // مرفقات/ملاحظات/مواعيد
   payments: SalesPayment[];
   attachments: SalesAttachment[];
@@ -208,6 +210,7 @@ function rowToSalesDoc(r: any): SalesDoc {
     fromDocId: linkedWorkOrderId || m.fromDocId || r.converted_invoice_id,
     fromDocType: m.fromDocType,
     documentReference: m.documentReference,
+    requestedInvoiceNumber: m.requestedInvoiceNumber,
     // sales_payments is the sole source of truth. Older metadata snapshots are
     // intentionally ignored because they can survive after a real receipt was
     // removed and create an undeletable "ghost" payment in the invoice UI.
@@ -379,6 +382,7 @@ async function upsertSalesCloud(doc: SalesDoc) {
       fromDocId: doc.fromDocId,
       fromDocType: doc.fromDocType,
       documentReference: doc.documentReference,
+      requestedInvoiceNumber: doc.requestedInvoiceNumber,
       attachments: doc.attachments,
       noteEntries: doc.noteEntries,
       appointments: doc.appointments,
@@ -600,6 +604,8 @@ export const salesStore = {
     if (doc.type !== "invoice") throw new Error("Only sales invoices can be issued");
     if (doc.invoiceStatus === "issued" && doc.number) return doc;
 
+    const requestedNumber = doc.requestedInvoiceNumber?.trim().toUpperCase() || "";
+
     const draft: SalesDoc = {
       ...doc,
       number: "",
@@ -612,10 +618,14 @@ export const salesStore = {
       throw new Error("تعذر حفظ مسودة الفاتورة في Supabase قبل الإصدار");
     }
 
-    const { data, error } = await (supabase.rpc as any)("issue_sales_document_invoice", {
-      p_source_id: cloudDraft.id,
-      p_issue_date: doc.date,
-    });
+    const { data, error } = await (supabase.rpc as any)(
+      requestedNumber ? "issue_sales_document_invoice_with_number" : "issue_sales_document_invoice",
+      {
+        p_source_id: cloudDraft.id,
+        p_issue_date: doc.date,
+        ...(requestedNumber ? { p_requested_number: requestedNumber } : {}),
+      },
+    );
     if (error) throw error;
     const issueResult = Array.isArray(data) ? data[0] : data;
     const issuedNumber = issueResult?.invoice_number;
@@ -771,6 +781,7 @@ export const salesStore = {
       ...src,
       id: cryptoRandom(),
       number: src.type === "invoice" ? "" : salesStore.nextNumber(src.type),
+      requestedInvoiceNumber: undefined,
       status: "draft",
       invoiceStatus: src.type === "invoice" ? "draft" : src.invoiceStatus,
       issuedAt: src.type === "invoice" ? undefined : src.issuedAt,

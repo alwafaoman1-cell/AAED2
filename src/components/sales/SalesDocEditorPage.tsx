@@ -304,6 +304,17 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       );
       return;
     }
+    const requestedNumber = doc.requestedInvoiceNumber?.trim().toUpperCase() || "";
+    if (type === "invoice" && requestedNumber) {
+      const year = doc.date.slice(0, 4);
+      if (!/^INV-\d{2}-\d{6,}$/.test(requestedNumber) ||
+          requestedNumber.split("-")[1] !== year.slice(-2)) {
+        toast.error(isAr
+          ? "اكتب رقمًا مثل INV-26-000024 يطابق سنة تاريخ الفاتورة."
+          : "Use a number such as INV-26-000024 matching the invoice date year.");
+        return;
+      }
+    }
     if (!doc.customerName.trim()) {
       toast.error(isAr ? "اكتب اسم العميل" : "Customer name required");
       return;
@@ -322,6 +333,8 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
     const prepared: SalesDoc = {
       ...doc,
       number: trimmedNumber,
+      documentReference: doc.documentReference?.trim() || undefined,
+      requestedInvoiceNumber: requestedNumber || undefined,
       items: validItems,
       activity: numberChanged
         ? [
@@ -359,7 +372,22 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       );
       navigate(detailRoute(saved.id));
     } catch (error: any) {
-      toast.error(error?.message || (isAr ? "تعذر حفظ الفاتورة" : "Invoice save failed"));
+      const message = String(error?.message || "");
+      const manualNumberErrors: Record<string, [string, string]> = {
+        MANUAL_INVOICE_NUMBER_ALREADY_USED: ["رقم الفاتورة مستخدم مسبقًا في النظام.", "This invoice number has already been used."],
+        MANUAL_NUMBER_NOT_AN_EARLIER_GAP: ["هذا الرقم ليس فراغًا سابقًا في التسلسل الحالي.", "This number is not an earlier gap in the current sequence."],
+        MANUAL_NUMBER_YEAR_OR_FORMAT_INVALID: ["الرقم لا يطابق سنة الفاتورة أو صيغتها.", "The number does not match the invoice year or format."],
+        MANUAL_NUMBER_REQUIRES_UNNUMBERED_DRAFT: ["يمكن اختيار رقم يدوي لفاتورة جديدة غير صادرة فقط.", "A manual number is available only for a new unissued invoice."],
+        MANUAL_INVOICE_NUMBER_PERMISSION_DENIED: ["اختيار رقم يدوي متاح للمدير فقط.", "Only a manager can select a manual number."],
+      };
+      const knownError = Object.entries(manualNumberErrors).find(([code]) => message.includes(code));
+      const unavailable = type === "invoice" && !!requestedNumber &&
+        (error?.code === "PGRST202" || message.includes("issue_sales_document_invoice_with_number"));
+      toast.error(knownError
+        ? knownError[1][isAr ? 0 : 1]
+        : unavailable
+          ? (isAr ? "ميزة الرقم اليدوي غير مفعّلة بعد في قاعدة البيانات؛ لم تُصدر الفاتورة." : "Manual numbering is not active in the database; the invoice was not issued.")
+          : message || (isAr ? "تعذر حفظ الفاتورة" : "Invoice save failed"));
     } finally {
       setSavingMode(null);
     }
@@ -415,20 +443,44 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       {/* ===== Customer & dates ===== */}
       <div className="rounded-lg border bg-card p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
-          <Label>{isAr ? "رقم الفاتورة" : "Invoice number"} *</Label>
+          <Label>{isAr ? "رقم الفاتورة" : "Invoice number"}{type === "invoice" ? "" : " *"}</Label>
           <Input
-            value={doc.number}
-            onChange={(e) => setDoc({ ...doc, number: e.target.value })}
-            readOnly={type === "invoice" && (doc.invoiceStatus !== "issued" || /^INV-(?:\d{2}|\d{4})-\d{6,}$/.test(doc.number))}
-            placeholder={type === "invoice" ? (isAr ? "يُخصص تلقائيًا عند الإصدار" : "Allocated automatically on issue") : "00001"}
+            value={type === "invoice" && doc.invoiceStatus !== "issued" ? (doc.requestedInvoiceNumber || "") : doc.number}
+            onChange={(e) => type === "invoice"
+              ? setDoc((current) => ({ ...current, requestedInvoiceNumber: e.target.value }))
+              : setDoc((current) => ({ ...current, number: e.target.value }))}
+            readOnly={type === "invoice" && doc.invoiceStatus === "issued"}
+            placeholder={type === "invoice" ? (isAr ? "اتركه فارغًا للترقيم التلقائي" : "Leave blank for automatic numbering") : "00001"}
             className="font-mono"
           />
           {type === "invoice" && doc.invoiceStatus !== "issued" && (
             <p className="mt-1 text-[11px] text-muted-foreground">
-              {isAr ? "المسودة لا تستهلك رقم فاتورة رسميًا." : "A draft does not consume an official invoice number."}
+              {isAr
+                ? "اختياري: رقم قديم غير مستخدم من نفس السنة وأقل من الرقم التالي. يُفحص ويُحجز عند الإصدار فقط؛ المسودة لا تستهلك رقمًا."
+                : "Optional: an unused earlier number from the same year. It is checked and reserved only when issued; drafts do not consume a number."}
             </p>
           )}
         </div>
+        {type === "invoice" && (
+          <div>
+            <Label htmlFor="sales-invoice-reference">
+              {isAr ? "مرجع إضافي غير رسمي (اختياري)" : "Additional non-official reference (optional)"}
+            </Label>
+            <Input
+              id="sales-invoice-reference"
+              value={doc.documentReference || ""}
+              onChange={(event) => setDoc((current) => ({ ...current, documentReference: event.target.value }))}
+              maxLength={160}
+              dir="ltr"
+              placeholder="PO-2026-001"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {isAr
+                ? "يظهر كمرجع منفصل في الفاتورة المطبوعة؛ لا يستبدل رقم الفاتورة الرسمي ولا يغيّر تسلسله."
+                : "Printed as a separate reference; it does not replace or advance the official invoice number."}
+            </p>
+          </div>
+        )}
         <div>
           <Label>{isAr ? "العميل" : "Customer"} *</Label>
           <CustomerAutocomplete
