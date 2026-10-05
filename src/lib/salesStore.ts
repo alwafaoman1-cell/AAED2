@@ -79,6 +79,7 @@ export interface SalesDoc {
   issuedAt?: string;
   customerId?: string;
   customerName: string;
+  customerPhone?: string;
   customerAddress?: string;
   customerTaxNo?: string;
   date: string;                      // ISO
@@ -190,6 +191,7 @@ function rowToSalesDoc(r: any): SalesDoc {
     issuedAt: r.issued_at || undefined,
     customerId: r.customer_id || undefined,
     customerName: r.customer_name || "",
+    customerPhone: r.customer_phone || undefined,
     customerAddress: m.customerAddress,
     customerTaxNo: m.customerTaxNo,
     date: r.date,
@@ -358,6 +360,7 @@ async function upsertSalesCloud(doc: SalesDoc) {
     issued_at: doc.issuedAt || null,
     customer_id: doc.customerId && isUuid(doc.customerId) ? doc.customerId : null,
     customer_name: doc.customerName || null,
+    customer_phone: doc.customerPhone || null,
     date: doc.date,
     due_date: doc.dueDate || null,
     items: doc.items,
@@ -599,6 +602,80 @@ export const salesStore = {
     const saved = cloud || draft;
     write([saved, ...read().filter((item) => item.id !== saved.id && item.id !== draft.id)]);
     return saved;
+  },
+  async reviseIssuedInvoice(doc: SalesDoc, reason: string): Promise<SalesDoc> {
+    if (doc.type !== "invoice" || doc.invoiceStatus !== "issued" || !isUuid(doc.id) || !doc.updatedAt) {
+      throw new Error("INVOICE_REVISION_NOT_ISSUED_CASH");
+    }
+    if (reason.trim().length < 4) throw new Error("INVOICE_REVISION_INPUT_REQUIRED");
+
+    // The database recalculates totals, checks receipts and accounting links,
+    // preserves the official number, and writes the revision in one transaction.
+    const { data, error } = await (supabase.rpc as any)("revise_issued_cash_invoice", {
+      p_source_id: doc.id,
+      p_expected_updated_at: doc.updatedAt,
+      p_reason: reason.trim(),
+      p_changes: {
+        customer_id: doc.customerId && isUuid(doc.customerId) ? doc.customerId : null,
+        customer_name: doc.customerName.trim(),
+        customer_phone: doc.customerPhone || null,
+        date: doc.date,
+        due_date: doc.dueDate || null,
+        items: doc.items,
+        notes: doc.notes || null,
+        vehicle_plate: doc.vehicle?.plate || null,
+        vehicle_make: doc.vehicle?.make || null,
+        vehicle_model: doc.vehicle?.model || null,
+        metadata: {
+          customerAddress: doc.customerAddress || null,
+          customerTaxNo: doc.customerTaxNo || null,
+          currency: doc.currency,
+          terms: doc.terms || null,
+          documentReference: doc.documentReference || null,
+          vehicle: doc.vehicle || null,
+          customField: doc.customField || [],
+          paymentTerms: doc.paymentTerms || null,
+          headerLines: doc.headerLines || [],
+        },
+      },
+    });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || row.id !== doc.id || row.doc_number !== doc.number || row.invoice_status !== "issued") {
+      throw new Error("INVOICE_REVISION_CONFIRMATION_FAILED");
+    }
+
+    // The RPC response is authoritative even if the follow-up read briefly
+    // fails; never claim the write failed after the transaction committed.
+    const rpcDoc = rowToSalesDoc(row);
+    const knownPayments = roundMoney(doc.payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+    let revised = Math.abs(knownPayments - rpcDoc.paidTotal) < 0.001
+      ? { ...rpcDoc, payments: doc.payments }
+      : rpcDoc;
+    try {
+      revised = (await refreshSalesDocumentFromCloud(doc.id)) || revised;
+    } catch (refreshError) {
+      console.warn("[salesStore] revised invoice refresh delayed", refreshError);
+    }
+    write([revised, ...read().filter((item) => item.id !== doc.id)]);
+    try {
+      const { postSalesInvoice } = await import("./salesAccounting");
+      postSalesInvoice({
+        invoiceId: revised.id,
+        invoiceNumber: revised.number,
+        date: revised.date,
+        customerName: revised.customerName,
+        subtotal: Number(revised.subtotal || 0),
+        vat: Number(revised.taxTotal || 0),
+        total: Number(revised.total || 0),
+        source: "sales_invoice",
+      });
+    } catch (journalError) {
+      // The cloud correction already committed. A legacy local journal refresh
+      // must never turn that success into a misleading save failure.
+      console.warn("[salesStore] local invoice journal refresh delayed", journalError);
+    }
+    return revised;
   },
   async issueInvoice(doc: SalesDoc): Promise<SalesDoc> {
     if (doc.type !== "invoice") throw new Error("Only sales invoices can be issued");

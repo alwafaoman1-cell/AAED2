@@ -40,6 +40,7 @@ import { getCashInvoiceInsuranceStyleHtml } from "@/lib/pdfGenerator";
 import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
 import UnifiedSendButton from "@/components/UnifiedSendButton";
 import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 interface Props {
   type: SalesDocType;
@@ -65,6 +66,11 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   const [showPdf, setShowPdf] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string>("");
   const [printLayout, setPrintLayout] = useState<"cash" | "insurance_style">("cash");
+  const [activeTab, setActiveTab] = useState("details");
+  const [invoiceRevisions, setInvoiceRevisions] = useState<{
+    documentId: string;
+    rows: Array<{ revision_number: number; reason: string; revised_at: string }>;
+  }>({ documentId: "", rows: [] });
   const [confirmCfg, setConfirmCfg] = useState<{
     title: string; description: string; onConfirm: () => void;
   } | null>(null);
@@ -76,6 +82,23 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   }, []);
 
   const doc = useMemo(() => salesStore.get(id), [id, tick]);
+
+  useEffect(() => {
+    if (activeTab !== "activity" || type !== "invoice" || !id) return;
+    let cancelled = false;
+    void (async () => {
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) return;
+      const { data, error } = await (supabase.from as any)("sales_invoice_revisions")
+        .select("revision_number,reason,revised_at")
+        .eq("tenant_id", tenantId)
+        .eq("sales_document_id", id)
+        .order("revision_number", { ascending: false })
+        .limit(30);
+      if (!cancelled && !error) setInvoiceRevisions({ documentId: id, rows: data || [] });
+    })().catch((error) => console.warn("[SalesDocDetail] correction history unavailable", error));
+    return () => { cancelled = true; };
+  }, [activeTab, id, type]);
 
   async function doDelete() {
     try {
@@ -263,8 +286,9 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
     ? doc.invoiceStatus === "issued" || doc.invoiceStatus === "credited" || !!doc.issuedAt
     : doc.status !== "draft");
   const blockIssuedEdit = () => toast.error(isAr
-    ? "لا يمكن تعديل الفاتورة الصادرة أو رقمها الرسمي. راجع الدفعات ثم أصدر إشعارًا دائنًا وفاتورة بديلة مع ربطهما محاسبيًا."
-    : "An issued invoice and its official number cannot be edited. Review payments, then issue a linked credit note and replacement invoice.");
+    ? "لا يمكن تعديل مستند أُغلق أو أُصدر له إشعار دائن من هذه الصفحة."
+    : "A closed or credited document cannot be edited from this page.");
+  const canCorrectIssuedCashInvoice = type === "invoice" && doc.invoiceStatus === "issued";
 
   return (
     <div className="space-y-3" dir={isRtl ? "rtl" : "ltr"}>
@@ -340,7 +364,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
       {/* Toolbar (دفترة style) */}
       <div className="rounded-lg border bg-card p-2 flex flex-wrap items-center gap-1 text-sm">
-        <ToolbarBtn icon={<Edit className="h-4 w-4" />} label={isAr ? "تعديل" : "Edit"} onClick={() => isLockedIssuedDocument ? blockIssuedEdit() : navigate(editRoute(doc.id))} />
+        <ToolbarBtn icon={<Edit className="h-4 w-4" />} label={isAr ? "تعديل" : "Edit"} onClick={() => isLockedIssuedDocument && !canCorrectIssuedCashInvoice ? blockIssuedEdit() : navigate(editRoute(doc.id))} />
         <ToolbarBtn icon={<Printer className="h-4 w-4" />} label={isAr ? "طباعة" : "Print"} onClick={buildAndShowPdf} />
         <ToolbarBtn icon={<FileText className="h-4 w-4" />} label="PDF" onClick={buildAndShowPdf} />
 
@@ -445,7 +469,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
       </div>
 
       {/* Tabs: details / activity */}
-      <Tabs defaultValue="details">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="details">{isAr ? "التفاصيل" : "Details"}</TabsTrigger>
           <TabsTrigger value="activity">{isAr ? "سجل النشاطات" : "Activity"}</TabsTrigger>
@@ -538,6 +562,12 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 
         <TabsContent value="activity" className="mt-3">
           <div className="rounded-lg border bg-card divide-y">
+            {(invoiceRevisions.documentId === id ? invoiceRevisions.rows : []).map((revision) => (
+              <div key={`invoice-revision-${revision.revision_number}`} className="p-3 text-sm flex justify-between gap-3">
+                <span>{isAr ? `تصحيح الفاتورة #${revision.revision_number}: ${revision.reason}` : `Invoice correction #${revision.revision_number}: ${revision.reason}`}</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{new Date(revision.revised_at).toLocaleString(isAr ? "ar-OM" : "en-GB")}</span>
+              </div>
+            ))}
             {doc.activity.slice().reverse().map((a) => (
               <div key={a.id} className="p-3 text-sm flex justify-between">
                 <span>{a.text}</span>

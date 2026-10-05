@@ -105,19 +105,37 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   const [pickerOpen, setPickerOpen] = useState(false);
   const [vehiclePickerOpen, setVehiclePickerOpen] = useState(false);
   const [savingMode, setSavingMode] = useState<"draft" | "issue" | null>(null);
+  const [loadingExisting, setLoadingExisting] = useState(!!id);
+  const [loadError, setLoadError] = useState(false);
+  const [revisionReason, setRevisionReason] = useState("");
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void salesStore.refreshOne(id).then((fresh) => {
+      if (cancelled) return;
+      if (!fresh) { setLoadError(true); return; }
+      setDoc({ ...fresh, items: fresh.items?.length ? fresh.items : [emptyItem()] });
+      setLoadError(false);
+    }).catch(() => {
+      if (!cancelled) setLoadError(true);
+    }).finally(() => {
+      if (!cancelled) setLoadingExisting(false);
+    });
+    return () => { cancelled = true; };
+  }, [id]);
 
   useEffect(() => {
     const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
-    const issuedInvoice = type === "invoice" && (
-      doc.invoiceStatus === "issued" || doc.invoiceStatus === "credited" || !!doc.issuedAt
-    );
-    if (id && isFinancialDocument && (issuedInvoice || (type !== "invoice" && doc.status !== "draft"))) {
+    const lockedInvoice = type === "invoice" && doc.invoiceStatus === "credited";
+    if (id && !loadingExisting && isFinancialDocument &&
+        (lockedInvoice || (type !== "invoice" && doc.status !== "draft"))) {
       toast.error(isAr
-        ? "لا يمكن تعديل فاتورة صادرة. يلزم إشعار دائن وفاتورة بديلة بعد مراجعة الدفعات."
-        : "An issued invoice cannot be edited. Review payments, then use a credit note and replacement invoice.");
+        ? "لا يمكن تعديل فاتورة أُصدر لها إشعار دائن. استخدم مسار تصحيح مستقل."
+        : "A credited invoice cannot be edited. Use a separate correction workflow.");
       navigate(detailRoute(doc.id), { replace: true });
     }
-  }, [id, type, doc.id, doc.status, doc.invoiceStatus, doc.issuedAt, isAr, navigate, detailRoute]);
+  }, [id, type, doc.id, doc.status, doc.invoiceStatus, loadingExisting, isAr, navigate, detailRoute]);
 
   // ===== Tax toggle (per invoice) =====
   const taxSettings = getTemplateSettings();
@@ -217,6 +235,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
     setDoc((d) => ({
       ...d,
       customerName: v.owner || d.customerName,
+      customerId: v.owner && v.owner !== d.customerName ? undefined : d.customerId,
       vehicle: {
         plate: v.plate || "",
         make: (v.type || "").split(" ")[0] || v.type || "",
@@ -279,15 +298,16 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   }
 
   async function save(mode: "draft" | "issue" = "draft") {
-    const existing = id ? salesStore.get(doc.id) : undefined;
-    if (type === "invoice" && existing && (
-      existing.invoiceStatus === "issued"
-      || existing.invoiceStatus === "credited"
-      || !!existing.issuedAt
-    )) {
+    if (loadingExisting || loadError) return;
+    if (type === "invoice" && doc.invoiceStatus === "credited") {
       toast.error(isAr
-        ? "الفاتورة الصادرة ورقمها الرسمي لا يُعدّلان من هذا النموذج. يلزم تصحيح رسمي بإشعار دائن وفاتورة جديدة مع مراجعة الدفعات المرتبطة."
-        : "An issued invoice and its official number cannot be edited here. Use a linked credit note and replacement invoice after reviewing linked payments.");
+        ? "لا يمكن تعديل فاتورة أُصدر لها إشعار دائن."
+        : "A credited invoice cannot be edited.");
+      return;
+    }
+    const revisingIssued = type === "invoice" && doc.invoiceStatus === "issued";
+    if (revisingIssued && revisionReason.trim().length < 4) {
+      toast.error(isAr ? "اكتب سبب التعديل (4 أحرف على الأقل)." : "Enter a correction reason (at least 4 characters).");
       return;
     }
     const trimmedNumber = doc.number.trim();
@@ -295,7 +315,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       toast.error(isAr ? "أدخل رقم الفاتورة" : "Invoice number is required");
       return;
     }
-    const duplicate = trimmedNumber ? findDuplicateNumber(trimmedNumber) : undefined;
+    const duplicate = !revisingIssued && trimmedNumber ? findDuplicateNumber(trimmedNumber) : undefined;
     if (duplicate) {
       toast.error(
         isAr
@@ -305,7 +325,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
       return;
     }
     const requestedNumber = doc.requestedInvoiceNumber?.trim().toUpperCase() || "";
-    if (type === "invoice" && requestedNumber) {
+    if (type === "invoice" && !revisingIssued && requestedNumber) {
       const year = doc.date.slice(0, 4);
       if (!/^INV-\d{2}-\d{6,}$/.test(requestedNumber) ||
           requestedNumber.split("-")[1] !== year.slice(-2)) {
@@ -350,19 +370,24 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
 
     setSavingMode(mode);
     try {
-      customersStore.getOrCreateByName(doc.customerName);
       let saved: SalesDoc;
-      if (type === "invoice" && prepared.invoiceStatus !== "issued") {
+      if (revisingIssued) {
+        saved = await salesStore.reviseIssuedInvoice(prepared, revisionReason);
+      } else if (type === "invoice" && prepared.invoiceStatus !== "issued") {
+        customersStore.getOrCreateByName(doc.customerName);
         saved = mode === "issue"
           ? await salesStore.issueInvoice(prepared)
           : await salesStore.saveDraft(prepared);
       } else {
+        customersStore.getOrCreateByName(doc.customerName);
         // Wait for Supabase before reporting success; optimistic upsert can
         // otherwise claim a document was saved after its cloud write failed.
         saved = await salesStore.saveDraft(prepared);
       }
       toast.success(
-        type === "invoice" && mode === "issue"
+        revisingIssued
+          ? (isAr ? `حُفظ تعديل الفاتورة ${saved.number} مع سجل التصحيح` : `Invoice ${saved.number} corrected with an audit record`)
+          : type === "invoice" && mode === "issue"
           ? saved.invoiceStatus === "issued"
             ? (isAr ? `تم إصدار الفاتورة ${saved.number}` : `Invoice issued: ${saved.number}`)
             : (isAr ? `فاتورة تاريخية محفوظة برقمها الأصلي ${saved.number}` : `Historical invoice retained: ${saved.number}`)
@@ -379,14 +404,28 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
         MANUAL_NUMBER_YEAR_OR_FORMAT_INVALID: ["الرقم لا يطابق سنة الفاتورة أو صيغتها.", "The number does not match the invoice year or format."],
         MANUAL_NUMBER_REQUIRES_UNNUMBERED_DRAFT: ["يمكن اختيار رقم يدوي لفاتورة جديدة غير صادرة فقط.", "A manual number is available only for a new unissued invoice."],
         MANUAL_INVOICE_NUMBER_PERMISSION_DENIED: ["اختيار رقم يدوي متاح للمدير فقط.", "Only a manager can select a manual number."],
+        INVOICE_REVISION_ACCOUNTING_POSTED: ["الفاتورة مرتبطة بقيد محاسبي؛ لا يمكن تعديلها مباشرة. يلزم تصحيح محاسبي رسمي.", "This invoice has an accounting entry; use a formal accounting correction."],
+        INVOICE_REVISION_PERMISSION_DENIED: ["تعديل الفاتورة الصادرة متاح للمدير فقط.", "Only a manager can correct an issued invoice."],
+        INVOICE_REVISION_CUSTOMER_NOT_FOUND: ["العميل المختار غير موجود في المؤسسة الحالية. أعد اختياره.", "The selected customer is not in this tenant. Select a valid customer."],
+        INVOICE_REVISION_INVALID_ITEM: ["أحد بنود الفاتورة غير صالح. راجع الوصف والكمية والسعر والضريبة.", "An invoice line is invalid. Check its description, quantity, price and tax."],
+        INVOICE_REVISION_BELOW_PAID: ["الإجمالي الجديد أقل من الدفعات المسجلة. راجع الدفعات أولًا.", "The new total is below recorded payments. Review payments first."],
+        INVOICE_REVISION_STALE: ["تغيرت الفاتورة أثناء التعديل. أعد فتحها ثم راجع البيانات الجديدة.", "The invoice changed while you edited it. Reopen and review it."],
+        INVOICE_REVISION_PERIOD_CLOSED: ["الفترة المحاسبية مغلقة؛ لا يمكن تغيير تاريخ الفاتورة أو بنودها المالية مباشرة.", "This accounting period is closed; the invoice date or financial lines cannot be changed directly."],
+        INVOICE_REVISION_NOT_ISSUED_CASH: ["هذه الفاتورة غير مؤهلة للتعديل المباشر؛ قد تكون مؤرشفة أو لها نسخة نهائية معتمدة.", "This invoice cannot be directly corrected; it may be archived or have a final snapshot."],
+        INVOICE_REVISION_NUMBER_YEAR_MISMATCH: ["تاريخ التعديل يجب أن يبقى ضمن سنة رقم الفاتورة الرسمي.", "The corrected date must remain in the invoice number's year."],
+        INVOICE_REVISION_CURRENCY_IMMUTABLE: ["لا يمكن تغيير عملة الفاتورة بعد إصدارها.", "The invoice currency cannot be changed after issue."],
+        INVOICE_REVISION_NO_CHANGES: ["لا توجد تغييرات لحفظها.", "There are no changes to save."],
+        ISSUED_CASH_INVOICE_REVISION_REQUIRED: ["يلزم حفظ التعديل من مسار التصحيح المعتمد.", "Use the approved invoice correction flow."],
       };
       const knownError = Object.entries(manualNumberErrors).find(([code]) => message.includes(code));
-      const unavailable = type === "invoice" && !!requestedNumber &&
-        (error?.code === "PGRST202" || message.includes("issue_sales_document_invoice_with_number"));
+      const unavailable = type === "invoice" &&
+        ((!!requestedNumber && !revisingIssued &&
+          (error?.code === "PGRST202" || message.includes("issue_sales_document_invoice_with_number"))) ||
+          (revisingIssued && (error?.code === "PGRST202" || message.includes("revise_issued_cash_invoice"))));
       toast.error(knownError
         ? knownError[1][isAr ? 0 : 1]
         : unavailable
-          ? (isAr ? "ميزة الرقم اليدوي غير مفعّلة بعد في قاعدة البيانات؛ لم تُصدر الفاتورة." : "Manual numbering is not active in the database; the invoice was not issued.")
+          ? (isAr ? "مسار التعديل غير مفعّل بعد في قاعدة البيانات؛ لم تُحفظ التغييرات." : "The correction flow is not active in the database; changes were not saved.")
           : message || (isAr ? "تعذر حفظ الفاتورة" : "Invoice save failed"));
     } finally {
       setSavingMode(null);
@@ -395,6 +434,15 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
 
   const docTypeForTemplate = type === "quote" ? "quote" : "tax_invoice";
   const totals = useMemo(() => calculateTotals(doc.items), [doc.items]);
+  const revisingIssued = type === "invoice" && doc.invoiceStatus === "issued";
+
+  if (loadingExisting || loadError) {
+    return <div className="py-12 text-center text-sm text-muted-foreground">
+      {loadingExisting
+        ? (isAr ? "جارٍ تحميل الفاتورة..." : "Loading invoice...")
+        : (isAr ? "تعذر تحميل الفاتورة من Supabase. ارجع وحاول مرة أخرى." : "Could not load the invoice from Supabase. Go back and retry.")}
+    </div>;
+  }
 
   return (
     <div className="space-y-4 max-w-6xl mx-auto" dir={isRtl ? "rtl" : "ltr"}>
@@ -423,7 +471,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
             </ShadLabel>
           </div>
           <TemplatePicker docType={docTypeForTemplate as any} size="sm" />
-          {type === "invoice" && doc.invoiceStatus !== "issued" ? (
+          {type === "invoice" && !revisingIssued ? (
             <>
               <Button variant="outline" onClick={() => void save("draft")} disabled={savingMode !== null} className="gap-2">
                 <Save className="h-4 w-4" /> {isAr ? "حفظ مسودة" : "Save Draft"}
@@ -434,11 +482,27 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
             </>
           ) : (
             <Button onClick={() => void save("draft")} disabled={savingMode !== null} className="gap-2">
-              <Save className="h-4 w-4" /> {isAr ? "حفظ" : "Save"}
+              <Save className="h-4 w-4" /> {revisingIssued
+                ? (isAr ? "حفظ تعديل الفاتورة" : "Save invoice correction")
+                : (isAr ? "حفظ" : "Save")}
             </Button>
           )}
         </div>
       </div>
+
+      {revisingIssued && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-4 text-sm dark:bg-amber-950/20">
+          <p className="mb-3">
+            {isAr
+              ? "يمكن تعديل بيانات ومبالغ فاتورة الكاش الصادرة مع حفظ نسخة تدقيق. رقم الفاتورة الرسمي ووقت إصدارها الأصلي لا يتغيران. لا يُقبل التعديل إذا وُجد قيد محاسبي مرتبط أو أصبح الإجمالي أقل من الدفعات."
+              : "You can correct an issued cash invoice with an audit snapshot. Its official number and original issue timestamp remain unchanged. A linked accounting entry or a total below recorded payments blocks the correction."}
+          </p>
+          <Label htmlFor="issued-invoice-revision-reason">{isAr ? "سبب التعديل *" : "Correction reason *"}</Label>
+          <Textarea id="issued-invoice-revision-reason" value={revisionReason}
+            onChange={(event) => setRevisionReason(event.target.value)} maxLength={500}
+            placeholder={isAr ? "اكتب سببًا واضحًا للتعديل" : "Explain why this invoice is being corrected"} />
+        </div>
+      )}
 
       {/* ===== Customer & dates ===== */}
       <div className="rounded-lg border bg-card p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -485,15 +549,29 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
           <Label>{isAr ? "العميل" : "Customer"} *</Label>
           <CustomerAutocomplete
             value={doc.customerName}
-            onChange={(name) => setDoc({ ...doc, customerName: name })}
+            onChange={(name) => setDoc((current) => ({
+              ...current,
+              customerName: name,
+              customerId: name === current.customerName ? current.customerId : undefined,
+            }))}
             onSelect={(c) =>
-              setDoc({
-                ...doc,
+              setDoc((current) => ({
+                ...current,
+                customerId: c.id,
                 customerName: c.name,
-                customerAddress: c.address || doc.customerAddress,
-                customerTaxNo: (c as any).idNumber || doc.customerTaxNo,
-              })
+                customerPhone: c.phone || current.customerPhone,
+                customerAddress: c.address || current.customerAddress,
+                customerTaxNo: (c as any).idNumber || current.customerTaxNo,
+              }))
             }
+          />
+        </div>
+        <div>
+          <Label>{isAr ? "هاتف العميل" : "Customer phone"}</Label>
+          <Input
+            dir="ltr"
+            value={doc.customerPhone || ""}
+            onChange={(event) => setDoc((current) => ({ ...current, customerPhone: event.target.value }))}
           />
         </div>
         <div>
@@ -571,16 +649,18 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
             {isAr ? "بيانات السيارة" : "Vehicle Information"}
           </h3>
           <div className="flex gap-2 flex-wrap">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setPickerOpen(true)}
-              className="gap-1.5 text-xs"
-            >
-              <ClipboardList className="h-3.5 w-3.5" />
-              {isAr ? "من أمر عمل" : "From Work Order"}
-            </Button>
+            {!revisingIssued && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setPickerOpen(true)}
+                className="gap-1.5 text-xs"
+              >
+                <ClipboardList className="h-3.5 w-3.5" />
+                {isAr ? "من أمر عمل" : "From Work Order"}
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"

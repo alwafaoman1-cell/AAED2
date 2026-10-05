@@ -488,6 +488,7 @@ const CURATED_AR_TO_EN: Record<string, string> = {
   "حساب دائن": "Credit Account",
   "حساب مدين": "Debit Account",
   "حفظ": "Save",
+  "حفظ تعديل الفاتورة": "Save Invoice Correction",
   "حفظ الإعدادات": "Save Settings",
   "حفظ التغييرات": "Save Changes",
   "حفظ الدفعة": "Save Payment",
