@@ -139,13 +139,18 @@ const subscribers = new Set<() => void>();
 let cloudRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let cloudRefreshInFlight: Promise<void> | null = null;
 let lastCloudRefreshFailureAt = 0;
+let salesSessionGeneration = 0;
+let salesSessionUserId: string | null = null;
+let salesCacheWriteGeneration = 0;
 const CLOUD_REFRESH_FAILURE_COOLDOWN_MS = 15_000;
+const SALES_SYNC_PAGE_SIZE = 100;
 
 function read(): SalesDoc[] {
   return cache;
 }
 
 function write(next: SalesDoc[]) {
+  salesCacheWriteGeneration += 1;
   cache = next;
   subscribers.forEach((cb) => cb());
 }
@@ -244,66 +249,88 @@ async function refreshSalesFromCloud() {
   if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) return;
   if (cloudRefreshInFlight) return cloudRefreshInFlight;
 
-  cloudRefreshInFlight = (async () => {
-  const tenantId = await getCurrentTenantId();
-  if (!tenantId) return;
-  const { data, error } = await (supabase.from("sales_documents") as any)
-    .select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
-  if (error) {
-    lastCloudRefreshFailureAt = Date.now();
-    console.warn("[salesStore] cloud fetch failed", error);
-    return;
-  }
-  const documentRows = data || [];
-  const documentIds = documentRows.map((row: any) => row.id).filter(Boolean);
-  let paymentsByDocument = new Map<string, SalesPayment[]>();
-  if (documentIds.length > 0) {
-    const { data: paymentsData, error: paymentsError } = await (supabase.from("sales_payments") as any)
-      .select("id,sales_document_id,date,amount,method,reference,notes")
-      .eq("tenant_id", tenantId)
-      .in("sales_document_id", documentIds)
-      .order("date", { ascending: false });
-    if (paymentsError) {
-      console.warn("[salesStore] sales payments cloud fetch failed", paymentsError);
-    } else {
-      paymentsByDocument = (paymentsData || []).reduce((map: Map<string, SalesPayment[]>, row: any) => {
-        const current = map.get(row.sales_document_id) || [];
-        current.push({
-          id: row.id,
-          date: row.date,
-          amount: Number(row.amount || 0),
-          method: row.method || "cash",
-          reference: row.reference || undefined,
-          note: row.notes || undefined,
-        });
-        map.set(row.sales_document_id, current);
-        return map;
-      }, paymentsByDocument);
+  const request = (async () => {
+    const generation = salesSessionGeneration;
+    const writeGeneration = salesCacheWriteGeneration;
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId || generation !== salesSessionGeneration) return;
+    const nextDocs: SalesDoc[] = [];
+    try {
+      for (let offset = 0; ; offset += SALES_SYNC_PAGE_SIZE) {
+        const { data, error } = await (supabase.from("sales_documents") as any)
+          .select("*").eq("tenant_id", tenantId)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(offset, offset + SALES_SYNC_PAGE_SIZE - 1);
+        if (error) throw error;
+        if (generation !== salesSessionGeneration) return;
+        const rows: any[] = data || [];
+        const ids = rows.map((row) => row.id).filter(Boolean);
+        const paymentsByDocument = new Map<string, SalesPayment[]>();
+        if (ids.length) {
+          for (let paymentOffset = 0; ; paymentOffset += 500) {
+            const { data: payments, error: paymentsError } = await (supabase.from("sales_payments") as any)
+              .select("id,sales_document_id,date,amount,method,reference,notes")
+              .eq("tenant_id", tenantId).in("sales_document_id", ids)
+              .order("date", { ascending: false })
+              .order("id", { ascending: false })
+              .range(paymentOffset, paymentOffset + 499);
+            // Do not replace authoritative payment state with an empty array
+            // on a failed or truncated read; paid invoices must stay paid.
+            if (paymentsError) throw paymentsError;
+            if (generation !== salesSessionGeneration) return;
+            for (const row of payments || []) {
+              const current = paymentsByDocument.get(row.sales_document_id) || [];
+              current.push({ id: row.id, date: row.date, amount: Number(row.amount || 0),
+                method: row.method || "cash", reference: row.reference || undefined,
+                note: row.notes || undefined });
+              paymentsByDocument.set(row.sales_document_id, current);
+            }
+            if ((payments || []).length < 500) break;
+          }
+        }
+        nextDocs.push(...rows.map((row) => {
+          const doc = rowToSalesDoc(row);
+          return applyAuthoritativeSalesPayments(doc, paymentsByDocument.get(doc.id) || []);
+        }));
+        if (rows.length < SALES_SYNC_PAGE_SIZE) break;
+        // Let user input render between bounded network batches.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      if (generation !== salesSessionGeneration) return;
+      if (writeGeneration !== salesCacheWriteGeneration) {
+        // A save or targeted refresh completed during this bulk read. Never
+        // overwrite it with an older snapshot; schedule a fresh reconciliation.
+        scheduleSalesRefresh(500);
+        return;
+      }
+      cache = nextDocs;
+      lastCloudRefreshFailureAt = 0;
+      notify();
+    } catch (error) {
+      if (generation === salesSessionGeneration) {
+        lastCloudRefreshFailureAt = Date.now();
+        console.warn("[salesStore] cloud fetch failed; previous cache retained", error);
+      }
     }
-  }
-  cache = documentRows.map((row: any) => {
-    const doc = rowToSalesDoc(row);
-    const cloudPayments = paymentsByDocument.get(doc.id);
-    return applyAuthoritativeSalesPayments(doc, cloudPayments || []);
-  });
-  lastCloudRefreshFailureAt = 0;
-  notify();
   })().finally(() => {
-    cloudRefreshInFlight = null;
+    if (cloudRefreshInFlight === request) cloudRefreshInFlight = null;
   });
-  return cloudRefreshInFlight;
+  cloudRefreshInFlight = request;
+  return request;
 }
 
 async function refreshSalesDocumentFromCloud(id: string): Promise<SalesDoc | null> {
+  const generation = salesSessionGeneration;
   const tenantId = await getCurrentTenantId();
-  if (!tenantId || !isUuid(id)) return null;
+  if (!tenantId || !isUuid(id) || generation !== salesSessionGeneration) return null;
   const { data: row, error } = await (supabase.from("sales_documents") as any)
     .select("*")
     .eq("tenant_id", tenantId)
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
-  if (!row) return null;
+  if (!row || generation !== salesSessionGeneration) return null;
 
   const { data: paymentRows, error: paymentsError } = await (supabase.from("sales_payments") as any)
     .select("id,date,amount,method,reference,notes")
@@ -311,6 +338,7 @@ async function refreshSalesDocumentFromCloud(id: string): Promise<SalesDoc | nul
     .eq("sales_document_id", id)
     .order("date", { ascending: false });
   if (paymentsError) throw paymentsError;
+  if (generation !== salesSessionGeneration) return null;
 
   const payments = (paymentRows || []).map((payment: any) => ({
     id: payment.id,
@@ -338,7 +366,7 @@ function scheduleSalesRefresh(delay = 250) {
 
 async function upsertSalesCloud(doc: SalesDoc) {
   const tenantId = await getCurrentTenantId();
-  if (!tenantId) return;
+  if (!tenantId) throw new Error("تعذّر تحديد المؤسسة؛ لم تُحفظ الفاتورة في السحابة");
   const fromDocId = doc.fromDocId || "";
   const workOrderCandidate = fromDocId.startsWith("WO-") ? fromDocId.slice(3) : "";
   const linkedWorkOrderId = isUuid(workOrderCandidate) ? workOrderCandidate : null;
@@ -415,8 +443,12 @@ async function upsertSalesCloud(doc: SalesDoc) {
     console.warn("[salesStore] cloud upsert failed", error);
     throw error;
   }
-  if (!data) return null;
-  if (isIssuedSalesInvoice) return refreshSalesDocumentFromCloud(data.id);
+  if (!data) throw new Error("لم تؤكد قاعدة البيانات حفظ الفاتورة");
+  if (isIssuedSalesInvoice) {
+    const refreshed = await refreshSalesDocumentFromCloud(data.id);
+    if (!refreshed) throw new Error("تعذّر تأكيد الفاتورة بعد حفظها؛ افحص القائمة قبل إعادة المحاولة");
+    return refreshed;
+  }
   return rowToSalesDoc(data);
 }
 
@@ -598,8 +630,7 @@ export const salesStore = {
     const draft: SalesDoc = doc.type === "invoice" && doc.invoiceStatus !== "issued"
       ? { ...doc, number: "", status: "draft", invoiceStatus: "draft", issuedAt: undefined }
       : doc;
-    const cloud = await upsertSalesCloud(draft);
-    const saved = cloud || draft;
+    const saved = await upsertSalesCloud(draft);
     write([saved, ...read().filter((item) => item.id !== saved.id && item.id !== draft.id)]);
     return saved;
   },
@@ -1031,15 +1062,29 @@ export const salesStore = {
 };
 
 if (typeof window !== "undefined") {
-  scheduleSalesRefresh(0);
   supabase.auth.onAuthStateChange((event, session) => {
+    const nextUserId = session?.user?.id ?? null;
+    if (nextUserId !== salesSessionUserId) {
+      salesSessionUserId = nextUserId;
+      salesSessionGeneration += 1;
+      cloudRefreshInFlight = null;
+      lastCloudRefreshFailureAt = 0;
+      if (cloudRefreshTimer) clearTimeout(cloudRefreshTimer);
+      cloudRefreshTimer = null;
+      cache = [];
+      notify();
+    }
     if (event === "SIGNED_OUT") {
+      salesSessionGeneration += 1;
+      cloudRefreshInFlight = null;
+      if (cloudRefreshTimer) clearTimeout(cloudRefreshTimer);
+      cloudRefreshTimer = null;
       cache = [];
       notify();
       return;
     }
-    if (event === "SIGNED_IN" && session?.user && cache.length === 0) {
-      scheduleSalesRefresh(500);
+    if ((event === "INITIAL_SESSION" || event === "SIGNED_IN") && session?.user && cache.length === 0) {
+      scheduleSalesRefresh(1500);
     }
   });
   // Realtime invalidation is centralized in useRealtimeSync. Avoid duplicate

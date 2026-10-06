@@ -46,10 +46,12 @@ interface CloudStoreOpts<T> {
 
 let cachedTenantId: string | null = null;
 let cachedTenantPromise: Promise<string | null> | null = null;
+let tenantCacheGeneration = 0;
 
 /** Seed tenant cache from AuthContext when the profile is already loaded. */
 export function setCachedTenantId(tenantId: string | null | undefined) {
   if (tenantId) {
+    tenantCacheGeneration += 1;
     cachedTenantId = tenantId;
     cachedTenantPromise = null;
     return;
@@ -61,8 +63,11 @@ export function setCachedTenantId(tenantId: string | null | undefined) {
 export async function getCurrentTenantId(): Promise<string | null> {
   if (cachedTenantId) return cachedTenantId;
   if (cachedTenantPromise) return cachedTenantPromise;
-  cachedTenantPromise = (async () => {
+  const generation = tenantCacheGeneration;
+  const isCurrent = () => generation === tenantCacheGeneration;
+  const request = (async () => {
     const { data: u } = await supabase.auth.getUser();
+    if (!isCurrent()) return null;
     const uid = u.user?.id;
     if (!uid) return null;
     const { data, error } = await supabase
@@ -70,12 +75,14 @@ export async function getCurrentTenantId(): Promise<string | null> {
       .select("tenant_id")
       .eq("user_id", uid)
       .maybeSingle();
+    if (!isCurrent()) return null;
     if (!error && data?.tenant_id) {
       cachedTenantId = data.tenant_id;
       return cachedTenantId;
     }
 
     const { data: rpcTenant } = await (supabase as any).rpc("get_user_tenant_id");
+    if (!isCurrent()) return null;
     if (rpcTenant) {
       cachedTenantId = rpcTenant;
       return cachedTenantId;
@@ -87,6 +94,7 @@ export async function getCurrentTenantId(): Promise<string | null> {
       .eq("user_id", uid)
       .limit(1)
       .maybeSingle();
+    if (!isCurrent()) return null;
     if ((roleTenant as any)?.tenant_id) {
       cachedTenantId = (roleTenant as any).tenant_id;
       return cachedTenantId;
@@ -94,13 +102,17 @@ export async function getCurrentTenantId(): Promise<string | null> {
 
     return null;
   })();
-  const r = await cachedTenantPromise;
-  cachedTenantPromise = null;
-  return r;
+  cachedTenantPromise = request;
+  try {
+    return await request;
+  } finally {
+    if (cachedTenantPromise === request) cachedTenantPromise = null;
+  }
 }
 
 /** Clear the cached tenant_id (call on sign-out). */
 export function clearTenantCache() {
+  tenantCacheGeneration += 1;
   cachedTenantId = null;
   cachedTenantPromise = null;
 }

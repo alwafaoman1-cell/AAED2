@@ -124,6 +124,11 @@ export const queryKeys = {
     byClaim: (claimId?: string | null) => ["claim_payments", "by_claim", claimId ?? ""] as const,
     byCompany: (companyId?: string | null) => ["claim_payments", "by_company", companyId ?? ""] as const,
   },
+  receipts: {
+    all: ["accounting_receipts_page"] as const,
+    list: (tenantId?: string | null, filters?: unknown) =>
+      ["accounting_receipts_page", tenantId ?? "", filters ?? ""] as const,
+  },
   claimActiveInvoice: (claimId?: string | null) => ["claim_active_invoice", claimId ?? ""] as const,
   claimMedia: {
     all: ["claim_media"] as const,

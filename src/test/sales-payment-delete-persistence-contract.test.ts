@@ -32,7 +32,8 @@ describe("sales payment deletion persistence contract", () => {
 
   it("never restores metadata-only ghost payments into the invoice cache", () => {
     expect(store).toContain("payments: []");
-    expect(store).toContain("applyAuthoritativeSalesPayments(doc, cloudPayments || [])");
+    expect(store).toContain("applyAuthoritativeSalesPayments(doc, paymentsByDocument.get(doc.id) || [])");
+    expect(store).toContain("if (paymentsError) throw paymentsError");
     expect(store).not.toContain("payments: doc.payments,");
   });
 

@@ -1,4 +1,4 @@
-import type { User } from "@supabase/supabase-js";
+import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
 export type AppRole = "admin" | "manager" | "supervisor" | "technician" | "insurance" | "accountant";
@@ -126,16 +126,20 @@ async function fetchProfileViaRest(uid: string, user: User | null, accessToken?:
   }
 }
 
-async function fetchProfileFromSupabase(uid: string): Promise<UserProfile | null> {
-  const sessionData = await withTimeout(supabase.auth.getSession(), 3_000, "auth session query timeout")
-    .then(({ data }) => data)
-    .catch(() => null);
-  const verifiedUser = await withTimeout(supabase.auth.getUser(), 5_000, "auth user verification timeout")
-    .then(({ data }) => data.user ?? null)
-    .catch(() => null);
+async function fetchProfileFromSupabase(uid: string, session: Session | null): Promise<UserProfile | null> {
+  // AuthContext already received this session from the SDK. Calling getSession
+  // again here used to duplicate bootstrap work before every profile read.
+  const sessionData = session ? { session } : await withTimeout(
+    supabase.auth.getSession(), 8_000, "auth session query timeout",
+  ).then(({ data }) => data);
+  const { data: verified, error: verificationError } = await withTimeout(
+    supabase.auth.getUser(), 8_000, "auth user verification timeout",
+  );
+  if (verificationError) throw verificationError;
+  const verifiedUser = verified.user ?? null;
   if (!verifiedUser || verifiedUser.id !== uid) {
-    console.warn("[auth] persisted session is not valid; clearing local session");
-    await (supabase.auth.signOut as any)({ scope: "local" }).catch(() => {});
+    // A profile reader must not log the user out: a slow/failed verification
+    // is not proof of an invalid session. Auth state changes own sign-out.
     return null;
   }
 
@@ -166,7 +170,7 @@ async function fetchProfileFromSupabase(uid: string): Promise<UserProfile | null
   return profileFromPartial(null, uid, sessionUser);
 }
 
-export async function getCachedAuthProfile(uid: string, options: { forceRefresh?: boolean } = {}): Promise<UserProfile | null> {
+export async function getCachedAuthProfile(uid: string, options: { forceRefresh?: boolean; session?: Session | null } = {}): Promise<UserProfile | null> {
   if (options.forceRefresh) clearCachedAuthProfile(uid);
   if (!options.forceRefresh && profileCache.has(uid)) return profileCache.get(uid) ?? null;
 
@@ -182,7 +186,7 @@ export async function getCachedAuthProfile(uid: string, options: { forceRefresh?
   const requestGeneration = (profileRequestGenerations.get(uid) || 0) + 1;
   const requestGlobalGeneration = globalProfileCacheGeneration;
   profileRequestGenerations.set(uid, requestGeneration);
-  const request = fetchProfileFromSupabase(uid);
+  const request = fetchProfileFromSupabase(uid, options.session ?? null);
   inFlightProfileRequests.set(uid, request);
   try {
     const result = await request;

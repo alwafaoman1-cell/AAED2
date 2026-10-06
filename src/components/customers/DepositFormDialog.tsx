@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,9 @@ import { voucherSettingsStore, PAYMENT_METHOD_LABELS, type PaymentMethod, employ
 import { getDepositReceiptHtml } from "@/lib/pdfGenerator";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { createUuid } from "@/lib/uuid";
 
 interface Props {
   open: boolean;
@@ -34,6 +37,8 @@ export default function DepositFormDialog({ open, onOpenChange, customerName, cu
   const [notes, setNotes] = useState("");
   const [previewHtml, setPreviewHtml] = useState("");
   const [showPreview, setShowPreview] = useState(false);
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open && initial) {
@@ -50,11 +55,15 @@ export default function DepositFormDialog({ open, onOpenChange, customerName, cu
     }
   }, [open, initial?.id]);
 
-  function handleSave(printAfter: boolean) {
+  async function handleSave(printAfter: boolean) {
+    if (savingRef.current) return;
     if (!amount || amount <= 0) { toast.error("أدخل مبلغاً صحيحاً"); return; }
     if (scope === "vehicle" && !plate) { toast.error("اختر رقم اللوحة"); return; }
     const cashbox = cashboxes.find(c => c.id === cashboxId);
 
+    savingRef.current = true;
+    setSaving(true);
+    try {
     let record: DepositRecord;
     if (isEdit && initial) {
       record = {
@@ -67,12 +76,19 @@ export default function DepositFormDialog({ open, onOpenChange, customerName, cu
         cashboxName: cashbox?.cashboxName,
         notes,
       };
-      depositsStore.update(initial.id, record);
+      await depositsStore.updateConfirmed(initial.id, record);
       toast.success(`تم تحديث الدفعة ${record.receiptNumber}`);
     } else {
-      const receiptNumber = voucherSettingsStore.generateNextNumber("receipt");
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("تعذر تحديد المؤسسة؛ لم تُحفظ الدفعة");
+      const { data: receiptNumber, error: numberError } = await (supabase.rpc as any)("reserve_receipt_number_rpc", {
+        p_tenant_id: tenantId,
+      });
+      if (numberError || typeof receiptNumber !== "string" || !receiptNumber) {
+        throw numberError || new Error("تعذر تخصيص رقم سند قبض من قاعدة البيانات");
+      }
       record = {
-        id: `DEP-${Date.now()}`,
+        id: createUuid(),
         receiptNumber,
         date: new Date().toISOString().split("T")[0],
         amount,
@@ -87,7 +103,7 @@ export default function DepositFormDialog({ open, onOpenChange, customerName, cu
         consumed: 0,
         createdAt: new Date().toISOString(),
       };
-      depositsStore.add(record);
+      await depositsStore.addConfirmed(record);
       toast.success(`تم تسجيل الدفعة ${receiptNumber}`);
     }
 
@@ -107,6 +123,12 @@ export default function DepositFormDialog({ open, onOpenChange, customerName, cu
       setShowPreview(true);
     } else {
       onOpenChange(false);
+    }
+    } catch (error: any) {
+      toast.error(error?.message || "لم تؤكد السحابة حفظ الدفعة؛ تحقق قبل إعادة المحاولة");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   }
 
@@ -172,8 +194,8 @@ export default function DepositFormDialog({ open, onOpenChange, customerName, cu
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="w-full rounded-lg bg-secondary border border-border text-foreground p-2 text-sm" />
             </div>
             <div className="flex gap-2 pt-2">
-              <Button onClick={() => handleSave(true)} className="gradient-gold text-primary-foreground flex-1">حفظ وطباعة سند</Button>
-              <Button onClick={() => handleSave(false)} variant="outline">حفظ فقط</Button>
+              <Button disabled={saving} onClick={() => void handleSave(true)} className="gradient-gold text-primary-foreground flex-1">{saving ? "جارِ الحفظ…" : "حفظ وطباعة سند"}</Button>
+              <Button disabled={saving} onClick={() => void handleSave(false)} variant="outline">حفظ فقط</Button>
               <Button onClick={() => onOpenChange(false)} variant="ghost">إلغاء</Button>
             </div>
           </div>

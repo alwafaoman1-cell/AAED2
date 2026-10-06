@@ -86,7 +86,9 @@ describe("no focus reload and draft loss guard contract", () => {
 
     expect(auth).toContain('_event === "SIGNED_IN" && !sameUser');
     expect(salesStore).toContain('event === "SIGNED_OUT"');
-    expect(salesStore).toContain('event === "SIGNED_IN" && session?.user && cache.length === 0');
+    expect(salesStore).toContain('event === "INITIAL_SESSION" || event === "SIGNED_IN"');
+    expect(salesStore).toContain('session?.user && cache.length === 0');
+    expect(salesStore).not.toContain('scheduleSalesRefresh(0)');
     expect(salesStore).not.toContain('if (session?.user) scheduleSalesRefresh(500)');
     expect(expensesStore).toContain('event === "SIGNED_OUT"');
     expect(expensesStore).toContain('event === "SIGNED_IN" || event === "USER_UPDATED"');

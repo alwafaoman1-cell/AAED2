@@ -388,9 +388,14 @@ export default function CustomerDetail() {
     navigate(`/work-orders/${encodeURIComponent(orderId)}`);
   }
 
-  function deleteDeposit(d: DepositRecord) {
+  async function deleteDeposit(d: DepositRecord) {
     if (!confirm(`حذف الدفعة ${d.receiptNumber}؟`)) return;
-    depositsStore.remove(d.id);
+    try {
+      await depositsStore.removeConfirmed(d.id);
+    } catch (error: any) {
+      toast.error(error?.message || "لم تؤكد قاعدة البيانات حذف الدفعة");
+      return;
+    }
     logActivity({
       action: "delete", entity: "receipt", entityId: d.receiptNumber,
       label: `دفعة ${d.receiptNumber}`, amount: d.amount,

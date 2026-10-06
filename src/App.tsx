@@ -11,9 +11,9 @@ import { FeatureProvider } from "@/contexts/FeatureContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import AppLayout from "./components/AppLayout";
-// Eager: critical paths (auth + landing dashboard) for fast first paint
+// Keep auth eager; the operational dashboard and its sales store are loaded
+// only when that route opens, not on every workshop page.
 import AuthPage from "./pages/Auth";
-import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
 import ReportsLegacyRedirect from "./components/reports/ReportsLegacyRedirect";
 
@@ -33,6 +33,7 @@ function LegacyPortalRedirect({ param = "token" }: { param?: "id" | "token" | "p
 }
 
 // Lazy: every other route — splits the bundle and dramatically improves first-paint
+const Dashboard = lazy(() => import("./pages/Dashboard"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPassword"));
 const InvoicePublicView = lazy(() => import("./pages/InvoicePublicView"));
 const Users = lazy(() => import("./pages/Users"));

@@ -208,14 +208,22 @@ const findSafeSliceRow = (canvas: HTMLCanvasElement, maxY: number, searchPx = 60
   const ctx = canvas.getContext("2d");
   if (!ctx) return maxY;
   let data: Uint8ClampedArray;
-  try { data = ctx.getImageData(0, 0, canvas.width, canvas.height).data; }
-  catch { return maxY; }
   const lower = Math.max(1, maxY - searchPx);
+  // Only inspect the candidate rows. Reading the full multi-page canvas on
+  // every slice caused large PDFs to spend most of their time copying pixels.
+  try { data = ctx.getImageData(0, lower, canvas.width, maxY - lower + 1).data; }
+  catch { return maxY; }
   for (let y = maxY; y >= lower; y--) {
-    if (isRowBlank(data, canvas.width, y)) return y;
+    if (isRowBlank(data, canvas.width, y - lower)) return y;
   }
   return maxY;
 };
+
+export function pdfCaptureScale(width: number, height: number): number {
+  // Keep ordinary A4 sharp, while capping oversized pages near 5.5M pixels.
+  // Overflow pages previously rasterized at 2.5x regardless of height.
+  return Math.max(1.5, Math.min(2.5, Math.sqrt(5_500_000 / Math.max(1, width * height))));
+}
 
 const fmtTimestamp = (d = new Date()) => {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -321,17 +329,19 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
       }
       await yieldToBrowser();
       try {
+        const captureWidth = Math.max(el.scrollWidth, el.offsetWidth);
+        const captureHeight = Math.max(el.scrollHeight, el.offsetHeight);
         return await withTimeout(html2canvas(el, {
-          scale: 2.5,
+          scale: pdfCaptureScale(captureWidth, captureHeight),
           useCORS: true,
           allowTaint: false,
           imageTimeout: 2500,
           backgroundColor: "#ffffff",
           logging: false,
-          windowWidth: Math.max(el.scrollWidth, el.offsetWidth),
-          windowHeight: Math.max(el.scrollHeight, el.offsetHeight),
+          windowWidth: captureWidth,
+          windowHeight: captureHeight,
           ignoreElements: (node) => node instanceof HTMLElement && (node.classList.contains("print-bar") || node.classList.contains("no-print")),
-        }), 12000, "تحضير صفحة PDF");
+        }), captureHeight > 1600 ? 25000 : 16000, "تحضير صفحة PDF");
       } finally {
         el.style.height = originalHeight;
         el.style.minHeight = originalMinHeight;

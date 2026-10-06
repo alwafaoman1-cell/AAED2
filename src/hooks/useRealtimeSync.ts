@@ -9,7 +9,8 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   insurance_invoices: ["insurance_invoices", "work_order_financials", "vehicle_360"],
   job_orders: ["job_orders", "insurance_claims", "invoices", "work_order_financials", "vehicle_360"],
   invoices: ["invoices"],
-  claim_payments: ["claim_payments", "insurance_claims", "work_order_financials", "vehicle_360"],
+  claim_payments: ["claim_payments", "insurance_claims", "work_order_financials", "vehicle_360", "accounting_receipts_page"],
+  accounting_receipts: ["accounting_receipts_page"],
   customers: ["customers"],
   vehicles: ["vehicles", "customers", "vehicle_360"],
   vehicle_media: ["vehicle_media", "vehicles", "vehicle_360"],
@@ -32,7 +33,7 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   vehicle_models: ["vehicle_models"],
   expenses: ["expenses", "job_orders", "journal_entries", "vehicle_360"],
   sales_documents: ["sales_documents", "invoices", "work_order_financials", "vehicle_360"],
-  sales_payments: ["sales_payments", "sales_documents", "work_order_financials", "vehicle_360"],
+  sales_payments: ["sales_payments", "sales_documents", "work_order_financials", "vehicle_360", "accounting_receipts_page"],
   journal_entries: ["journal_entries"],
   journal_lines: ["journal_lines", "journal_entries"],
 };
@@ -106,7 +107,7 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   {
     scope: "accounting",
     test: (path) => path.startsWith("/accounting") || path.startsWith("/insurance/accounting"),
-    tables: ["insurance_invoices", "claim_payments", "expenses", "sales_documents", "sales_payments"],
+    tables: ["insurance_invoices", "claim_payments", "expenses", "sales_documents", "sales_payments", "accounting_receipts"],
   },
   {
     scope: "operations_apps",

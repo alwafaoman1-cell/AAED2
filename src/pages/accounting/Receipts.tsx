@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, FileSpreadsheet, FileText, Pencil, Plus, Printer, ReceiptText, Save, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,8 @@ import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import { exportRowsAsCsv, useBulkSelection } from "@/hooks/useBulkSelection";
 import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
+import { useAuth } from "@/contexts/AuthContext";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface Receipt {
   id: string;
@@ -43,9 +46,9 @@ interface Receipt {
 
 export default function Receipts() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const queryClient = useQueryClient();
   const [, force] = useState(0);
-  const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [unifiedOpen, setUnifiedOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -58,6 +61,12 @@ export default function Receipts() {
   const [filterPaymentMethod, setFilterPaymentMethod] = useState<string>("all");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [exportingAll, setExportingAll] = useState(false);
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const pageSize = 50;
 
   const allowManage = canManageFinance();
   const categories = incomeCategoriesStore.getAll().filter((category) => category.active);
@@ -82,93 +91,64 @@ export default function Receipts() {
     };
   }, []);
 
-  async function fetchCloudReceipts() {
-    setLoading(true);
-    try {
-      const { data: tenantId, error: tenantError } = await supabase.rpc("get_user_tenant_id");
-      if (tenantError || !tenantId) throw new Error(tenantError?.message || "تعذر تحديد المؤسسة");
-
-      const [salesResult, claimResult, manualResult] = await Promise.all([
-        (supabase.from("sales_payments") as any)
-          .select("id,payment_number,date,amount,method,reference,notes,sales_document:sales_documents(doc_number,customer_name)")
-          .eq("tenant_id", tenantId)
-          .order("date", { ascending: false }),
-        (supabase.from("claim_payments") as any)
-          .select("id,payment_number,payment_date,amount,payment_method,notes,claim:insurance_claims(claim_number,insurance_company)")
-          .eq("tenant_id", tenantId)
-          .order("payment_date", { ascending: false }),
-        (supabase.from("accounting_receipts" as any) as any)
-          .select("id,receipt_number,receipt_date,amount,payer_name,category_id,cashbox_id,payment_method,notes,created_at")
-          .eq("tenant_id", tenantId)
-          .is("deleted_at", null)
-          .is("archived_at", null)
-          .order("receipt_date", { ascending: false }),
-      ]);
-
-      if (salesResult.error) throw salesResult.error;
-      if (claimResult.error) throw claimResult.error;
-      if (manualResult.error) throw manualResult.error;
-
-      const salesReceipts: Receipt[] = (salesResult.data || []).map((row: any) => ({
-        id: `sales:${row.id}`,
-        source: "sales",
-        number: row.payment_number || `PAY-${String(row.id).slice(0, 8)}`,
-        date: row.date,
-        amount: Number(row.amount || 0),
-        payerName: row.sales_document?.customer_name || "عميل",
-        categoryId: "sales_invoice",
-        cashboxId: "cloud",
-        paymentMethod: (row.method || "cash") as PaymentMethod,
-        notes: [row.sales_document?.doc_number, row.reference, row.notes].filter(Boolean).join(" — ") || undefined,
-        createdAt: row.date,
-      }));
-
-      const claimReceipts: Receipt[] = (claimResult.data || []).map((row: any) => ({
-        id: `claim:${row.id}`,
-        source: "claim",
-        number: row.payment_number || `CP-${String(row.id).slice(0, 8)}`,
-        date: row.payment_date,
-        amount: Number(row.amount || 0),
-        payerName: row.claim?.insurance_company || "شركة تأمين",
-        categoryId: "insurance_claim",
-        cashboxId: "cloud",
-        paymentMethod: (row.payment_method || "bank_transfer") as PaymentMethod,
-        notes: [row.claim?.claim_number, row.notes].filter(Boolean).join(" — ") || undefined,
-        createdAt: row.payment_date,
-      }));
-
-      const manualReceipts: Receipt[] = (manualResult.data || []).map((row: any) => ({
-        id: `manual:${row.id}`,
-        source: "manual",
-        number: row.receipt_number,
-        date: row.receipt_date,
-        amount: Number(row.amount || 0),
-        payerName: row.payer_name || "—",
-        categoryId: row.category_id || "",
-        cashboxId: row.cashbox_id || "",
-        paymentMethod: (row.payment_method || "cash") as PaymentMethod,
-        notes: row.notes || undefined,
-        createdAt: row.created_at || row.receipt_date,
-      }));
-
-      setReceipts([...manualReceipts, ...salesReceipts, ...claimReceipts].sort((a, b) => b.date.localeCompare(a.date)));
-    } catch (error: any) {
-      toast.error(error?.message || "تعذر تحميل سندات القبض");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    void fetchCloudReceipts();
-    const channel = supabase
-      .channel("receipts_cloud_sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "sales_payments" }, () => void fetchCloudReceipts())
-      .on("postgres_changes", { event: "*", schema: "public", table: "claim_payments" }, () => void fetchCloudReceipts())
-      .on("postgres_changes", { event: "*", schema: "public", table: "accounting_receipts" }, () => void fetchCloudReceipts())
-      .subscribe();
-    return () => { void supabase.removeChannel(channel); };
-  }, []);
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => { setPage(1); }, [filterSource, filterPaymentMethod, filterDateFrom, filterDateTo, debouncedSearch]);
+
+  const receiptQuery = useQuery({
+    queryKey: queryKeys.receipts.list(profile?.tenant_id, { page, filterSource, filterPaymentMethod, filterDateFrom, filterDateTo, debouncedSearch }),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 15_000,
+    queryFn: async () => {
+      const { data, error } = await (supabase.rpc as any)("list_accounting_receipts_page_rpc", {
+        p_tenant_id: profile!.tenant_id,
+        p_page: page,
+        p_page_size: pageSize,
+        p_source: filterSource,
+        p_method: filterPaymentMethod,
+        p_date_from: filterDateFrom || null,
+        p_date_to: filterDateTo || null,
+        p_search: debouncedSearch || null,
+      });
+      if (error) throw error;
+      const payload = data || {};
+      return {
+        totalCount: Number(payload.totalCount || 0),
+        totalAmount: Number(payload.totalAmount || 0),
+        latestNumber: String(payload.latestNumber || "—"),
+        receipts: (Array.isArray(payload.items) ? payload.items : []).map((row: any): Receipt => ({
+          id: String(row.id),
+          source: row.source,
+          number: row.number || "—",
+          date: row.receipt_date,
+          amount: Number(row.amount || 0),
+          payerName: row.payer_name || "—",
+          categoryId: row.category_id || "",
+          cashboxId: row.cashbox_id || "",
+          paymentMethod: (row.payment_method || "cash") as PaymentMethod,
+          notes: row.notes || undefined,
+          createdAt: row.created_at || row.receipt_date,
+        })),
+      };
+    },
+  });
+  const receipts: Receipt[] = receiptQuery.data?.receipts || [];
+  const filteredReceipts = receipts;
+  const loading = receiptQuery.isPending;
+  const totalCount = receiptQuery.data?.totalCount || 0;
+  const total = receiptQuery.data?.totalAmount || 0;
+  const latestNumber = receiptQuery.data?.latestNumber || "—";
+  const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));
+  useEffect(() => {
+    if (!receiptQuery.isPending && page > pageCount) setPage(pageCount);
+  }, [page, pageCount, receiptQuery.isPending]);
+
+  async function fetchCloudReceipts() {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.receipts.all });
+  }
 
   const resetForm = () => {
     setEditingId(null);
@@ -203,81 +183,100 @@ export default function Receipts() {
   };
 
   async function handleSave() {
+    if (savingRef.current) return;
     const value = parseFloat(amount);
     if (!value || value <= 0) return toast.error("أدخل مبلغًا صحيحًا");
     if (!payerName.trim()) return toast.error("أدخل اسم الدافع");
     if (!categoryId) return toast.error("اختر التصنيف");
     if (!cashboxId) return toast.error("اختر الخزينة");
 
-    const { data: tenantId, error: tenantError } = await supabase.rpc("get_user_tenant_id");
-    if (tenantError || !tenantId) {
-      toast.error(tenantError?.message || "تعذر تحديد المؤسسة");
-      return;
-    }
-
-    if (editingId) {
-      const old = receipts.find((receipt) => receipt.id === editingId);
-      if (!old || old.source !== "manual") return;
-      const cloudId = old.id.replace("manual:", "");
-      const { error } = await (supabase.from("accounting_receipts" as any) as any)
-        .update({
-          receipt_date: date,
+    const tenantId = profile?.tenant_id;
+    if (!tenantId) return toast.error("تعذر تحديد المؤسسة");
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      if (editingId) {
+        const old = receipts.find((receipt) => receipt.id === editingId);
+        if (!old || old.source !== "manual") return;
+        const cloudId = old.id.replace("manual:", "");
+        const { data: updated, error } = await (supabase.from("accounting_receipts" as any) as any)
+          .update({
+            receipt_date: date,
+            amount: value,
+            payer_name: payerName.trim(),
+            category_id: categoryId,
+            cashbox_id: cashboxId,
+            payment_method: paymentMethod,
+            notes: notes.trim() || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", cloudId)
+          .eq("tenant_id", tenantId)
+          .is("deleted_at", null)
+          .select("id")
+          .maybeSingle();
+        if (error) {
+          toast.error(error.message);
+          return;
+        }
+        if (!updated?.id) return toast.error("لم يتم تحديث السند في قاعدة البيانات؛ تحقق من الصلاحيات ثم أعد المحاولة");
+        logActivity({
+          action: "update",
+          entity: "receipt",
+          entityId: old.number,
+          label: `سند قبض من ${payerName}`,
+          description: `تعديل المبلغ من ${old.amount.toLocaleString()} إلى ${value.toLocaleString()} ر.ع`,
           amount: value,
-          payer_name: payerName.trim(),
-          category_id: categoryId,
-          cashbox_id: cashboxId,
-          payment_method: paymentMethod,
-          notes: notes.trim() || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", cloudId)
-        .eq("tenant_id", tenantId);
+        });
+        toast.success(`تم تحديث ${old.number}`);
+        setOpen(false);
+        await fetchCloudReceipts();
+        return;
+      }
+
+      const { data: number, error: numberError } = await (supabase.rpc as any)("reserve_receipt_number_rpc", {
+        p_tenant_id: tenantId,
+      });
+      if (numberError || typeof number !== "string" || !number) {
+        throw numberError || new Error("تعذر تخصيص رقم سند قبض من قاعدة البيانات");
+      }
+      const { data: inserted, error } = await (supabase.from("accounting_receipts" as any) as any).insert({
+        tenant_id: tenantId,
+        receipt_number: number,
+        receipt_date: date,
+        amount: value,
+        payer_name: payerName.trim(),
+        category_id: categoryId,
+        cashbox_id: cashboxId,
+        payment_method: paymentMethod,
+        notes: notes.trim() || null,
+      }).select("id,receipt_number").single();
       if (error) {
         toast.error(error.message);
         return;
       }
+      if (!inserted?.id || inserted.receipt_number !== number) {
+        toast.error("تعذر تأكيد إنشاء السند؛ افحص القائمة قبل إعادة المحاولة");
+        return;
+      }
+
       logActivity({
-        action: "update",
+        action: "create",
         entity: "receipt",
-        entityId: old.number,
+        entityId: number,
         label: `سند قبض من ${payerName}`,
-        description: `تعديل المبلغ من ${old.amount.toLocaleString()} إلى ${value.toLocaleString()} ر.ع`,
+        description: `قبض ${value.toLocaleString()} ر.ع`,
         amount: value,
       });
-      toast.success(`تم تحديث ${old.number}`);
+      toast.success(`تم إنشاء سند القبض ${number}`);
       setOpen(false);
       await fetchCloudReceipts();
-      return;
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر حفظ السند؛ تحقق من الاتصال قبل إعادة المحاولة");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
-
-    const number = voucherSettingsStore.generateNextNumber("receipt");
-    const { error } = await (supabase.from("accounting_receipts" as any) as any).insert({
-      tenant_id: tenantId,
-      receipt_number: number,
-      receipt_date: date,
-      amount: value,
-      payer_name: payerName.trim(),
-      category_id: categoryId,
-      cashbox_id: cashboxId,
-      payment_method: paymentMethod,
-      notes: notes.trim() || null,
-    });
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-
-    logActivity({
-      action: "create",
-      entity: "receipt",
-      entityId: number,
-      label: `سند قبض من ${payerName}`,
-      description: `قبض ${value.toLocaleString()} ر.ع`,
-      amount: value,
-    });
-    toast.success(`تم إنشاء سند القبض ${number}`);
-    setOpen(false);
-    await fetchCloudReceipts();
   }
 
   async function confirmDelete() {
@@ -290,13 +289,18 @@ export default function Receipts() {
       return;
     }
     const cloudId = receipt.id.replace("manual:", "");
-    const { error } = await (supabase.from("accounting_receipts" as any) as any)
+    const { data: archived, error } = await (supabase.from("accounting_receipts" as any) as any)
       .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq("id", cloudId);
+      .eq("id", cloudId)
+      .eq("tenant_id", profile?.tenant_id || "")
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
     if (error) {
       toast.error(error.message);
       return;
     }
+    if (!archived?.id) return toast.error("لم يتم أرشفة السند في قاعدة البيانات؛ تحقق من الصلاحيات ثم أعد المحاولة");
     logActivity({
       action: "delete",
       entity: "receipt",
@@ -310,21 +314,9 @@ export default function Receipts() {
     await fetchCloudReceipts();
   }
 
-  const filteredReceipts = useMemo(() => receipts.filter((receipt) => {
-    if (filterSource !== "all" && receipt.source !== filterSource) return false;
-    if (filterPaymentMethod !== "all" && receipt.paymentMethod !== filterPaymentMethod) return false;
-    if (filterDateFrom && receipt.date < filterDateFrom) return false;
-    if (filterDateTo && receipt.date > filterDateTo) return false;
-    if (searchTerm.trim()) {
-      const q = searchTerm.trim().toLowerCase();
-      const hay = `${receipt.number} ${receipt.payerName} ${receipt.notes || ""} ${receipt.source} ${receipt.paymentMethod}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  }), [receipts, filterSource, filterPaymentMethod, filterDateFrom, filterDateTo, searchTerm]);
-
-  const total = filteredReceipts.reduce((sum, receipt) => sum + receipt.amount, 0);
-  const bulk = useBulkSelection(filteredReceipts);
+  const bulk = useBulkSelection<Receipt>(filteredReceipts);
+  const clearBulkSelection = bulk.clear;
+  useEffect(() => { clearBulkSelection(); }, [page, filterSource, filterPaymentMethod, filterDateFrom, filterDateTo, debouncedSearch, clearBulkSelection]);
 
   const escapeHtml = (value: unknown) => String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -399,11 +391,20 @@ export default function Receipts() {
       return;
     }
     const ids = manualItems.map((receipt) => receipt.id.replace("manual:", ""));
-    const { error } = await (supabase.from("accounting_receipts" as any) as any)
+    const { data: archived, error } = await (supabase.from("accounting_receipts" as any) as any)
       .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .in("id", ids);
+      .eq("tenant_id", profile?.tenant_id || "")
+      .is("deleted_at", null)
+      .in("id", ids)
+      .select("id");
     if (error) {
       toast.error(error.message);
+      return;
+    }
+    if ((archived || []).length !== ids.length) {
+      toast.error(`تم أرشفة ${(archived || []).length} من ${ids.length} سند فقط؛ حدّث القائمة وافحص البقية`);
+      bulk.clear();
+      await fetchCloudReceipts();
       return;
     }
     toast.success(`تم أرشفة ${manualItems.length} سند`);
@@ -432,6 +433,56 @@ export default function Receipts() {
     );
   }
 
+  async function handleExportAll() {
+    if (!profile?.tenant_id || exportingAll) return;
+    setExportingAll(true);
+    try {
+      const rows: (string | number)[][] = [];
+      const seenIds = new Set<string>();
+      let expectedTotal: number | null = null;
+      const exportPageSize = 100;
+      for (let exportPage = 1; ; exportPage++) {
+        const { data, error } = await (supabase.rpc as any)("list_accounting_receipts_page_rpc", {
+          p_tenant_id: profile.tenant_id,
+          p_page: exportPage,
+          p_page_size: exportPageSize,
+          p_source: filterSource,
+          p_method: filterPaymentMethod,
+          p_date_from: filterDateFrom || null,
+          p_date_to: filterDateTo || null,
+          p_search: debouncedSearch || null,
+        });
+        if (error) throw error;
+        const currentTotal = Number(data?.totalCount || 0);
+        if (expectedTotal === null) expectedTotal = currentTotal;
+        if (expectedTotal !== currentTotal) throw new Error("تغيّرت السندات أثناء التصدير؛ أعد المحاولة");
+        const items: any[] = Array.isArray(data?.items) ? data.items : [];
+        for (const item of items) {
+          if (seenIds.has(String(item.id))) throw new Error("تغيّر ترتيب السندات أثناء التصدير؛ أعد المحاولة");
+          seenIds.add(String(item.id));
+          const category = categories.find((entry) => entry.id === item.category_id);
+          const cashbox = cashboxes.find((entry) => entry.id === item.cashbox_id);
+          rows.push([
+            item.number || "", item.receipt_date || "", item.payer_name || "",
+            category?.name || item.source || "",
+            cashbox?.cashboxName || (item.source === "manual" ? "" : "سحابي"),
+            PAYMENT_METHOD_LABELS[item.payment_method as PaymentMethod] || item.payment_method || "",
+            Number(item.amount || 0), item.notes || "",
+          ]);
+        }
+        if (items.length < exportPageSize || rows.length >= currentTotal) break;
+      }
+      if (rows.length !== expectedTotal) throw new Error("التصدير غير مكتمل؛ أعد المحاولة");
+      exportRowsAsCsv(`receipts-${new Date().toISOString().slice(0, 10)}`,
+        ["الرقم", "التاريخ", "من السيد", "التصنيف", "الخزينة", "طريقة الدفع", "المبلغ", "ملاحظات"], rows);
+      toast.success(`تم تصدير ${rows.length} سند`);
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر تصدير السندات");
+    } finally {
+      setExportingAll(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -442,6 +493,9 @@ export default function Receipts() {
           <p className="text-sm text-muted-foreground">إدارة وعرض سندات القبض السحابية المرتبطة بالدفعات والفواتير والمطالبات.</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" disabled={exportingAll || !totalCount} onClick={() => void handleExportAll()} className="gap-2">
+            <FileSpreadsheet size={16} /> {exportingAll ? "جارِ التصدير…" : "تصدير كل النتائج"}
+          </Button>
           <Button variant="outline" onClick={() => smartBack(navigate, "/accounting")}>
             <ArrowRight size={16} className="ml-1" /> رجوع
           </Button>
@@ -457,7 +511,7 @@ export default function Receipts() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-card border border-border rounded-xl p-4 shadow-card">
           <p className="text-xs text-muted-foreground">إجمالي السندات</p>
-          <p className="text-xl font-bold text-foreground mt-1">{loading ? "…" : filteredReceipts.length}</p>
+          <p className="text-xl font-bold text-foreground mt-1">{loading ? "…" : totalCount}</p>
         </div>
         <div className="bg-card border border-border rounded-xl p-4 shadow-card">
           <p className="text-xs text-muted-foreground">إجمالي المقبوض</p>
@@ -465,7 +519,7 @@ export default function Receipts() {
         </div>
         <div className="bg-card border border-border rounded-xl p-4 shadow-card">
           <p className="text-xs text-muted-foreground">آخر سند</p>
-          <p className="text-xl font-bold text-foreground mt-1">{filteredReceipts[0]?.number ?? "—"}</p>
+          <p className="text-xl font-bold text-foreground mt-1">{latestNumber}</p>
         </div>
       </div>
 
@@ -515,7 +569,7 @@ export default function Receipts() {
             </thead>
             <tbody>
               {filteredReceipts.length === 0 ? (
-                <tr><td colSpan={8} className="text-center p-8 text-muted-foreground">{loading ? "جارِ التحميل…" : "لا توجد سندات قبض مطابقة"}</td></tr>
+                <tr><td colSpan={8} className="text-center p-8 text-muted-foreground">{loading ? "جارِ التحميل…" : receiptQuery.isError ? <button className="underline" onClick={() => void receiptQuery.refetch()}>تعذر تحميل السندات — اضغط لإعادة المحاولة</button> : "لا توجد سندات قبض مطابقة"}</td></tr>
               ) : filteredReceipts.map((receipt) => (
                 <tr key={receipt.id} className="border-t border-border hover:bg-secondary/10">
                   <td className="p-3"><Checkbox checked={bulk.isSelected(receipt.id)} onCheckedChange={() => bulk.toggle(receipt.id)} /></td>
@@ -553,6 +607,14 @@ export default function Receipts() {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-border p-3 text-sm">
+          <span>{totalCount === 0 ? "0" : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, totalCount)}`} / {totalCount}</span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1 || receiptQuery.isFetching} onClick={() => setPage((value) => value - 1)}>السابق</Button>
+            <span>{page} / {pageCount}</span>
+            <Button variant="outline" size="sm" disabled={page >= pageCount || receiptQuery.isFetching} onClick={() => setPage((value) => value + 1)}>التالي</Button>
+          </div>
         </div>
       </div>
 
@@ -630,8 +692,8 @@ export default function Receipts() {
             <Button variant="outline" onClick={() => setOpen(false)}>
               <X size={16} className="ml-1" /> إلغاء
             </Button>
-            <Button onClick={() => void handleSave()} className="gap-2">
-              <Save size={16} /> {editingId ? "حفظ التعديلات" : "حفظ السند"}
+            <Button disabled={saving} onClick={() => void handleSave()} className="gap-2">
+              <Save size={16} /> {saving ? "جارِ الحفظ…" : editingId ? "حفظ التعديلات" : "حفظ السند"}
             </Button>
           </DialogFooter>
         </DialogContent>
