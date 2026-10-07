@@ -24,6 +24,7 @@ describe("work orders column visibility", () => {
     expect(source).toContain('key: "vin"');
     expect(source).toContain('key: "neededParts"');
     expect(source).toContain('key: "status"');
+    expect(source).toContain('key: "invoiceState"');
     expect(source).toContain('key: "cost"');
   });
 
@@ -31,6 +32,7 @@ describe("work orders column visibility", () => {
     expect(source).toContain('isColumnVisible("orderNumber")');
     expect(source).toContain('isColumnVisible("vehicle")');
     expect(source).toContain('isColumnVisible("technician")');
+    expect(source).toContain('isColumnVisible("invoiceState")');
     expect(source).toContain('isColumnVisible("cost")');
     expect(source).toContain("WORK_ORDER_COLUMNS.map((column) => isColumnVisible(column.key)");
   });

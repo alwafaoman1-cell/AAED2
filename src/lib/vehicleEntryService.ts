@@ -2,7 +2,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { ensureVehicleForCustomer, normalizeVin } from "@/lib/vehicleIdentity";
 import { extractPlateDigits, extractPlateLetters, formatPlate } from "@/lib/plateUtils";
-import { toE164 } from "@/lib/phoneUtils";
+import { isValidE164, toE164 } from "@/lib/phoneUtils";
+import { assertVehicleEntryClaimLink } from "@/lib/vehicleEntryClaimLink";
+import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import JsBarcode from "jsbarcode";
 
@@ -31,6 +33,9 @@ export interface VehicleEntryFormState {
   entry_number?: string;
   status: VehicleEntryStatus;
   customer_id?: string | null;
+  // Form-only baseline: never persisted in the entry snapshot. It prevents an
+  // unrelated entry edit from overwriting a customer's newer phone number.
+  customer_phone_before_edit?: string | null;
   vehicle_id?: string | null;
   insurance_company_id?: string | null;
   insurance_claim_id?: string | null;
@@ -420,7 +425,7 @@ export async function getVehicleEntry(id: string) {
   if (signaturesRes.error) throw signaturesRes.error;
   if (auditRes.error) throw auditRes.error;
 
-  const resolvedMedia = await resolveVehicleEntryMediaUrls((mediaRes.data as any[]) || []);
+  const resolvedMedia = await resolveVehicleMediaUrls((mediaRes.data as any[]) || []);
 
   return {
     ...(data as any),
@@ -446,33 +451,6 @@ export async function getVehicleEntryByClaimId(claimId: string) {
     .maybeSingle();
   if (error) throw error;
   return (data as any) || null;
-}
-
-async function resolveVehicleEntryMediaUrls(rows: any[]) {
-  if (!rows.length) return [];
-  const signedByStorageKey = new Map<string, string>();
-  const groups = new Map<string, any[]>();
-  rows.forEach((row) => {
-    if (!row?.storage_path) return;
-    const bucket = String(row.storage_bucket || "insurance-docs");
-    groups.set(bucket, [...(groups.get(bucket) || []), row]);
-  });
-
-  await Promise.all(Array.from(groups.entries()).map(async ([bucket, items]) => {
-    const uniquePaths = Array.from(new Set(items.map((item) => String(item.storage_path))));
-    const { data, error } = await supabase.storage.from(bucket).createSignedUrls(uniquePaths, 60 * 60 * 24 * 7);
-    if (error) return;
-    ((data as any[]) || []).forEach((signed, index) => {
-      const path = String(signed?.path || uniquePaths[index] || "");
-      if (path && signed?.signedUrl) signedByStorageKey.set(`${bucket}:${path}`, signed.signedUrl);
-    });
-  }));
-
-  return rows.map((row) => {
-    const bucket = String(row.storage_bucket || "insurance-docs");
-    const url = signedByStorageKey.get(`${bucket}:${row.storage_path}`) || row.url || row.public_url || null;
-    return { ...row, url, public_url: url };
-  });
 }
 
 export async function ensureVehicleEntryForClaim(input: ClaimVehicleEntryInput, userId?: string | null) {
@@ -523,6 +501,7 @@ export function formFromVehicleEntry(row: any): VehicleEntryFormState {
     entry_number: row.entry_number,
     status: row.status || "Draft",
     customer_id: row.customer_id || null,
+    customer_phone_before_edit: row.customer?.phone ?? customerSnapshot.phone ?? null,
     vehicle_id: row.vehicle_id || null,
     insurance_company_id: row.insurance_company_id || null,
     insurance_claim_id: row.insurance_claim_id || null,
@@ -566,6 +545,39 @@ export function formFromVehicleEntry(row: any): VehicleEntryFormState {
       color: mark.color || null,
     })),
   };
+}
+
+export function customerPhoneEdit(form: VehicleEntryFormState): { previous: string | null; next: string } | null {
+  if (!form.customer_id || form.customer_phone_before_edit === undefined) return null;
+  const previous = cleanText(form.customer_phone_before_edit) || null;
+  const entered = cleanText(form.customer.phone);
+  if (entered === (previous || "")) return null;
+  const next = toE164(entered);
+  if (!isValidE164(next)) throw new Error("أدخل رقم هاتف عميل صحيحًا قبل حفظ التعديل.");
+  return { previous, next };
+}
+
+async function syncCustomerPhone(customerId: string, tenantId: string, change: { previous: string | null; next: string }) {
+  const phoneKey = normalizePhoneKey(change.next);
+  const { data: matches, error: lookupError } = await supabase
+    .from("customers")
+    .select("id,phone")
+    .eq("tenant_id", tenantId)
+    .ilike("phone", `%${phoneKey}%`)
+    .limit(20);
+  if (lookupError) throw lookupError;
+  if (((matches as any[]) || []).some((row) => row.id !== customerId && toE164(row.phone) === change.next)) {
+    throw new Error("رقم الهاتف مرتبط بعميل آخر؛ راجع سجل العملاء قبل الحفظ.");
+  }
+
+  let update = supabase.from("customers")
+    .update({ phone: change.next })
+    .eq("tenant_id", tenantId)
+    .eq("id", customerId);
+  update = change.previous ? update.eq("phone", change.previous) : update.is("phone", null);
+  const { data, error } = await update.select("id,phone").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("تغيّر رقم هاتف العميل في جلسة أخرى؛ أعد تحميل النموذج ثم حاول مجددًا.");
 }
 
 function entryPayload(form: VehicleEntryFormState, tenantId: string, entryNumber: string, customerId: string | null, vehicleId: string | null, userId?: string | null) {
@@ -624,6 +636,8 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: str
     await assertVehicleEntryCanBeIssued(form.id, tenantId);
   }
 
+  const phoneChange = customerPhoneEdit(form);
+
   const customerId = await ensureCustomer(form, tenantId);
   let vehicleId = form.vehicle_id || null;
   if (customerId && (form.vehicle.plate_number || form.vehicle.vin)) {
@@ -668,6 +682,15 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: str
   }
 
   await saveDamageMarks(saved.id, tenantId, form.damage_marks);
+  if (phoneChange && customerId) {
+    try {
+      await syncCustomerPhone(customerId, tenantId, phoneChange);
+    } catch (error) {
+      const partialError = new Error(`حُفظ نموذج الدخول، لكن تعذر تحديث رقم هاتف العميل: ${(error as Error)?.message || error}`) as Error & { savedEntry: any };
+      partialError.savedEntry = saved;
+      throw partialError;
+    }
+  }
   await insertVehicleEntryAudit({
     tenantId,
     vehicleEntryId: saved.id,
@@ -1019,18 +1042,42 @@ export async function convertVehicleEntryToClaim(entryId: string, userId?: strin
   if (!entry.customer_id || !entry.vehicle_id) throw new Error("يجب ربط العميل والمركبة قبل إنشاء المطالبة");
   const insurance = entry.insurance_snapshot || {};
   const claimNumber = cleanText(insurance.claim_number) || entry.entry_number;
+  if (entry.insurance_claim_id && entry.converted_claim_id && entry.insurance_claim_id !== entry.converted_claim_id) {
+    throw new Error("نموذج الدخول مرتبط بمطالبتين مختلفتين. راجع الربط قبل المتابعة.");
+  }
   if (entry.insurance_claim_id || entry.converted_claim_id) {
-    return { existing: true, claim_id: entry.insurance_claim_id || entry.converted_claim_id, claim_number: entry.claim?.claim_number || claimNumber };
+    const linkedClaimId = entry.insurance_claim_id || entry.converted_claim_id;
+    const linked = await supabase
+      .from("insurance_claims" as any)
+      .select("id,tenant_id,claim_number,customer_id,vehicle_id,vehicle_entry_id,deleted_at")
+      .eq("tenant_id", tenantId)
+      .eq("id", linkedClaimId)
+      .maybeSingle();
+    if (linked.error) throw linked.error;
+    if (!linked.data) throw new Error("المطالبة المرتبطة غير موجودة. لم يتم تغيير أي بيانات.");
+    assertVehicleEntryClaimLink({ ...entry, tenant_id: tenantId }, linked.data as any);
+    return { existing: true, claim_id: linkedClaimId, claim_number: (linked.data as any).claim_number };
   }
   const existing = await supabase
     .from("insurance_claims" as any)
-    .select("id,claim_number")
+    .select("id,tenant_id,claim_number,customer_id,vehicle_id,vehicle_entry_id,deleted_at")
     .eq("tenant_id", tenantId)
     .eq("claim_number", claimNumber)
     .maybeSingle();
   if (existing.error) throw existing.error;
   if ((existing.data as any)?.id) {
-    await supabase.from("vehicle_entries" as any).update({ insurance_claim_id: (existing.data as any).id, converted_claim_id: (existing.data as any).id } as any).eq("tenant_id", tenantId).eq("id", entryId);
+    assertVehicleEntryClaimLink({ ...entry, tenant_id: tenantId }, existing.data as any);
+    const linked = await supabase
+      .from("vehicle_entries" as any)
+      .update({ insurance_claim_id: (existing.data as any).id, converted_claim_id: (existing.data as any).id } as any)
+      .eq("tenant_id", tenantId)
+      .eq("id", entryId)
+      .is("insurance_claim_id", null)
+      .is("converted_claim_id", null)
+      .select("id")
+      .maybeSingle();
+    if (linked.error) throw linked.error;
+    if (!linked.data) throw new Error("تغير ربط نموذج الدخول أثناء العملية. أعد تحميل الصفحة وتحقق من المطالبة قبل المتابعة.");
     return { existing: true, claim_id: (existing.data as any).id, claim_number: (existing.data as any).claim_number };
   }
   const vehicle = entry.vehicle || entry.vehicle_snapshot || {};
@@ -1063,11 +1110,17 @@ export async function convertVehicleEntryToClaim(entryId: string, userId?: strin
   };
   const { data, error } = await supabase.from("insurance_claims" as any).insert(payload as any).select("id,claim_number").single();
   if (error) throw error;
-  await supabase
+  const entryLink = await supabase
     .from("vehicle_entries" as any)
     .update({ status: "Converted to Claim", insurance_claim_id: (data as any).id, converted_claim_id: (data as any).id } as any)
     .eq("tenant_id", tenantId)
-    .eq("id", entryId);
+    .eq("id", entryId)
+    .is("insurance_claim_id", null)
+    .is("converted_claim_id", null)
+    .select("id")
+    .maybeSingle();
+  if (entryLink.error) throw new Error(`أُنشئت المطالبة لكن تعذر حفظ ربط نموذج الدخول: ${entryLink.error.message}`);
+  if (!entryLink.data) throw new Error("أُنشئت المطالبة لكن تغير ربط نموذج الدخول أثناء العملية. أعد تحميل الصفحة قبل المتابعة.");
   await insertVehicleEntryAudit({
     tenantId,
     vehicleEntryId: entryId,

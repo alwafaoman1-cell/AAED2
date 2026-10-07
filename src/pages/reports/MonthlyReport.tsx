@@ -17,7 +17,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { toast } from "@/hooks/use-toast";
-import { salesStore } from "@/lib/salesStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { useQuery } from "@tanstack/react-query";
+import { fetchSalesFinancialSummary } from "@/lib/salesDocumentQueries";
 import { expensesStore } from "@/lib/expensesStore";
 import { journalStore } from "@/lib/journalStore";
 import { hrStore } from "@/lib/hrStore";
@@ -37,9 +39,24 @@ function arabicMonth(ym: string): string {
   return `${names[parseInt(m, 10) - 1]} ${y}`;
 }
 
+function lastDayOfMonth(ym: string): string {
+  const [year, month] = ym.split("-").map(Number);
+  return `${ym}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
+}
+
 export default function MonthlyReport() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const salesSummaryQuery = useQuery({
+    queryKey: ["sales_financial_summary", profile?.tenant_id, month],
+    queryFn: () => fetchSalesFinancialSummary(profile!.tenant_id, `${month}-01`, lastDayOfMonth(month)),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
   const [openSettings, setOpenSettings] = useState(false);
   const [settings, setSettings] = useState(monthlySettingsStore.get());
   const [, force] = useState(0);
@@ -58,12 +75,9 @@ export default function MonthlyReport() {
     const inMonth = (iso?: string) => !!iso && iso.startsWith(monthPrefix);
 
     // 1) الإيرادات (فواتير المبيعات + قيود الإيرادات)
-    const invoices = salesStore.list({ type: "invoice" })
-      .filter((d) => inMonth((d.date || d.createdAt || "").slice(0, 10)));
-    const salesRevenue = invoices.reduce((s, d) => s + (Number(d.subtotal) || 0), 0);
-    const salesInvoiceTotal = invoices.reduce((s, d) => s + (Number(d.total) || 0), 0);
-    const salesPaid = invoices.reduce((s, d) => s + (Number(d.paidTotal) || 0), 0);
-    const salesUnpaid = salesInvoiceTotal - salesPaid;
+    const salesRevenue = salesSummaryQuery.data?.revenue ?? 0;
+    const salesPaid = salesSummaryQuery.data?.paid ?? 0;
+    const salesUnpaid = salesSummaryQuery.data?.outstanding ?? 0;
 
     // 2) إيرادات إضافية من قيود اليومية (تأمين/خدمات ورشة) لتكتمل الصورة
     const journals = journalStore.getAll().filter((j) => inMonth(j.date));
@@ -134,7 +148,7 @@ export default function MonthlyReport() {
         insuranceExpected: insuranceRevenue,
         workshop: workshopServiceRevenue,
         total: totalRevenue,
-        invoicesCount: invoices.length,
+        invoicesCount: salesSummaryQuery.data?.invoiceCount ?? 0,
       },
       expenses: {
         parts: partsCost,
@@ -152,7 +166,7 @@ export default function MonthlyReport() {
       netProfit,
       margin,
     };
-  }, [month, settings]);
+  }, [month, settings, salesSummaryQuery.data]);
 
   // ====== إعدادات: تعديل التكاليف الثابتة ======
   const addFixed = () => {
@@ -302,6 +316,12 @@ export default function MonthlyReport() {
       toast({ title: "فشل التصدير", description: e?.message || "", variant: "destructive" });
     }
   };
+
+  if (salesSummaryQuery.isPending || salesSummaryQuery.isError) {
+    return <div className="py-12 text-center text-sm text-muted-foreground">
+      {salesSummaryQuery.isPending ? "جارٍ تحميل ملخص الفواتير من قاعدة البيانات..." : "تعذر تحميل ملخص الفواتير؛ لم تُعرض أرقام ناقصة."}
+    </div>;
+  }
 
   return (
     <div className="space-y-4" dir="rtl">

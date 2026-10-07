@@ -13,6 +13,9 @@ import { formatMoney, getTemplateSettings } from "@/lib/pdfGenerator";
 import { getJournalSourceRoute, JOURNAL_SOURCE_LABEL } from "@/lib/journalSourceLink";
 import { expensesStore } from "@/lib/expensesStore";
 import { salesStore } from "@/lib/salesStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { useQuery } from "@tanstack/react-query";
+import { fetchSalesFinancialSummary } from "@/lib/salesDocumentQueries";
 
 const REVENUE_ACCOUNTS = new Set([
   "إيرادات المبيعات",
@@ -64,6 +67,16 @@ function liveAccountingEntries(): JournalEntry[] {
 
 export default function Accounting() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const salesSummaryQuery = useQuery({
+    queryKey: ["sales_financial_summary", profile?.tenant_id, "all"],
+    queryFn: () => fetchSalesFinancialSummary(profile!.tenant_id),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
   const [entries, setEntries] = useState<JournalEntry[]>(liveAccountingEntries());
   useEffect(() => {
     const refresh = () => setEntries(liveAccountingEntries());
@@ -115,18 +128,13 @@ export default function Accounting() {
     revMap.clear();
     expMap.clear();
 
-    const actualInvoices = salesStore
-      .list({ type: "invoice" })
-      .filter((doc) => !doc.isDeleted && doc.status !== "cancelled" && doc.status !== "draft");
-    actualInvoices.forEach((doc) => {
-      const amount = Number(doc.subtotal || 0);
-      const ym = (doc.date || doc.createdAt || "").slice(0, 7);
-      const slot = byMonth.get(ym) || { revenue: 0, expenses: 0 };
-      revenue += amount;
-      slot.revenue += amount;
-      byMonth.set(ym, slot);
+    revenue = salesSummaryQuery.data?.revenue ?? 0;
+    (salesSummaryQuery.data?.monthly || []).forEach((month) => {
+      const slot = byMonth.get(month.month) || { revenue: 0, expenses: 0 };
+      slot.revenue = month.revenue;
+      byMonth.set(month.month, slot);
     });
-    revMap.set("فواتير معتمدة", { account: "فواتير معتمدة", total: revenue, count: actualInvoices.length, entries: [] });
+    revMap.set("فواتير معتمدة", { account: "فواتير معتمدة", total: revenue, count: salesSummaryQuery.data?.invoiceCount ?? 0, entries: [] });
 
     const actualExpenses = expensesStore
       .getAll()
@@ -161,7 +169,14 @@ export default function Accounting() {
     const expensesByAccount = Array.from(expMap.values()).sort((a, b) => b.total - a.total);
 
     return { revenue, expenses, profit, margin, monthly, recent, revenueByAccount, expensesByAccount };
-  }, [entries]);
+  }, [entries, salesSummaryQuery.data]);
+
+  if (salesSummaryQuery.isPending || salesSummaryQuery.isError) {
+    return <div className="py-12 text-center text-sm text-muted-foreground">
+      {salesSummaryQuery.isPending ? "جارٍ تحميل ملخص فواتير المبيعات..." : "تعذر تحميل ملخص فواتير المبيعات؛ لم تُعرض أرقام مالية ناقصة."}
+      {salesSummaryQuery.isError && <Button variant="outline" className="ms-3" onClick={() => void salesSummaryQuery.refetch()}>إعادة المحاولة</Button>}
+    </div>;
+  }
 
   return (
     <div className="space-y-6">

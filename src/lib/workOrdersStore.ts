@@ -1105,8 +1105,8 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
     listeners.forEach((l) => l());
     lastCloudFetchFailureAt = 0;
 
-    // Kick off background migration of legacy base64 photos to Storage (non-blocking).
-    setTimeout(() => migrateLegacyPhotosInBackground(cache), 1000);
+    // Historical inline images stay readable; a cloud refresh must not upload
+    // copies of them or mutate work orders in the background.
   } catch (e) {
     lastCloudFetchFailureAt = Date.now();
     console.warn("[workOrdersStore] cloud fetch failed:", e);
@@ -1116,30 +1116,6 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
   }
   })();
   return cloudFetchInFlight;
-}
-
-let _photoMigrationRunning = false;
-async function migrateLegacyPhotosInBackground(orders: WorkOrder[]) {
-  if (_photoMigrationRunning) return;
-  _photoMigrationRunning = true;
-  try {
-    const { migrateOrderPhotos, isLegacyDataUrl } = await import("@/lib/workOrderPhotosStorage");
-    const candidates = orders.filter((o) => Array.isArray(o.photos) && o.photos.some(isLegacyDataUrl));
-    if (candidates.length === 0) return;
-    console.info(`[workOrdersStore] migrating photos for ${candidates.length} order(s) to Storage…`);
-    for (const o of candidates) {
-      const migrated = await migrateOrderPhotos(o.id, o.photos!);
-      if (migrated) {
-        // Update through the verified cloud save path so all devices get the URLs.
-        await updateWorkOrderInCloud(o.id, { photos: migrated });
-      }
-    }
-    console.info(`[workOrdersStore] photo migration complete.`);
-  } catch (e) {
-    console.warn("[workOrdersStore] photo migration failed", e);
-  } finally {
-    _photoMigrationRunning = false;
-  }
 }
 
 function scheduleCloudFetch(delay = 200) {
@@ -1671,10 +1647,11 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
   let targetId = existingId;
   let finalOrderNumber = order.id;
   let previousOrderNumber: string | null = null;
+  let previousPhotos: StagePhoto[] = [];
   if (existingId) {
     const { data: existing, error: existingError } = await supabase
       .from("job_orders")
-      .select("id,order_number,deleted_at,archived_at")
+      .select("id,order_number,deleted_at,archived_at,photos")
       .eq("tenant_id", ctx.tenantId)
       .eq("id", existingId)
       .maybeSingle();
@@ -1684,6 +1661,7 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
       throw new Error("Work order is deleted in Supabase and cannot be updated from this form");
     }
     previousOrderNumber = (existing as any).order_number || order.id;
+    previousPhotos = Array.isArray((existing as any).photos) ? (existing as any).photos : [];
     // Visible numbers are immutable after allocation. Keeping the UUID and the
     // original number together prevents broken invoices, claims and old links.
     finalOrderNumber = normalizeWorkOrderNumber(previousOrderNumber || order.id || "");
@@ -1750,26 +1728,49 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
           vehicle_received_at: saved.receivedAt || null,
         },
       });
+    } catch (syncError) {
+      console.warn("[unified claim/work-order sync] skipped", syncError);
+    }
+  }
+  // One Storage object and one canonical vehicle_media identity for each new
+  // stage photo. job_orders.photos remains a compatibility reference for old
+  // clients; it does not contain a second file.
+  const photoFingerprint = (photos: StagePhoto[]) => JSON.stringify(photos.map((p) =>
+    [p.storagePath || p.dataUrl, p.phase, p.caption || ""]));
+  if (photoFingerprint(previousPhotos) !== photoFingerprint(saved.photos || [])) {
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const activePaths = new Set((saved.photos || []).map((p) => p.storagePath).filter((p): p is string => !!p));
       for (const photo of saved.photos || []) {
-        const path = photo.storagePath || photo.dataUrl;
-        if (!path) continue;
+        if (!photo.storagePath) continue; // Legacy inline photos stay in their original read path.
         await addUnifiedVehicleMedia({
           tenantId: ctx.tenantId,
-          claimId: saved.claimId,
+          claimId: saved.claimId || null,
           workOrderId: saved.cloudId || data.id,
           vehicleId: saved.vehicleId || vehicleId,
-          bucket: photo.storagePath ? "work-order-photos" : "legacy-inline",
-          path,
-          publicUrl: photo.dataUrl || null,
-          category: photo.phase || "work_order",
-          stage: photo.phase || null,
+          bucket: "work-order-photos",
+          path: photo.storagePath,
+          publicUrl: null,
+          category: photo.phase,
+          stage: photo.phase,
           caption: photo.caption || null,
           uploadedBy: auth.user?.id || null,
           source: "work_order",
         });
       }
+      const removedPaths = previousPhotos.map((p) => p.storagePath).filter((p): p is string => !!p && !activePaths.has(p));
+      if (removedPaths.length) {
+        const { error: mediaError } = await supabase.from("vehicle_media" as any)
+          .update({ deleted_at: new Date().toISOString() } as any)
+          .eq("tenant_id", ctx.tenantId)
+          .eq("work_order_id", saved.cloudId || data.id)
+          .eq("source", "work_order")
+          .eq("storage_bucket", "work-order-photos")
+          .in("storage_path", removedPaths);
+        if (mediaError) throw mediaError;
+      }
     } catch (syncError) {
-      console.warn("[unified claim/work-order sync] skipped", syncError);
+      console.warn("[work order media index] references retained in job_orders.photos", syncError);
     }
   }
   KNOWN_CLOUD_NUMBERS.add(saved.id);

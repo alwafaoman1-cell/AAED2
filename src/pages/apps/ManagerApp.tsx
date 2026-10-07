@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useQuery } from "@tanstack/react-query";
 import { getWorkOrders, subscribeWorkOrders } from "@/lib/workOrdersStore";
-import { salesStore } from "@/lib/salesStore";
+import { fetchSalesFinancialSummary } from "@/lib/salesDocumentQueries";
 import { expensesStore } from "@/lib/expensesStore";
 import { inventoryStore } from "@/lib/inventoryStore";
 import { toast } from "sonner";
@@ -28,11 +29,19 @@ export default function ManagerApp() {
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
   const [tick, setTick] = useState(0);
+  const salesSummaryQuery = useQuery({
+    queryKey: ["sales_financial_summary", profile?.tenant_id, "all"],
+    queryFn: () => fetchSalesFinancialSummary(profile!.tenant_id),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
   useEffect(() => subscribeWorkOrders(() => setTick((t) => t + 1)), []);
   useEffect(() => {
-    const u1 = salesStore.subscribe(() => setTick((t) => t + 1));
     const u2 = expensesStore.subscribe(() => setTick((t) => t + 1));
-    return () => { u1(); u2(); };
+    return () => { u2(); };
   }, []);
 
   const stats = useMemo(() => {
@@ -43,16 +52,9 @@ export default function ManagerApp() {
     const ready = orders.filter((o) => o.status === "جاهز للتسليم");
     const waitingParts = orders.filter((o) => o.status === "بانتظار قطع الغيار");
 
-    const invoices = salesStore.list({ type: "invoice" }).filter((d) => !d.isDeleted);
-    const todayRevenue = invoices
-      .filter((i) => (i.date || "").slice(0, 10) === d)
-      .reduce((s, i) => s + Number(i.total || 0), 0);
-    const monthRevenue = invoices
-      .filter((i) => (i.date || "").slice(0, 7) === d.slice(0, 7))
-      .reduce((s, i) => s + Number(i.total || 0), 0);
-
-    const unpaid = invoices.filter((i) => i.status !== "paid")
-      .reduce((s, i) => s + Math.max(0, Number(i.total || 0) - Number(i.paidTotal || 0)), 0);
+    const todayRevenue = salesSummaryQuery.data?.todayTotal ?? 0;
+    const monthRevenue = salesSummaryQuery.data?.currentMonthTotal ?? 0;
+    const unpaid = salesSummaryQuery.data?.outstanding ?? 0;
 
     const lowStock = inventoryStore.getAll().filter((p: any) =>
       p.minStock != null && Number(p.quantity || 0) <= Number(p.minStock)
@@ -60,7 +62,7 @@ export default function ManagerApp() {
 
     return { todayOrders: todayOrders.length, openOrders: openOrders.length, ready: ready.length,
       waitingParts: waitingParts.length, todayRevenue, monthRevenue, unpaid, lowStock };
-  }, [tick]);
+  }, [tick, salesSummaryQuery.data]);
 
   const tiles: Tile[] = [
     { label: "إيراد اليوم", value: fmt(stats.todayRevenue), sub: "ر.ع", icon: Wallet, tone: "from-emerald-500/15 to-emerald-500/5 border-emerald-500/30 text-emerald-500", to: "/sales/invoices" },
@@ -87,6 +89,13 @@ export default function ManagerApp() {
     { label: "الموظفون", to: "/staff", icon: Users, cls: "bg-sky-500/10 text-sky-500 border-sky-500/30" },
     { label: "الإعدادات", to: "/settings", icon: LayoutDashboard, cls: "bg-muted text-foreground border-border" },
   ];
+
+  if (salesSummaryQuery.isPending || salesSummaryQuery.isError) {
+    return <div className="py-12 text-center text-sm text-muted-foreground">
+      {salesSummaryQuery.isPending ? "جارٍ تحميل ملخص المبيعات..." : "تعذر تحميل ملخص المبيعات؛ لم تُعرض أرقام ناقصة."}
+      {salesSummaryQuery.isError && <Button variant="outline" className="ms-3" onClick={() => void salesSummaryQuery.refetch()}>إعادة المحاولة</Button>}
+    </div>;
+  }
 
   return (
     <div dir="rtl" className="min-h-screen bg-gradient-to-b from-background via-background to-muted/30 pb-24">

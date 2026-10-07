@@ -14,6 +14,7 @@ import {
   Undo2, AlertTriangle, Car, FolderOpen, ArrowRight,
 } from "lucide-react";
 import { refreshSignedUrls } from "@/lib/refreshSignedUrls";
+import { canonicalMediaReference, parseMediaStorageReference } from "@/lib/vehicleMediaUrls";
 import ArchivedPdfPreviewDialog from "@/components/ArchivedPdfPreviewDialog";
 import { getWorkOrders } from "@/lib/workOrdersStore";
 import { toast } from "sonner";
@@ -29,6 +30,7 @@ interface MediaItem {
   contentType: string;
   updatedAt: string;
   url?: string;
+  urlExpiresAt?: number;
   vehicleId?: string | null;
   claimId?: string | null;
   vehiclePlate?: string;
@@ -38,6 +40,7 @@ interface MediaItem {
 const REAL_BUCKETS = [
   { id: "insurance-docs", label: "مستندات التأمين" },
   { id: "damage-photos", label: "صور الأضرار / الفحص" },
+  { id: "work-order-photos", label: "صور مراحل أمر العمل" },
   { id: "invoices-pdf", label: "فواتير PDF" },
   { id: "avatars", label: "الصور الشخصية" },
 ];
@@ -194,12 +197,13 @@ async function listVehicleMediaIndex(): Promise<Record<string, MediaItem[]>> {
     ].filter(Boolean).join(" ").trim() || vehiclePlate;
     const item: MediaItem = {
       bucket,
-      path: row.storage_path,
+      path: canonicalMediaReference(row.storage_path, bucket),
       name: row.file_name || String(row.storage_path || "").split("/").pop() || "file",
       size: Number(row.file_size || 0),
       contentType: String(row.mime_type || (row.media_type === "image" ? "image/*" : "")),
       updatedAt: row.uploaded_at || "",
-      url: row.public_url || undefined,
+      url: /^https?:\/\//i.test(row.storage_path) && !parseMediaStorageReference(row.storage_path, bucket)
+        ? row.storage_path : undefined,
       vehicleId: row.vehicle_id || null,
       claimId: row.claim_id || null,
       vehiclePlate,
@@ -337,7 +341,7 @@ export default function MediaStudio() {
         const m = await refreshSignedUrls(b, chunk);
         m.forEach((v, k) => signed.set(k, v));
       }
-      const withUrls = list.map((x) => ({ ...x, url: signed.get(x.path) }));
+      const withUrls = list.map((x) => ({ ...x, url: signed.get(x.path), urlExpiresAt: signed.has(x.path) ? Date.now() + 6 * 86400_000 : undefined }));
       setItems((s) => ({ ...s, [b]: withUrls }));
     } finally {
       setLoading((s) => ({ ...s, [b]: false }));
@@ -349,7 +353,7 @@ export default function MediaStudio() {
   }
 
   async function loadVehicleMediaIndex(force = false) {
-    if (!force && REAL_BUCKETS.some((bucket) => items[bucket.id])) return;
+    if (!force && REAL_BUCKETS.every((bucket) => items[bucket.id])) return;
     setVehiclesLoading(true);
     try {
       const indexed = await listVehicleMediaIndex();
@@ -373,7 +377,7 @@ export default function MediaStudio() {
   async function ensureSignedFor(list: MediaItem[]) {
     const byBucket = new Map<string, string[]>();
     for (const it of list) {
-      if (it.url || it.bucket === "local-photos") continue;
+      if (it.bucket === "local-photos" || (it.url && (!parseMediaStorageReference(it.path, it.bucket) || (it.urlExpiresAt || 0) > Date.now()))) continue;
       const sigKey = keyOf(it);
       if (signingRef.current.has(sigKey)) continue;
       signingRef.current.add(sigKey);
@@ -384,12 +388,16 @@ export default function MediaStudio() {
     for (const [bucket, paths] of byBucket) {
       for (let i = 0; i < paths.length; i += 100) {
         const chunk = paths.slice(i, i + 100);
-        const m = await refreshSignedUrls(bucket, chunk);
-        setItems((s) => {
-          const cur = s[bucket] || [];
-          const next = cur.map((it) => (m.has(it.path) ? { ...it, url: m.get(it.path) } : it));
-          return { ...s, [bucket]: next };
-        });
+        try {
+          const m = await refreshSignedUrls(bucket, chunk);
+          setItems((s) => {
+            const cur = s[bucket] || [];
+            const next = cur.map((it) => (m.has(it.path) ? { ...it, url: m.get(it.path), urlExpiresAt: Date.now() + 6 * 86400_000 } : it));
+            return { ...s, [bucket]: next };
+          });
+        } finally {
+          chunk.forEach((path) => signingRef.current.delete(`${bucket}|${path}`));
+        }
       }
     }
   }

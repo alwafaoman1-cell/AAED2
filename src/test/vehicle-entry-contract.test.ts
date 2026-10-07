@@ -89,8 +89,8 @@ describe("vehicle entry receipt contract", () => {
     expect(service).toContain('.from("vehicle_media" as any)');
     expect(service).toContain("vehicle_entry_id");
     expect(service).toContain("onConflict: \"tenant_id,storage_bucket,storage_path\"");
-    expect(service).toContain("resolveVehicleEntryMediaUrls");
-    expect(service).toContain("createSignedUrls");
+    expect(service).toContain("resolveVehicleMediaUrls");
+    expect(read("src/lib/vehicleMediaUrls.ts")).toContain("refreshSignedUrls");
     expect(service).toContain("public_url: null");
     expect(list).toContain('import * as XLSX from "xlsx"');
     expect(list).toContain("XLSX.writeFile");

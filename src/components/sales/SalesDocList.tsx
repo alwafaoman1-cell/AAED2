@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
 import { Plus, Search, FileSpreadsheet, Cloud, Settings, MoreHorizontal, Printer, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
-import { salesStore, SalesDoc, SalesDocType, SalesDocStatus, calculateTotals, cryptoRandom, makeEmptyDoc } from "@/lib/salesStore";
+import { salesStore, SalesDocType, SalesDocStatus, calculateTotals, cryptoRandom, makeEmptyDoc } from "@/lib/salesStore";
+import { fetchNextNonInvoiceNumber, fetchSalesDocumentExport, fetchSalesDocumentPage, SALES_LIST_PAGE_SIZE } from "@/lib/salesDocumentQueries";
 import SalesStatusBadge from "./SalesStatusBadge";
 import { toast } from "sonner";
 import { findUnifiedInvoiceNumber, type UnifiedInvoiceSearchResult } from "@/lib/unifiedInvoiceSearch";
@@ -34,13 +37,47 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
   const { i18n } = useTranslation();
   const isAr = i18n.language === "ar";
   const isRtl = i18n.dir() === "rtl";
-  const [tick, force] = useState(0);
+  const { profile } = useAuth();
+  const queryClient = useQueryClient();
   const [q, setQ] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
+  const [savingBulk, setSavingBulk] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [invoiceSearchBusy, setInvoiceSearchBusy] = useState(false);
   const [invoiceMatches, setInvoiceMatches] = useState<UnifiedInvoiceSearchResult[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const tenantId = profile?.tenant_id || "";
+  const listKey = ["sales_documents", tenantId, type, status, debouncedSearch, page] as const;
+  const listQuery = useQuery({
+    queryKey: listKey,
+    queryFn: () => fetchSalesDocumentPage({ tenantId, type, status, search: debouncedSearch, page }),
+    enabled: Boolean(tenantId),
+    staleTime: 20_000,
+    gcTime: 120_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const items = listQuery.data?.rows || [];
+  const total = listQuery.data?.total || 0;
+  const pageCount = Math.max(1, Math.ceil(total / SALES_LIST_PAGE_SIZE));
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(q.trim());
+      setPage(1);
+      setSelected(new Set());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [q]);
+
+  useEffect(() => {
+    setPage(1);
+    setSelected(new Set());
+  }, [status, type]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -51,16 +88,18 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
   }
 
   useEffect(() => {
-    const unsub = salesStore.subscribe(() => force((x) => x + 1));
-    void salesStore.refresh();
-    return () => {
-      unsub();
-    };
-  }, []);
+    const unsubscribe = salesStore.subscribe(() => {
+      void queryClient.invalidateQueries({ queryKey: ["sales_documents", tenantId] });
+    });
+    return () => { unsubscribe(); };
+  }, [queryClient, tenantId]);
 
-  function exportCsv() {
-    const all = salesStore.list({ type });
-    if (all.length === 0) {
+  async function exportCsv() {
+    if (!tenantId) return;
+    setExporting(true);
+    try {
+    const all = await fetchSalesDocumentExport({ tenantId, type, status, search: debouncedSearch });
+    if (!all.length) {
       toast.info(isAr ? "لا توجد بيانات للتصدير" : "Nothing to export");
       return;
     }
@@ -69,7 +108,7 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
       d.number,
       d.date,
       d.customerName,
-      d.customerTaxNo || "",
+      d.customerTaxNo,
       d.status,
       d.subtotal.toFixed(3),
       d.taxTotal.toFixed(3),
@@ -90,6 +129,12 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
     a.remove();
     URL.revokeObjectURL(url);
     toast.success(isAr ? "تم تصدير CSV" : "CSV exported");
+    } catch (error) {
+      console.error("[sales] export failed", error);
+      toast.error(isAr ? "تعذر تصدير جميع النتائج. لم يُنشأ ملف ناقص." : "Export failed; no incomplete file was created.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   function triggerImport() {
@@ -100,13 +145,16 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    let added = 0;
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
       const arr: any[] = Array.isArray(parsed) ? parsed : [parsed];
-      let added = 0;
+      const nextNumber = type === "invoice" ? "" : await fetchNextNonInvoiceNumber(tenantId, type);
+      const sequence = nextNumber.match(/^(.*-)(\d+)$/);
       for (const raw of arr) {
         const base = makeEmptyDoc(type);
+        if (sequence) base.number = `${sequence[1]}${String(Number(sequence[2]) + added).padStart(sequence[2].length, "0")}`;
         const items = Array.isArray(raw.items) ? raw.items.map((it: any) => ({
           id: cryptoRandom(),
           description: String(it.description || it.desc || ""),
@@ -116,7 +164,7 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
           tax: Number(it.tax ?? 5) || 0,
         })) : [];
         const totals = calculateTotals(items);
-        salesStore.upsert({
+        await salesStore.saveDraft({
           ...base,
           customerName: String(raw.customerName || raw.customer || ""),
           customerAddress: raw.customerAddress || "",
@@ -128,9 +176,12 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
         });
         added++;
       }
-      toast.success(isAr ? `تم استيراد ${added} مستند` : `Imported ${added} document(s)`);
+      void queryClient.invalidateQueries({ queryKey: ["sales_documents", tenantId] });
+      toast.success(isAr ? `تم حفظ ${added} مستند` : `Saved ${added} document(s)`);
     } catch (err: any) {
-      toast.error(isAr ? "ملف غير صالح — يجب أن يكون JSON" : "Invalid file — must be JSON");
+      void queryClient.invalidateQueries({ queryKey: ["sales_documents", tenantId] });
+      const partial = added ? (isAr ? `حُفظ ${added} مستند قبل الخطأ. ` : `${added} document(s) saved before the error. `) : "";
+      toast.error(partial + (err?.message || (isAr ? "تعذر استيراد الملف أو حفظه" : "Import or save failed")));
     }
   }
 
@@ -159,22 +210,6 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
     }
   }
 
-  const items = useMemo(() => {
-    const all = salesStore.list({ type });
-    return all
-      .filter((d) => (status === "all" ? true : d.status === status))
-      .filter((d) => {
-        if (!q.trim()) return true;
-        const s = q.toLowerCase();
-        return (
-          d.number.toLowerCase().includes(s) ||
-          d.customerName.toLowerCase().includes(s) ||
-          (d.customerTaxNo || "").toLowerCase().includes(s)
-        );
-      })
-      .sort((a, b) => b.number.localeCompare(a.number, undefined, { numeric: true, sensitivity: "base" }));
-  }, [q, status, type, tick]);
-
   return (
     <div className="space-y-4" dir={isRtl ? "rtl" : "ltr"}>
       {/* Header bar (دفترة style) */}
@@ -184,7 +219,7 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
           <Button onClick={() => navigate(newRoute)} className="bg-success hover:bg-success/90 text-success-foreground gap-2">
             <Plus className="h-4 w-4" /> {isAr ? "جديد" : "New"}
           </Button>
-          <Button variant="outline" size="icon" onClick={exportCsv} title={isAr ? "تصدير CSV" : "Export CSV"}><FileSpreadsheet className="h-4 w-4" /></Button>
+          <Button variant="outline" size="icon" onClick={() => void exportCsv()} disabled={exporting || !tenantId} title={isAr ? "تصدير كل نتائج الفلتر CSV" : "Export all filtered results CSV"}><FileSpreadsheet className="h-4 w-4" /></Button>
           <Button variant="outline" size="icon" onClick={triggerImport} title={isAr ? "استيراد JSON" : "Import JSON"}><Cloud className="h-4 w-4" /></Button>
           <Button variant="outline" size="icon" onClick={openSettings} title={isAr ? "إعدادات القوالب" : "Template settings"}><Settings className="h-4 w-4" /></Button>
           <input ref={fileRef} type="file" accept=".json,application/json" onChange={handleImportFile} hidden />
@@ -246,7 +281,9 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
 
       {/* Results */}
       <div className="rounded-lg border bg-card divide-y">
-        {items.length === 0 && (
+        {listQuery.isPending && <div className="text-center py-12 text-muted-foreground text-sm">{isAr ? "جارٍ تحميل الصفحة..." : "Loading page..."}</div>}
+        {listQuery.isError && <div className="text-center py-12 text-destructive text-sm">{isAr ? "تعذر تحميل الفواتير" : "Unable to load documents"}<Button variant="link" onClick={() => void listQuery.refetch()}>{isAr ? "إعادة المحاولة" : "Retry"}</Button></div>}
+        {!listQuery.isPending && !listQuery.isError && items.length === 0 && (
           <div className="text-center py-12 text-muted-foreground text-sm">
             {isAr ? "لا توجد نتائج" : "No results"}
           </div>
@@ -266,22 +303,15 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                   <span title={isAr ? "تاريخ إصدار الفاتورة" : "Issue date"}>📄 {new Date(d.date).toLocaleDateString(isAr ? "ar-OM" : "en-GB")}</span>
-                  {d.payments && d.payments.length > 0 && (() => {
-                    const last = d.payments.reduce((a, b) => (a.date > b.date ? a : b)).date;
-                    return (
-                      <span className="text-success" title={isAr ? "تاريخ آخر تحصيل" : "Last payment"}>💵 {new Date(last).toLocaleDateString(isAr ? "ar-OM" : "en-GB")}</span>
-                    );
-                  })()}
+                  {d.lastPaymentDate && <span className="text-success" title={isAr ? "تاريخ آخر تحصيل" : "Last payment"}>💵 {new Date(d.lastPaymentDate).toLocaleDateString(isAr ? "ar-OM" : "en-GB")}</span>}
                   <span>—</span>
                   <span className="font-mono">{d.number}</span>
                 </div>
                 <div className="text-sm font-medium truncate">{d.customerName || "—"}</div>
-                {d.customerAddress && (
-                  <div className="text-xs text-muted-foreground truncate">{d.customerAddress}</div>
-                )}
+                {d.customerAddress && <div className="text-xs text-muted-foreground truncate">{d.customerAddress}</div>}
               </div>
               <div className="text-right">
-                <div className="font-mono font-bold">{d.total.toFixed(3)} <span className="text-xs">{d.currency === "OMR" ? "ر.ع" : d.currency}</span></div>
+                <div className="font-mono font-bold">{d.total.toFixed(3)} <span className="text-xs">{isAr ? "ر.ع" : "OMR"}</span></div>
                 <div className="mt-1"><SalesStatusBadge status={d.status as SalesDocStatus} /></div>
               </div>
             </Link>
@@ -290,15 +320,29 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
       </div>
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <div>{isAr ? `صفحة 1 من ${Math.max(1, Math.ceil(items.length / 20))}` : `Page 1 of ${Math.max(1, Math.ceil(items.length / 20))}`}</div>
-        <div>{isAr ? `1 - ${items.length} من ${items.length}` : `1 - ${items.length} of ${items.length}`}</div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={page <= 1 || listQuery.isFetching} onClick={() => { setPage((value) => value - 1); setSelected(new Set()); }}>{isAr ? "السابق" : "Previous"}</Button>
+          <span>{isAr ? `صفحة ${page} من ${pageCount}` : `Page ${page} of ${pageCount}`}</span>
+          <Button variant="outline" size="sm" disabled={page >= pageCount || listQuery.isFetching} onClick={() => { setPage((value) => value + 1); setSelected(new Set()); }}>{isAr ? "التالي" : "Next"}</Button>
+        </div>
+        <div>{total ? (page - 1) * SALES_LIST_PAGE_SIZE + 1 : 0} - {Math.min(page * SALES_LIST_PAGE_SIZE, total)} {isAr ? "من" : "of"} {total}</div>
       </div>
 
       <BulkActionBar count={selected.size} onClear={() => setSelected(new Set())} label={isAr ? "مستند" : "doc"}>
-        {type !== "invoice" && <Select onValueChange={(s) => {
-          selected.forEach((id) => salesStore.setStatus(id, s as SalesDocStatus));
-          toast.success(isAr ? `تم تحديث الحالة` : "Status updated");
-          setSelected(new Set());
+        {type !== "invoice" && <Select onValueChange={async (s) => {
+          setSavingBulk(true);
+          const ids = Array.from(selected);
+          const results = await Promise.allSettled(ids.map(async (id) => {
+            const fresh = await salesStore.refreshOne(id);
+            if (!fresh) throw new Error("Document not found");
+            await salesStore.setStatusConfirmed(id, s as SalesDocStatus);
+          }));
+          const failed = ids.filter((_, index) => results[index].status === "rejected");
+          setSelected(new Set(failed));
+          setSavingBulk(false);
+          void queryClient.invalidateQueries({ queryKey: ["sales_documents", tenantId] });
+          if (failed.length) toast.error(isAr ? `تعذر تحديث ${failed.length} مستند` : `Failed to update ${failed.length} document(s)`);
+          else toast.success(isAr ? "تم تحديث الحالة" : "Status updated");
         }}>
           <SelectTrigger className="h-8 w-32 text-xs"><SelectValue placeholder={isAr ? "الحالة" : "Status"} /></SelectTrigger>
           <SelectContent>
@@ -307,9 +351,9 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
             ))}
           </SelectContent>
         </Select>}
-        <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => {
+        <Button size="sm" variant="outline" className="h-8 gap-1" disabled={savingBulk} onClick={() => {
           const ids = Array.from(selected);
-          const docs = salesStore.list({ type }).filter((d) => ids.includes(d.id));
+          const docs = items.filter((d) => ids.includes(d.id));
           const header = ["Number","Date","Customer","Status","Total","Paid","Balance"];
           const rows = docs.map((d) => [d.number, d.date, d.customerName, d.status, d.total.toFixed(3), d.paidTotal.toFixed(3), d.balanceDue.toFixed(3)]);
           const csv = "\uFEFF" + [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -320,11 +364,18 @@ export default function SalesDocList({ type, title, newRoute, detailRoute }: Pro
         }}>
           <FileSpreadsheet size={14} /> {isAr ? "تصدير" : "Export"}
         </Button>
-        <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={async () => {
+        <Button size="sm" variant="destructive" className="h-8 gap-1" disabled={savingBulk} onClick={async () => {
           if (!confirm(isAr ? `حذف ${selected.size} مستند؟` : `Delete ${selected.size}?`)) return;
+          setSavingBulk(true);
           const ids = Array.from(selected);
-          const results = await Promise.allSettled(ids.map((id) => salesStore.remove(id)));
+          const results = await Promise.allSettled(ids.map(async (id) => {
+            const fresh = await salesStore.refreshOne(id);
+            if (!fresh) throw new Error("Document not found");
+            await salesStore.remove(id);
+          }));
           const failedIds = ids.filter((_, index) => results[index].status === "rejected");
+          setSavingBulk(false);
+          void queryClient.invalidateQueries({ queryKey: ["sales_documents", tenantId] });
           if (failedIds.length === 0) {
             toast.success(isAr ? "تم حذف الفواتير وسندات القبض المرتبطة" : "Invoices and linked receipts deleted");
             setSelected(new Set());

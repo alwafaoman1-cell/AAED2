@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { isUuid } from "@/lib/uuid";
+import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 
 export type ClaimMediaType = "image" | "document";
 
@@ -163,7 +164,7 @@ export async function getClaimMedia(claimId?: string | null): Promise<ClaimMedia
       if (!retry.error) {
         data = retry.data;
       } else {
-        return getLegacyClaimMediaFallback(claimId);
+        return resolveVehicleMediaUrls(await getLegacyClaimMediaFallback(claimId));
       }
     } else {
       throw error;
@@ -171,15 +172,14 @@ export async function getClaimMedia(claimId?: string | null): Promise<ClaimMedia
   }
 
   const rows = (data || []) as unknown as ClaimMediaRecord[];
-  const signed = await Promise.all(rows.map(async (row) => {
-    if (/^https?:\/\//i.test(row.storage_path)) return row.storage_path;
-    const { data: urlData } = await supabase.storage
-      .from(row.storage_bucket || "insurance-docs")
-      .createSignedUrl(row.storage_path, 60 * 60 * 24 * 7);
-    return urlData?.signedUrl || row.public_url || "";
-  }));
-
-  return rows.map((row, index) => ({ ...row, url: signed[index] || row.public_url || row.storage_path }));
+  if (!rows.length) {
+    // Only use the old claim arrays if no canonical (including soft-deleted)
+    // media exists. Otherwise a deleted photo could reappear from legacy data.
+    const { count, error: countError } = await supabase.from("vehicle_media" as any)
+      .select("id", { head: true, count: "exact" }).eq("claim_id", claimId);
+    if (!countError && count === 0) return resolveVehicleMediaUrls(await getLegacyClaimMediaFallback(claimId));
+  }
+  return resolveVehicleMediaUrls(rows);
 }
 
 export async function uploadClaimMedia(input: UploadClaimMediaInput): Promise<ClaimMediaRecord> {
@@ -219,7 +219,7 @@ export async function uploadClaimMedia(input: UploadClaimMediaInput): Promise<Cl
     vehicle_id: input.vehicleId || null,
     storage_bucket: bucket,
     storage_path: storagePath,
-    public_url: publicUrl,
+    public_url: null,
     media_type: input.mediaType,
     category: input.category,
     file_name: uploadName,
@@ -247,7 +247,7 @@ export async function uploadClaimMedia(input: UploadClaimMediaInput): Promise<Cl
         vehicle_id: input.vehicleId || null,
         storage_bucket: bucket,
         storage_path: storagePath,
-        public_url: publicUrl,
+        public_url: null,
         media_type: input.mediaType,
         category: input.category,
         caption: input.description || null,

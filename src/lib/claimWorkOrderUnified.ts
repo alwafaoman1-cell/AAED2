@@ -1,4 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { isUuid } from "@/lib/uuid";
+import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 
 export type UnifiedOperationalPatch = {
   vehicle_presence_status?: string | null;
@@ -40,6 +43,7 @@ export type UnifiedMediaRecord = {
   storage_bucket: string;
   storage_path: string;
   public_url: string | null;
+  url?: string;
   media_type: string;
   category: string;
   stage: string | null;
@@ -242,6 +246,7 @@ export async function addUnifiedVehicleMedia(params: {
       storage_bucket: params.bucket,
       storage_path: params.path,
       public_url: params.publicUrl || null,
+      deleted_at: null,
       media_type: "image",
       category: params.category,
       stage: params.stage || null,
@@ -265,21 +270,25 @@ export async function listUnifiedVehicleMedia(params: {
   vehicleId?: string | null;
   limit?: number;
 }): Promise<UnifiedMediaRecord[]> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) return [];
   const filters = [
-    params.claimId ? `claim_id.eq.${params.claimId}` : "",
-    params.workOrderId ? `work_order_id.eq.${params.workOrderId}` : "",
-    params.vehicleId ? `vehicle_id.eq.${params.vehicleId}` : "",
+    params.claimId && isUuid(params.claimId) ? `claim_id.eq.${params.claimId}` : "",
+    params.workOrderId && isUuid(params.workOrderId) ? `work_order_id.eq.${params.workOrderId}` : "",
+    params.vehicleId && isUuid(params.vehicleId) ? `vehicle_id.eq.${params.vehicleId}` : "",
   ].filter(Boolean).join(",");
   if (!filters) return [];
   const { data, error } = await supabase
     .from("vehicle_media" as any)
     .select("*")
+    .eq("tenant_id", tenantId)
     .or(filters)
+    .is("deleted_at", null)
     .order("uploaded_at", { ascending: false })
     .limit(params.limit || 200);
   if (error) {
     if (isMissingUnifiedTable(error)) return [];
     throw error;
   }
-  return (data || []) as unknown as UnifiedMediaRecord[];
+  return resolveVehicleMediaUrls((data || []) as unknown as UnifiedMediaRecord[]);
 }

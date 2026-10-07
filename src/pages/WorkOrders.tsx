@@ -66,6 +66,8 @@ import { TablePaginationControls } from "@/components/ui/table-pagination-contro
 import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { isInsuranceWorkOrder, resolveWorkOrderType } from "@/lib/workOrderType";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
+import WorkOrderInvoiceBadge from "@/components/workorders/WorkOrderInvoiceBadge";
+import { fetchWorkOrderInvoiceIndicators } from "@/lib/workOrderInvoiceIndicators";
 import { isUuid } from "@/lib/uuid";
 import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 import {
@@ -108,6 +110,7 @@ type WorkOrderColumnKey =
   | "vin"
   | "neededParts"
   | "status"
+  | "invoiceState"
   | "cost";
 
 const WORK_ORDER_COLUMNS: Array<{ key: WorkOrderColumnKey; ar: string; en: string }> = [
@@ -126,6 +129,7 @@ const WORK_ORDER_COLUMNS: Array<{ key: WorkOrderColumnKey; ar: string; en: strin
   { key: "vin", ar: "رقم الهيكل", en: "VIN" },
   { key: "neededParts", ar: "القطع المطلوبة", en: "Needed Parts" },
   { key: "status", ar: "الحالة", en: "Status" },
+  { key: "invoiceState", ar: "الفاتورة والتحصيل", en: "Invoice & Payment" },
   { key: "cost", ar: "المنفق شامل الضريبة", en: "Actual Spend incl. VAT" },
 ];
 
@@ -145,6 +149,7 @@ const DEFAULT_WORK_ORDER_COLUMNS: Record<WorkOrderColumnKey, boolean> = {
   vin: false,
   neededParts: false,
   status: true,
+  invoiceState: true,
   cost: true,
 };
 
@@ -555,6 +560,23 @@ export default function WorkOrders() {
       ? workOrdersPageQuery.data!.rows
       : filtered.slice((page - 1) * pageSize, page * pageSize),
     [filtered, page, pageSize, serverListReady, workOrdersPageQuery.data],
+  );
+  const invoiceIndicatorsQuery = useQuery({
+    queryKey: queryKeys.workOrderFinancials.list(profile?.tenant_id, paginatedOrders.map((order) => [order.cloudId || order.id, order.claimId || ""])),
+    queryFn: () => fetchWorkOrderInvoiceIndicators(profile!.tenant_id, paginatedOrders),
+    enabled: Boolean(profile?.tenant_id && paginatedOrders.length && isColumnVisible("invoiceState")),
+    staleTime: 15_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const invoiceBadgeFor = (order: WorkOrder) => (
+    <WorkOrderInvoiceBadge
+      indicator={invoiceIndicatorsQuery.data?.[order.cloudId || order.id]}
+      loading={invoiceIndicatorsQuery.isPending && !invoiceIndicatorsQuery.data}
+      error={invoiceIndicatorsQuery.isError}
+      isArabic={isArabic}
+    />
   );
   const availableActionOrders = serverListReady ? paginatedOrders : orders;
 
@@ -1059,6 +1081,7 @@ export default function WorkOrders() {
                       {normalizeWorkOrderStatus(order.status)}
                     </button>
                   </td>}
+                  {isColumnVisible("invoiceState") && <td className="py-3 px-4">{invoiceBadgeFor(order)}</td>}
                   {isColumnVisible("cost") && <td title={isArabic ? "سندات الصرف الفعلية المرتبطة شامل الضريبة" : "Actual linked expense vouchers including VAT"} className="py-3 px-4 text-foreground font-medium" style={{ fontFamily: "Inter, sans-serif", direction: "ltr", textAlign: "right" }} data-amount="true">{toEnglishDigits(formatActualWorkOrderCost(order))} OMR</td>}
                   <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
@@ -1316,6 +1339,7 @@ export default function WorkOrders() {
                   insurance={order.insurance}
                 />}
                 {isColumnVisible("status") && <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${workOrderStatusColor(order.status)}`}>{normalizeWorkOrderStatus(order.status)}</span>}
+                {isColumnVisible("invoiceState") && invoiceBadgeFor(order)}
                 {delay.level !== "green" && delay.days !== null && <span className="rounded-full bg-destructive/10 px-2 py-1 text-[10px] font-semibold text-destructive">{delay.days} يوم</span>}
               </div>
               {(isColumnVisible("entryDate") || isColumnVisible("daysInWorkshop") || isColumnVisible("phone") || isColumnVisible("insuranceCompany") || isColumnVisible("claimNumber") || isColumnVisible("vin") || isColumnVisible("neededParts")) && (

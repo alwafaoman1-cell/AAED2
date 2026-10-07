@@ -354,6 +354,56 @@ async function refreshSalesDocumentFromCloud(id: string): Promise<SalesDoc | nul
   return doc;
 }
 
+async function refreshSalesRangeFromCloud(from: string, to: string): Promise<void> {
+  const generation = salesSessionGeneration;
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId || generation !== salesSessionGeneration) throw new Error("تعذّر تحديد المؤسسة");
+  const nextDocs: SalesDoc[] = [];
+  for (let offset = 0; ; offset += SALES_SYNC_PAGE_SIZE) {
+    const { data, error } = await supabase.from("sales_documents")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("doc_type", "invoice")
+      .gte("date", from)
+      .lte("date", to)
+      .order("created_at", { ascending: false })
+      .range(offset, offset + SALES_SYNC_PAGE_SIZE - 1);
+    if (error) throw error;
+    if (generation !== salesSessionGeneration) return;
+    const rows = data || [];
+    const ids = rows.map((row) => row.id);
+    const paymentsByDocument = new Map<string, SalesPayment[]>();
+    if (ids.length) {
+      for (let paymentOffset = 0; ; paymentOffset += 500) {
+        const { data: payments, error: paymentError } = await supabase.from("sales_payments")
+          .select("id,sales_document_id,date,amount,method,reference,notes")
+          .eq("tenant_id", tenantId)
+          .in("sales_document_id", ids)
+          .order("date", { ascending: false })
+          .range(paymentOffset, paymentOffset + 499);
+        if (paymentError) throw paymentError;
+        if (generation !== salesSessionGeneration) return;
+        for (const payment of payments || []) {
+          const current = paymentsByDocument.get(payment.sales_document_id) || [];
+          current.push({ id: payment.id, date: payment.date, amount: Number(payment.amount || 0),
+            method: payment.method || "cash", reference: payment.reference || undefined,
+            note: payment.notes || undefined });
+          paymentsByDocument.set(payment.sales_document_id, current);
+        }
+        if ((payments || []).length < 500) break;
+      }
+    }
+    nextDocs.push(...rows.map((row) => {
+      const doc = rowToSalesDoc(row);
+      return applyAuthoritativeSalesPayments(doc, paymentsByDocument.get(doc.id) || []);
+    }));
+    if (rows.length < SALES_SYNC_PAGE_SIZE) break;
+  }
+  if (generation !== salesSessionGeneration) return;
+  const fetchedIds = new Set(nextDocs.map((doc) => doc.id));
+  write([...nextDocs, ...read().filter((doc) => !fetchedIds.has(doc.id))]);
+}
+
 function scheduleSalesRefresh(delay = 250) {
   if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
   if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) return;
@@ -603,9 +653,40 @@ export const salesStore = {
   },
   async refresh() {
     await refreshSalesFromCloud();
+    if (Date.now() - lastCloudRefreshFailureAt < CLOUD_REFRESH_FAILURE_COOLDOWN_MS) {
+      throw new Error("تعذر تحميل سجل المبيعات من قاعدة البيانات");
+    }
+  },
+  async refreshRange(from: string, to: string) {
+    await refreshSalesRangeFromCloud(from, to);
   },
   async refreshOne(id: string) {
     return refreshSalesDocumentFromCloud(id);
+  },
+  async refreshCustomerInvoices(customerName: string): Promise<void> {
+    const name = customerName.trim();
+    if (!name) return;
+    const generation = salesSessionGeneration;
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId || generation !== salesSessionGeneration) return;
+    for (let offset = 0; ; offset += 100) {
+      const { data, error } = await supabase.from("sales_documents")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("doc_type", "invoice")
+        .eq("customer_name", name)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + 99);
+      if (error) throw error;
+      if (generation !== salesSessionGeneration) return;
+      const rows = data || [];
+      for (let index = 0; index < rows.length; index += 5) {
+        await Promise.all(rows.slice(index, index + 5).map((row) => refreshSalesDocumentFromCloud(row.id)));
+        if (generation !== salesSessionGeneration) return;
+      }
+      if (rows.length < 100) return;
+    }
   },
   async setDocumentReference(id: string, reference: string) {
     const doc = salesStore.get(id);
@@ -1001,6 +1082,20 @@ export const salesStore = {
       activity: [...doc.activity, { id: cryptoRandom(), at: new Date().toISOString(), text: `تغيير الحالة إلى: ${status}` }],
     });
   },
+  async setStatusConfirmed(id: string, status: SalesDocStatus): Promise<void> {
+    const doc = salesStore.get(id);
+    if (!doc) throw new Error("المستند غير موجود");
+    if (doc.type === "invoice" && (doc.invoiceStatus === "issued" || doc.invoiceStatus === "credited" || !!doc.issuedAt)) {
+      throw new Error("حالة الفاتورة الصادرة تُحتسب من الدفعات ولا يمكن تغييرها يدويًا");
+    }
+    const next = {
+      ...doc,
+      status,
+      activity: [...doc.activity, { id: cryptoRandom(), at: new Date().toISOString(), text: `تغيير الحالة إلى: ${status}` }],
+    };
+    const saved = await upsertSalesCloud(next);
+    write([saved, ...read().filter((item) => item.id !== id)]);
+  },
   /** يضيف دفعة واحدة بالمبلغ المتبقي ويحوّل الحالة إلى "مدفوعة" */
   markPaidInFull(id: string, method: string = "نقداً", reference?: string) {
     const doc = salesStore.get(id);
@@ -1083,9 +1178,8 @@ if (typeof window !== "undefined") {
       notify();
       return;
     }
-    if ((event === "INITIAL_SESSION" || event === "SIGNED_IN") && session?.user && cache.length === 0) {
-      scheduleSalesRefresh(1500);
-    }
+    // Never hydrate the entire sales history on auth. Lists use paged reads,
+    // summaries use database aggregates, and details read by document id.
   });
   // Realtime invalidation is centralized in useRealtimeSync. Avoid duplicate
   // store-level subscriptions that refetch all sales documents repeatedly.

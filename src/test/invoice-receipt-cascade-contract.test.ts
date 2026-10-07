@@ -41,6 +41,8 @@ describe("invoice receipt cascade contract", () => {
     expect(removeBlock.indexOf("await upsertSalesCloud(removed)")).toBeLessThan(removeBlock.indexOf("write(read().map"));
     expect(store).toContain("removeCustomerPaymentJournal(`${id}::${payment.id}`)");
     expect(detail).toContain("await salesStore.remove(doc.id)");
-    expect(list).toContain("Promise.allSettled(ids.map((id) => salesStore.remove(id)))");
+    expect(list).toContain("Promise.allSettled(ids.map(async (id) => {");
+    expect(list).toContain("await salesStore.refreshOne(id)");
+    expect(list).toContain("await salesStore.remove(id)");
   });
 });

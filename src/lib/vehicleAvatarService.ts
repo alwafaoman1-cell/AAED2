@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { isUuid } from "@/lib/uuid";
+import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 
 export interface VehicleAvatarRecord {
   id: string;
@@ -18,9 +19,6 @@ export interface VehicleAvatarRecord {
   deleted_at?: string | null;
   url?: string;
 }
-
-const SIGNED_URL_TTL_MS = 55 * 60 * 1000;
-const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
 function safeFileName(name: string) {
   const cleaned = String(name || "vehicle-avatar").replace(/[^\p{L}\p{N}._-]+/gu, "_").replace(/^_+|_+$/g, "");
@@ -41,16 +39,8 @@ async function resolveTenantId(explicit?: string | null) {
 }
 
 async function createSignedUrl(row: Pick<VehicleAvatarRecord, "storage_bucket" | "storage_path" | "public_url">) {
-  if (/^https?:\/\//i.test(row.storage_path)) return row.storage_path;
-  const cacheKey = `${row.storage_bucket || "insurance-docs"}:${row.storage_path}`;
-  const cached = signedUrlCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.url;
-  const { data } = await supabase.storage
-    .from(row.storage_bucket || "insurance-docs")
-    .createSignedUrl(row.storage_path, 60 * 60 * 24 * 7);
-  const url = data?.signedUrl || row.public_url || "";
-  if (url) signedUrlCache.set(cacheKey, { url, expiresAt: Date.now() + SIGNED_URL_TTL_MS });
-  return url;
+  const [resolved] = await resolveVehicleMediaUrls([row]);
+  return resolved.url;
 }
 
 export async function getVehicleAvatar(vehicleId?: string | null): Promise<VehicleAvatarRecord | null> {

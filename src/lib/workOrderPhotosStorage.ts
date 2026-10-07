@@ -7,6 +7,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import type { StagePhoto } from "@/lib/workOrdersStore";
+import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 
 const BUCKET = "work-order-photos";
 const SIGNED_TTL_SEC = 60 * 60 * 24 * 365; // 1 year — refreshed on each load
@@ -73,18 +74,16 @@ export async function migrateOrderPhotos(orderId: string, photos: StagePhoto[]):
   return changed ? updated : null;
 }
 
-/** Refresh signed URLs for non-legacy photos (in case they expired). */
+/** Refresh every stored photo on read; the old token can be present but expired. */
 export async function refreshSignedPhotoUrls(photos: StagePhoto[]): Promise<StagePhoto[] | null> {
-  const stalePaths: { idx: number; path: string }[] = [];
-  photos.forEach((p, idx) => {
-    const path = (p as any).storagePath as string | undefined;
-    if (path && !p.dataUrl?.includes("token=")) stalePaths.push({ idx, path });
-  });
-  if (stalePaths.length === 0) return null;
-  const out = photos.slice();
-  for (const { idx, path } of stalePaths) {
-    const { data } = await supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_TTL_SEC);
-    if (data?.signedUrl) out[idx] = { ...out[idx], dataUrl: data.signedUrl };
-  }
-  return out;
+  if (!photos.some((photo) => photo.storagePath)) return null;
+  const resolved = await resolveVehicleMediaUrls(photos.map((photo) => ({
+    storage_bucket: BUCKET,
+    storage_path: photo.storagePath || "",
+    public_url: photo.dataUrl,
+  })));
+  return photos.map((photo, index) => ({
+    ...photo,
+    dataUrl: photo.storagePath ? (resolved[index].url || photo.dataUrl) : photo.dataUrl,
+  }));
 }

@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { roundMoney } from "@/lib/money";
+import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 
 type Row = Record<string, any>;
 const EXPENSE_SELECTION = "id,voucher_number,date,created_at,updated_at,status,expense_type,expense_scope,work_order_channel,description,category_name,total,subtotal,amount,vat_amount,vehicle_id,linked_vehicle_plate,work_order_id,linked_work_order_id,claim_id,supplier_id,archived_at,deleted_at";
@@ -275,7 +276,11 @@ export async function fetchVehicle360Media(tenantId: string, vehicleId: string, 
     workOrderIds.length ? rows((supabase.from("vehicle_media") as any).select(selection).eq("tenant_id", tenantId).in("work_order_id", workOrderIds).is("deleted_at", null)) : Promise.resolve([]),
     claimIds.length ? rows((supabase.from("vehicle_media") as any).select(selection).eq("tenant_id", tenantId).in("claim_id", claimIds).is("deleted_at", null)) : Promise.resolve([]),
   ]);
-  return uniqueRows(groups.flat());
+  const unique = uniqueRows(groups.flat());
+  const resolved = await resolveVehicleMediaUrls(unique);
+  // The existing archive/print views read public_url. Supply a fresh URL in
+  // memory only; the stored row continues to hold the durable Storage path.
+  return resolved.map((row) => ({ ...row, public_url: row.url || null }));
 }
 
 export async function fetchVehicle360Estimates(tenantId: string, vehicleId: string, workOrderIds: string[], claimIds: string[]) {

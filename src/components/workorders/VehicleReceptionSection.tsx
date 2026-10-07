@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { canonicalMediaReference, resolveImageReferences } from "@/lib/vehicleMediaUrls";
 
 type BelongingItem = { key: string; label_ar: string; label_en?: string };
 
@@ -39,6 +40,7 @@ export default function VehicleReceptionSection({ jobOrderId }: Props) {
   const [belongings, setBelongings] = useState<Record<string, boolean | string>>({});
   const [other, setOther] = useState<string>("");
   const [photos, setPhotos] = useState<string[]>([]);
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [items, setItems] = useState<BelongingItem[]>(DEFAULT_ITEMS);
   const [belongingsOpen, setBelongingsOpen] = useState(false);
@@ -59,7 +61,12 @@ export default function VehicleReceptionSection({ jobOrderId }: Props) {
         const b = (jo.vehicle_belongings as any) || {};
         setBelongings(b);
         setOther(typeof b.other === "string" ? b.other : "");
-        setPhotos(Array.isArray(jo.reception_photos) ? (jo.reception_photos as any) : []);
+        const references = Array.isArray(jo.reception_photos)
+          ? (jo.reception_photos as string[]).map((ref) => canonicalMediaReference(ref, "damage-photos")) : [];
+        setPhotos(references);
+        void resolveImageReferences(references, "damage-photos").then((urls) => {
+          setPhotoUrls(Object.fromEntries(references.map((ref, index) => [ref, urls[index]])));
+        });
       }
       if (settings?.items) setItems(settings.items as any);
       setLoading(false);
@@ -72,8 +79,9 @@ export default function VehicleReceptionSection({ jobOrderId }: Props) {
       const path = `reception/${jobOrderId}/${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, "_")}`;
       const { error } = await supabase.storage.from("damage-photos").upload(path, file, { upsert: false });
       if (error) throw error;
-      const { data: signed } = await supabase.storage.from("damage-photos").createSignedUrl(path, 60 * 60 * 24 * 30);
-      if (signed?.signedUrl) setPhotos((p) => [...p, signed.signedUrl]);
+      const [url] = await resolveImageReferences([path], "damage-photos");
+      setPhotos((p) => [...p, path]);
+      if (url) setPhotoUrls((current) => ({ ...current, [path]: url }));
       toast.success("تم رفع الصورة");
     } catch (e: any) {
       toast.error(e.message || "فشل رفع الصورة");
@@ -199,7 +207,7 @@ export default function VehicleReceptionSection({ jobOrderId }: Props) {
           <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
             {photos.map((p, i) => (
               <div key={i} className="relative aspect-square bg-muted rounded overflow-hidden group">
-                <img src={p} alt="" className="w-full h-full object-cover" />
+                <img src={photoUrls[p] || (/^https?:\/\//i.test(p) ? p : "")} alt="" className="w-full h-full object-cover" />
                 <button type="button" onClick={() => setPhotos((arr) => arr.filter((_, x) => x !== i))}
                   className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100">
                   <X size={12} />

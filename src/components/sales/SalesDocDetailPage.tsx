@@ -56,6 +56,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   const isAr = i18n.language === "ar";
   const isRtl = i18n.dir() === "rtl";
   const [tick, setTick] = useState(0);
+  const [documentLoad, setDocumentLoad] = useState<{ id: string; pending: boolean; error: string | null }>({ id: "", pending: false, error: null });
   const [showPayment, setShowPayment] = useState(false);
   const [showReference, setShowReference] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
@@ -82,6 +83,17 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   }, []);
 
   const doc = useMemo(() => salesStore.get(id), [id, tick]);
+
+  useEffect(() => {
+    let active = true;
+    setDocumentLoad({ id, pending: true, error: null });
+    void salesStore.refreshOne(id).then((fresh) => {
+      if (active) setDocumentLoad({ id, pending: false, error: fresh ? null : "not_found" });
+    }).catch((error) => {
+      if (active) setDocumentLoad({ id, pending: false, error: error?.message || "load_failed" });
+    });
+    return () => { active = false; };
+  }, [id]);
 
   useEffect(() => {
     if (activeTab !== "activity" || type !== "invoice" || !id) return;
@@ -274,7 +286,18 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   if (!doc) {
     return (
       <div className="text-center py-16">
-        <p className="text-muted-foreground">{isAr ? "المستند غير موجود" : "Document not found"}</p>
+        <p className="text-muted-foreground">{documentLoad.id !== id || documentLoad.pending
+          ? (isAr ? "جارٍ تحميل المستند..." : "Loading document...")
+          : documentLoad.error === "not_found"
+            ? (isAr ? "المستند غير موجود" : "Document not found")
+            : (isAr ? "تعذر تحميل المستند، يرجى إعادة المحاولة" : "Unable to load document. Please retry.")}</p>
+        {documentLoad.id === id && !documentLoad.pending && documentLoad.error && documentLoad.error !== "not_found" && (
+          <Button variant="outline" className="mt-4" onClick={() => {
+            setDocumentLoad({ id, pending: true, error: null });
+            void salesStore.refreshOne(id).then((fresh) => setDocumentLoad({ id, pending: false, error: fresh ? null : "not_found" }))
+              .catch((error) => setDocumentLoad({ id, pending: false, error: error?.message || "load_failed" }));
+          }}>{isAr ? "إعادة المحاولة" : "Retry"}</Button>
+        )}
         <Button className="mt-4" onClick={() => smartBack(navigate, listRoute)}>{isAr ? "عودة" : "Back"}</Button>
       </div>
     );

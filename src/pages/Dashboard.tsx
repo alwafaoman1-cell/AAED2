@@ -24,7 +24,7 @@ import { CSS } from "@dnd-kit/utilities";
 
 import { inventoryStore, type Part } from "@/lib/inventoryStore";
 import { getWorkOrders, refreshWorkOrdersFromCloud, subscribeWorkOrders, type WorkOrder } from "@/lib/workOrdersStore";
-import { salesStore, type SalesDoc } from "@/lib/salesStore";
+import { fetchSalesDocumentPage, fetchSalesFinancialSummary, searchSalesDocuments } from "@/lib/salesDocumentQueries";
 import { staffStore, type Technician } from "@/lib/staffStore";
 import { vehiclesStore } from "@/lib/vehiclesStore";
 import { customersStore, refreshCustomersFromCloud, type Customer } from "@/lib/customersStore";
@@ -56,6 +56,11 @@ function periodStart(key: PeriodKey): number {
   if (key === "week") { d.setDate(d.getDate() - 6); return d.getTime(); }
   if (key === "month") { d.setDate(1); return d.getTime(); }
   return 0;
+}
+function periodStartDate(key: PeriodKey): string | null {
+  if (key === "all") return null;
+  const date = new Date(periodStart(key));
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 function inPeriod(iso: string | undefined, key: PeriodKey): boolean {
   if (key === "all") return true;
@@ -123,7 +128,6 @@ export default function Dashboard() {
   // ===== Live data =====
   const [inventory, setInventory] = useState<Part[]>(inventoryStore.getAll());
   const [orders, setOrders] = useState<WorkOrder[]>(getWorkOrders());
-  const [docs, setDocs] = useState<SalesDoc[]>(salesStore.list());
   const [techs, setTechs] = useState<Technician[]>(staffStore.getAll());
   const [customers, setCustomers] = useState<Customer[]>(customersStore.getAll());
 
@@ -142,6 +146,23 @@ export default function Dashboard() {
     refetchOnWindowFocus: false,
     retry: false,
   });
+  const salesSummaryQuery = useQuery({
+    queryKey: ["sales_financial_summary", profile?.tenant_id, period],
+    queryFn: () => fetchSalesFinancialSummary(profile!.tenant_id, periodStartDate(period)),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const salesRecentQuery = useQuery({
+    queryKey: ["sales_documents", profile?.tenant_id, "invoice", "recent"],
+    queryFn: () => fetchSalesDocumentPage({ tenantId: profile!.tenant_id, type: "invoice", page: 1 }),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
   const serverDashboardReady = Boolean(dashboardQuery.data && !dashboardQuery.isError);
 
   useEffect(() => { const u = inventoryStore.subscribe(() => setInventory([...inventoryStore.getAll()])); return () => { u(); }; }, []);
@@ -150,7 +171,6 @@ export default function Dashboard() {
     const u = subscribeWorkOrders(() => setOrders([...getWorkOrders()]));
     return () => { u(); };
   }, [dashboardQuery.isError]);
-  useEffect(() => { const u = salesStore.subscribe(() => setDocs([...salesStore.list()])); return () => { u(); }; }, []);
   useEffect(() => { const u = staffStore.subscribe(() => setTechs([...staffStore.getAll()])); return () => { u(); }; }, []);
   useEffect(() => {
     if (!dashboardQuery.isError) return;
@@ -197,12 +217,12 @@ export default function Dashboard() {
     return true;
     }), [dashboardQuery.data, orders, period, techFilter, serviceFilter, serverDashboardReady]);
 
-  const filteredDocs = useMemo(() => docs.filter((d) => inPeriod(d.date, period)), [docs, period]);
+  const filteredDocs = useMemo(() => (salesRecentQuery.data?.rows || []).filter((d) => inPeriod(d.date, period)), [salesRecentQuery.data, period]);
 
   // ===== Stats =====
   const stats = useMemo(() => {
     if (serverDashboardReady) {
-      return { ...dashboardQuery.data!.stats, unpaidInvoices: filteredDocs.filter((d) => d.type === "invoice" && (d.balanceDue || 0) > 0.001).length };
+      return { ...dashboardQuery.data!.stats, unpaidInvoices: salesSummaryQuery.data?.unpaidCount ?? 0 };
     }
     const inWorkshop = filteredOrders.filter((o) => !["تم التسليم", "مغلق"].includes(o.status)).length;
     const underInspection = filteredOrders.filter((o) => o.status === "تحت الفحص").length;
@@ -211,10 +231,9 @@ export default function Dashboard() {
     const readyDelivery = filteredOrders.filter((o) => o.status === "جاهز للتسليم").length;
     const openOrders = filteredOrders.filter((o) => !["مغلق"].includes(o.status)).length;
     const closedToday = orders.filter((o) => (o.status === "مغلق" || o.status === "تم التسليم") && inPeriod(o.entryDate, "today")).length;
-    const invoices = filteredDocs.filter((d) => d.type === "invoice");
-    const unpaidInvoices = invoices.filter((d) => (d.balanceDue || 0) > 0.001).length;
+    const unpaidInvoices = salesSummaryQuery.data?.unpaidCount ?? 0;
     return { inWorkshop, underInspection, waitingInsurance, underRepair, readyDelivery, openOrders, closedToday, unpaidInvoices };
-  }, [dashboardQuery.data, filteredOrders, filteredDocs, orders, serverDashboardReady]);
+  }, [dashboardQuery.data, filteredOrders, orders, salesSummaryQuery.data, serverDashboardReady]);
 
   // ===== KPIs =====
   const kpis = useMemo(() => {
@@ -229,16 +248,15 @@ export default function Dashboard() {
         ? closedWithDates.reduce((s, o) => s + Math.max(0, Math.floor((Date.now() - new Date(o.entryDate).getTime()) / 86400000)), 0) / closedWithDates.length
         : 0;
 
-    const invoices = filteredDocs.filter((d) => d.type === "invoice");
-    const totalAmt = invoices.reduce((s, d) => s + (d.total || 0), 0);
-    const paidAmt = invoices.reduce((s, d) => s + ((d.total || 0) - (d.balanceDue || 0)), 0);
+    const totalAmt = salesSummaryQuery.data?.invoiceTotal ?? 0;
+    const paidAmt = salesSummaryQuery.data?.paid ?? 0;
     const collectionRate = totalAmt > 0 ? (paidAmt / totalAmt) * 100 : 0;
 
     const activeCustomers = serverDashboardReady
       ? dashboardQuery.data!.stats.activeCustomers
       : new Set(filteredOrders.map((o) => (o.customer || "").trim()).filter(Boolean)).size;
     return { completionRate, avgDays, collectionRate, activeCustomers };
-  }, [dashboardQuery.data, filteredOrders, filteredDocs, serverDashboardReady]);
+  }, [dashboardQuery.data, filteredOrders, salesSummaryQuery.data, serverDashboardReady]);
 
   // ===== Service distribution =====
   const serviceData = useMemo(() => {
@@ -290,7 +308,7 @@ export default function Dashboard() {
       id: `sd-${d.id}`, ts: new Date(d.date || d.createdAt || 0).getTime() || 0,
       label: `${t("dashboard.activityInvoice")} • ${d.number}`,
       sublabel: `${d.customerName} — ${(d.total || 0).toLocaleString(localeCode)} ${t("common.currency")}`,
-      to: `/sales/${d.type === "quote" ? "quotes" : d.type === "credit_note" ? "credit-notes" : d.type === "return_invoice" ? "returns" : d.type === "recurring_invoice" ? "recurring" : "invoices"}/${d.id}`, icon: FileText, tone: "text-success",
+      to: `/sales/invoices/${d.id}`, icon: FileText, tone: "text-success",
     }));
     activityCustomers.slice(0, 10).forEach((c) => acts.push({
       id: `c-${c.id}`, ts: 0,
@@ -310,6 +328,14 @@ export default function Dashboard() {
     enabled: serverDashboardReady && Boolean(profile?.tenant_id) && debouncedSearch.length >= 2,
     staleTime: 30_000,
     gcTime: 120_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const salesSearchQuery = useQuery({
+    queryKey: ["sales_documents_search", profile?.tenant_id, debouncedSearch],
+    queryFn: () => searchSalesDocuments(profile!.tenant_id, debouncedSearch),
+    enabled: Boolean(profile?.tenant_id) && debouncedSearch.length >= 2,
+    staleTime: 30_000,
     refetchOnWindowFocus: false,
     retry: false,
   });
@@ -341,7 +367,7 @@ export default function Dashboard() {
           out.push({ kind: "تأمين", label: c.claim_number || "—", sub: `${c.insurance_company || ""} — ${c.vehicle_plate || ""}`, to: `/insurance/${c.id}` });
       });
     }
-    docs.forEach((d) => {
+    (salesSearchQuery.data || []).forEach((d) => {
       if (`${d.number} ${d.customerName}`.toLowerCase().includes(q))
         out.push({ kind: t("sales.title"), label: d.number, sub: d.customerName, to: `/sales/${d.type === "quote" ? "quotes" : d.type === "credit_note" ? "credit-notes" : d.type === "return_invoice" ? "returns" : d.type === "recurring_invoice" ? "recurring" : "invoices"}/${d.id}` });
     });
@@ -358,7 +384,7 @@ export default function Dashboard() {
         out.push({ kind: "مورد", label: s.name, sub: s.phone || "", to: `/inventory/suppliers` });
     });
     return out.slice(0, 20);
-  }, [search, orders, customers, docs, insuranceClaims, insuranceCompanies, inventory, t, serverDashboardReady, dashboardSearchQuery.data]);
+  }, [search, orders, customers, salesSearchQuery.data, insuranceClaims, insuranceCompanies, inventory, t, serverDashboardReady, dashboardSearchQuery.data]);
 
   // ===== Layout DnD =====
   const { order, setOrder, reset } = useLayout();
@@ -382,7 +408,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         <StatCard title={t("dashboard.completionRate")} value={fmtPct(kpis.completionRate)} icon={Percent} variant="success" to="/work-orders" />
         <StatCard title={t("dashboard.avgRepairDays")} value={fmtDays(kpis.avgDays)} icon={Timer} variant="info" to="/work-orders" />
-        <StatCard title={t("dashboard.collectionRate")} value={fmtPct(kpis.collectionRate)} icon={TrendingUp} variant="gold" to="/accounting" />
+        <StatCard title={t("dashboard.collectionRate")} value={salesSummaryQuery.isSuccess ? fmtPct(kpis.collectionRate) : "—"} icon={TrendingUp} variant="gold" to="/accounting" />
         <StatCard title={t("dashboard.activeCustomers")} value={kpis.activeCustomers} icon={Users} to="/customers" />
       </div>
     ),
@@ -395,7 +421,7 @@ export default function Dashboard() {
         <StatCard title={t("dashboard.stats.readyDelivery")} value={stats.readyDelivery} icon={CheckCircle} variant="success" to="/work-orders" />
         <StatCard title={t("dashboard.stats.openOrders")} value={stats.openOrders} icon={FileText} to="/work-orders" />
         <StatCard title={t("dashboard.stats.closedToday")} value={stats.closedToday} icon={ClipboardCheck} variant="success" to="/work-orders" />
-        <StatCard title={t("dashboard.stats.unpaidInvoices")} value={stats.unpaidInvoices} icon={AlertTriangle} variant="warning" to="/sales/invoices" />
+        <StatCard title={t("dashboard.stats.unpaidInvoices")} value={salesSummaryQuery.isSuccess ? stats.unpaidInvoices : "—"} icon={AlertTriangle} variant="warning" to="/sales/invoices" />
       </div>
     ),
     charts: (

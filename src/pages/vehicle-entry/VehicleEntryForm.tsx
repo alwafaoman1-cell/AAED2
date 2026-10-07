@@ -243,6 +243,9 @@ export default function VehicleEntryForm() {
     }
     setSaving(true);
     try {
+      const customerPhoneWasEdited = form.customer_id &&
+        form.customer_phone_before_edit !== undefined &&
+        form.customer.phone.trim() !== (form.customer_phone_before_edit || "").trim();
       const saved = await saveVehicleEntry({ ...form, status }, user?.id);
       if (pendingPhotos.length) {
         try {
@@ -268,10 +271,29 @@ export default function VehicleEntryForm() {
       const refreshed = await getVehicleEntry(saved.id);
       qc.setQueryData(queryKeys.vehicleEntries.detail(saved.id), refreshed || saved);
       await qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
+      if (!form.customer_id || customerPhoneWasEdited) {
+        void Promise.allSettled([
+          qc.invalidateQueries({ queryKey: queryKeys.customers.all }),
+          qc.invalidateQueries({ queryKey: queryKeys.vehicles.all }),
+          qc.invalidateQueries({ queryKey: queryKeys.vehicle360.all }),
+        ]);
+      }
       toast.success(status === "Issued" ? "تم حفظ وإصدار نموذج الدخول" : "تم حفظ مسودة نموذج الدخول");
       navigate(`/vehicle-entry/${saved.id}`, { replace: true });
     } catch (error: any) {
-      toast.error(`تعذر حفظ نموذج الدخول: ${error.message || error}`);
+      if (error?.savedEntry?.id) {
+        const savedEntry = error.savedEntry;
+        patch({
+          id: savedEntry.id,
+          entry_number: savedEntry.entry_number,
+          customer_id: savedEntry.customer_id,
+          vehicle_id: savedEntry.vehicle_id,
+        });
+        qc.setQueryData(queryKeys.vehicleEntries.detail(savedEntry.id), savedEntry);
+        void qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
+      }
+      const message = String(error?.message || error);
+      toast.error(message.startsWith("حُفظ نموذج الدخول، لكن") ? message : `تعذر حفظ نموذج الدخول: ${message}`);
     } finally {
       setSaving(false);
     }
@@ -280,6 +302,7 @@ export default function VehicleEntryForm() {
   function selectCustomer(customer: any) {
     patch({
       customer_id: customer.id,
+      customer_phone_before_edit: customer.phone ?? null,
       customer: {
         ...form.customer,
         name: customer.name || "",
@@ -304,6 +327,11 @@ export default function VehicleEntryForm() {
     patch({
       vehicle_id: vehicle.id,
       customer_id: vehicle.customer_id || form.customer_id,
+      customer_phone_before_edit: vehicle.customers
+        ? vehicle.customers.phone ?? null
+        : vehicle.customer_id && vehicle.customer_id !== form.customer_id
+          ? undefined
+          : form.customer_phone_before_edit,
       vehicle: {
         ...form.vehicle,
         plate_number: vehicle.plate_number || "",

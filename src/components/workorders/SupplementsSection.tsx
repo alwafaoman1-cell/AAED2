@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { normalizePhone } from "@/lib/phoneUtils";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
+import { canonicalMediaReference, resolveImageReferences } from "@/lib/vehicleMediaUrls";
 
 interface Supplement {
   id: string;
@@ -33,11 +34,12 @@ const STATUS_LABEL: Record<string, { ar: string; cls: string; icon: any }> = {
   executed: { ar: "تم التنفيذ", cls: "bg-primary/15 text-primary", icon: PackageCheck },
 };
 
-interface Props { jobOrderId: string; customerName?: string; customerPhone?: string }
+interface Props { jobOrderId: string; customerName?: string; customerPhone?: string; onPhotosChanged?: () => void }
 
-export default function SupplementsSection({ jobOrderId, customerName, customerPhone }: Props) {
+export default function SupplementsSection({ jobOrderId, customerName, customerPhone, onPhotosChanged }: Props) {
   const isUuid = UUID_RE.test(jobOrderId);
   const [items, setItems] = useState<Supplement[]>([]);
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Partial<Supplement> | null>(null);
   const [sending, setSending] = useState(false);
@@ -48,7 +50,15 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
     setLoading(true);
     const { data } = await supabase.from("work_order_supplements")
       .select("*").eq("job_order_id", jobOrderId).order("created_at", { ascending: true });
-    setItems((data as any) || []);
+    const normalized = ((data as Supplement[]) || []).map((item) => ({
+      ...item,
+      photos: (item.photos || []).map((ref) => canonicalMediaReference(ref, "damage-photos")),
+    }));
+    setItems(normalized);
+    const refs = Array.from(new Set(normalized.flatMap((item) => item.photos)));
+    void resolveImageReferences(refs, "damage-photos").then((urls) => {
+      setPhotoUrls(Object.fromEntries(refs.map((ref, index) => [ref, urls[index]])));
+    });
     setLoading(false);
   }
   useEffect(() => { load(); }, [jobOrderId]);
@@ -76,22 +86,23 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
       });
       if (error) return toast.error(error.message);
     }
-    setEditing(null); toast.success("تم الحفظ"); load();
+    setEditing(null); toast.success("تم الحفظ"); load(); onPhotosChanged?.();
   }
 
   async function remove(id: string) {
     if (!confirm("حذف البند؟")) return;
     const { error } = await supabase.from("work_order_supplements").delete().eq("id", id);
     if (error) return toast.error(error.message);
-    load();
+    load(); onPhotosChanged?.();
   }
 
   async function uploadPhoto(file: File) {
     const path = `supplements/${jobOrderId}/${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, "_")}`;
     const { error } = await supabase.storage.from("damage-photos").upload(path, file);
     if (error) { toast.error(error.message); return; }
-    const { data } = await supabase.storage.from("damage-photos").createSignedUrl(path, 60 * 60 * 24 * 30);
-    if (data?.signedUrl) setEditing((e) => ({ ...e!, photos: [...(e?.photos || []), data.signedUrl] }));
+    const [url] = await resolveImageReferences([path], "damage-photos");
+    setEditing((current) => current ? ({ ...current, photos: [...(current.photos || []), path] }) : current);
+    if (url) setPhotoUrls((current) => ({ ...current, [path]: url }));
   }
 
   async function markExecuted(id: string) {
@@ -199,7 +210,7 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
                         {i.photos?.length > 0 && (
                           <div className="flex gap-1 mt-1">
                             {i.photos.slice(0, 4).map((p, x) => (
-                              <img key={x} src={p} className="w-8 h-8 rounded object-cover border" alt="" />
+                              <img key={x} src={photoUrls[p] || (/^https?:\/\//i.test(p) ? p : "")} className="w-8 h-8 rounded object-cover border" alt="" />
                             ))}
                           </div>
                         )}
@@ -278,7 +289,7 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
               {(editing?.photos || []).length > 0 && (
                 <div className="grid grid-cols-4 gap-1 mt-2">
                   {editing!.photos!.map((p, i) => (
-                    <img key={i} src={p} className="w-full aspect-square object-cover rounded" alt=""/>
+                    <img key={i} src={photoUrls[p] || (/^https?:\/\//i.test(p) ? p : "")} className="w-full aspect-square object-cover rounded" alt=""/>
                   ))}
                 </div>
               )}

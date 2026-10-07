@@ -65,6 +65,8 @@ export const queryKeys = {
   },
   workOrderFinancials: {
     all: ["work_order_financials"] as const,
+    list: (tenantId?: string | null, orders?: unknown) =>
+      ["work_order_financials", "list", tenantId ?? "", orders ?? []] as const,
     detail: (tenantId?: string | null, workOrderId?: string | null, claimId?: string | null) =>
       ["work_order_financials", tenantId ?? "", workOrderId ?? "", claimId ?? ""] as const,
   },

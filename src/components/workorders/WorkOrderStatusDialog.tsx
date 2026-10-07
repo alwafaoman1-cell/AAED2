@@ -159,23 +159,25 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
       const { uploadStagePhoto } = await import("@/lib/workOrderPhotosStorage");
       const phase = getStatusPhase(selected || order!.status);
       const newOnes: StagePhoto[] = [];
+      let failed = 0;
       for (const f of Array.from(files).slice(0, 6)) {
         if (!f.type.startsWith("image/")) continue;
-        const opt = await convertImageToWebp(f);
-        const photoId = Math.random().toString(36).slice(2, 9);
-        const uploaded = await uploadStagePhoto({ orderId: order!.id, photoId, file: opt });
-        if (uploaded) {
+        try {
+          const opt = await convertImageToWebp(f);
+          const photoId = Math.random().toString(36).slice(2, 9);
+          const uploaded = await uploadStagePhoto({ orderId: order!.id, photoId, file: opt });
+          if (!uploaded) { failed++; continue; }
           newOnes.push({
             id: photoId, phase, dataUrl: uploaded.url, storagePath: uploaded.path,
             uploadedAt: new Date().toISOString(),
           } as StagePhoto);
-        } else {
-          const dataUrl: string = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(opt); });
-          newOnes.push({ id: photoId, phase, dataUrl, uploadedAt: new Date().toISOString() } as StagePhoto);
+        } catch {
+          failed++;
         }
       }
       setPendingPhotos((p) => [...p, ...newOnes]);
       if (newOnes.length) toast.success(`تمت إضافة ${newOnes.length} صورة`);
+      if (failed) toast.error(`فشل رفع ${failed} صورة إلى التخزين السحابي؛ لم تُحفظ محليًا. أعد المحاولة.`);
     } catch (e: any) {
       toast.error(e.message || "فشل رفع الصور");
     } finally {

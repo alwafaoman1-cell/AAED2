@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { smartBack } from "@/lib/smartBack";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import ReportToolbar from "@/components/reports/ReportToolbar";
 import ReportsKpiBar from "@/components/reports/ReportsKpiBar";
+import { salesStore } from "@/lib/salesStore";
 import {
   rangeShortcut, getReportFacets,
   buildSalesReport, buildPurchasesReport, buildProfitLossReport, buildVatReport,
@@ -94,6 +95,27 @@ export default function Reports({ version = "legacy" }: ReportsProps) {
   );
 
   const filters = tabFilters[activeTab] || DEFAULT_FILTERS;
+  const salesRangeKey = `${filters.range.from}|${filters.range.to}`;
+  const [loadedSalesRange, setLoadedSalesRange] = useState("");
+  const [salesRangeError, setSalesRangeError] = useState(false);
+  const [salesRetry, setSalesRetry] = useState(0);
+  const [salesTick, setSalesTick] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setSalesRangeError(false);
+    void salesStore.refreshRange(filters.range.from || "1900-01-01", filters.range.to || "9999-12-31")
+      .then(() => {
+        if (!active) return;
+        setLoadedSalesRange(salesRangeKey);
+        setSalesTick((value) => value + 1);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.warn("[Reports] sales range unavailable", error);
+        setSalesRangeError(true);
+      });
+    return () => { active = false; };
+  }, [salesRangeKey, salesRetry]);
   const setFilters = (f: ReportFilters) =>
     setTabFilters({ ...tabFilters, [activeTab]: f });
 
@@ -405,7 +427,7 @@ export default function Reports({ version = "legacy" }: ReportsProps) {
     }
 
     return null;
-  }, [activeReport, filters, rangeLabel]);
+  }, [activeReport, filters, rangeLabel, salesTick]);
 
   // ===== بحث لحظي داخل صفوف التقرير النشط =====
   const filteredRows = useMemo(() => {
@@ -440,6 +462,14 @@ export default function Reports({ version = "legacy" }: ReportsProps) {
     setSearchQuery("");
     setExpandedRows(new Set());
   };
+
+  if (loadedSalesRange !== salesRangeKey) {
+    return <div className="py-12 text-center text-sm text-muted-foreground">
+      {salesRangeError ? (isRtl ? "تعذر تحميل بيانات المبيعات للفترة؛ لم تُعرض أرقام ناقصة." : "Sales data could not be loaded; incomplete numbers are hidden.")
+        : (isRtl ? "جارٍ تحميل بيانات الفترة المحددة..." : "Loading the selected reporting period...")}
+      {salesRangeError && <Button variant="outline" className="ms-3" onClick={() => setSalesRetry((value) => value + 1)}>{isRtl ? "إعادة المحاولة" : "Retry"}</Button>}
+    </div>;
+  }
 
   return (
     <div className="space-y-6" dir={isRtl ? "rtl" : "ltr"}>

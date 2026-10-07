@@ -361,11 +361,11 @@ function getBaseStyles(s: PdfTemplateSettings) {
     tbody td{padding:7px 8px;border-bottom:1px solid #eee}
     tbody tr:hover{background:#fafafa}
 
-    .totals-box{margin-top:12px;margin-right:auto;width:280px;border:2px solid #eee;border-radius:8px;overflow:hidden;break-inside:avoid;page-break-inside:avoid}
+    .totals-box{margin-top:12px;margin-right:auto;width:280px;border:2px solid #eee;border-radius:8px;overflow:visible;break-inside:avoid;page-break-inside:avoid}
     .totals-row{display:flex;justify-content:space-between;align-items:center;padding:7px 14px;font-size:11.5px;gap:10px}
     .totals-row:not(:last-child){border-bottom:1px solid #eee}
     .totals-row .amount{font-family:'Inter',sans-serif;font-weight:600;direction:ltr}
-    .totals-row.total{background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor,-15)});color:white;font-weight:700;font-size:13.5px}
+    .totals-row.total{background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor,-15)});color:white;font-weight:700;font-size:13.5px;line-height:1.3;min-height:48px;padding-top:10px;padding-bottom:12px}
 
     .notes-box{margin-top:12px;padding:9px 12px;background:#f8f9fa;border-radius:8px;border-right:3px solid ${s.primaryColor};font-size:10.3px;color:#555;line-height:1.55;break-inside:avoid;page-break-inside:avoid}
     .notes-box .label-en{display:block;font-size:9px;color:#999;font-family:'Inter',sans-serif;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}

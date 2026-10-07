@@ -1,45 +1,41 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { salesStore } from "@/lib/salesStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchCashSalesPaymentsPage, SALES_LIST_PAGE_SIZE } from "@/lib/salesDocumentQueries";
 import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
 
 export default function CustomerPayments() {
   const { i18n } = useTranslation();
   const isAr = i18n.language === "ar";
   const isRtl = i18n.dir() === "rtl";
-  const [, force] = useState(0);
+  const { profile } = useAuth();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const tenantId = profile?.tenant_id || "";
 
   useEffect(() => {
-    const u = salesStore.subscribe(() => force((x) => x + 1));
-    return () => { u(); };
-  }, []);
-
-  const invoices = salesStore.list({ type: "invoice" });
-  const allPayments = useMemo(() => {
-    const rows: { id: string; date: string; amount: number; method: string; invoice: string; customer: string }[] = [];
-    for (const inv of invoices) {
-      for (const p of inv.payments) {
-        rows.push({
-          id: p.id,
-          date: p.date,
-          amount: p.amount,
-          method: p.method,
-          invoice: inv.number,
-          customer: inv.customerName,
-        });
-      }
-    }
-    return rows.sort((a, b) => b.date.localeCompare(a.date));
-  }, [invoices]);
-
-  const filtered = allPayments.filter(
-    (p) => !q || p.customer.includes(q) || p.invoice.includes(q) || p.method.includes(q)
-  );
+    const timer = window.setTimeout(() => { setSearch(q.trim()); setPage(1); }, 300);
+    return () => window.clearTimeout(timer);
+  }, [q]);
+  const paymentsQuery = useQuery({
+    queryKey: ["cash_sales_payments", tenantId, page, search],
+    queryFn: () => fetchCashSalesPaymentsPage(tenantId, page, search),
+    enabled: Boolean(tenantId),
+    staleTime: 20_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const rows = paymentsQuery.data?.rows || [];
+  const total = paymentsQuery.data?.total || 0;
+  const pageCount = Math.max(1, Math.ceil(total / SALES_LIST_PAGE_SIZE));
 
   return (
     <div className="space-y-4" dir={isRtl ? "rtl" : "ltr"}>
@@ -58,13 +54,15 @@ export default function CustomerPayments() {
       </div>
 
       <div className="rounded-lg border bg-card divide-y">
-        {filtered.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">{isAr ? "لا توجد دفعات" : "No payments"}</div>}
-        {filtered.map((p) => (
+        {paymentsQuery.isPending && <div className="text-center py-12 text-muted-foreground text-sm">{isAr ? "جارٍ تحميل الدفعات..." : "Loading payments..."}</div>}
+        {paymentsQuery.isError && <div className="text-center py-12 text-destructive text-sm">{isAr ? "تعذر تحميل سندات القبض" : "Unable to load payments"}</div>}
+        {!paymentsQuery.isPending && !paymentsQuery.isError && rows.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">{isAr ? "لا توجد دفعات" : "No payments"}</div>}
+        {rows.map((p) => (
           <div key={p.id} className="p-3 flex items-center justify-between gap-3">
             <div className="flex-1">
-              <div className="text-sm font-medium">{p.customer}</div>
+              <div className="text-sm font-medium">{p.customerName}</div>
               <div className="text-xs text-muted-foreground">
-                {isAr ? "فاتورة" : "Invoice"} {p.invoice} — {p.method}
+                {isAr ? "فاتورة" : "Invoice"} {p.invoiceNumber} — {p.method}
               </div>
             </div>
             <div className="text-end">
@@ -75,7 +73,19 @@ export default function CustomerPayments() {
         ))}
       </div>
 
-      <UnifiedAddPaymentDialog open={open} onOpenChange={setOpen} onSaved={() => force((x) => x + 1)} />
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>{total ? (page - 1) * SALES_LIST_PAGE_SIZE + 1 : 0} - {Math.min(page * SALES_LIST_PAGE_SIZE, total)} {isAr ? "من" : "of"} {total}</span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={page <= 1 || paymentsQuery.isFetching} onClick={() => setPage((value) => value - 1)}>{isAr ? "السابق" : "Previous"}</Button>
+          <span>{page} / {pageCount}</span>
+          <Button variant="outline" size="sm" disabled={page >= pageCount || paymentsQuery.isFetching} onClick={() => setPage((value) => value + 1)}>{isAr ? "التالي" : "Next"}</Button>
+        </div>
+      </div>
+
+      <UnifiedAddPaymentDialog open={open} onOpenChange={setOpen} onSaved={() => {
+        void queryClient.invalidateQueries({ queryKey: ["cash_sales_payments", tenantId] });
+        void queryClient.invalidateQueries({ queryKey: ["sales_financial_summary", tenantId] });
+      }} />
     </div>
   );
 }

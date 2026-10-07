@@ -55,6 +55,8 @@ import {
   upsertUnifiedOperationalState,
 } from "@/lib/claimWorkOrderUnified";
 import { queryKeys } from "@/lib/queryKeys";
+import { getClaimMedia } from "@/lib/insurance/claimMediaService";
+import { mediaStorageKey } from "@/lib/vehicleMediaUrls";
 
 const PRIMARY = "#0f2f57";
 const GOLD = "#c69b43";
@@ -330,11 +332,15 @@ export default function InsuranceClaimDetailRedesigned() {
   const { data: unifiedMedia = [] } = useQuery({
     queryKey: queryKeys.vehicleMedia.claim(currentId, (claim as any)?.job_order_id, (claim as any)?.vehicle_id),
     enabled: !!currentId,
-    queryFn: () => listUnifiedVehicleMedia({
-      claimId: currentId,
-      workOrderId: (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
-      vehicleId: (claim as any)?.vehicle_id || null,
-    }),
+    queryFn: async () => {
+      const rows = await listUnifiedVehicleMedia({
+        claimId: currentId,
+        workOrderId: (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
+      });
+      if (rows.some((media) => media.media_type === "image" && media.claim_id === currentId)) return rows;
+      const fallback = await getClaimMedia(currentId);
+      return [...rows, ...fallback.filter((media) => media.media_type === "image")];
+    },
   });
 
   const { data: timeline = [] } = useQuery({
@@ -401,15 +407,12 @@ export default function InsuranceClaimDetailRedesigned() {
   const claimPhotoUrls = useMemo(() => {
     const urls = new Map<string, string>();
     for (const media of unifiedMedia) {
-      const url = media.public_url || media.storage_path;
-      if (url) urls.set(url, url);
-    }
-    for (const legacy of ((claim as any)?.damage_photos || [])) {
-      const url = typeof legacy === "string" ? legacy : legacy?.url || legacy?.path;
-      if (url) urls.set(url, url);
+      if (media.media_type !== "image") continue;
+      const url = media.url || media.public_url;
+      if (url) urls.set(mediaStorageKey(media.storage_bucket, media.storage_path), url);
     }
     return Array.from(urls.values());
-  }, [claim, unifiedMedia]);
+  }, [unifiedMedia]);
 
   const missingDocs = [
     !hasLpo ? "LPO" : "",
@@ -956,26 +959,22 @@ export default function InsuranceClaimDetailRedesigned() {
         contentType: file.type || "application/octet-stream",
       });
       if (uploadError) throw uploadError;
-      const { data } = await supabase.storage.from("insurance-docs").createSignedUrl(path, 60 * 60 * 24 * 7);
       const { data: auth } = await supabase.auth.getUser();
-      const photoUrl = data?.signedUrl || path;
-      await addUnifiedVehicleMedia({
+      const savedMedia = await addUnifiedVehicleMedia({
         tenantId: claim.tenant_id,
         claimId: currentId,
         workOrderId: workOrder?.id || (claim as any)?.job_order_id || (claim as any)?.auto_job_order_id || null,
         vehicleId: claim.vehicle_id || null,
         bucket: "insurance-docs",
         path,
-        publicUrl: photoUrl,
+        publicUrl: null,
         category: "claim",
         stage: statusText,
         caption: file.name,
         uploadedBy: auth.user?.id || null,
         source: "claim",
       });
-      await updateClaimColumns(currentId, {
-        damage_photos: [...(claim.damage_photos || []), photoUrl],
-      });
+      if (!savedMedia) throw new Error("تعذر حفظ مرجع الصورة في قاعدة البيانات");
       await insertTimeline(claim, "claim_photo_uploaded", { file: file.name, path, stage: statusText });
       await refreshClaim();
       toast.success("تم رفع صورة المطالبة");

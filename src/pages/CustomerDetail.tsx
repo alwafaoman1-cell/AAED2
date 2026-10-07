@@ -48,6 +48,7 @@ import {
   appointmentsStore, getCustomerAppointments, type Appointment,
 } from "@/lib/appointmentsStore";
 import { getCustomerLedger } from "@/lib/customerLedger";
+import { salesStore } from "@/lib/salesStore";
 import { auditLogStore } from "@/lib/auditLogStore";
 import { getAccountStatementHtml } from "@/lib/accountStatementPdf";
 import { canEdit, canDelete } from "@/lib/permissions";
@@ -113,6 +114,10 @@ export default function CustomerDetail() {
   useEffect(() => creditNotesStore.subscribe(() => setTick((t) => t + 1)), []);
   useEffect(() => appointmentsStore.subscribe(() => setTick((t) => t + 1)), []);
   useEffect(() => auditLogStore.subscribe(() => setTick((t) => t + 1)), []);
+  useEffect(() => {
+    const unsubscribe = salesStore.subscribe(() => setTick((t) => t + 1));
+    return () => { unsubscribe(); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,6 +146,11 @@ export default function CustomerDetail() {
   );
 
   const customerName = customer?.name || "";
+  useEffect(() => {
+    if (!customerName) return;
+    void salesStore.refreshCustomerInvoices(customerName)
+      .catch((error) => console.warn("[CustomerDetail] customer invoices unavailable", error));
+  }, [customerName]);
   const k = useMemo(() => normalize(customerName), [customerName]);
 
   const legacyOrders = useMemo(

@@ -22,6 +22,8 @@ import { claimDocLabel, type ClaimDocCategory } from "@/lib/uploadHtmlAsPdf";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import { buildClaimArchiveHtml, type ArchiveSectionFile } from "@/lib/claimArchivePdf";
 import { refreshSignedUrls } from "@/lib/refreshSignedUrls";
+import { mediaStorageKey, resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
+import { getClaimMedia } from "@/lib/insurance/claimMediaService";
 import { queryKeys } from "@/lib/queryKeys";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -92,33 +94,6 @@ const fileNameFromUrl = (u: string, fallback = "file") => {
   try { return decodeURIComponent(u.split("/").pop()?.split("?")[0] || fallback); }
   catch { return fallback; }
 };
-const KNOWN_STORAGE_BUCKETS = ["insurance-docs", "damage-photos", "work-order-photos", "invoices-pdf"] as const;
-function extractStoragePath(url: string, bucket: string): string | null {
-  try {
-    const parsed = new URL(url);
-    const markers = [`/object/sign/${bucket}/`, `/object/public/${bucket}/`];
-    for (const marker of markers) {
-      const index = parsed.pathname.indexOf(marker);
-      if (index >= 0) return decodeURIComponent(parsed.pathname.slice(index + marker.length));
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-async function removeStorageObjectIfPossible(url: string, explicitPath?: string | null) {
-  const candidates = explicitPath
-    ? [{ bucket: "insurance-docs", path: explicitPath }]
-    : KNOWN_STORAGE_BUCKETS
-      .map((bucket) => ({ bucket: bucket as string, path: extractStoragePath(url, bucket) }))
-      .filter((x): x is { bucket: string; path: string } => !!x.path);
-  for (const candidate of candidates) {
-    const { error } = await supabase.storage.from(candidate.bucket).remove([candidate.path]);
-    if (!error) return;
-    console.warn("[claim archive] storage remove failed", candidate.bucket, candidate.path, error);
-  }
-}
-
 export default function ClaimArchivePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -154,6 +129,7 @@ export default function ClaimArchivePage() {
       if (!claim) return null;
 
       const c: any = claim;
+      const canonicalMedia = await getClaimMedia(id!);
 
       // 2) سجلات المستندات المولّدة
       const { data: genDocs } = await supabase
@@ -186,7 +162,7 @@ export default function ClaimArchivePage() {
       if (woId) {
         const { data: wo } = await supabase
           .from("job_orders")
-          .select("id, order_number, status, description, diagnosis, created_at")
+          .select("id, order_number, status, description, diagnosis, photos, created_at")
           .eq("id", woId)
           .maybeSingle();
         workOrder = wo;
@@ -207,7 +183,22 @@ export default function ClaimArchivePage() {
         .eq("claim_id", id!)
         .order("payment_date", { ascending: false });
 
-      return { claim: c, genDocs: generatedDocs, invoices: invoices || [], workOrder, workOrderInspections, payments: (payments || []) as any[] };
+      const legacyRefs = [
+        ...(c.satisfaction_photos || []), ...(c.damage_photos || []), ...(c.delivery_photos || []),
+        c.receiver_id_photo, ...(c.documents || []).map((doc: any) => doc.url),
+        ...(invoices || []).map((invoice: any) => invoice.pdf_url),
+        ...workOrderInspections.flatMap((inspection: any) => inspection.photos || []),
+      ].filter((reference): reference is string => typeof reference === "string" && !!reference);
+      const storedOrderPhotos = (Array.isArray(workOrder?.photos) ? workOrder.photos : []) as Array<{ dataUrl?: string; storagePath?: string }>;
+      const legacyResolved = await resolveVehicleMediaUrls(legacyRefs.map((reference) => ({
+        storage_bucket: "insurance-docs", storage_path: reference,
+      })));
+      const orderResolved = await resolveVehicleMediaUrls(storedOrderPhotos.map((photo) => ({
+        storage_bucket: "work-order-photos", storage_path: photo.storagePath || photo.dataUrl || "",
+      })));
+      const freshUrls = Object.fromEntries(legacyRefs.map((reference, index) => [reference, legacyResolved[index].url || reference]));
+      return { claim: c, canonicalMedia, genDocs: generatedDocs, invoices: invoices || [], workOrder, workOrderInspections,
+        orderPhotoUrls: orderResolved.map((item) => item.url), freshUrls, payments: (payments || []) as any[] };
     },
   });
 
@@ -216,25 +207,38 @@ export default function ClaimArchivePage() {
     if (!data) return [];
     const c = data.claim;
     const list: ArchiveFile[] = [];
+    const freshUrl = (reference: string) => data.freshUrls[reference] || reference;
+
+    data.canonicalMedia.forEach((media) => {
+      if (!media.url || (media.media_type !== "image" && media.media_type !== "document")) return;
+      list.push({
+        id: `media-${media.id}`, url: media.url,
+        name: media.file_name || fileNameFromUrl(media.storage_path),
+        kind: media.media_type === "image" ? "image" : "pdf",
+        section: media.media_type === "image" ? "damage" : "documents",
+        createdAt: media.uploaded_at || undefined,
+        meta: media.caption || undefined,
+      });
+    });
 
     // Reception (لا حقل مخصص — نعتبر damage_photos الأقدم لاستلام)؟ نتركها فارغة افتراضياً.
     // لكن نعرض delivery_photos كاستلام/تسليم
     (c.satisfaction_photos || []).forEach((u: string, i: number) => list.push({
-      id: `sat-${i}`, url: u, name: fileNameFromUrl(u, `satisfaction-${i + 1}.jpg`),
+      id: `sat-${i}`, url: freshUrl(u), name: fileNameFromUrl(u, `satisfaction-${i + 1}.jpg`),
       source: { type: "claim_array", field: "satisfaction_photos", index: i },
       kind: "image", section: "reception", meta: "صورة رضا/استلام",
     }));
 
     // Damage Photos
     (c.damage_photos || []).forEach((u: string, i: number) => list.push({
-      id: `dmg-${i}`, url: u, name: fileNameFromUrl(u, `damage-${i + 1}.jpg`),
+      id: `dmg-${i}`, url: freshUrl(u), name: fileNameFromUrl(u, `damage-${i + 1}.jpg`),
       source: { type: "claim_array", field: "damage_photos", index: i },
       kind: "image", section: "damage",
     }));
 
     // Documents (مرفقات التأمين العامة)
     (c.documents || []).forEach((d: any, i: number) => list.push({
-      id: `doc-${i}`, url: d.url, name: d.name || fileNameFromUrl(d.url, `doc-${i + 1}`),
+      id: `doc-${i}`, url: freshUrl(d.url), name: d.name || fileNameFromUrl(d.url, `doc-${i + 1}`),
       source: { type: "claim_document", index: i },
       kind: isPdfUrl(d.url) ? "pdf" : isImageUrl(d.url) ? "image" : "pdf",
       section: "documents", meta: d.type,
@@ -242,7 +246,7 @@ export default function ClaimArchivePage() {
 
     // ID — هوية المستلم
     if (c.receiver_id_photo) list.push({
-      id: "rid", url: c.receiver_id_photo, name: fileNameFromUrl(c.receiver_id_photo, "receiver-id.jpg"),
+      id: "rid", url: freshUrl(c.receiver_id_photo), name: fileNameFromUrl(c.receiver_id_photo, "receiver-id.jpg"),
       source: { type: "claim_single", field: "receiver_id_photo" },
       kind: isImageUrl(c.receiver_id_photo) ? "image" : "pdf", section: "id",
       meta: c.receiver_name ? `هوية: ${c.receiver_name}` : "هوية المستلم",
@@ -250,7 +254,7 @@ export default function ClaimArchivePage() {
 
     // Delivery photos
     (c.delivery_photos || []).forEach((u: string, i: number) => list.push({
-      id: `del-${i}`, url: u, name: fileNameFromUrl(u, `delivery-${i + 1}.jpg`),
+      id: `del-${i}`, url: freshUrl(u), name: fileNameFromUrl(u, `delivery-${i + 1}.jpg`),
       source: { type: "claim_array", field: "delivery_photos", index: i },
       kind: "image", section: "delivery", meta: "صورة تسليم",
     }));
@@ -258,13 +262,22 @@ export default function ClaimArchivePage() {
     // Work Order Photos (من inspections.photos)
     data.workOrderInspections.forEach((insp: any) => {
       (insp.photos || []).forEach((u: string, i: number) => list.push({
-        id: `wo-${insp.id}-${i}`, url: u,
+        id: `wo-${insp.id}-${i}`, url: freshUrl(u),
         source: { type: "inspection_photo", inspectionId: insp.id, index: i },
         name: fileNameFromUrl(u, `wo-photo-${i + 1}.jpg`),
         kind: "image", section: "workorder",
         meta: insp.damage_type ? `فحص: ${insp.damage_type}` : "صورة من أمر العمل",
         createdAt: insp.created_at,
       }));
+    });
+
+    // The work-order JSON keeps references to the same Storage objects; do not copy them.
+    ((Array.isArray(data.workOrder?.photos) ? data.workOrder.photos : []) as Array<{ id?: string; storagePath?: string; dataUrl?: string; caption?: string }>).forEach((photo, index) => {
+      const reference = photo.storagePath || photo.dataUrl || "";
+      const url = data.orderPhotoUrls[index] || "";
+      if (!reference || !url) return;
+      list.push({ id: `order-photo-${photo.id || index}`, url, name: photo.caption || fileNameFromUrl(reference, `work-order-${index + 1}.jpg`),
+        kind: "image", section: "workorder", meta: "صورة من أمر العمل" });
     });
 
     // Generated PDFs (estimates/invoices/delivery/inspection/summary)
@@ -300,7 +313,14 @@ export default function ClaimArchivePage() {
       });
     });
 
-    return list;
+    const seenImages = new Set<string>();
+    return list.filter((file) => {
+      if (file.kind !== "image") return true;
+      const key = mediaStorageKey("insurance-docs", file.url);
+      if (seenImages.has(key)) return false;
+      seenImages.add(key);
+      return true;
+    });
   }, [data]);
 
   const filtered = useMemo(() => {
@@ -372,32 +392,26 @@ export default function ClaimArchivePage() {
         const next = current.filter((_: string, index: number) => index !== source.index);
         const { error } = await supabase.from("insurance_claims" as any).update({ [source.field]: next } as any).eq("id", claimId);
         if (error) throw error;
-        await removeStorageObjectIfPossible(f.url);
       } else if (source.type === "claim_document") {
         const current = Array.isArray(data.claim.documents) ? [...data.claim.documents] : [];
         const next = current.filter((_: unknown, index: number) => index !== source.index);
         const { error } = await supabase.from("insurance_claims" as any).update({ documents: next } as any).eq("id", claimId);
         if (error) throw error;
-        await removeStorageObjectIfPossible(f.url);
       } else if (source.type === "claim_single") {
         const { error } = await supabase.from("insurance_claims" as any).update({ [source.field]: null } as any).eq("id", claimId);
         if (error) throw error;
-        await removeStorageObjectIfPossible(f.url);
       } else if (source.type === "inspection_photo") {
         const inspection = data.workOrderInspections.find((item: any) => item.id === source.inspectionId);
         const current = Array.isArray(inspection?.photos) ? [...inspection.photos] : [];
         const next = current.filter((_: string, index: number) => index !== source.index);
         const { error } = await supabase.from("inspections" as any).update({ photos: next } as any).eq("id", source.inspectionId);
         if (error) throw error;
-        await removeStorageObjectIfPossible(f.url);
       } else if (source.type === "generated_doc") {
         const { error } = await supabase.from("claim_audit_logs" as any).delete().eq("id", source.auditLogId).eq("claim_id", claimId);
         if (error) throw error;
-        await removeStorageObjectIfPossible(f.url, source.filePath);
       } else if (source.type === "invoice_pdf") {
         const { error } = await supabase.from("insurance_invoices" as any).update({ pdf_url: null } as any).eq("id", source.invoiceId).eq("claim_id", claimId);
         if (error) throw error;
-        await removeStorageObjectIfPossible(f.url);
       }
       await supabase.from("claim_audit_logs" as any).insert({
         claim_id: claimId,

@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { salesStore } from "@/lib/salesStore";
+import { useQuery } from "@tanstack/react-query";
+import { fetchSalesFinancialSummary } from "@/lib/salesDocumentQueries";
 import { expensesStore } from "@/lib/expensesStore";
 import { journalStore } from "@/lib/journalStore";
 import { toast } from "sonner";
@@ -24,29 +25,31 @@ export default function AccountantApp() {
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
   const [tick, setTick] = useState(0);
+  const salesSummaryQuery = useQuery({
+    queryKey: ["sales_financial_summary", profile?.tenant_id, "all"],
+    queryFn: () => fetchSalesFinancialSummary(profile!.tenant_id),
+    enabled: Boolean(profile?.tenant_id),
+    staleTime: 30_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
 
   useEffect(() => {
-    const u1 = salesStore.subscribe(() => setTick((t) => t + 1));
     const u2 = expensesStore.subscribe(() => setTick((t) => t + 1));
     const u3 = journalStore.subscribe(() => setTick((t) => t + 1));
-    return () => { u1(); u2(); u3(); };
+    return () => { u2(); u3(); };
   }, []);
 
   const data = useMemo(() => {
     const d = today();
     const month = d.slice(0, 7);
 
-    const invoices = salesStore.list({ type: "invoice" }).filter((x) => !x.isDeleted);
-    const todayRev = invoices.filter((i) => (i.date || "").slice(0, 10) === d)
-      .reduce((s, i) => s + Number(i.total || 0), 0);
-    const monthRev = invoices.filter((i) => (i.date || "").slice(0, 7) === month)
-      .reduce((s, i) => s + Number(i.total || 0), 0);
-    const monthVat = invoices.filter((i) => (i.date || "").slice(0, 7) === month)
-      .reduce((s, i) => s + Number(i.taxTotal || 0), 0);
-    const unpaid = invoices.filter((i) => i.status !== "paid")
-      .reduce((s, i) => s + Math.max(0, Number(i.total || 0) - Number(i.paidTotal || 0)), 0);
-    const unpaidCount = invoices.filter((i) => i.status !== "paid" &&
-      Math.max(0, Number(i.total || 0) - Number(i.paidTotal || 0)) > 0).length;
+    const todayRev = salesSummaryQuery.data?.todayTotal ?? 0;
+    const monthRev = salesSummaryQuery.data?.currentMonthTotal ?? 0;
+    const monthVat = salesSummaryQuery.data?.currentMonthVat ?? 0;
+    const unpaid = salesSummaryQuery.data?.outstanding ?? 0;
+    const unpaidCount = salesSummaryQuery.data?.unpaidCount ?? 0;
 
     const expenses = expensesStore.getAll();
     const todayExp = expenses.filter((e) => e.date === d).reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -61,7 +64,7 @@ export default function AccountantApp() {
       todayExp, monthExp, todayJournal, recentJournal,
       netToday: todayRev - todayExp, netMonth: monthRev - monthExp,
     };
-  }, [tick]);
+  }, [tick, salesSummaryQuery.data]);
 
   const tiles: Tile[] = [
     { label: "إيراد اليوم", value: fmt(data.todayRev), sub: "ر.ع", icon: TrendingUp, tone: "from-emerald-500/15 to-emerald-500/5 border-emerald-500/30 text-emerald-500", to: "/sales/invoices" },
@@ -86,6 +89,13 @@ export default function AccountantApp() {
     { label: "تقارير سحابية", to: "/reports/cloud-advanced", icon: FileSpreadsheet, cls: "bg-sky-500/10 text-sky-500 border-sky-500/30" },
     { label: "سجل النشاط", to: "/settings/audit-log", icon: AlertCircle, cls: "bg-muted text-foreground border-border" },
   ];
+
+  if (salesSummaryQuery.isPending || salesSummaryQuery.isError) {
+    return <div className="py-12 text-center text-sm text-muted-foreground">
+      {salesSummaryQuery.isPending ? "جارٍ تحميل ملخص المبيعات..." : "تعذر تحميل ملخص المبيعات؛ لم تُعرض أرقام ناقصة."}
+      {salesSummaryQuery.isError && <Button variant="outline" className="ms-3" onClick={() => void salesSummaryQuery.refetch()}>إعادة المحاولة</Button>}
+    </div>;
+  }
 
   return (
     <div dir="rtl" className="min-h-screen bg-gradient-to-b from-background via-background to-muted/30 pb-24">

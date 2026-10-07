@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { getWorkOrderById, refreshWorkOrdersFromCloud } from "@/lib/workOrdersStore";
 import AiExtractButton from "@/components/ai/AiExtractButton";
+import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 
 interface Props {
   claimId: string;
@@ -59,6 +60,7 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
   const [deliveryPhotos, setDeliveryPhotos] = useState<string[]>(initial?.delivery_photos ?? []);
   const [satisfactionPhotos, setSatisfactionPhotos] = useState<string[]>(initial?.satisfaction_photos ?? []);
   const [receiverIdPhoto, setReceiverIdPhoto] = useState<string | null>(initial?.receiver_id_photo ?? null);
+  const [displayUrls, setDisplayUrls] = useState<Record<string, string>>({});
   const [receiverName, setReceiverName] = useState(initial?.receiver_name ?? "");
   const [receiverIdNumber, setReceiverIdNumber] = useState(initial?.receiver_id_number ?? "");
   const [notes, setNotes] = useState(initial?.delivery_notes ?? "");
@@ -69,6 +71,16 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
   const [saving, setSaving] = useState(false);
 
   const [loadingWo, setLoadingWo] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const references = Array.from(new Set([...deliveryPhotos, ...satisfactionPhotos, receiverIdPhoto].filter((value): value is string => !!value)));
+    void resolveVehicleMediaUrls(references.map((reference) => ({ storage_bucket: "insurance-docs", storage_path: reference })))
+      .then((rows) => {
+        if (!cancelled) setDisplayUrls(Object.fromEntries(references.map((reference, index) => [reference, rows[index].url])));
+      });
+    return () => { cancelled = true; };
+  }, [deliveryPhotos, satisfactionPhotos, receiverIdPhoto]);
 
   /** Fetch linked job order from Supabase and adapt to local WorkOrder shape. */
   async function ensureWorkOrder(): Promise<WorkOrder | null> {
@@ -257,12 +269,12 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
       {urls.map((u, i) => (
         <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-border bg-muted">
           {isPdfUrl(u) ? (
-            <a href={u} target="_blank" rel="noreferrer" className="w-full h-full flex flex-col items-center justify-center text-xs gap-1 p-2 text-center">
+            <a href={displayUrls[u] || u} target="_blank" rel="noreferrer" className="w-full h-full flex flex-col items-center justify-center text-xs gap-1 p-2 text-center">
               <span className="text-2xl">📄</span>
               <span className="truncate w-full">PDF</span>
             </a>
           ) : (
-            <img src={u} alt="" className="w-full h-full object-cover" />
+            <img src={displayUrls[u] || u} alt="" className="w-full h-full object-cover" />
           )}
           <button
             type="button"
@@ -430,12 +442,12 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
           {receiverIdPhoto && (
             <div className="relative mt-2 inline-block">
               {isPdfUrl(receiverIdPhoto) ? (
-                <a href={receiverIdPhoto} target="_blank" rel="noreferrer" className="flex h-32 w-32 flex-col items-center justify-center rounded-lg border border-border bg-muted text-sm">
+                <a href={displayUrls[receiverIdPhoto] || receiverIdPhoto} target="_blank" rel="noreferrer" className="flex h-32 w-32 flex-col items-center justify-center rounded-lg border border-border bg-muted text-sm">
                   <span className="text-3xl">📄</span>
                   PDF
                 </a>
               ) : (
-                <img src={receiverIdPhoto} alt="" className="h-32 rounded-lg border border-border" />
+                <img src={displayUrls[receiverIdPhoto] || receiverIdPhoto} alt="" className="h-32 rounded-lg border border-border" />
               )}
               <button
                 type="button"

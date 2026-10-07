@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { STAGE_LABELS, StagePhase, StagePhoto, WorkOrder, getWorkOrderById, updateWorkOrderInCloud } from "@/lib/workOrdersStore";
 import { toast } from "sonner";
 import PhotoLightbox, { type LightboxPhoto } from "@/components/vehicles/PhotoLightbox";
+import { refreshSignedPhotoUrls } from "@/lib/workOrderPhotosStorage";
 
 interface Props {
   orderId: string | null;
@@ -48,20 +49,30 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxStart, setLightboxStart] = useState(0);
   const [lightboxPhotos, setLightboxPhotos] = useState<LightboxPhoto[]>([]);
+  const [displayUrls, setDisplayUrls] = useState<Record<string, string>>({});
   const galleryInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    let active = true;
     if (orderId && open) {
-      setOrder(getWorkOrderById(orderId));
+      const found = getWorkOrderById(orderId);
+      setOrder(found);
+      setDisplayUrls({});
+      if (found?.photos?.length) {
+        void refreshSignedPhotoUrls(found.photos).then((resolved) => {
+          if (active && resolved) setDisplayUrls(Object.fromEntries(resolved.map((photo) => [photo.id, photo.dataUrl])));
+        }).catch((error) => console.warn("[stage photos] URL refresh failed", error));
+      }
       setPending([]);
       setDirty(false);
     }
+    return () => { active = false; };
   }, [orderId, open]);
 
   if (!order) return null;
 
-  const allPhotos = [...(order.photos || []), ...pending];
+  const allPhotos = [...(order.photos || []).map((photo) => ({ ...photo, dataUrl: displayUrls[photo.id] || photo.dataUrl })), ...pending];
   const photos = allPhotos.filter((p) => p.phase === activePhase);
   const phaseCount = photos.length;
   const remaining = Math.max(0, MAX_PHOTOS_PER_PHASE - phaseCount);
@@ -84,19 +95,7 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
         const optimized = await convertImageToWebp(file);
         const photoId = Math.random().toString(36).slice(2, 9);
         const uploaded = await uploadStagePhoto({ orderId: order!.id, photoId, file: optimized });
-        if (!uploaded) {
-          // Cloud upload failed → fall back to local data URL so the photo isn't lost.
-          const dataUrl = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(optimized);
-          });
-          return {
-            id: photoId, phase: activePhase, dataUrl,
-            caption: caption.trim() || undefined,
-            uploadedAt: new Date().toISOString(),
-          } satisfies StagePhoto;
-        }
+        if (!uploaded) return null;
         return {
           id: photoId,
           phase: activePhase,
@@ -107,16 +106,20 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
         } satisfies StagePhoto;
       })());
     });
-    Promise.all(tasks).then((results) => {
-      const newPhotos = results.filter((p): p is StagePhoto => !!p);
-      setPending((prev) => [...prev, ...newPhotos]);
-      setDirty(true);
-      setCaption("");
-      const msg = `تمت إضافة ${newPhotos.length} صورة` + (dropped > 0 ? ` — تم تجاهل ${dropped} لتجاوز الحد` : "");
-      toast.success(msg);
+    Promise.allSettled(tasks).then((results) => {
+      const failed = results.filter((result) => result.status === "rejected" || result.value === null).length;
+      const newPhotos = results.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
+      if (newPhotos.length) {
+        setPending((prev) => [...prev, ...newPhotos]);
+        setDirty(true);
+        setCaption("");
+        const msg = `تمت إضافة ${newPhotos.length} صورة` + (dropped > 0 ? ` — تم تجاهل ${dropped} لتجاوز الحد` : "");
+        toast.success(msg);
+      }
+      if (failed) toast.error(`فشل رفع ${failed} صورة إلى التخزين السحابي؛ لم تُحفظ محليًا. أعد المحاولة.`);
 
       // التقاط متتابع: إعادة فتح الكاميرا تلقائياً إذا لم نصل للحد
-      if (fromCamera && continuousMode) {
+      if (!failed && fromCamera && continuousMode) {
         const willRemain = remaining - newPhotos.length;
         if (willRemain > 0) {
           setTimeout(() => cameraInput.current?.click(), 350);

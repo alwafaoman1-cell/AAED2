@@ -493,18 +493,13 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
         toast.warning("Work order saved, but image upload failed because storage bucket is not configured.");
         continue;
       }
-      const { data: signed, error: signedError } = await supabase.storage
-        .from("work-order-photos")
-        .createSignedUrl(storagePath, 60 * 60 * 24 * 30);
-      if (signedError || !signed?.signedUrl) {
-        console.warn("[WorkOrderForm] reception image signed URL failed", signedError);
-        toast.warning("Work order saved, but image upload failed because storage bucket is not configured.");
-        continue;
-      }
+      const { resolveImageReferences } = await import("@/lib/vehicleMediaUrls");
+      const [previewUrl] = await resolveImageReferences([storagePath], "work-order-photos");
+      if (!previewUrl) toast.warning("تم رفع الصورة، لكن تعذر إنشاء رابط المعاينة الآن. ستبقى محفوظة في التخزين السحابي.");
       uploaded.push({
         id: crypto.randomUUID(),
         phase: "received",
-        dataUrl: signed.signedUrl,
+        dataUrl: previewUrl || "",
         storagePath,
         caption: "صورة استلام المركبة",
         uploadedAt: new Date().toISOString(),

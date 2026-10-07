@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { useVehicleAvatar, useDeleteVehicleAvatar, useUploadVehicleAvatar } from "@/hooks/useVehicleAvatar";
+import { parseMediaStorageReference, resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 
 type VehicleAvatarSize = "sm" | "md" | "lg";
 
@@ -49,16 +50,29 @@ export default function VehicleAvatar({
   const [failed, setFailed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [resolvedFallback, setResolvedFallback] = useState<{ reference: string; url: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const shouldFetchAvatar = !!vehicleId && (!deferAvatarFetch || dialogOpen);
   const { data: avatar, isLoading } = useVehicleAvatar(shouldFetchAvatar ? vehicleId : null);
   const uploadAvatar = useUploadVehicleAvatar();
   const deleteAvatar = useDeleteVehicleAvatar();
 
-  const src = useMemo(
-    () => [avatar?.url, imageUrl, ...fallbackPhotos].find((url) => !!String(url || "").trim()) || "",
-    [avatar?.url, imageUrl, fallbackPhotos],
-  );
+  const candidate = useMemo(() => [imageUrl, ...fallbackPhotos].find((url) => !!String(url || "").trim()) || "",
+    [imageUrl, fallbackPhotos]);
+  const storageCandidate = candidate.startsWith("/")
+    ? parseMediaStorageReference(candidate)
+    : parseMediaStorageReference(candidate, "insurance-docs");
+  useEffect(() => {
+    if (avatar?.url || !candidate || !storageCandidate) return;
+    let cancelled = false;
+    void resolveVehicleMediaUrls([{ storage_bucket: storageCandidate.bucket, storage_path: candidate }]).then(([row]) => {
+      if (!cancelled) setResolvedFallback({ reference: candidate, url: row.url });
+    });
+    return () => { cancelled = true; };
+  }, [avatar?.url, candidate, storageCandidate?.bucket, storageCandidate?.path]);
+  const src = avatar?.url || (storageCandidate
+    ? (resolvedFallback?.reference === candidate ? resolvedFallback.url : "")
+    : candidate);
 
   const activeSrc = src && !failed ? src : "";
   const editable = canEdit && !!vehicleId;

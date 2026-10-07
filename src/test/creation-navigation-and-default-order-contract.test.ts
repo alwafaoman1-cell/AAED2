@@ -22,9 +22,11 @@ describe("creation navigation and newest-first ordering contract", () => {
 
   it("defaults invoice lists to descending document number", () => {
     const salesList = read("src/components/sales/SalesDocList.tsx");
+    const salesReadModel = read("supabase/migrations/20261007100000_sales_financial_read_summary.sql");
     const insuranceAccounting = read("src/pages/insurance/InsuranceAccounting.tsx");
 
-    expect(salesList).toContain('b.number.localeCompare(a.number, undefined, { numeric: true');
+    expect(salesList).toContain("fetchSalesDocumentPage");
+    expect(salesReadModel).toContain("order by doc_number desc nulls last, created_at desc, id desc");
     expect(insuranceAccounting).toContain('useState<InsuranceInvoiceSortKey>("invoiceNumber")');
     expect(insuranceAccounting).toContain('useState<"asc" | "desc">("desc")');
     expect(insuranceAccounting).toContain('searchParams.get("invoice")');

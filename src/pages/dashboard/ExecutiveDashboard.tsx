@@ -39,6 +39,20 @@ export default function ExecutiveDashboard() {
   const navigate = useNavigate();
   const [tick, setTick] = useState(0);
   const [isRefreshing, setRefreshing] = useState(false);
+  const [salesLoad, setSalesLoad] = useState<"loading" | "ready" | "error">("loading");
+  const [salesRetry, setSalesRetry] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setSalesLoad("loading");
+    void salesStore.refresh().then(() => {
+      if (active) setSalesLoad("ready");
+    }).catch((error) => {
+      console.warn("[ExecutiveDashboard] sales data unavailable", error);
+      if (active) setSalesLoad("error");
+    });
+    return () => { active = false; };
+  }, [salesRetry]);
 
   useEffect(() => {
     const cleanups = [
@@ -99,6 +113,13 @@ export default function ExecutiveDashboard() {
     setTick((n) => n + 1);
     window.setTimeout(() => setRefreshing(false), 350);
   };
+
+  if (salesLoad !== "ready") {
+    return <div className="py-12 text-center text-sm text-muted-foreground">
+      {salesLoad === "loading" ? "جارٍ تحميل البيانات المالية..." : "تعذر تحميل البيانات المالية؛ لم تُعرض أرقام ناقصة."}
+      {salesLoad === "error" && <Button variant="outline" className="ms-3" onClick={() => setSalesRetry((value) => value + 1)}>إعادة المحاولة</Button>}
+    </div>;
+  }
 
   return (
     <div className="space-y-5" dir="rtl">

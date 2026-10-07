@@ -16,6 +16,8 @@ import { Switch } from "@/components/ui/switch";
 import { Label as ShadLabel } from "@/components/ui/label";
 import { toast } from "sonner";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchNextNonInvoiceNumber } from "@/lib/salesDocumentQueries";
 import {
   salesStore,
   makeEmptyDoc,
@@ -76,6 +78,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   const { i18n } = useTranslation();
   const isAr = i18n.language === "ar";
   const isRtl = i18n.dir() === "rtl";
+  const { profile } = useAuth();
 
   const [doc, setDoc] = useState<SalesDoc>(() => {
     if (id) {
@@ -107,6 +110,8 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   const [savingMode, setSavingMode] = useState<"draft" | "issue" | null>(null);
   const [loadingExisting, setLoadingExisting] = useState(!!id);
   const [loadError, setLoadError] = useState(false);
+  const [loadingNewNumber, setLoadingNewNumber] = useState(!id && type !== "invoice");
+  const [newNumberError, setNewNumberError] = useState(false);
   const [revisionReason, setRevisionReason] = useState("");
 
   useEffect(() => {
@@ -124,6 +129,22 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
     });
     return () => { cancelled = true; };
   }, [id]);
+
+  useEffect(() => {
+    if (id || type === "invoice" || !profile?.tenant_id) return;
+    let active = true;
+    void fetchNextNonInvoiceNumber(profile.tenant_id, type).then((number) => {
+      if (!active) return;
+      setDoc((current) => ({ ...current, number }));
+      setLoadingNewNumber(false);
+      setNewNumberError(false);
+    }).catch(() => {
+      if (!active) return;
+      setLoadingNewNumber(false);
+      setNewNumberError(true);
+    });
+    return () => { active = false; };
+  }, [id, profile?.tenant_id, type]);
 
   useEffect(() => {
     const isFinancialDocument = type === "invoice" || type === "credit_note" || type === "return_invoice";
@@ -298,7 +319,7 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   }
 
   async function save(mode: "draft" | "issue" = "draft") {
-    if (loadingExisting || loadError) return;
+    if (loadingExisting || loadError || loadingNewNumber || newNumberError) return;
     if (type === "invoice" && doc.invoiceStatus === "credited") {
       toast.error(isAr
         ? "لا يمكن تعديل فاتورة أُصدر لها إشعار دائن."
@@ -436,10 +457,12 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   const totals = useMemo(() => calculateTotals(doc.items), [doc.items]);
   const revisingIssued = type === "invoice" && doc.invoiceStatus === "issued";
 
-  if (loadingExisting || loadError) {
+  if (loadingExisting || loadError || loadingNewNumber || newNumberError) {
     return <div className="py-12 text-center text-sm text-muted-foreground">
       {loadingExisting
         ? (isAr ? "جارٍ تحميل الفاتورة..." : "Loading invoice...")
+        : loadingNewNumber ? (isAr ? "جارٍ التحقق من رقم المستند..." : "Checking document number...")
+        : newNumberError ? (isAr ? "تعذر التحقق من رقم المستند؛ لن يُحفظ برقم محتمل التكرار." : "Could not verify the document number; saving is blocked.")
         : (isAr ? "تعذر تحميل الفاتورة من Supabase. ارجع وحاول مرة أخرى." : "Could not load the invoice from Supabase. Go back and retry.")}
     </div>;
   }

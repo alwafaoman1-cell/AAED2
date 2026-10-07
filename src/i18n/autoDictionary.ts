@@ -43,6 +43,9 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "تعذر تحميل السندات — اضغط لإعادة المحاولة": "Could not load receipts — click to retry",
+  "جارِ التصدير…": "Exporting…",
+  "تصدير كل النتائج": "Export all results",
   " p.name.trim()).length} قطعة": " p.name.trim()).length} Pcs",
   " إضافة": " Add",
   " إضافة بند": " Add Item",
@@ -876,6 +879,7 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "يوم": "Day",
   "مسح": "Clear",
   "تصدير CSV": "Export CSV",
+  "تصدير كل نتائج الفلتر CSV": "Export all filtered results CSV",
   "فتح": "Open",
   "واتساب": "WhatsApp",
   "مطالبة": "Claim",

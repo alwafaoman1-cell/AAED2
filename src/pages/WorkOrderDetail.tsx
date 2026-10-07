@@ -43,6 +43,7 @@ import {
   type WorkOrder,
   type NeededPart,
   type StagePhase,
+  type StagePhoto,
   refreshWorkOrdersFromCloud,
   upsertWorkOrderInCache,
   fetchWorkOrderFromCloudByIdentifier,
@@ -85,6 +86,7 @@ import { Label } from "@/components/ui/label";
 import WhatsAppCenter from "@/components/workorders/WhatsAppCenter";
 import QuickEmailButton from "@/components/QuickEmailButton";
 import { salesStore, statusLabel, type SalesDoc } from "@/lib/salesStore";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import WorkOrderTypeBadge from "@/components/workorders/WorkOrderTypeBadge";
 import { resolveWorkOrderType } from "@/lib/workOrderType";
 import { archiveWorkOrder } from "@/lib/deletePolicy";
@@ -92,6 +94,9 @@ import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { classifyWorkOrderCosts, splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
 import { fetchUnifiedOperationalState, listUnifiedVehicleMedia, type UnifiedMediaRecord } from "@/lib/claimWorkOrderUnified";
+import { mergeWorkOrderMedia } from "@/lib/workOrderMedia";
+import { fetchWorkOrderAttachedPhotos } from "@/lib/workOrderAttachedPhotos";
+import { refreshSignedPhotoUrls } from "@/lib/workOrderPhotosStorage";
 import { useWorkOrderFinancials } from "@/hooks/useWorkOrderFinancials";
 import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
 import { paymentTargetFromWorkOrderInvoice } from "@/lib/paymentTargets";
@@ -169,6 +174,28 @@ export default function WorkOrderDetail() {
   const [loadingRemote, setLoadingRemote] = useState(false);
   const [cloudJobOrderId, setCloudJobOrderId] = useState<string | null>(null);
   const [unifiedMedia, setUnifiedMedia] = useState<UnifiedMediaRecord[]>([]);
+  const [resolvedLegacyPhotos, setResolvedLegacyPhotos] = useState<StagePhoto[]>([]);
+  const [attachedPhotos, setAttachedPhotos] = useState<StagePhoto[]>([]);
+  const [mediaRevision, setMediaRevision] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const source = order?.photos || [];
+    setResolvedLegacyPhotos(source);
+    void refreshSignedPhotoUrls(source).then((resolved) => {
+      if (!cancelled && resolved) setResolvedLegacyPhotos(resolved);
+    }).catch((error) => console.warn("[work order photos] URL refresh failed", error));
+    return () => { cancelled = true; };
+  }, [order?.photos]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!cloudJobOrderId) { setAttachedPhotos([]); return; }
+    void fetchWorkOrderAttachedPhotos(cloudJobOrderId).then((rows) => {
+      if (!cancelled) setAttachedPhotos(rows);
+    }).catch((error) => console.warn("[work order attached photos] load failed", error));
+    return () => { cancelled = true; };
+  }, [cloudJobOrderId, mediaRevision]);
 
   // Resolve cloud UUID for job_orders (used by Supplements/Reception/Approval sections)
   useEffect(() => {
@@ -444,6 +471,27 @@ export default function WorkOrderDetail() {
     const unsub = salesStore.subscribe(() => setSalesTick((t) => t + 1));
     return () => { unsub(); };
   }, []);
+  useEffect(() => {
+    if (!order) return;
+    let cancelled = false;
+    void (async () => {
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId || cancelled) return;
+      const tag = `#WO:${order.id}`;
+      const filter = isUuid(order.id)
+        ? `work_order_id.eq.${order.id},notes.ilike.%${tag}%`
+        : `notes.ilike.%${tag}%`;
+      const { data, error } = await supabase.from("sales_documents")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
+        .or(filter)
+        .limit(10);
+      if (error) throw error;
+      if (!cancelled) await Promise.all((data || []).map((row) => salesStore.refreshOne(row.id)));
+    })().catch((error) => console.warn("[WorkOrderDetail] linked sales documents unavailable", error));
+    return () => { cancelled = true; };
+  }, [order?.id]);
   const linkedInvoice = useMemo<SalesDoc | undefined>(() => {
     if (!order) return undefined;
     const tag = `#WO:${order.id}`;
@@ -528,7 +576,6 @@ export default function WorkOrderDetail() {
         const rows = await listUnifiedVehicleMedia({
           claimId: order.claimId || null,
           workOrderId: order.cloudId || cloudJobOrderId || (UUID_RE.test(order.id) ? order.id : null),
-          vehicleId: order.vehicleId || null,
         });
         if (!cancelled) setUnifiedMedia(rows);
       } catch (error) {
@@ -537,7 +584,7 @@ export default function WorkOrderDetail() {
       }
     })();
     return () => { cancelled = true; };
-  }, [order?.claimId, order?.cloudId, order?.id, order?.vehicleId, cloudJobOrderId]);
+  }, [order?.claimId, order?.cloudId, order?.id, order?.vehicleId, order?.photos, cloudJobOrderId]);
 
 
 
@@ -559,29 +606,7 @@ export default function WorkOrderDetail() {
 
   const currentIdx = WORK_ORDER_STATUSES.indexOf(order.status);
   const partsNeeded = order.partsNeeded || [];
-  const photos = (() => {
-    const byKey = new Map<string, any>();
-    const normalizePhase = (value?: string | null): StagePhase => (
-      PHASES.includes(value as StagePhase) ? value as StagePhase : "inspection"
-    );
-    for (const media of unifiedMedia) {
-      const dataUrl = media.public_url || media.storage_path;
-      if (!dataUrl) continue;
-      byKey.set(`${media.storage_bucket}:${media.storage_path}`, {
-        id: media.id,
-        phase: normalizePhase(media.stage || media.category),
-        dataUrl,
-        storagePath: media.storage_path,
-        caption: media.caption || undefined,
-        uploadedAt: media.uploaded_at,
-      });
-    }
-    for (const photo of order.photos || []) {
-      const key = photo.storagePath || photo.dataUrl || photo.id;
-      if (!byKey.has(key)) byKey.set(key, photo);
-    }
-    return Array.from(byKey.values());
-  })();
+  const photos = mergeWorkOrderMedia(unifiedMedia, [...resolvedLegacyPhotos, ...attachedPhotos]);
   // رقم العرض الرسمي (WO-C-YY-NNNN / WO-I-YY-NNNN) المستخدم بدل UUID.
   const displayNo = order.displayNumber || (UUID_RE.test(order.id) ? `WO-${order.id.slice(0, 8).toUpperCase()}` : order.id);
   const effectiveLinkedClaim = linkedClaim || (order.claimId && UUID_RE.test(order.claimId)
@@ -759,7 +784,7 @@ export default function WorkOrderDetail() {
             size="md"
             vehicleId={order.vehicleId}
             imageUrl={order.vehicleThumbnailUrl || order.vehicleImageUrl}
-            fallbackPhotos={(order.photos || []).map((photo) => photo.dataUrl)}
+            fallbackPhotos={photos.map((photo) => photo.dataUrl)}
             label={`${order.vehicleType} ${order.model}`.trim() || order.plate}
             className="hidden sm:flex"
           />
@@ -1376,6 +1401,7 @@ export default function WorkOrderDetail() {
           jobOrderId={cloudJobOrderId}
           customerName={order.customer}
           customerPhone={order.phone}
+          onPhotosChanged={() => setMediaRevision((value) => value + 1)}
         />
       ) : (
         <div className="bg-card border border-dashed border-border rounded-xl p-4 text-center text-xs text-muted-foreground">
