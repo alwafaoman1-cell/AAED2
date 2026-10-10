@@ -66,7 +66,7 @@ function throwClaimPaymentError(error: any): never {
   if (message.includes("PAYMENT_CHANGED_BY_ANOTHER_USER")) throw new Error("تم تعديل هذه الدفعة من مستخدم آخر. أغلق النافذة وحدّث الصفحة ثم راجع القيم الجديدة");
   if (message.includes("INSURANCE_PAYMENT_NOT_FOUND")) throw new Error("الدفعة غير موجودة أو لم تعد متاحة");
   if (message.includes("PAYMENT_EXCEEDS_INVOICE_TOTAL")) throw new Error("القيمة المعدلة تتجاوز إجمالي الفاتورة بعد احتساب الدفعات الأخرى");
-  if (message.includes("SETTLEMENT_DISCOUNT_REQUIRES_CLEARED_NON_CHEQUE")) throw new Error("خصم التسوية يتطلب دفعة محصلة وليست شيكًا");
+  if (message.includes("SETTLEMENT_DISCOUNT_REQUIRES_CLEARED")) throw new Error("خصم التسوية يتطلب دفعة محصلة؛ لا يُحتسب الشيك المعلق");
   throw error;
 }
 
@@ -194,10 +194,12 @@ export function useUpdateClaimPayment() {
       payment,
       updates,
       editReason,
+      successMessage,
     }: {
       payment: ClaimPayment;
       updates: Partial<ClaimPaymentInsert>;
       editReason: string;
+      successMessage?: string;
     }) => {
       const { data, error } = await (supabase.rpc as any)("update_insurance_payment_by_manager", {
         p_payment_id: payment.id,
@@ -235,7 +237,7 @@ export function useUpdateClaimPayment() {
       } catch (e) { console.warn("journal post failed", e); }
       return updated;
     },
-    onSuccess: (payment) => {
+    onSuccess: (payment, vars) => {
       qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
       qc.invalidateQueries({ queryKey: queryKeys.claimPayments.byClaim(payment.claim_id) });
       if (payment.insurance_company_id) {
@@ -248,7 +250,7 @@ export function useUpdateClaimPayment() {
       qc.invalidateQueries({ queryKey: queryKeys.monthlyVehicleProfitability.all });
       qc.invalidateQueries({ queryKey: queryKeys.reportCenter.all });
       qc.invalidateQueries({ queryKey: queryKeys.reports.all });
-      toast.success("تم حفظ التعديلات");
+      toast.success(vars.successMessage || "تم حفظ التعديلات");
     },
     onError: (e: any) => toast.error(e?.message || "تعذر تعديل الدفعة"),
   });

@@ -455,12 +455,19 @@ export default function UnifiedAddPaymentDialog({ open, onOpenChange, onSaved, i
               </div>
               <div className="space-y-1.5">
                 <Label>طريقة الدفع</Label>
-                <Select value={method} onValueChange={(value) => setMethod(value as PaymentMethod)}>
+                <Select value={method} onValueChange={(value) => {
+                  setMethod(value as PaymentMethod);
+                  if (value === "cheque") {
+                    setSettleWithDiscount(false);
+                    setSettlementReason("");
+                  }
+                }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {METHOD_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {method === "cheque" && <p className="text-xs text-muted-foreground">يُسجَّل الشيك معلقًا، ويمكن اعتماد خصم التسوية عند تأكيد تحصيله.</p>}
               </div>
               <div className="space-y-1.5">
                 <Label>رقم المرجع</Label>

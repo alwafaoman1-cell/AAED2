@@ -71,7 +71,11 @@ export default function ClaimPaymentDialog({
 
   // الشيك يبدأ معلقاً تلقائياً
   useEffect(() => {
-    if (method === "cheque") setStatus("pending");
+    if (method === "cheque") {
+      setStatus("pending");
+      setSettleWithDiscount(false);
+      setSettlementReason("");
+    }
     else setStatus("cleared");
   }, [method]);
 
@@ -87,7 +91,7 @@ export default function ClaimPaymentDialog({
       return;
     }
     if (settleWithDiscount && !canApproveSettlement) { toast.error("خصم التسوية يحتاج صلاحية المدير"); return; }
-    if (settleWithDiscount && method === "cheque") { toast.error("يُسجل الخصم بعد تحصيل الشيك"); return; }
+    if (settleWithDiscount && method === "cheque" && status !== "cleared") { toast.error("يُسجل الخصم عند تحصيل الشيك، لا عند استلامه معلقًا"); return; }
     if (settleWithDiscount && settlementDiscount <= 0) { toast.error("أدخل مبلغًا أقل من الرصيد لإنشاء خصم التسوية"); return; }
     if (settleWithDiscount && !settlementReason.trim()) { toast.error("اكتب سبب خصم التسوية"); return; }
 
@@ -225,7 +229,13 @@ export default function ClaimPaymentDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>حالة الشيك</Label>
-                <Select value={status} onValueChange={(v) => setStatus(v as PaymentStatus)}>
+                <Select value={status} onValueChange={(v) => {
+                  setStatus(v as PaymentStatus);
+                  if (v !== "cleared") {
+                    setSettleWithDiscount(false);
+                    setSettlementReason("");
+                  }
+                }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pending">معلق (لم يصرف بعد)</SelectItem>
@@ -250,8 +260,9 @@ export default function ClaimPaymentDialog({
                   <Label>إغلاق الفاتورة بخصم تسوية مبكرة</Label>
                   <p className="text-xs text-muted-foreground">الخصم داخلي ولا يظهر في الفاتورة أو PDF.</p>
                 </div>
-                <Switch checked={settleWithDiscount} onCheckedChange={setSettleWithDiscount} disabled={method === "cheque"} />
+                <Switch checked={settleWithDiscount} onCheckedChange={setSettleWithDiscount} disabled={method === "cheque" && status !== "cleared"} />
               </div>
+              {method === "cheque" && status !== "cleared" && <p className="text-xs text-muted-foreground">لا يُعتمد الخصم قبل صرف الشيك. استخدم «تحصيل الشيك» لاحقًا لتسجيله مع الخصم.</p>}
               {settleWithDiscount && (
                 <>
                   <div className="text-sm">خصم التسوية المحسوب: <b className="text-amber-700">{settlementDiscount.toFixed(3)} ر.ع</b></div>

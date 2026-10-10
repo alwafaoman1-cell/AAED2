@@ -84,8 +84,8 @@ export default function EditClaimPaymentDialog({ payment, open, onOpenChange }: 
       setErrorMessage("خصم التسوية لا يمكن أن يكون سالبًا");
       return;
     }
-    if (Number(discount || 0) > 0 && (method === "cheque" || status !== "cleared")) {
-      setErrorMessage("خصم التسوية يتطلب دفعة محصلة وليست شيكًا");
+    if (Number(discount || 0) > 0 && status !== "cleared") {
+      setErrorMessage("خصم التسوية يتطلب دفعة محصلة؛ لا يُحتسب الشيك المعلق");
       return;
     }
     if (Number(discount || 0) > 0 && !discountReason.trim()) {
