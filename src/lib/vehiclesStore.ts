@@ -206,8 +206,8 @@ export interface VehicleArchivePage {
   pageSize: number;
 }
 
-export async function fetchVehicleArchivePage(input: { page: number; pageSize: number; search?: string; scope?: "active" | "all" | "archived" }): Promise<VehicleArchivePage> {
-  const tenantId = await getCurrentTenantId();
+export async function fetchVehicleArchivePage(input: { tenantId?: string; page: number; pageSize: number; search?: string; scope?: "active" | "all" | "archived" }): Promise<VehicleArchivePage> {
+  const tenantId = input.tenantId || await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   const page = Math.max(1, Number(input.page) || 1);
   const pageSize = Math.max(10, Math.min(100, Number(input.pageSize) || 25));

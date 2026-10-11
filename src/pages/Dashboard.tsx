@@ -131,6 +131,7 @@ export default function Dashboard() {
   const [orders, setOrders] = useState<WorkOrder[]>(getWorkOrders());
   const [techs, setTechs] = useState<Technician[]>(staffStore.getAll());
   const [customers, setCustomers] = useState<Customer[]>(customersStore.getAll());
+  const [legacyDashboardTenantId, setLegacyDashboardTenantId] = useState<string | null>(null);
 
   const dashboardQuery = useQuery({
     queryKey: queryKeys.dashboard.operational(profile?.tenant_id, { period, techFilter, serviceFilter }),
@@ -143,7 +144,8 @@ export default function Dashboard() {
     enabled: Boolean(profile?.tenant_id),
     staleTime: 30_000,
     gcTime: 300_000,
-    placeholderData: (previous) => previous,
+    placeholderData: (previous, previousQuery) =>
+      profile?.tenant_id && previousQuery?.queryKey[2] === profile.tenant_id ? previous : undefined,
     refetchOnWindowFocus: false,
     retry: false,
   });
@@ -164,38 +166,44 @@ export default function Dashboard() {
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const serverDashboardReady = Boolean(dashboardQuery.data && !dashboardQuery.isError);
+  const serverDashboardReady = Boolean(dashboardQuery.data);
+  const missingDashboardRpc = dashboardQuery.isError && !dashboardQuery.data &&
+    ["PGRST202", "42883"].includes((dashboardQuery.error as { code?: string } | null)?.code || "");
+  const dashboardDataReady = serverDashboardReady ||
+    (Boolean(profile?.tenant_id) && legacyDashboardTenantId === profile?.tenant_id);
 
   useEffect(() => { const u = inventoryStore.subscribe(() => setInventory([...inventoryStore.getAll()])); return () => { u(); }; }, []);
   useEffect(() => {
-    if (!dashboardQuery.isError) return;
+    if (!missingDashboardRpc) return;
     const u = subscribeWorkOrders(() => setOrders([...getWorkOrders()]));
     return () => { u(); };
-  }, [dashboardQuery.isError]);
+  }, [missingDashboardRpc]);
   useEffect(() => { const u = staffStore.subscribe(() => setTechs([...staffStore.getAll()])); return () => { u(); }; }, []);
   useEffect(() => {
-    if (!dashboardQuery.isError) return;
+    if (!missingDashboardRpc) return;
     const u = customersStore.subscribe(() => setCustomers([...customersStore.getAll()]));
     return () => { u(); };
-  }, [dashboardQuery.isError]);
+  }, [missingDashboardRpc]);
+  const legacyTenantId = profile?.tenant_id;
   useEffect(() => {
-    if (!dashboardQuery.isError) return;
+    if (!missingDashboardRpc || !legacyTenantId) return;
     let cancelled = false;
     const syncDashboardStores = async () => {
-      await Promise.allSettled([
+      const results = await Promise.allSettled([
         refreshWorkOrdersFromCloud(),
         refreshCustomersFromCloud(),
       ]);
       if (!cancelled) {
         setOrders([...getWorkOrders()]);
         setCustomers([...customersStore.getAll()]);
+        setLegacyDashboardTenantId(results.every((result) => result.status === "fulfilled") ? legacyTenantId : null);
       }
     };
     void syncDashboardStores();
     return () => {
       cancelled = true;
     };
-  }, [dashboardQuery.isError]);
+  }, [missingDashboardRpc, legacyTenantId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -589,6 +597,13 @@ export default function Dashboard() {
       <ComplianceAlertsBanner />
       <SupplementsKpiCard />
 
+      {dashboardQuery.isError && dashboardDataReady && (
+        <div role="alert" className="rounded-lg border border-warning/40 p-3 text-sm text-warning">
+          {i18n.language === "en" ? "Dashboard could not refresh; showing previously loaded data." : "تعذر تحديث لوحة التحكم؛ تُعرض آخر بيانات محمّلة."}
+          <Button size="sm" variant="outline" className="ms-2" onClick={() => void dashboardQuery.refetch()}>{i18n.language === "en" ? "Retry" : "إعادة المحاولة"}</Button>
+        </div>
+      )}
+
       {/* Search + Filters bar */}
       <div className="bg-card border border-border rounded-xl p-3 md:p-4 shadow-card flex flex-col md:flex-row md:items-center gap-3">
         <div className="relative flex-1">
@@ -681,8 +696,15 @@ export default function Dashboard() {
         <p className="text-xs text-muted-foreground text-center">{t("dashboard.dragHint")}</p>
       )}
 
-      {/* Sortable sections */}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      {/* Never present zero totals or "no orders" before a cloud read succeeds. */}
+      {!dashboardDataReady ? (
+        <div role={dashboardQuery.isError ? "alert" : "status"} className="rounded-xl border border-border bg-card p-10 text-center text-muted-foreground">
+          {dashboardQuery.isError
+            ? (i18n.language === "en" ? "Could not load the dashboard. No empty result has been assumed." : "تعذر تحميل لوحة التحكم؛ لم تُعتبر البيانات فارغة.")
+            : (i18n.language === "en" ? "Loading dashboard data…" : "جارٍ تحميل بيانات لوحة التحكم…")}
+          {dashboardQuery.isError && <Button variant="outline" className="ms-3" onClick={() => void dashboardQuery.refetch()}>{i18n.language === "en" ? "Retry" : "إعادة المحاولة"}</Button>}
+        </div>
+      ) : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={order} strategy={verticalListSortingStrategy}>
           <div className="space-y-4 md:space-y-6">
             {order.map((id) => (
@@ -692,7 +714,7 @@ export default function Dashboard() {
             ))}
           </div>
         </SortableContext>
-      </DndContext>
+      </DndContext>}
     </div>
   );
 }

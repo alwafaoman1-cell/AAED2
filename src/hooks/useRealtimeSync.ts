@@ -3,13 +3,17 @@ import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { hasUnsavedWork, subscribeUnsavedWork } from "@/lib/unsavedWork";
+
+const RESUME_DELAY_MS = 2_000;
+const STALE_AFTER_HIDDEN_MS = 30_000;
 
 const TABLES_TO_KEYS: Record<string, string[]> = {
-  insurance_claims: ["insurance_claims", "insurance_invoices", "work_order_financials", "vehicle_360"],
-  insurance_invoices: ["insurance_invoices", "work_order_financials", "vehicle_360"],
-  job_orders: ["job_orders", "insurance_claims", "invoices", "work_order_financials", "vehicle_360"],
+  insurance_claims: ["insurance_claims", "insurance_invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
+  insurance_invoices: ["insurance_invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
+  job_orders: ["job_orders", "insurance_claims", "invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
   invoices: ["invoices"],
-  claim_payments: ["claim_payments", "insurance_claims", "work_order_financials", "vehicle_360", "accounting_receipts_page"],
+  claim_payments: ["claim_payments", "insurance_claims", "work_order_financials", "vehicle_360", "accounting_receipts_page", "monthly-vehicle-profitability"],
   accounting_receipts: ["accounting_receipts_page"],
   customers: ["customers"],
   vehicles: ["vehicles", "customers", "vehicle_360"],
@@ -31,9 +35,9 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   profiles: ["profiles"],
   vehicle_makes: ["vehicle_makes"],
   vehicle_models: ["vehicle_models"],
-  expenses: ["expenses", "job_orders", "journal_entries", "vehicle_360"],
-  sales_documents: ["sales_documents", "sales_documents_search", "sales_financial_summary", "invoices", "work_order_financials", "vehicle_360"],
-  sales_payments: ["sales_payments", "sales_documents", "sales_financial_summary", "cash_sales_payments", "work_order_financials", "vehicle_360", "accounting_receipts_page"],
+  expenses: ["expenses", "expense_management", "job_orders", "journal_entries", "vehicle_360", "monthly-vehicle-profitability", "monthly-workshop-report"],
+  sales_documents: ["sales_documents", "sales_documents_search", "sales_financial_summary", "invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
+  sales_payments: ["sales_payments", "sales_documents", "sales_financial_summary", "cash_sales_payments", "work_order_financials", "vehicle_360", "accounting_receipts_page", "monthly-vehicle-profitability"],
   journal_entries: ["journal_entries"],
   journal_lines: ["journal_lines", "journal_entries"],
 };
@@ -142,47 +146,70 @@ export function useRealtimeSync() {
   const realtimeScope = useMemo(() => getRealtimeScope(pathname), [pathname]);
 
   useEffect(() => {
-    if (realtimeScope.tables.length === 0) return;
+    if (!profile?.tenant_id || realtimeScope.tables.length === 0) return;
 
     const pending = new Set<string>();
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let visibleSince = typeof performance !== "undefined" ? performance.now() : Date.now();
+    let hiddenAt: number | null = null;
+    let resumedAt: number | null = null;
 
-    const isRecentlyReturnedToTab = () => {
-      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      return now - visibleSince < 2_000;
+    const now = () => Date.now();
+    const isVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
+    const isRecentlyReturnedToTab = () => resumedAt !== null && now() - resumedAt < RESUME_DELAY_MS;
+
+    const scheduleFlush = () => {
+      if (timer || pending.size === 0 || !isVisible() || hasUnsavedWork()) return;
+      const delay = Math.max(1_500, RESUME_DELAY_MS - (resumedAt === null ? RESUME_DELAY_MS : now() - resumedAt));
+      timer = setTimeout(flush, delay);
     };
 
-    const handleVisibilityChange = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        visibleSince = typeof performance !== "undefined" ? performance.now() : Date.now();
-        pending.clear();
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
+    const queueStaleActiveQueries = () => {
+      for (const table of realtimeScope.tables) {
+        for (const key of TABLES_TO_KEYS[table] ?? []) {
+          if (qc.getQueryCache().findAll({ queryKey: [key], type: "active" })
+            .some((query) => query.state.dataUpdatedAt < now() - STALE_AFTER_HIDDEN_MS)) {
+            pending.add(key);
+          }
         }
       }
     };
 
-    const flush = () => {
-      timer = null;
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
-        pending.clear();
+    const handleVisibilityChange = () => {
+      if (!isVisible()) {
+        hiddenAt = now();
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
         return;
       }
+      resumedAt = now();
+      if (hiddenAt !== null && resumedAt - hiddenAt >= STALE_AFTER_HIDDEN_MS) queueStaleActiveQueries();
+      hiddenAt = null;
+      scheduleFlush();
+    };
+
+    const flush = () => {
+      timer = null;
+      if (!isVisible() || hasUnsavedWork()) return;
+      if (isRecentlyReturnedToTab()) { scheduleFlush(); return; }
       const keys = Array.from(pending);
       pending.clear();
       for (const key of keys) {
-        qc.invalidateQueries({ queryKey: [key], refetchType: "active" });
+        // Only mounted readers refetch. A tab return never reloads the page or
+        // hydrates whole legacy stores while a form is being edited.
+        void qc.invalidateQueries({ queryKey: [key], refetchType: "active" });
       }
     };
 
     const schedule = (keys: string[]) => {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      if (isRecentlyReturnedToTab()) return;
       for (const key of keys) pending.add(key);
-      if (!timer) timer = setTimeout(flush, 1_500);
+      scheduleFlush();
     };
+
+    const unsubscribeDirty = subscribeUnsavedWork((dirty) => {
+      if (!dirty) scheduleFlush();
+    });
 
     let channel = supabase.channel(`rt_${realtimeScope.scope}`);
     for (const table of realtimeScope.tables) {
@@ -192,7 +219,7 @@ export function useRealtimeSync() {
         event: "*",
         schema: "public",
         table,
-        ...(profile?.tenant_id ? { filter: `tenant_id=eq.${profile.tenant_id}` } : {}),
+        filter: `tenant_id=eq.${profile.tenant_id}`,
       }, (payload) => {
         // Work-order screens still consume the compatibility store. Apply the
         // changed row directly so another device is reflected immediately;
@@ -236,6 +263,7 @@ export function useRealtimeSync() {
 
     return () => {
       if (timer) clearTimeout(timer);
+      unsubscribeDirty();
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", handleVisibilityChange);
       }

@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke:production": "node scripts/production-smoke.mjs"
+    "smoke:production": "node scripts/production-smoke.mjs",
+    "smoke:readonly": "node scripts/production-readonly-smoke.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

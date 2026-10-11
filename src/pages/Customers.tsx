@@ -74,18 +74,24 @@ export default function Customers() {
     enabled: Boolean(profile?.tenant_id),
     staleTime: 30_000,
     gcTime: 300_000,
-    placeholderData: (previous) => previous,
+    placeholderData: (previous, previousQuery) =>
+      profile?.tenant_id && previousQuery?.queryKey[2] === profile.tenant_id ? previous : undefined,
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const serverListReady = Boolean(customersPageQuery.data && !customersPageQuery.isError);
+  const serverListReady = Boolean(customersPageQuery.data);
+  const initialListLoading = !serverListReady && !customersPageQuery.isError;
 
   useEffect(() => {
     if (!customersPageQuery.isError) return;
+    const code = (customersPageQuery.error as { code?: string } | null)?.code;
+    // The compatibility store is a full-table read. Never start it for a
+    // transient network/auth failure; only an older schema missing the RPC.
+    if (code !== "PGRST202" && code !== "42883") return;
     const unsubscribe = customersStore.subscribe(() => setTick((t) => t + 1));
     void refreshCustomersFromCloud();
     return unsubscribe;
-  }, [customersPageQuery.isError]);
+  }, [customersPageQuery.isError, customersPageQuery.error]);
   useEffect(() => {
     registerRestoreHandler("customer", (p) => customersStore.restore(p as Customer));
   }, []);
@@ -190,11 +196,11 @@ export default function Customers() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <StatCard title={isRtl ? "إجمالي العملاء" : "Total Customers"} value={totalCustomers} icon={Users} variant="info" />
-        <StatCard title={isRtl ? "شركات" : "Companies"} value={companyCount} icon={Building2} variant="info" />
-        <StatCard title={isRtl ? "عملاء نشطون" : "Active Customers"} value={activeCount} icon={TrendingUp} variant="success" />
-        <StatCard title={isRtl ? "عملاء VIP" : "VIP Customers"} value={vipCount} icon={Sparkles} variant="gold" />
-        <StatCard title={isRtl ? "إجمالي الإيرادات" : "Total Revenue"} value={`${totalRevenue.toLocaleString()} ${t("common.currency")}`} icon={DollarSign} variant="warning" />
+        <StatCard title={isRtl ? "إجمالي العملاء" : "Total Customers"} value={serverListReady ? totalCustomers : "—"} icon={Users} variant="info" />
+        <StatCard title={isRtl ? "شركات" : "Companies"} value={serverListReady ? companyCount : "—"} icon={Building2} variant="info" />
+        <StatCard title={isRtl ? "عملاء نشطون" : "Active Customers"} value={serverListReady ? activeCount : "—"} icon={TrendingUp} variant="success" />
+        <StatCard title={isRtl ? "عملاء VIP" : "VIP Customers"} value={serverListReady ? vipCount : "—"} icon={Sparkles} variant="gold" />
+        <StatCard title={isRtl ? "إجمالي الإيرادات" : "Total Revenue"} value={serverListReady ? `${totalRevenue.toLocaleString()} ${t("common.currency")}` : "—"} icon={DollarSign} variant="warning" />
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
@@ -222,7 +228,24 @@ export default function Customers() {
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
-        {filtered.length === 0 ? (
+        {customersPageQuery.isError && filtered.length > 0 && (
+          <div role="alert" className="p-3 text-sm text-destructive border-b border-border">
+            {isRtl ? "تعذر تحديث العملاء؛ تُعرض بيانات محفوظة سابقًا وقد لا تكون كاملة." : "Could not refresh customers; showing previously loaded data that may be incomplete."}
+            <Button size="sm" variant="outline" className="ms-2" onClick={() => void customersPageQuery.refetch()}>{isRtl ? "إعادة المحاولة" : "Retry"}</Button>
+          </div>
+        )}
+        {initialListLoading ? (
+          <div role="status" aria-live="polite" className="p-10 text-center text-muted-foreground text-sm">
+            {isRtl ? "جارٍ تحميل العملاء من قاعدة البيانات…" : "Loading customers from the database…"}
+          </div>
+        ) : customersPageQuery.isError && filtered.length === 0 ? (
+          <div role="alert" className="p-10 text-center text-destructive text-sm">
+            <p>{isRtl ? "تعذر تحميل العملاء. لم يتم اعتبار القائمة فارغة." : "Customers could not be loaded. The list is not confirmed empty."}</p>
+            <Button variant="outline" className="mt-3" onClick={() => void customersPageQuery.refetch()}>
+              {isRtl ? "إعادة المحاولة" : "Retry"}
+            </Button>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="p-10 text-center text-muted-foreground text-sm">
             {totalCustomers === 0 ? "لا يوجد عملاء بعد. أضف أول عميل." : "لا توجد نتائج مطابقة."}
           </div>
@@ -320,6 +343,12 @@ export default function Customers() {
           </div>
         )}
       </div>
+
+      {customersPageQuery.isPlaceholderData && (
+        <p role="status" className="text-xs text-muted-foreground">
+          {isRtl ? "جارٍ تحديث نتائج البحث؛ النتائج الظاهرة من الفلتر السابق." : "Updating search results; the visible rows are from the previous filter."}
+        </p>
+      )}
 
       {(serverListReady ? customersPageQuery.data!.pagination.totalRows : filtered.length) > 0 && (
         <TablePaginationControls

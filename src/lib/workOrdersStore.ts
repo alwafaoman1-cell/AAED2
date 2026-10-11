@@ -998,6 +998,7 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
     let ordersResult = await supabase
       .from("job_orders")
       .select("*")
+      .eq("tenant_id", tenantId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(500);
@@ -1005,6 +1006,7 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
       ordersResult = await supabase
         .from("job_orders")
         .select("*")
+        .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false })
         .limit(500);
     }
@@ -1015,28 +1017,31 @@ async function fetchFromCloud(options: { throwOnError?: boolean } = {}): Promise
     const vehicleIds = Array.from(new Set(rows.map((r: any) => r.vehicle_id).filter(Boolean)));
     const claimIds = Array.from(new Set(rows.map((r: any) => r.claim_id).filter(Boolean)));
     const customerQuery = customerIds.length
-      ? supabase.from("customers").select("id,name,phone").in("id", customerIds).limit(10000)
+      ? supabase.from("customers").select("id,name,phone").eq("tenant_id", tenantId).in("id", customerIds).limit(customerIds.length)
       : Promise.resolve({ data: [], error: null } as any);
     let vehicleQuery: any = vehicleIds.length
       ? await supabase
         .from("vehicles")
         .select("id,plate_number,plate_letters,brand,model,year,vin,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url")
+        .eq("tenant_id", tenantId)
         .in("id", vehicleIds)
-        .limit(10000)
+        .limit(vehicleIds.length)
       : { data: [], error: null };
     if (vehicleIds.length && vehicleQuery.error && isMissingOptionalColumnError(vehicleQuery.error)) {
       vehicleQuery = await supabase
         .from("vehicles")
         .select("id,plate_number,plate_letters,brand,model,year,vin,vin_number,color")
+        .eq("tenant_id", tenantId)
         .in("id", vehicleIds)
-        .limit(10000);
+        .limit(vehicleIds.length);
     }
     const claimQuery = claimIds.length
       ? supabase
         .from("insurance_claims")
         .select("id,approved_amount,estimated_amount,estimation_type")
+        .eq("tenant_id", tenantId)
         .in("id", claimIds)
-        .limit(10000)
+        .limit(claimIds.length)
       : Promise.resolve({ data: [], error: null } as any);
     const expenseCostsQuery = fetchActualExpenseCostsForOrders(tenantId, rows)
       .catch((error) => {

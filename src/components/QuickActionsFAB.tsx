@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -10,12 +10,11 @@ import {
   getQuickActionsSettings, subscribeQuickActionsSettings,
   type QuickActionKey, type QuickActionsSettings,
 } from "@/lib/quickActionsSettingsStore";
-import WorkOrderPickerDialog from "@/components/workorders/WorkOrderPickerDialog";
-import WorkOrderBulkExpenseDialog from "@/components/workorders/WorkOrderBulkExpenseDialog";
-import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
 import type { WorkOrder } from "@/lib/workOrdersStore";
-import { stockMovementsStore } from "@/lib/stockMovementsStore";
-import { inventoryStore } from "@/lib/inventoryStore";
+
+const WorkOrderPickerDialog = lazy(() => import("@/components/workorders/WorkOrderPickerDialog"));
+const WorkOrderBulkExpenseDialog = lazy(() => import("@/components/workorders/WorkOrderBulkExpenseDialog"));
+const StagePhotosDialog = lazy(() => import("@/components/workorders/StagePhotosDialog"));
 
 const HIDDEN_ROUTES = ["/auth", "/reset-password", "/track", "/v/"];
 
@@ -97,28 +96,32 @@ export default function QuickActionsFAB() {
     }
   }
 
-  function handlePick(order: WorkOrder) {
+  async function handlePick(order: WorkOrder) {
     setPickedOrder(order);
     if (mode === "expense") setExpenseOpen(true);
     else if (mode === "photos") setPhotosOpen(true);
     else if (mode === "invoice" || mode === "quote") {
-      const relatedMovements = stockMovementsStore.getAll().filter(
-        (m) => m.type === "OUT" &&
-          (m.reference === order.id || (m.notes || "").includes(order.id) || (m.reason || "").includes(order.id))
-      );
-      const consumedParts: Array<{ id: string; name: string; partNumber: string; qty: number; unitPrice: number }> = [];
-      relatedMovements.forEach((mv) => {
-        mv.items.forEach((it) => {
-          const part = inventoryStore.getById(it.partId);
-          const ex = consumedParts.find((p) => p.id === it.partId);
-          if (ex) ex.qty += it.qty;
-          else consumedParts.push({
-            id: it.partId, name: it.partName, partNumber: it.partNumber,
-            qty: it.qty, unitPrice: part?.sellPrice || 0,
+      try {
+        const [{ stockMovementsStore }, { inventoryStore }] = await Promise.all([
+          import("@/lib/stockMovementsStore"),
+          import("@/lib/inventoryStore"),
+        ]);
+        const relatedMovements = stockMovementsStore.getAll().filter(
+          (m) => m.type === "OUT" &&
+            (m.reference === order.id || (m.notes || "").includes(order.id) || (m.reason || "").includes(order.id))
+        );
+        const consumedParts: Array<{ id: string; name: string; partNumber: string; qty: number; unitPrice: number }> = [];
+        relatedMovements.forEach((mv) => {
+          mv.items.forEach((it) => {
+            const part = inventoryStore.getById(it.partId);
+            const ex = consumedParts.find((p) => p.id === it.partId);
+            if (ex) ex.qty += it.qty;
+            else consumedParts.push({
+              id: it.partId, name: it.partName, partNumber: it.partNumber,
+              qty: it.qty, unitPrice: part?.sellPrice || 0,
+            });
           });
         });
-      });
-      try {
         sessionStorage.setItem("alwafa_invoice_prefill", JSON.stringify({
           docType: mode === "quote" ? "quote" : "invoice",
           workOrderId: order.id,
@@ -211,28 +214,36 @@ export default function QuickActionsFAB() {
       </button>
 
       {/* shared dialogs */}
-      <WorkOrderPickerDialog
-        open={pickerOpen}
-        onOpenChange={(o) => {
-          setPickerOpen(o);
-          if (!o && !expenseOpen && !photosOpen) setMode(null);
-        }}
-        onPick={handlePick}
-        title={isRtl ? "اختر أمر العمل" : "Pick work order"}
-      />
-      <WorkOrderBulkExpenseDialog
-        order={pickedOrder}
-        open={expenseOpen}
-        onOpenChange={(o) => {
-          setExpenseOpen(o);
-          if (!o) { setMode(null); setPickedOrder(null); }
-        }}
-      />
-      <StagePhotosDialog
-        orderId={pickedOrder?.id ?? null}
-        open={photosOpen}
-        onClose={() => { setPhotosOpen(false); setMode(null); setPickedOrder(null); }}
-      />
+      <Suspense fallback={<span role="status" className="sr-only">{isRtl ? "جارٍ فتح الإجراء…" : "Opening action…"}</span>}>
+        {pickerOpen && (
+          <WorkOrderPickerDialog
+            open={pickerOpen}
+            onOpenChange={(o) => {
+              setPickerOpen(o);
+              if (!o && !expenseOpen && !photosOpen) setMode(null);
+            }}
+            onPick={handlePick}
+            title={isRtl ? "اختر أمر العمل" : "Pick work order"}
+          />
+        )}
+        {expenseOpen && (
+          <WorkOrderBulkExpenseDialog
+            order={pickedOrder}
+            open={expenseOpen}
+            onOpenChange={(o) => {
+              setExpenseOpen(o);
+              if (!o) { setMode(null); setPickedOrder(null); }
+            }}
+          />
+        )}
+        {photosOpen && (
+          <StagePhotosDialog
+            orderId={pickedOrder?.id ?? null}
+            open={photosOpen}
+            onClose={() => { setPhotosOpen(false); setMode(null); setPickedOrder(null); }}
+          />
+        )}
+      </Suspense>
     </>
   );
 }

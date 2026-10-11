@@ -67,6 +67,8 @@ export const queryKeys = {
   jobOrders: {
     all: ["job_orders"] as const,
     list: (filters?: unknown) => ["job_orders", "list", filters ?? ""] as const,
+    picker: (tenantId?: string | null, search?: string, showClosed?: boolean, page = 1) =>
+      ["job_orders", "picker", tenantId ?? "", search ?? "", Boolean(showClosed), page] as const,
     detail: (id?: string | null) => ["job_orders", "detail", id ?? ""] as const,
     inline: (workOrderId?: string | null) => ["job_order_inline", workOrderId ?? ""] as const,
     operationalList: (tenantId?: string | null, filters?: unknown) =>

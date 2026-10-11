@@ -22,6 +22,7 @@ import { queryKeys } from "@/lib/queryKeys";
 import { fetchVehicleArchivePage } from "@/lib/vehiclesStore";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 import { logVehicleAudit } from "@/lib/vehicleAudit";
+import { useAuth } from "@/contexts/AuthContext";
 
 const empty: Vehicle = { id: "", plate: "", type: "", vin: "", owner: "", visits: 0, lastVisit: new Date().toISOString().split("T")[0], totalSpent: 0 };
 
@@ -35,7 +36,8 @@ function DetailItem({ label, value, mono, highlight }: { label: string; value: s
 }
 
 export default function Vehicles() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { profile } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -56,13 +58,23 @@ export default function Vehicles() {
   }, [search]);
 
   const vehiclesQuery = useQuery({
-    queryKey: queryKeys.vehicles.list({ scope: tab === "active" ? "active" : "all", search: debouncedSearch, page, pageSize }),
-    queryFn: () => fetchVehicleArchivePage({ page, pageSize, search: debouncedSearch, scope: tab === "active" ? "active" : "all" }),
+    queryKey: queryKeys.vehicles.list({ tenantId: profile?.tenant_id, scope: tab === "active" ? "active" : "all", search: debouncedSearch, page, pageSize }),
+    queryFn: () => fetchVehicleArchivePage({ tenantId: profile!.tenant_id, page, pageSize, search: debouncedSearch, scope: tab === "active" ? "active" : "all" }),
+    enabled: Boolean(profile?.tenant_id),
     staleTime: 30_000,
     gcTime: 300_000,
-    placeholderData: (previous) => previous,
+    placeholderData: (previous, previousQuery) =>
+      profile?.tenant_id && (previousQuery?.queryKey[2] as { tenantId?: string } | undefined)?.tenantId === profile.tenant_id
+        ? previous : undefined,
     refetchOnWindowFocus: false,
   });
+  const initialListLoading = !vehiclesQuery.data && vehiclesQuery.isPending;
+  const listLoadFailed = !vehiclesQuery.data && vehiclesQuery.isError;
+  const listStatus = initialListLoading
+    ? (i18n.language === "en" ? "Loading vehicles…" : "جارٍ تحميل المركبات…")
+    : listLoadFailed
+      ? (i18n.language === "en" ? "Could not load vehicles. Please try again." : "تعذر تحميل المركبات. حاول مجددًا.")
+      : "";
   const list = useMemo(() => vehiclesQuery.data?.rows || [], [vehiclesQuery.data?.rows]);
 
   const { active, archiveVehicles } = useMemo(() => {
@@ -287,8 +299,8 @@ export default function Vehicles() {
 
       <Tabs value={tab} onValueChange={(value) => { setTab(value); setPage(1); }} className="w-full">
         <TabsList className="bg-secondary border border-border">
-          <TabsTrigger value="active" className="gap-1 data-[state=active]:bg-card"><Car size={14} /> النشطة <span className="text-[10px] mr-1 px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">{tab === "active" ? vehiclesQuery.data?.total || 0 : ""}</span></TabsTrigger>
-          <TabsTrigger value="archive" className="gap-1 data-[state=active]:bg-card"><Archive size={14} /> أرشيف كل السيارات <span className="text-[10px] mr-1 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{tab === "archive" ? vehiclesQuery.data?.total || 0 : ""}</span></TabsTrigger>
+          <TabsTrigger value="active" className="gap-1 data-[state=active]:bg-card"><Car size={14} /> النشطة <span className="text-[10px] mr-1 px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">{tab === "active" ? initialListLoading ? "—" : vehiclesQuery.data?.total ?? "—" : ""}</span></TabsTrigger>
+          <TabsTrigger value="archive" className="gap-1 data-[state=active]:bg-card"><Archive size={14} /> أرشيف كل السيارات <span className="text-[10px] mr-1 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{tab === "archive" ? initialListLoading ? "—" : vehiclesQuery.data?.total ?? "—" : ""}</span></TabsTrigger>
           <TabsTrigger value="tracking" className="gap-1 data-[state=active]:bg-card"><MapPin size={14} /> تتبع الحالة</TabsTrigger>
         </TabsList>
 
@@ -296,11 +308,17 @@ export default function Vehicles() {
           <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="بحث برقم اللوحة، اسم المالك، أو رقم الهيكل..." className="pr-9 bg-card border-border text-foreground placeholder:text-muted-foreground" />
         </div>
+        {vehiclesQuery.isPlaceholderData && (
+          <p role="status" className="mt-3 text-xs text-muted-foreground">{i18n.language === "en" ? "Updating results…" : "جارٍ تحديث النتائج…"}</p>
+        )}
+        {vehiclesQuery.isError && vehiclesQuery.data && (
+          <div role="alert" className="mt-3 text-sm text-destructive">{i18n.language === "en" ? "Could not refresh vehicles; showing the last loaded results." : "تعذر تحديث المركبات؛ تُعرض آخر نتائج محمّلة."} <Button size="sm" variant="outline" onClick={() => void vehiclesQuery.refetch()}>{i18n.language === "en" ? "Retry" : "إعادة المحاولة"}</Button></div>
+        )}
 
         <TabsContent value="active" className="space-y-4 mt-4">
           <div className="grid gap-4">
             {active.map((v) => renderCard(v, false))}
-            {active.length === 0 && <div className="text-center py-12 text-muted-foreground"><Car size={40} className="mx-auto mb-3 opacity-30" /><p>لا توجد سيارات نشطة</p></div>}
+            {active.length === 0 && <div className="text-center py-12 text-muted-foreground"><Car size={40} className="mx-auto mb-3 opacity-30" /><p role="status">{listStatus || "لا توجد سيارات نشطة"}</p>{listLoadFailed && <Button size="sm" variant="outline" onClick={() => void vehiclesQuery.refetch()}>{i18n.language === "en" ? "Retry" : "إعادة المحاولة"}</Button>}</div>}
           </div>
         </TabsContent>
 
@@ -332,11 +350,11 @@ export default function Vehicles() {
           )}
           <div className="grid gap-4">
             {archiveVehicles.map((v) => renderCard(v, true))}
-            {archiveVehicles.length === 0 && <div className="text-center py-12 text-muted-foreground"><Archive size={40} className="mx-auto mb-3 opacity-30" /><p>لا توجد سيارات مسجلة</p></div>}
+            {archiveVehicles.length === 0 && <div className="text-center py-12 text-muted-foreground"><Archive size={40} className="mx-auto mb-3 opacity-30" /><p role="status">{listStatus || "لا توجد سيارات مسجلة"}</p>{listLoadFailed && <Button size="sm" variant="outline" onClick={() => void vehiclesQuery.refetch()}>{i18n.language === "en" ? "Retry" : "إعادة المحاولة"}</Button>}</div>}
           </div>
         </TabsContent>
 
-        {tab !== "tracking" && <TablePaginationControls page={page} pageSize={pageSize} totalItems={vehiclesQuery.data?.total || 0} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} />}
+        {tab !== "tracking" && vehiclesQuery.data && <TablePaginationControls page={page} pageSize={pageSize} totalItems={vehiclesQuery.data.total} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} />}
 
         <TabsContent value="tracking" className="mt-4"><VehicleTracking /></TabsContent>
       </Tabs>

@@ -300,6 +300,7 @@ export default function WorkOrders() {
   const [deleteImpact, setDeleteImpact] = useState<ImpactSummary | null>(null);
   const [isLoadingCloudOrders, setIsLoadingCloudOrders] = useState(false);
   const [cloudOrdersError, setCloudOrdersError] = useState<string | null>(null);
+  const [fallbackTenantId, setFallbackTenantId] = useState<string | null>(null);
   const allowEdit = canEdit();
   const allowDelete = canDelete();
   const [searchParams] = useSearchParams();
@@ -383,10 +384,15 @@ export default function WorkOrders() {
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const serverListReady = Boolean(workOrdersPageQuery.data && !workOrdersPageQuery.isError);
+  const serverListReady = Boolean(workOrdersPageQuery.data);
+  const missingListRpc = workOrdersPageQuery.isError && !workOrdersPageQuery.data &&
+    ["PGRST202", "42883"].includes((workOrdersPageQuery.error as { code?: string } | null)?.code || "");
+  const fallbackReady = Boolean(profile?.tenant_id && fallbackTenantId === profile.tenant_id && missingListRpc);
+  const listVerified = serverListReady || fallbackReady;
+  const fallbackListTenantId = profile?.tenant_id;
 
   useEffect(() => {
-    if (!workOrdersPageQuery.isError) return;
+    if (!missingListRpc || !fallbackListTenantId) return;
     let cancelled = false;
     const syncVisibleOrders = () => {
       if (!cancelled) setOrders([...getWorkOrdersForAdminList()]);
@@ -395,9 +401,15 @@ export default function WorkOrders() {
     setIsLoadingCloudOrders(true);
     setCloudOrdersError(null);
     refreshWorkOrdersFromCloud()
-      .then(syncVisibleOrders)
+      .then(() => {
+        syncVisibleOrders();
+        if (!cancelled) setFallbackTenantId(fallbackListTenantId);
+      })
       .catch((error) => {
-        if (!cancelled) setCloudOrdersError(error?.message || "تعذر تحميل أوامر العمل من السحابة");
+        if (!cancelled) {
+          setFallbackTenantId(null);
+          setCloudOrdersError(error?.message || "تعذر تحميل أوامر العمل من السحابة");
+        }
       })
       .finally(() => {
         if (!cancelled) setIsLoadingCloudOrders(false);
@@ -406,7 +418,7 @@ export default function WorkOrders() {
       cancelled = true;
       unsubscribe();
     };
-  }, [workOrdersPageQuery.isError]);
+  }, [missingListRpc, fallbackListTenantId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -551,15 +563,15 @@ export default function WorkOrders() {
   });
   const filteredResultCount = serverListReady
     ? workOrdersPageQuery.data!.pagination.totalRows
-    : filtered.length;
+    : fallbackReady ? filtered.length : 0;
   const totalPages = serverListReady
     ? Math.max(1, workOrdersPageQuery.data!.pagination.totalPages)
     : Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginatedOrders = useMemo(
     () => serverListReady
       ? workOrdersPageQuery.data!.rows
-      : filtered.slice((page - 1) * pageSize, page * pageSize),
-    [filtered, page, pageSize, serverListReady, workOrdersPageQuery.data],
+      : fallbackReady ? filtered.slice((page - 1) * pageSize, page * pageSize) : [],
+    [filtered, page, pageSize, serverListReady, fallbackReady, workOrdersPageQuery.data],
   );
   const invoiceIndicatorsQuery = useQuery({
     queryKey: queryKeys.workOrderFinancials.list(profile?.tenant_id, paginatedOrders.map((order) => [order.cloudId || order.id, order.claimId || ""])),
@@ -578,7 +590,7 @@ export default function WorkOrders() {
       isArabic={isArabic}
     />
   );
-  const availableActionOrders = serverListReady ? paginatedOrders : orders;
+  const availableActionOrders = serverListReady ? paginatedOrders : fallbackReady ? orders : [];
 
   useEffect(() => {
     setPage(1);
@@ -591,13 +603,13 @@ export default function WorkOrders() {
   // الأوامر التي تحتاج قطع غيار (لأي زر طباعة جماعي)
   const ordersNeedingParts = serverListReady
     ? paginatedOrders.filter(o => (o.partsNeeded || []).some(isPartStillNeeded))
-    : orders.filter(o => (o.partsNeeded || []).some(isPartStillNeeded));
+    : fallbackReady ? orders.filter(o => (o.partsNeeded || []).some(isPartStillNeeded)) : [];
   const ordersNeedingPartsCount = serverListReady
     ? workOrdersPageQuery.data!.summary.needingParts
     : ordersNeedingParts.length;
 
   async function fetchAllMatchingOrders(overrides: Parameters<typeof fetchAllWorkOrderListRows>[0]["filters"] = serverListFilters) {
-    if (!serverListReady || !profile?.tenant_id) return filtered;
+    if (!serverListReady || !profile?.tenant_id) return fallbackReady ? filtered : [];
     return fetchAllWorkOrderListRows({
       tenantId: profile.tenant_id,
       search: debouncedSearch,
@@ -710,7 +722,7 @@ export default function WorkOrders() {
             className={`gap-1.5 h-9 ${partsFilter === "needed" ? "bg-info text-info-foreground hover:bg-info/90" : "text-info hover:bg-info/10"}`}
           >
             <Package size={14} /> {isArabic ? "تحتاج قطع" : "Parts needed"}
-            <span className="text-[10px] bg-background/20 rounded-full px-1.5 py-0.5">{ordersNeedingPartsCount}</span>
+            <span className="text-[10px] bg-background/20 rounded-full px-1.5 py-0.5">{listVerified ? ordersNeedingPartsCount : "—"}</span>
           </Button>
           <Button
             size="sm"
@@ -749,6 +761,13 @@ export default function WorkOrders() {
         </div>
       </div>
 
+      {workOrdersPageQuery.isError && serverListReady && (
+        <div role="alert" className="rounded-lg border border-warning/40 p-3 text-sm text-warning">
+          {isArabic ? "تعذر تحديث أوامر العمل؛ تُعرض آخر بيانات محمّلة." : "Could not refresh work orders; showing the last loaded data."}
+          <Button size="sm" variant="outline" className="ms-2" onClick={() => void workOrdersPageQuery.refetch()}>{isArabic ? "إعادة المحاولة" : "Retry"}</Button>
+        </div>
+      )}
+
       {/* Focused operational summary */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <button
@@ -757,7 +776,7 @@ export default function WorkOrders() {
           className={`text-right bg-card border rounded-xl p-3 transition-all hover:shadow-md hover:-translate-y-0.5 ${statusFilter === "all" ? "border-primary/50 shadow-gold" : "border-border hover:border-primary/30"}`}
         >
           <p className="text-[10px] text-muted-foreground">إجمالي</p>
-          <p className="text-lg font-bold text-foreground">{totalOrders}</p>
+          <p className="text-lg font-bold text-foreground">{listVerified ? totalOrders : "—"}</p>
         </button>
         <button
           type="button"
@@ -765,7 +784,7 @@ export default function WorkOrders() {
           className={`text-right bg-card border rounded-xl p-3 transition-all hover:shadow-md hover:-translate-y-0.5 ${statusFilter === "repair" ? "border-warning/60" : "border-border hover:border-warning/40"}`}
         >
           <p className="text-[10px] text-muted-foreground">قيد الإصلاح</p>
-          <p className="text-lg font-bold text-warning">{inProgress}</p>
+          <p className="text-lg font-bold text-warning">{listVerified ? inProgress : "—"}</p>
         </button>
         <button
           type="button"
@@ -773,15 +792,15 @@ export default function WorkOrders() {
           className={`text-right bg-card border rounded-xl p-3 transition-all hover:shadow-md hover:-translate-y-0.5 ${statusFilter === "ready" ? "border-success/60" : "border-border hover:border-success/40"}`}
         >
           <p className="text-[10px] text-muted-foreground">جاهز للتسليم</p>
-          <p className="text-lg font-bold text-success">{ready}</p>
+          <p className="text-lg font-bold text-success">{listVerified ? ready : "—"}</p>
         </button>
         <button type="button" onClick={() => setStatusFilter("delivered")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-success/40">
           <p className="text-[10px] text-muted-foreground">تم التسليم</p>
-          <p className="text-lg font-bold text-success">{delivered}</p>
+          <p className="text-lg font-bold text-success">{listVerified ? delivered : "—"}</p>
         </button>
         <button type="button" onClick={() => setStatusFilter("overdue")} className="text-right bg-card border border-border rounded-xl p-3 transition-all hover:border-destructive/40">
           <p className="text-[10px] text-muted-foreground">متأخرة</p>
-          <p className="text-lg font-bold text-destructive">{overdue}</p>
+          <p className="text-lg font-bold text-destructive">{listVerified ? overdue : "—"}</p>
         </button>
       </div>
 
@@ -798,9 +817,9 @@ export default function WorkOrders() {
           </div>
           <div className="grid grid-cols-3 rounded-xl border border-border bg-muted/30 p-1 xl:w-[330px]">
             {[
-              ["all", isArabic ? `الكل ${totalOrders}` : `All ${totalOrders}`],
-              ["cash", isArabic ? `كاش ${cashCount}` : `Cash ${cashCount}`],
-              ["insurance", isArabic ? `تأمين ${insuranceCount}` : `Insurance ${insuranceCount}`],
+              ["all", isArabic ? `الكل ${listVerified ? totalOrders : "—"}` : `All ${listVerified ? totalOrders : "—"}`],
+              ["cash", isArabic ? `كاش ${listVerified ? cashCount : "—"}` : `Cash ${listVerified ? cashCount : "—"}`],
+              ["insurance", isArabic ? `تأمين ${listVerified ? insuranceCount : "—"}` : `Insurance ${listVerified ? insuranceCount : "—"}`],
             ].map(([value, label]) => (
               <button
                 key={value}
@@ -1270,12 +1289,13 @@ export default function WorkOrders() {
           <div className="text-center py-12 text-muted-foreground">
             <Car size={40} className="mx-auto mb-3 opacity-30" />
             <p>
-              {workOrdersPageQuery.isLoading || isLoadingCloudOrders
-                ? "جاري تحميل أوامر العمل من السحابة..."
-                : cloudOrdersError
-                  ? cloudOrdersError
-                  : "لا توجد نتائج"}
+              {!listVerified && (workOrdersPageQuery.isPending || isLoadingCloudOrders)
+                ? (isArabic ? "جارٍ تحميل أوامر العمل من السحابة…" : "Loading work orders from the cloud…")
+                : !listVerified && workOrdersPageQuery.isError
+                  ? (cloudOrdersError || (isArabic ? "تعذر تحميل أوامر العمل؛ لم تُعتبر القائمة فارغة." : "Could not load work orders; the list is not confirmed empty."))
+                  : (isArabic ? "لا توجد نتائج" : "No matching work orders")}
             </p>
+            {!listVerified && workOrdersPageQuery.isError && <Button size="sm" variant="outline" className="mt-3" onClick={() => void workOrdersPageQuery.refetch()}>{isArabic ? "إعادة المحاولة" : "Retry"}</Button>}
           </div>
         )}
         {filteredResultCount > 0 && (

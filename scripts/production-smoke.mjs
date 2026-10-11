@@ -1,5 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 
+// This legacy smoke test INSERTs, UPDATEs and DELETEs operational records.
+// Never let an unqualified production audit run it by accident.
+if (process.env.SMOKE_ALLOW_WRITES !== "YES") {
+  console.error("Write smoke blocked. Use npm run smoke:readonly for a non-mutating production check.");
+  process.exit(2);
+}
+
 const required = [
   "SUPABASE_URL",
   "SUPABASE_SERVICE_ROLE_KEY",

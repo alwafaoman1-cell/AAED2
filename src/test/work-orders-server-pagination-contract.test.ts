@@ -37,7 +37,8 @@ describe("work-order server pagination contract", () => {
     expect(page).toContain("queryKeys.jobOrders.operationalList");
     expect(page).toContain("fetchWorkOrderListPage");
     expect(page).toContain("fetchAllWorkOrderListRows");
-    expect(page).toContain("if (!workOrdersPageQuery.isError) return;");
+    expect(page).toContain("if (!missingListRpc || !fallbackListTenantId) return;");
+    expect(page).toContain("const fallbackReady = Boolean(profile?.tenant_id && fallbackTenantId === profile.tenant_id && missingListRpc)");
     expect(page).toContain("refetchOnWindowFocus: false");
     expect(page).toContain("totalItems={filteredResultCount}");
   });

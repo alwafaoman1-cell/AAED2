@@ -70,13 +70,18 @@ describe("no focus reload and draft loss guard contract", () => {
     expect(messages).not.toContain("message_logs\" }, () => load())");
   });
 
-  it("does not invalidate realtime queries immediately on tab focus return", () => {
+  it("defers targeted realtime reconciliation until visible and free of unsaved work", () => {
     const realtime = read("src/hooks/useRealtimeSync.ts");
 
     expect(realtime).toContain("handleVisibilityChange");
+    expect(realtime).toContain("subscribeUnsavedWork");
+    expect(realtime).toContain("queueStaleActiveQueries");
+    expect(realtime).toContain('type: "active"');
     expect(realtime).toContain("pending.clear()");
     expect(realtime).toContain("isRecentlyReturnedToTab()");
-    expect(realtime).toContain("document.visibilityState !== \"visible\"");
+    expect(realtime).toContain("if (!isVisible() || hasUnsavedWork()) return;");
+    expect(realtime).toContain('refetchType: "active"');
+    expect(realtime).not.toContain("window.location.reload()");
   });
 
   it("does not treat token refresh or same-user signed-in as app reload triggers", () => {
