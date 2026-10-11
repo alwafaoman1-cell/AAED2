@@ -10,6 +10,7 @@ export interface ComplianceRecord {
   id: string;
   tenant_id: string;
   kind: ComplianceKind;
+  custom_type_id: string | null;
   title: string;
   reference_number: string | null;
   issuing_authority: string | null;
@@ -26,6 +27,7 @@ export interface ComplianceRecord {
 
 export interface ComplianceInput {
   kind: ComplianceKind;
+  custom_type_id?: string | null;
   title: string;
   reference_number?: string | null;
   issuing_authority?: string | null;
@@ -35,6 +37,14 @@ export interface ComplianceInput {
   expires_on: string;
   status: ComplianceStatus;
   notes?: string | null;
+}
+
+export interface ComplianceRecordType {
+  id: string;
+  tenant_id: string;
+  kind: "other" | "employee_permit";
+  name_ar: string;
+  name_en: string;
 }
 
 export interface ComplianceAlert {
@@ -55,6 +65,47 @@ export const COMPLIANCE_KINDS: { value: ComplianceKind; ar: string; en: string }
   { value: "other", ar: "وثيقة أخرى", en: "Other document" },
 ];
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function complianceTypeSelection(record: { kind: ComplianceKind; custom_type_id?: string | null }): string {
+  return record.custom_type_id ? `custom:${record.custom_type_id}` : record.kind;
+}
+
+export function complianceTypeFromSelection(
+  value: string, customType?: ComplianceRecordType,
+): Pick<ComplianceInput, "kind" | "custom_type_id"> {
+  if (value.startsWith("custom:")) {
+    const customTypeId = value.slice("custom:".length);
+    if (!UUID_PATTERN.test(customTypeId) || customType?.id !== customTypeId) throw new Error("COMPLIANCE_TYPE_INVALID");
+    return { kind: customType.kind, custom_type_id: customTypeId };
+  }
+  const fixed = COMPLIANCE_KINDS.find((item) => item.value === value);
+  if (!fixed) throw new Error("COMPLIANCE_TYPE_INVALID");
+  return { kind: fixed.value, custom_type_id: null };
+}
+
+export async function listComplianceTypes(tenantId: string): Promise<ComplianceRecordType[]> {
+  const { data, error } = await (supabase.from("compliance_record_types" as any) as any)
+    .select("id,tenant_id,kind,name_ar,name_en")
+    .eq("tenant_id", tenantId).order("name_ar", { ascending: true });
+  if (error) throw error;
+  return (data || []) as ComplianceRecordType[];
+}
+
+export async function createComplianceType(
+  tenantId: string, nameAr: string, nameEn: string, kind: ComplianceRecordType["kind"],
+): Promise<ComplianceRecordType> {
+  const name_ar = nameAr.trim();
+  const name_en = nameEn.trim();
+  if (!name_ar || !name_en || name_ar.length > 80 || name_en.length > 80) throw new Error("COMPLIANCE_TYPE_NAMES_REQUIRED");
+  if (kind !== "other" && kind !== "employee_permit") throw new Error("COMPLIANCE_TYPE_INVALID");
+  const { data, error } = await (supabase.from("compliance_record_types" as any) as any)
+    .insert({ tenant_id: tenantId, kind, name_ar, name_en })
+    .select("id,tenant_id,kind,name_ar,name_en").single();
+  if (error) throw error;
+  return data as ComplianceRecordType;
+}
+
 export function todayLocal(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Muscat", year: "numeric", month: "2-digit", day: "2-digit",
@@ -74,6 +125,7 @@ function assertValidInput(input: ComplianceInput): void {
   if (!input.title.trim() || !input.expires_on) throw new Error("COMPLIANCE_REQUIRED_FIELDS");
   if (input.issued_on && input.issued_on > input.expires_on) throw new Error("COMPLIANCE_DATE_ORDER");
   if (input.kind === "employee_permit" && !input.employee_id?.trim()) throw new Error("COMPLIANCE_EMPLOYEE_REQUIRED");
+  if (input.custom_type_id && (!["other", "employee_permit"].includes(input.kind) || !UUID_PATTERN.test(input.custom_type_id))) throw new Error("COMPLIANCE_TYPE_INVALID");
 }
 
 export async function listComplianceRecords(tenantId: string, page = 1, kind = "all", status = "all") {
@@ -81,7 +133,14 @@ export async function listComplianceRecords(tenantId: string, page = 1, kind = "
   let query = (supabase.from("compliance_records" as any) as any)
     .select("*", { count: "exact" }).eq("tenant_id", tenantId)
     .order("expires_on", { ascending: true }).range((page - 1) * size, page * size - 1);
-  if (kind !== "all") query = query.eq("kind", kind);
+  if (kind.startsWith("custom:")) {
+    const customTypeId = kind.slice("custom:".length);
+    if (!UUID_PATTERN.test(customTypeId)) throw new Error("COMPLIANCE_TYPE_INVALID");
+    query = query.eq("custom_type_id", customTypeId);
+  } else if (kind !== "all") {
+    const selected = complianceTypeFromSelection(kind);
+    query = query.eq("kind", selected.kind);
+  }
   if (status !== "all") query = query.eq("status", status);
   const { data, count, error } = await query;
   if (error) throw error;
@@ -100,7 +159,8 @@ export async function saveComplianceRecord(
 ): Promise<ComplianceRecord> {
   assertValidInput(input);
   const payload = {
-    kind: input.kind, title: input.title.trim(), reference_number: input.reference_number?.trim() || null,
+    kind: input.kind, custom_type_id: input.custom_type_id || null,
+    title: input.title.trim(), reference_number: input.reference_number?.trim() || null,
     issuing_authority: input.issuing_authority?.trim() || null,
     employee_id: input.kind === "employee_permit" ? input.employee_id?.trim() || null : null,
     employee_name: input.kind === "employee_permit" ? input.employee_name?.trim() || null : null,

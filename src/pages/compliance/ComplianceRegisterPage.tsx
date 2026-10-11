@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CalendarClock, FilePlus2, FileText, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
+import ComplianceTypeSelect from "@/components/compliance/ComplianceTypeSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useComplianceAlerts } from "@/hooks/useComplianceAlerts";
 import { queryKeys } from "@/lib/queryKeys";
-import { COMPLIANCE_KINDS, complianceAlertTitle, daysUntilExpiry, fetchHrComplianceEntries, listComplianceRecords } from "@/lib/compliance/complianceService";
+import { COMPLIANCE_KINDS, complianceAlertTitle, daysUntilExpiry, fetchHrComplianceEntries, listComplianceRecords, listComplianceTypes, type ComplianceRecord } from "@/lib/compliance/complianceService";
 
 export default function ComplianceRegisterPage() {
   const { i18n } = useTranslation();
@@ -21,6 +22,12 @@ export default function ComplianceRegisterPage() {
   const [kind, setKind] = useState("all");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
+  const customTypes = useQuery({
+    queryKey: queryKeys.compliance.types(tenantId),
+    queryFn: () => listComplianceTypes(tenantId),
+    enabled: !!tenantId,
+    staleTime: 60_000,
+  });
   const records = useQuery({
     queryKey: queryKeys.compliance.list(tenantId, { page, kind, status }),
     queryFn: () => listComplianceRecords(tenantId, page, kind, status),
@@ -35,9 +42,13 @@ export default function ComplianceRegisterPage() {
   });
   const alerts = useComplianceAlerts(tenantId);
   const hasExpired = alerts.alerts.some((item) => daysUntilExpiry(item.expiresOn) < 0);
-  const kindName = (value: string) => {
-    const found = COMPLIANCE_KINDS.find((item) => item.value === value);
-    return found ? (isAr ? found.ar : found.en) : value;
+  const kindName = (record: ComplianceRecord) => {
+    if (record.custom_type_id) {
+      const custom = customTypes.data?.find((item) => item.id === record.custom_type_id);
+      return custom ? (isAr ? custom.name_ar : custom.name_en) : (isAr ? "نوع مخصص" : "Custom type");
+    }
+    const fixed = COMPLIANCE_KINDS.find((item) => item.value === record.kind);
+    return fixed ? (isAr ? fixed.ar : fixed.en) : record.kind;
   };
   const deadlineLabel = (expiresOn: string) => {
     const days = daysUntilExpiry(expiresOn);
@@ -78,10 +89,8 @@ export default function ComplianceRegisterPage() {
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
         <CardTitle className="flex items-center gap-2 text-base"><FileText className="h-4 w-4"/>{isAr ? "وثائق الشركة وتصاريح العمال" : "Company documents & worker permits"}</CardTitle>
         <div className="flex flex-wrap gap-2">
-          <Select value={kind} onValueChange={(value) => { setKind(value); setPage(1); }}><SelectTrigger className="w-48"><SelectValue/></SelectTrigger><SelectContent>
-            <SelectItem value="all">{isAr ? "كل الأنواع" : "All types"}</SelectItem>
-            {COMPLIANCE_KINDS.map((item) => <SelectItem key={item.value} value={item.value}>{isAr ? item.ar : item.en}</SelectItem>)}
-          </SelectContent></Select>
+          <ComplianceTypeSelect tenantId={tenantId} isAr={isAr} value={kind} includeAll triggerClassName="w-48"
+            onValueChange={(value) => { setKind(value); setPage(1); }}/>
           <Select value={status} onValueChange={(value) => { setStatus(value); setPage(1); }}><SelectTrigger className="w-36"><SelectValue/></SelectTrigger><SelectContent>
             <SelectItem value="all">{isAr ? "كل الحالات" : "All statuses"}</SelectItem><SelectItem value="active">{isAr ? "سارية" : "Active"}</SelectItem><SelectItem value="closed">{isAr ? "مغلقة" : "Closed"}</SelectItem>
           </SelectContent></Select>
@@ -97,7 +106,7 @@ export default function ComplianceRegisterPage() {
           {!records.isLoading && !records.isError && !records.data?.rows.length && <TableRow><TableCell colSpan={6}>{isAr ? "لا توجد وثائق مطابقة" : "No matching documents"}</TableCell></TableRow>}
           {!records.isError && records.data?.rows.map((record) => <TableRow key={record.id}>
             <TableCell><Link className="font-medium text-primary hover:underline" to={`/compliance/${record.id}`}>{record.title}</Link></TableCell>
-            <TableCell>{kindName(record.kind)}</TableCell><TableCell>{record.reference_number || "—"}</TableCell><TableCell>{record.employee_name || "—"}</TableCell>
+            <TableCell>{kindName(record)}</TableCell><TableCell>{record.reference_number || "—"}</TableCell><TableCell>{record.employee_name || "—"}</TableCell>
             <TableCell className="whitespace-nowrap">{record.expires_on}<span className="block text-xs text-muted-foreground">{record.status === "active" ? deadlineLabel(record.expires_on) : "—"}</span></TableCell>
             <TableCell><Badge variant={record.status === "closed" ? "secondary" : daysUntilExpiry(record.expires_on) < 0 ? "destructive" : "outline"}>{record.status === "closed" ? (isAr ? "مغلقة" : "Closed") : (isAr ? "سارية" : "Active")}</Badge></TableCell>
           </TableRow>)}

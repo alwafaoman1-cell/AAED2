@@ -5,6 +5,7 @@ import { ArrowLeft, ExternalLink, History, Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import ComplianceTypeSelect from "@/components/compliance/ComplianceTypeSelect";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,13 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { queryKeys } from "@/lib/queryKeys";
 import {
-  COMPLIANCE_KINDS, fetchHrEmployeesForCompliance, getComplianceFileUrl,
+  complianceTypeFromSelection, complianceTypeSelection, fetchHrEmployeesForCompliance, getComplianceFileUrl,
   getComplianceRecord, listComplianceAudit, saveComplianceRecord, uploadComplianceFile, validateComplianceFile,
   type ComplianceInput,
 } from "@/lib/compliance/complianceService";
 
 const blank: ComplianceInput = {
-  kind: "commercial_registration", title: "", reference_number: "", issuing_authority: "",
+  kind: "commercial_registration", custom_type_id: null, title: "", reference_number: "", issuing_authority: "",
   employee_id: "", employee_name: "", issued_on: "", expires_on: "", status: "active", notes: "",
 };
 
@@ -56,7 +57,8 @@ export default function ComplianceRecordPage() {
     if (!detail.data) return;
     const record = detail.data;
     setForm({
-      kind: record.kind, title: record.title, reference_number: record.reference_number || "",
+      kind: record.kind, custom_type_id: record.custom_type_id || null,
+      title: record.title, reference_number: record.reference_number || "",
       issuing_authority: record.issuing_authority || "", employee_id: record.employee_id || "",
       employee_name: record.employee_name || "", issued_on: record.issued_on || "",
       expires_on: record.expires_on, status: record.status, notes: record.notes || "",
@@ -122,9 +124,14 @@ export default function ComplianceRecordPage() {
     {editing && detail.isError && <Card className="border-destructive p-4 text-destructive">{isAr ? "تعذر تحميل السجل. لم تُفتح نسخة قديمة للتعديل." : "Could not load the record. An old copy was not opened for editing."}</Card>}
     {(!editing || !!detail.data) && <Card><CardHeader><CardTitle className="text-base">{isAr ? "بيانات الوثيقة" : "Document details"}</CardTitle></CardHeader><CardContent>
       <form onSubmit={save} className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-1.5"><Label>{isAr ? "النوع" : "Type"} *</Label><Select value={form.kind} onValueChange={(value) => set("kind", value as ComplianceInput["kind"])}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>
-          {COMPLIANCE_KINDS.map((item) => <SelectItem key={item.value} value={item.value}>{isAr ? item.ar : item.en}</SelectItem>)}
-        </SelectContent></Select></div>
+        <div className="space-y-1.5"><Label>{isAr ? "النوع" : "Type"} *</Label>
+          <ComplianceTypeSelect tenantId={tenantId} isAr={isAr} value={complianceTypeSelection(form)} onValueChange={(value, customType) => {
+            const selected = complianceTypeFromSelection(value, customType);
+            setForm((current) => ({ ...current, ...selected,
+              ...(selected.kind === "employee_permit" ? {} : { employee_id: "", employee_name: "" }),
+            }));
+          }}/>
+        </div>
         <div className="space-y-1.5"><Label htmlFor="compliance-title">{isAr ? "اسم الوثيقة" : "Document title"} *</Label><Input id="compliance-title" required maxLength={200} value={form.title} onChange={(event) => set("title", event.target.value)}/></div>
         {form.kind === "employee_permit" && <div className="space-y-1.5 md:col-span-2"><Label>{isAr ? "العامل المرتبط" : "Linked employee"} *</Label>
           <Select value={form.employee_id || ""} onValueChange={(value) => {

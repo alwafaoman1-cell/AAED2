@@ -4,6 +4,7 @@ export const queryKeys = {
   },
   compliance: {
     all: ["compliance"] as const,
+    types: (tenantId?: string | null) => ["compliance", "types", tenantId ?? ""] as const,
     list: (tenantId?: string | null, filters?: unknown) => ["compliance", "list", tenantId ?? "", filters ?? ""] as const,
     detail: (tenantId?: string | null, id?: string | null) => ["compliance", "detail", tenantId ?? "", id ?? ""] as const,
     audit: (tenantId?: string | null, id?: string | null) => ["compliance", "audit", tenantId ?? "", id ?? ""] as const,

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { complianceCutoff, daysUntilExpiry, deriveHrComplianceEntries } from "@/lib/compliance/complianceService";
+import { complianceCutoff, complianceTypeFromSelection, complianceTypeSelection, daysUntilExpiry, deriveHrComplianceEntries } from "@/lib/compliance/complianceService";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
@@ -60,5 +60,42 @@ describe("licences and contracts register", () => {
     expect(dashboard).toContain("<ComplianceAlertsBanner />");
     expect(service).toContain('.eq("key", "alwafa_hr_v1").maybeSingle()');
     expect(service).not.toContain("writeCloudSetting");
+  });
+
+  it("preserves built-in kinds and resolves company and worker custom types", () => {
+    const id = "58e9d13f-efaa-4c5a-a236-977695a96e16";
+    const custom = { id, tenant_id: "tenant", kind: "other" as const, name_ar: "مثال", name_en: "Example" };
+    expect(complianceTypeFromSelection("commercial_registration")).toEqual({ kind: "commercial_registration", custom_type_id: null });
+    expect(complianceTypeFromSelection(`custom:${id}`, custom)).toEqual({ kind: "other", custom_type_id: id });
+    expect(complianceTypeFromSelection(`custom:${id}`, { ...custom, kind: "employee_permit" })).toEqual({ kind: "employee_permit", custom_type_id: id });
+    expect(complianceTypeSelection({ kind: "other", custom_type_id: id })).toBe(`custom:${id}`);
+    expect(complianceTypeSelection({ kind: "other", custom_type_id: null })).toBe("other");
+    expect(() => complianceTypeFromSelection("custom:invalid")).toThrow("COMPLIANCE_TYPE_INVALID");
+    expect(() => complianceTypeFromSelection(`custom:${id}`)).toThrow("COMPLIANCE_TYPE_INVALID");
+    expect(() => complianceTypeFromSelection("unknown")).toThrow("COMPLIANCE_TYPE_INVALID");
+  });
+
+  it("adds reusable bilingual tenant types without changing or backfilling old records", () => {
+    const sql = read("supabase/migrations/20261011100000_compliance_custom_types.sql");
+    const picker = read("src/components/compliance/ComplianceTypeSelect.tsx");
+    const list = read("src/pages/compliance/ComplianceRegisterPage.tsx");
+    const detail = read("src/pages/compliance/ComplianceRecordPage.tsx");
+    const service = read("src/lib/compliance/complianceService.ts");
+    expect(sql).toContain("create table if not exists public.compliance_record_types");
+    expect(sql).toContain("name_ar text not null");
+    expect(sql).toContain("name_en text not null");
+    expect(sql).toContain("alter table public.compliance_record_types enable row level security");
+    expect(sql).toContain("check (custom_type_id is null or kind in ('other', 'employee_permit'))");
+    expect(sql).toContain("foreign key (tenant_id, custom_type_id, kind)");
+    expect(sql).not.toContain("drop index if exists public.compliance_records_active_reference_unique");
+    expect(sql).not.toMatch(/update\s+public\.compliance_records/i);
+    expect(sql).not.toMatch(/create policy [^\n]+ for (?:update|delete)/i);
+    expect(picker).toContain("+ إضافة نوع سجل أو ترخيص");
+    expect(picker).toContain("Type name in English");
+    expect(picker).toContain("const created = await createComplianceType");
+    expect(list).toContain("<ComplianceTypeSelect");
+    expect(detail).toContain("<ComplianceTypeSelect");
+    expect(detail).toContain('form.kind === "employee_permit"');
+    expect(service).toContain('.eq("custom_type_id", customTypeId)');
   });
 });
