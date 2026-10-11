@@ -4475,5 +4475,9 @@
   "كل الأشهر": "All months",
   "أعمدة الجدول": "Table columns",
   "إظهار وإخفاء أعمدة الجدول": "Show or hide table columns",
-  "إظهار الكل": "Show all"
+  "إظهار الكل": "Show all",
+  "عرض المرفق الحالي": "View current attachment",
+  "حفظ السجل": "Save record",
+  "عرض المرفق السابق": "View previous attachment",
+  "التراخيص والعقود": "Licences & Contracts"
 }

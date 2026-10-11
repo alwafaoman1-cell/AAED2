@@ -81,6 +81,8 @@ const PartsCatalogImport = lazy(() => import("./pages/inventory/PartsCatalogImpo
 const InventoryDetail = lazy(() => import("./pages/inventory/InventoryDetail"));
 const Staff = lazy(() => import("./pages/staff/EmployeesList"));
 const EmployeeDetail = lazy(() => import("./pages/staff/EmployeeDetail"));
+const ComplianceRegisterPage = lazy(() => import("./pages/compliance/ComplianceRegisterPage"));
+const ComplianceRecordPage = lazy(() => import("./pages/compliance/ComplianceRecordPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const InsuranceHub = lazy(() => import("./pages/insurance/InsuranceHub"));
 const InsuranceClaimsList = lazy(() => import("./pages/insurance/InsuranceClaimsList"));
@@ -412,6 +414,9 @@ const App = () => (
               <Route path="/inventory/:id" element={<InventoryDetail />} />
               <Route path="/staff" element={<Staff />} />
               <Route path="/staff/:id" element={<EmployeeDetail />} />
+              <Route path="/compliance" element={<ProtectedRoute roles={["admin", "manager"]}><ComplianceRegisterPage /></ProtectedRoute>} />
+              <Route path="/compliance/new" element={<ProtectedRoute roles={["admin", "manager"]}><ComplianceRecordPage /></ProtectedRoute>} />
+              <Route path="/compliance/:recordId" element={<ProtectedRoute roles={["admin", "manager"]}><ComplianceRecordPage /></ProtectedRoute>} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route
                 path="/users"

@@ -204,6 +204,7 @@ const ROUTE_RULES: Array<{ match: (p: string) => boolean; rule: RouteRule }> = [
 
 export function canAccessPath(path: string, role: RbacRole | null | undefined): boolean {
   if (!role) return false;
+  if (path.startsWith("/compliance")) return role === "admin" || role === "manager";
   if (role === "admin") return true;
   // المسارات العامة دائمًا مسموحة
   if (path.startsWith("/supervisor")) return role === "manager" || role === "supervisor";

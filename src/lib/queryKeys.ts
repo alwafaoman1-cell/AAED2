@@ -2,6 +2,14 @@ export const queryKeys = {
   auth: {
     profile: (userId?: string | null) => ["auth", "profile", userId ?? ""] as const,
   },
+  compliance: {
+    all: ["compliance"] as const,
+    list: (tenantId?: string | null, filters?: unknown) => ["compliance", "list", tenantId ?? "", filters ?? ""] as const,
+    detail: (tenantId?: string | null, id?: string | null) => ["compliance", "detail", tenantId ?? "", id ?? ""] as const,
+    audit: (tenantId?: string | null, id?: string | null) => ["compliance", "audit", tenantId ?? "", id ?? ""] as const,
+    companyAlerts: (tenantId?: string | null) => ["compliance", "company-alerts", tenantId ?? ""] as const,
+    hrEntries: (tenantId?: string | null) => ["compliance", "hr-entries", tenantId ?? ""] as const,
+  },
   dashboard: {
     summary: (tenantId?: string | null) => ["dashboard", "summary", tenantId ?? ""] as const,
     operational: (tenantId?: string | null, filters?: unknown) => ["dashboard", "operational", tenantId ?? "", filters ?? ""] as const,

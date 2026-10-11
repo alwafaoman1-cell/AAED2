@@ -9,6 +9,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import StatCard from "@/components/StatCard";
 import QuickActionsMenu from "@/components/dashboard/QuickActionsMenu";
+import ComplianceAlertsBanner from "@/components/compliance/ComplianceAlertsBanner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -585,6 +586,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <ComplianceAlertsBanner />
       <SupplementsKpiCard />
 
       {/* Search + Filters bar */}

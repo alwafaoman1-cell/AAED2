@@ -7,7 +7,7 @@ import {
   Car, Trash2, UserSquare, ChevronDown, MinusCircle, ReceiptText, Wallet, History, Database,
   FileText, Building2, DollarSign, RotateCcw, BarChart3, ArrowDownUp, FileBarChart, Wrench, BookOpen,
   UserCog, LogOut, Palette, Plus, Tags, KanbanSquare, Bell, List, FileSpreadsheet,
-  Smartphone, Download, Power, Key, ServerCog, FolderLock,
+  Smartphone, Download, Power, Key, ServerCog, FolderLock, CalendarClock,
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { useAuth } from "@/contexts/AuthContext";
@@ -19,6 +19,7 @@ import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { translateAr } from "@/i18n/autoDictionary";
 import { isAccountingSetupFeatureEnabled } from "@/lib/accounting/accountingSetupAvailability";
 import { isAccountingReportsFeatureEnabled } from "@/lib/accounting/accountingReportsAvailability";
+import { useComplianceAlerts } from "@/hooks/useComplianceAlerts";
 
 type SubItem = { path: string; labelKey: string; icon: any };
 type MenuItem = {
@@ -103,6 +104,7 @@ const menuItems: MenuItem[] = [
   { path: "/reports-center", labelKey: "nav.reports", icon: FileBarChart },
   { path: "/reports-legacy", labelKey: "nav.legacyReports", icon: History },
   { path: "/reports-classic", labelKey: "nav.classicReports", icon: BookOpen },
+  { path: "/compliance", labelKey: "التراخيص والعقود", icon: CalendarClock },
   {
     path: "/staff",
     labelKey: "إدارة الفريق",
@@ -146,6 +148,8 @@ export default function AppSidebar() {
   const localizeUiLabel = (label: string) =>
     i18n.resolvedLanguage?.startsWith("en") ? translateAr(label) : label;
   const { isEnabled } = useFeatures();
+  const complianceEnabled = profile?.role === "admin" || profile?.role === "manager";
+  const complianceAlerts = useComplianceAlerts(profile?.tenant_id, complianceEnabled);
 
   const isPathEnabled = (path: string): boolean => {
     const key = featureForPath(path);
@@ -225,6 +229,7 @@ export default function AppSidebar() {
         {/* Nav */}
         <nav className="flex-1 p-2 overflow-y-auto space-y-1">
           {menuItems
+            .filter((item) => item.path !== "/compliance" || complianceEnabled)
             .filter((item) => canAccessPath(item.path, roleForGate))
             .filter((item) => isPathEnabled(item.path))
             .map((item) => {
@@ -258,6 +263,8 @@ export default function AppSidebar() {
                   >
                     <item.icon size={20} className={`flex-shrink-0 ${item.iconClass || ""}`} />
                     {!collapsed && <span className="flex-1">{itemLabel}</span>}
+                    {item.path === "/compliance" && complianceAlerts.isError && <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground" aria-label={isRtl ? "تعذر فحص التراخيص" : "Licence check failed"}>!</span>}
+                    {item.path === "/compliance" && !complianceAlerts.isError && complianceAlerts.total > 0 && <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground" aria-label={isRtl ? `${complianceAlerts.total} تنبيه` : `${complianceAlerts.total} alerts`}>{complianceAlerts.total}</span>}
                   </Link>
                   {hasChildren && !collapsed && (
                     <button
