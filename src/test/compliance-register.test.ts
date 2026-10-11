@@ -49,11 +49,13 @@ describe("licences and contracts register", () => {
   it("exposes guarded full pages and visible alerts without altering HR contracts", () => {
     const app = read("src/App.tsx");
     const sidebar = read("src/components/AppSidebar.tsx");
+    const breadcrumb = read("src/components/AutoBreadcrumb.tsx");
     const dashboard = read("src/pages/Dashboard.tsx");
     const service = read("src/lib/compliance/complianceService.ts");
     expect(app).toContain('path="/compliance" element={<ProtectedRoute roles={["admin", "manager"]}>');
     expect(app).toContain('path="/compliance/new"');
     expect(sidebar).toContain('path: "/compliance"');
+    expect(breadcrumb).toContain('compliance: { ar: "التراخيص والعقود", en: "Licences & Contracts" }');
     expect(sidebar).toContain("complianceAlerts.total > 0");
     expect(dashboard).toContain("<ComplianceAlertsBanner />");
     expect(service).toContain('.eq("key", "alwafa_hr_v1").maybeSingle()');

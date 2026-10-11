@@ -29,6 +29,7 @@ const LABELS: Record<string, { ar: string; en: string }> = {
   "supplier-balance": { ar: "رصيد الموردين", en: "Supplier Balance" },
   movements: { ar: "حركات المخزون", en: "Stock Movements" },
   staff: { ar: "الموظفون", en: "Staff" },
+  compliance: { ar: "التراخيص والعقود", en: "Licences & Contracts" },
   profile: { ar: "الملف الشخصي", en: "Profile" },
   users: { ar: "المستخدمون", en: "Users" },
   vehicles: { ar: "السيارات", en: "Vehicles" },
