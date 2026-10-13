@@ -32,6 +32,31 @@ import { useDraftPersistence } from "@/lib/drafts/useDraftPersistence";
 function normalizeWorkOrderNumberInput(value: string) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
 }
+
+function workOrderChannelSaveError(error: unknown, isEnglish: boolean): string {
+  const message = String((error as { message?: string })?.message || "");
+  if (message.includes("WORK_ORDER_CHANNEL_CHANGE_HAS_CASH_INVOICE")) {
+    return isEnglish
+      ? "This work order has a cash invoice. Resolve the invoice before moving it to insurance. Nothing was changed."
+      : "لهذا الأمر فاتورة كاش. راجع الفاتورة قبل تحويله إلى تأمين؛ لم يُغيَّر شيء.";
+  }
+  if (message.includes("WORK_ORDER_CHANNEL_CHANGE_HAS_INSURANCE_LINK")) {
+    return isEnglish
+      ? "This work order is still linked to an insurance claim or invoice. Resolve that link before moving it to cash. Nothing was changed."
+      : "الأمر مرتبط بمطالبة أو فاتورة تأمين. يجب معالجة الرابط قبل تحويله إلى كاش؛ لم يُغيَّر شيء.";
+  }
+  if (message.includes("WORK_ORDER_CHANNEL_CHANGE_HAS_UNRESOLVED_EXPENSE")) {
+    return isEnglish
+      ? "A linked expense has no confirmed work-order ID. Reconcile it before changing the order type. Nothing was changed."
+      : "هناك مصروف مرتبط دون معرّف أمر عمل مؤكد. طابقه أولًا قبل تغيير النوع؛ لم يُغيَّر شيء.";
+  }
+  if (message.includes("WORK_ORDER_CLAIM_TENANT_MISMATCH")) {
+    return isEnglish
+      ? "The selected claim is unavailable in this workshop. Nothing was changed."
+      : "المطالبة المحددة غير متاحة لهذه الورشة؛ لم يُغيَّر شيء.";
+  }
+  return message || (isEnglish ? "Could not save the work order in Supabase." : "تعذر حفظ أمر العمل في Supabase");
+}
 const serviceTypes = ["حادث", "صيانة", "كهرباء", "برمجة", "فحص", "صيانة دورية"];
 const insuranceCompanies = ["ظفار للتأمين", "الأهلية للتأمين", "ميثاق للتأمين", "الأمانة للتأمين", "آكسا الخليج", "أخرى"];
 const technicians = ["عبدالله الغامدي", "يوسف القحطاني", "ماجد الدوسري", "سامي العنزي"];
@@ -659,11 +684,15 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
       const saved = await saveWorkOrderToCloud({ ...payload, id: targetOrderNumber });
       draftGuard.clear();
       setFormDirty(false);
-      toast.success(isEdit ? `تم تحديث ${saved.id}` : `تم إنشاء ${saved.id}`);
+      toast.success(isEdit && saved.id !== targetOrderNumber
+        ? (i18n.resolvedLanguage?.startsWith("en")
+          ? `Work order moved to ${saved.id}; old number ${targetOrderNumber} remains an alias.`
+          : `تم نقل أمر العمل إلى ${saved.id}؛ بقي الرقم ${targetOrderNumber} مرجعًا سابقًا.`)
+        : (isEdit ? `تم تحديث ${saved.id}` : `تم إنشاء ${saved.id}`));
       if (onSaved) onSaved(saved);
       else onClose();
     } catch (error: any) {
-      toast.error(error?.message || "تعذر حفظ أمر العمل في Supabase");
+      toast.error(workOrderChannelSaveError(error, i18n.resolvedLanguage?.startsWith("en") || false));
     } finally {
       setSaving(false);
     }
@@ -682,7 +711,9 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
             className="mt-1 bg-card border-border font-mono text-left"
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
-            رقم ثابت يُنشأ تلقائيًا من قاعدة البيانات ولا يتغير بعد الحفظ.
+            {i18n.resolvedLanguage?.startsWith("en")
+              ? "Assigned by the database. Correcting cash/insurance type may issue a new number while preserving the old reference."
+              : "يُنشأ الرقم من قاعدة البيانات. عند تصحيح النوع بين الكاش والتأمين قد يصدر رقم جديد مع حفظ الرقم السابق كمرجع."}
           </p>
         </div>
       )}

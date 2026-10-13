@@ -1649,7 +1649,7 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
   const existingId = order.cloudId && isUuid(order.cloudId)
     ? order.cloudId
     : null;
-  let targetId = existingId;
+  const targetId = existingId;
   let finalOrderNumber = order.id;
   let previousOrderNumber: string | null = null;
   let previousPhotos: StagePhoto[] = [];
@@ -1667,8 +1667,8 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     }
     previousOrderNumber = (existing as any).order_number || order.id;
     previousPhotos = Array.isArray((existing as any).photos) ? (existing as any).photos : [];
-    // Visible numbers are immutable after allocation. Keeping the UUID and the
-    // original number together prevents broken invoices, claims and old links.
+    // Do not accept a client-supplied number. The database may atomically
+    // allocate a different series number only when the order changes channel.
     finalOrderNumber = normalizeWorkOrderNumber(previousOrderNumber || order.id || "");
     if (!isSupportedWorkOrderNumber(finalOrderNumber)) throw new Error("Invalid work order number");
   } else {
@@ -1708,10 +1708,6 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
     .maybeSingle();
   if (verifyError) throw verifyError;
   if (!verified?.id) throw new Error("تم الحفظ لكن تعذر قراءة أمر العمل للتأكيد");
-
-  if (previousOrderNumber && finalOrderNumber.toLowerCase() !== previousOrderNumber.toLowerCase()) {
-    await syncRenamedWorkOrderReferences(ctx.tenantId, previousOrderNumber, finalOrderNumber);
-  }
 
   const saved = await mapSavedJobOrder(verified);
   if (saved.claimId) {
@@ -1784,23 +1780,6 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
   else cache.unshift(saved);
   persist();
   return saved;
-}
-
-async function syncRenamedWorkOrderReferences(tenantId: string, oldNumber: string, newNumber: string) {
-  const updates: Array<PromiseLike<any>> = [
-    (supabase.from("expenses") as any).update({ linked_work_order_id: newNumber }).eq("tenant_id", tenantId).eq("linked_work_order_id", oldNumber),
-    (supabase.from("expenses") as any).update({ source_work_order_id: newNumber }).eq("tenant_id", tenantId).eq("source_work_order_id", oldNumber),
-    (supabase.from("sales_documents") as any).update({ from_doc_id: newNumber }).eq("tenant_id", tenantId).eq("from_doc_id", oldNumber),
-    (supabase.from("sales_documents") as any).update({ work_order_number: newNumber }).eq("tenant_id", tenantId).eq("work_order_number", oldNumber),
-    (supabase.from("vehicle_stay_notifications" as any) as any).update({ work_order_number: newNumber }).eq("tenant_id", tenantId).eq("work_order_number", oldNumber),
-  ];
-  const results = await Promise.allSettled(updates);
-  for (const result of results) {
-    if (result.status === "fulfilled" && (result.value as any)?.error && !isMissingOptionalColumnError((result.value as any).error)) {
-      console.warn("[syncRenamedWorkOrderReferences]", (result.value as any).error);
-    }
-    if (result.status === "rejected") console.warn("[syncRenamedWorkOrderReferences]", result.reason);
-  }
 }
 
 export async function updateWorkOrderInCloud(id: string, patch: Partial<WorkOrder>): Promise<WorkOrder> {

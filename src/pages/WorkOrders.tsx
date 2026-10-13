@@ -1405,7 +1405,14 @@ export default function WorkOrders() {
       <Dialog open={!!editOrder} onOpenChange={(o) => !o && setEditOrder(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-card border-border">
           <DialogHeader><DialogTitle className="text-foreground">تعديل أمر العمل {editOrder?.id}</DialogTitle></DialogHeader>
-          <WorkOrderForm initial={editOrder} onClose={() => setEditOrder(null)} />
+          <WorkOrderForm
+            initial={editOrder}
+            onClose={() => setEditOrder(null)}
+            onSaved={() => {
+              setEditOrder(null);
+              void workOrdersPageQuery.refetch();
+            }}
+          />
         </DialogContent>
       </Dialog>
 

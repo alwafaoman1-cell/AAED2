@@ -1718,7 +1718,17 @@ export default function WorkOrderDetail() {
           <DialogHeader>
             <DialogTitle>تعديل أمر العمل {displayNo}</DialogTitle>
           </DialogHeader>
-          <WorkOrderForm initial={order} onClose={() => setEditOpen(false)} />
+          <WorkOrderForm
+            initial={order}
+            onClose={() => setEditOpen(false)}
+            onSaved={(saved) => {
+              setEditOpen(false);
+              setOrder(saved);
+              if (saved.id !== order.id) {
+                navigate(`/work-orders/${encodeURIComponent(saved.id)}`, { replace: true });
+              }
+            }}
+          />
         </DialogContent>
       </Dialog>
 
