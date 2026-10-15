@@ -215,20 +215,25 @@ def run():
         raise RuntimeError("DOCUMENT_WORKER_TEST_JOB_LIMIT_INVALID")
     completed = 0
     deadline = time.monotonic() + 120 * test_max_jobs if one_shot else None
-    with psycopg.connect(config.db_dsn, autocommit=True) as connection:
-        while True:
-            try:
-                if process_one(config, connection) and one_shot:
-                    completed += 1
-                    if completed >= test_max_jobs:
-                        return
-                if deadline and time.monotonic() >= deadline:
-                    raise RuntimeError("DOCUMENT_WORKER_TEST_QUEUE_TIMEOUT")
-                time.sleep(2)
-            except psycopg.Error:
-                # No row content, token, filename or document text goes to logs.
-                print("DOCUMENT_WORKER_DATABASE_RETRY", file=sys.stderr)
-                time.sleep(5)
+    while True:
+        try:
+            # A dropped connection cannot be reused. Reopen it so queued jobs
+            # continue after a transient Development database interruption.
+            with psycopg.connect(config.db_dsn, autocommit=True) as connection:
+                while True:
+                    if process_one(config, connection) and one_shot:
+                        completed += 1
+                        if completed >= test_max_jobs:
+                            return
+                    if deadline and time.monotonic() >= deadline:
+                        raise RuntimeError("DOCUMENT_WORKER_TEST_QUEUE_TIMEOUT")
+                    time.sleep(2)
+        except psycopg.Error:
+            if deadline and time.monotonic() >= deadline:
+                raise RuntimeError("DOCUMENT_WORKER_TEST_QUEUE_TIMEOUT") from None
+            # No row content, token, filename or document text goes to logs.
+            print("DOCUMENT_WORKER_DATABASE_RETRY", file=sys.stderr)
+            time.sleep(5)
 
 
 if __name__ == "__main__":

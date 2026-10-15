@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from worker import Config, InvalidDocument, claim_next, download
+from worker import Config, InvalidDocument, claim_next, download, run
 
 
 class FakeConnection:
@@ -126,6 +126,22 @@ class WorkerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "DOCUMENT_STORAGE_DOWNLOAD_FAILED"):
                 download(config, job)
         self.assertFalse(request.call_args.kwargs["allow_redirects"])
+
+    def test_reconnects_after_database_connection_failure(self):
+        from unittest.mock import MagicMock
+
+        first = MagicMock()
+        first.__enter__.side_effect = __import__("psycopg").OperationalError("lost")
+        second = MagicMock()
+        second.__enter__.return_value = second
+        config = Config("development-dsn", "https://example.invalid", "test-only", "development", "paddleocr")
+        with patch("worker.Config.from_env", return_value=config), \
+             patch("worker.psycopg.connect", side_effect=[first, second]) as connect, \
+             patch("worker.process_one", return_value=True), \
+             patch("worker.time.sleep"), \
+             patch.dict(os.environ, {"TEMO_WORKER_ONCE": "1", "TEMO_WORKER_TEST_MAX_JOBS": "1"}):
+            run()
+        self.assertEqual(connect.call_count, 2)
 
 
 if __name__ == "__main__":

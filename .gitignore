@@ -31,3 +31,6 @@ deliverables/مجلد جديد/
 *.njsproj
 *.sln
 *.sw?
+.vercel/
+.env.local
+.env.*.local
