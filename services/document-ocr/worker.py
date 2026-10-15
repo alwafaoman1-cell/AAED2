@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import multiprocessing as mp
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -193,16 +194,27 @@ def process_one(config: Config, connection: psycopg.Connection) -> bool:
     job = claim_next(connection)
     if not job:
         return False
+    stage = "download"
     try:
         raw = download(config, job)
+        stage = "ocr"
         outcome, result = process_isolated(raw, job, config.provider)
         if outcome == "success":
+            stage = "finalize"
             finalize(connection, job, result)
         else:
+            stage = "record_failure"
             fail_job(connection, job, result, outcome == "retry")
     except InvalidDocument as error:
         fail_job(connection, job, error.code, False)
-    except Exception:
+    except Exception as error:
+        sqlstate = error.sqlstate if isinstance(error, psycopg.Error) else 'none'
+        primary = error.diag.message_primary if isinstance(error, psycopg.Error) else ''
+        safe_primary = primary if primary and re.fullmatch(
+            r'(?:permission denied for|new row violates row-level security policy for) [A-Za-z0-9_ "\x27]{1,100}',
+            primary,
+        ) else 'unknown'
+        print(f"DOCUMENT_WORKER_JOB_RETRY:{stage}:{type(error).__name__}:{sqlstate or 'none'}:{safe_primary}", file=sys.stderr)
         fail_job(connection, job, "DOCUMENT_WORKER_IO_FAILED", True)
     return True
 
@@ -228,11 +240,18 @@ def run():
                     if deadline and time.monotonic() >= deadline:
                         raise RuntimeError("DOCUMENT_WORKER_TEST_QUEUE_TIMEOUT")
                     time.sleep(2)
-        except psycopg.Error:
+        except psycopg.Error as error:
             if deadline and time.monotonic() >= deadline:
                 raise RuntimeError("DOCUMENT_WORKER_TEST_QUEUE_TIMEOUT") from None
             # No row content, token, filename or document text goes to logs.
-            print("DOCUMENT_WORKER_DATABASE_RETRY", file=sys.stderr)
+            # SQLSTATE and exception class identify a broken permission/schema
+            # contract without logging connection strings or document content.
+            primary = error.diag.message_primary or ''
+            safe_primary = primary if re.fullmatch(
+                r'(?:permission denied for|new row violates row-level security policy for) [A-Za-z0-9_ "\x27]{1,100}',
+                primary,
+            ) else 'unknown'
+            print(f"DOCUMENT_WORKER_DATABASE_RETRY:{type(error).__name__}:{error.sqlstate or 'none'}:{safe_primary}", file=sys.stderr)
             time.sleep(5)
 
 
