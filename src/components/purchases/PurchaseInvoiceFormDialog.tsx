@@ -15,6 +15,11 @@ import {
 import { suppliersStore, type Supplier } from "@/lib/suppliersStore";
 import { inventoryStore, type Part } from "@/lib/inventoryStore";
 import { postPurchaseInvoice, unpostPurchaseInvoice } from "@/lib/purchaseAccounting";
+import AiExtractButton from "@/components/ai/AiExtractButton";
+import { isDocumentEngineEnabled } from "@/lib/documentExtraction/config";
+import { reviewedPurchaseLineItems } from "@/lib/documentExtraction/lineItems";
+import { parseMoneyMilli } from "@/lib/documentExtraction/parsers";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   open: boolean;
@@ -31,6 +36,8 @@ const emptyItem: PurchaseInvoiceItem = {
 };
 
 export default function PurchaseInvoiceFormDialog({ open, onOpenChange, editing }: Props) {
+  const { i18n } = useTranslation();
+  const english = i18n.language?.startsWith("en") || false;
   const [suppliers, setSuppliers] = useState<Supplier[]>(suppliersStore.getAll());
   const [parts, setParts] = useState<Part[]>(inventoryStore.getAll());
   const [supplierId, setSupplierId] = useState("");
@@ -42,12 +49,16 @@ export default function PurchaseInvoiceFormDialog({ open, onOpenChange, editing 
   const [shipping, setShipping] = useState(0);
   const [notes, setNotes] = useState("");
   const [paid, setPaid] = useState(false);
+  const [extractedSupplierName, setExtractedSupplierName] = useState("");
+  const [extractedExpectedTotal, setExtractedExpectedTotal] = useState<number | null>(null);
 
   useEffect(() => suppliersStore.subscribe(() => setSuppliers([...suppliersStore.getAll()])), []);
   useEffect(() => inventoryStore.subscribe(() => setParts([...inventoryStore.getAll()])), []);
 
   useEffect(() => {
     if (open) {
+      setExtractedSupplierName("");
+      setExtractedExpectedTotal(null);
       if (editing) {
         setSupplierId(editing.supplierId);
         setInvoiceNumber(editing.invoiceNumber);
@@ -100,6 +111,11 @@ export default function PurchaseInvoiceFormDialog({ open, onOpenChange, editing 
   }
 
   function handleSave() {
+    if (extractedExpectedTotal !== null && Math.abs(totals.total - extractedExpectedTotal) > 0.0015) {
+      toast.error(english ? "Item totals do not match the reviewed document. Check VAT, discount and shipping before saving."
+        : "إجمالي البنود لا يطابق إجمالي المستند المراجع. راجع الضريبة أو الخصم أو الشحن قبل الحفظ.");
+      return;
+    }
     const supplier = suppliers.find((s) => s.id === supplierId);
     if (!supplier) {
       toast.error("اختر المورد");
@@ -155,6 +171,33 @@ export default function PurchaseInvoiceFormDialog({ open, onOpenChange, editing 
           </DialogTitle>
         </DialogHeader>
 
+        {!editing && isDocumentEngineEnabled() && <div className="rounded-lg border border-border p-3 space-y-1">
+          <AiExtractButton schema="purchase_invoice" expectedDocumentType="purchase_invoice"
+            label={english ? "Read purchase invoice and lines" : "قراءة فاتورة الشراء وبنودها"} onExtracted={(data) => {
+              const reviewed = reviewedPurchaseLineItems(data);
+              if (!reviewed.valid) { toast.error(english ? "Document lines are incomplete; nothing was applied." : "بنود المستند غير مكتملة؛ لم تُطبّق على النموذج."); return; }
+              if (data.supplier_name) { setExtractedSupplierName(data.supplier_name); setSupplierId(""); }
+              if (data.invoice_number) setInvoiceNumber((current) => current || data.invoice_number);
+              if (data.invoice_date) setDate(data.invoice_date);
+              if (data.total) {
+                const milli = parseMoneyMilli(data.total);
+                setExtractedExpectedTotal(milli === null ? null : milli / 1000);
+              }
+              if (reviewed.items.length) {
+                if (items.length !== 1 || items[0].name.trim()) {
+                  toast.warning(english ? "Existing form lines were kept; extracted lines were not inserted." : "تم الإبقاء على البنود الموجودة؛ لم تُدرج البنود المستخرجة فوقها.");
+                } else {
+                  setItems(reviewed.items.map((item) => ({ name: item.name, qty: item.qty, unitPrice: item.unitPrice,
+                    taxRate: 0, discount: 0 })));
+                  toast.info(english ? "Review the supplier, VAT and each line. No invoice or stock movement was saved." : "راجع المورد والضريبة وكل بند قبل الحفظ؛ لم تُنشأ فاتورة أو حركة مخزون تلقائيًا.");
+                }
+              } else toast.info(english ? "No complete lines were approved. Enter them manually before saving." : "لم تُعتمد بنود كاملة؛ أدخلها يدويًا قبل الحفظ.");
+            }} />
+          <p className="text-xs text-muted-foreground">{english
+            ? "Extraction fills a draft only. This purchase-invoice page still uses local storage; the document is not cloud-linked to an accounting invoice."
+            : "الاستخراج يملأ مسودة فقط. صفحة فواتير الشراء الحالية لا تزال تعتمد مخزنها المحلي؛ لا يعد هذا ربطًا محاسبيًا سحابيًا للمستند."}</p>
+        </div>}
+
         {/* الترويسة */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2">
           <Field label="المورد *">
@@ -168,6 +211,7 @@ export default function PurchaseInvoiceFormDialog({ open, onOpenChange, editing 
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
+            {extractedSupplierName && <p className="text-xs text-amber-700">{english ? "Read supplier:" : "المورد المقروء:"} {extractedSupplierName} {english ? "— select the matching supplier yourself." : "— اختر المورد المطابق بنفسك."}</p>}
           </Field>
           <Field label="رقم فاتورة المورد">
             <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} className="bg-secondary border-border" />

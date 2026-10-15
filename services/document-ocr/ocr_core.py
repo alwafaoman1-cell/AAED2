@@ -1,0 +1,305 @@
+"""Isolated document OCR core. No Supabase credentials, PII logs, or shell calls.
+
+The deployment adapter may fetch bytes from a private bucket and supply them here.
+It must validate the authenticated tenant, file scope, content hash and job lease.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import datetime
+import re
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+MAX_BYTES = 12 * 1024 * 1024
+MAX_PAGES = 8
+MAX_PIXELS = 32_000_000
+SIGNATURES = {
+    ".pdf": ("application/pdf", lambda b: b.startswith(b"%PDF-")),
+    ".jpg": ("image/jpeg", lambda b: b.startswith(b"\xff\xd8\xff")),
+    ".jpeg": ("image/jpeg", lambda b: b.startswith(b"\xff\xd8\xff")),
+    ".png": ("image/png", lambda b: b.startswith(b"\x89PNG\r\n\x1a\n")),
+    ".webp": ("image/webp", lambda b: b.startswith(b"RIFF") and b[8:12] == b"WEBP"),
+}
+
+
+class InvalidDocument(ValueError):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class ValidatedDocument:
+    mime: str
+    sha256: str
+    pages: int
+    byte_size: int
+
+
+def validate_document(raw: bytes, filename: str, declared_mime: str, expected_sha256: str | None = None) -> ValidatedDocument:
+    if not raw or len(raw) > MAX_BYTES:
+        raise InvalidDocument("DOCUMENT_SIZE_INVALID")
+    suffix = Path(filename).suffix.lower()
+    signature = SIGNATURES.get(suffix)
+    if not signature or not signature[1](raw) or signature[0] != declared_mime:
+        raise InvalidDocument("DOCUMENT_SIGNATURE_MISMATCH")
+    digest = hashlib.sha256(raw).hexdigest()
+    if expected_sha256 and digest != expected_sha256:
+        raise InvalidDocument("DOCUMENT_HASH_MISMATCH")
+    if declared_mime == "application/pdf":
+        import pymupdf
+        try:
+            with pymupdf.open(stream=raw, filetype="pdf") as pdf:
+                if pdf.needs_pass or not 1 <= pdf.page_count <= MAX_PAGES:
+                    raise InvalidDocument("DOCUMENT_PDF_PAGE_LIMIT")
+                for page in pdf:
+                    if page.rect.width <= 0 or page.rect.height <= 0:
+                        raise InvalidDocument("DOCUMENT_PDF_CORRUPT")
+                pages = pdf.page_count
+        except InvalidDocument:
+            raise
+        except Exception as exc:
+            raise InvalidDocument("DOCUMENT_PDF_CORRUPT") from exc
+    else:
+        from PIL import Image, ImageFile, UnidentifiedImageError
+        Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+        ImageFile.LOAD_TRUNCATED_IMAGES = False
+        try:
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.width * image.height > MAX_PIXELS:
+                    raise InvalidDocument("DOCUMENT_IMAGE_PIXEL_LIMIT")
+                image.verify()
+            pages = 1
+        except InvalidDocument:
+            raise
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise InvalidDocument("DOCUMENT_IMAGE_CORRUPT") from exc
+    return ValidatedDocument(declared_mime, digest, pages, len(raw))
+
+
+def _image_pages(raw: bytes, mime: str):
+    from PIL import Image, ImageOps
+    if mime == "application/pdf":
+        import pymupdf
+        with pymupdf.open(stream=raw, filetype="pdf") as pdf:
+            for number, page in enumerate(pdf, 1):
+                native = page.get_text("text", sort=True)
+                if len(re.sub(r"\s", "", native)) >= 45:
+                    yield number, None, native, int(page.rect.width), int(page.rect.height)
+                    continue
+                pixels = page.get_pixmap(matrix=pymupdf.Matrix(2.5, 2.5), alpha=False)
+                if pixels.width * pixels.height > MAX_PIXELS:
+                    raise InvalidDocument("DOCUMENT_IMAGE_PIXEL_LIMIT")
+                image = Image.open(io.BytesIO(pixels.tobytes("png"))).convert("RGB")
+                yield number, image, "", image.width, image.height
+    else:
+        image = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+        yield 1, image, "", image.width, image.height
+
+
+def _variants(image: Any):
+    import cv2
+    import numpy as np
+    source = np.asarray(image)
+    yield "original", source
+    lab = cv2.cvtColor(source, cv2.COLOR_RGB2LAB)
+    light, a, b = cv2.split(lab)
+    enhanced = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8)).apply(light)
+    yield "local_contrast", cv2.cvtColor(cv2.merge((enhanced, a, b)), cv2.COLOR_LAB2RGB)
+
+
+def _line(text: str, confidence: float, box: list[float]) -> dict[str, Any]:
+    return {"text": text, "confidence": max(0.0, min(1.0, confidence)),
+            "box": {"x": box[0], "y": box[1], "width": box[2], "height": box[3]}}
+
+
+class TesseractProvider:
+    name = "tesseract"
+    version = "5"
+
+    def __init__(self):
+        import pytesseract
+        pytesseract.get_tesseract_version()  # fail at setup, not halfway through a corpus
+
+    def recognize(self, image: Any) -> tuple[str, list[dict[str, Any]], float]:
+        import pytesseract
+        from pytesseract import Output
+        from PIL import Image
+        data = pytesseract.image_to_data(Image.fromarray(image), lang="ara+eng", config="--psm 3", output_type=Output.DICT)
+        lines: dict[tuple[int, int, int], list[tuple[str, float, list[float]]]] = {}
+        for index, raw in enumerate(data["text"]):
+            text = raw.strip()
+            if not text:
+                continue
+            try:
+                confidence = max(0.0, float(data["conf"][index])) / 100
+            except ValueError:
+                confidence = 0.0
+            key = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
+            lines.setdefault(key, []).append((text, confidence, [data["left"][index], data["top"][index], data["width"][index], data["height"][index]]))
+        segments = []
+        for words in lines.values():
+            x = min(word[2][0] for word in words); y = min(word[2][1] for word in words)
+            right = max(word[2][0] + word[2][2] for word in words)
+            bottom = max(word[2][1] + word[2][3] for word in words)
+            segments.append(_line(" ".join(word[0] for word in words), sum(word[1] for word in words) / len(words), [x, y, right - x, bottom - y]))
+        return "\n".join(segment["text"] for segment in segments), segments, (sum(segment["confidence"] for segment in segments) / len(segments) if segments else 0)
+
+
+class PaddleProvider:
+    name = "paddleocr"
+    version = "PP-OCRv5-ar+en-claim"
+
+    def __init__(self):
+        from paddleocr import PaddleOCR
+        self._pipeline = PaddleOCR(device="cpu",
+                                   text_detection_model_name="PP-OCRv5_mobile_det",
+                                   text_recognition_model_name="arabic_PP-OCRv5_mobile_rec",
+                                   enable_mkldnn=False, cpu_threads=2,
+                                   use_doc_orientation_classify=False, use_doc_unwarping=False,
+                                   use_textline_orientation=False)
+        self._english_pipeline = None
+
+    def warm_english_model(self):
+        if self._english_pipeline is None:
+            from paddleocr import PaddleOCR
+            self._english_pipeline = PaddleOCR(device="cpu",
+                                               text_detection_model_name="PP-OCRv5_mobile_det",
+                                               text_recognition_model_name="en_PP-OCRv5_mobile_rec",
+                                               enable_mkldnn=False, cpu_threads=2,
+                                               use_doc_orientation_classify=False, use_doc_unwarping=False,
+                                               use_textline_orientation=False)
+
+    @staticmethod
+    def _segments(results: Any) -> list[dict[str, Any]]:
+        segments = []
+        for item in results:
+            payload = item.json.get("res", item.json)
+            texts = payload.get("rec_texts", []); scores = payload.get("rec_scores", [])
+            polygons = payload.get("rec_polys", [])
+            for index, text in enumerate(texts):
+                polygon = polygons[index] if index < len(polygons) else []
+                if len(polygon):
+                    xs = [float(point[0]) for point in polygon]; ys = [float(point[1]) for point in polygon]
+                    box = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+                else:
+                    box = [0, 0, 0, 0]
+                segments.append(_line(text, float(scores[index]) if index < len(scores) else 0, box))
+        return segments
+
+    def recognize(self, image: Any) -> tuple[str, list[dict[str, Any]], float]:
+        segments = self._segments(self._pipeline.predict(image))
+        # Whole-line Arabic recognition can retain a label but drop a compact
+        # Arabic-Indic value. Re-read only the value side of the detected line;
+        # the crop is derived from OCR coordinates, not from a document template.
+        digit = r"[0-9٠-٩۰-۹]"
+        date_pattern = re.compile(digit + r"{1,4}\s*[/.-]\s*" + digit + r"{1,2}\s*[/.-]\s*" + digit + r"{2,4}")
+
+        def unambiguous_compact_date(value: str) -> bool:
+            digits = value.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789"))
+            if not re.fullmatch(r"\d{8}", digits):
+                return False
+            day, month, year = int(digits[:2]), int(digits[2:4]), int(digits[4:])
+            if day <= 12 or year < 1900 or year > 2100:
+                return False  # Both dd/mm and mm/dd could otherwise be plausible.
+            try:
+                datetime.date(year, month, day)
+                return True
+            except ValueError:
+                return False
+        for label_text, complete, share, margin in (("رقم اللوحة", re.compile(digit + r"{2,7}"), 0.60, 18),
+                                                    ("تاريخ الحادث", date_pattern, 0.60, 14)):
+            labels_for_value = [segment for segment in segments if label_text in segment["text"] and
+                                (not complete.search(segment["text"]) or
+                                 (label_text == "رقم اللوحة" and
+                                  len(complete.search(segment["text"]).group()) < 3))]
+            for label in labels_for_value:
+                import numpy as np
+                box = label["box"]
+                left = max(0, int(box["x"] - (20 if label_text == "رقم اللوحة" else 13)))
+                top = max(0, int(box["y"] - margin))
+                right = min(image.shape[1], int(box["x"] + box["width"] * share))
+                bottom = min(image.shape[0], int(box["y"] + box["height"] + (18 if label_text == "تاريخ الحادث" else 8)))
+                if right - left < 30 or bottom - top < 20:
+                    continue
+                observed_dates = {}
+                # Very small crop changes can turn a printed slash into a
+                # digit. Require two independent crop widths to agree on all
+                # eight digits before accepting a separator-free date.
+                for offset in ([0, 2, 10, 12] if label_text == "تاريخ الحادث" else [0]):
+                    crop = np.ascontiguousarray(image[top:bottom, left:min(image.shape[1], right + offset)])
+                    for candidate in self._segments(self._pipeline.predict(crop)):
+                        value = candidate["text"].strip()
+                        valid_format = (re.fullmatch(digit + r"{2,7}", value) if label_text == "رقم اللوحة"
+                                        else date_pattern.fullmatch(value) or unambiguous_compact_date(value))
+                        if candidate["confidence"] < 0.70 or not valid_format:
+                            continue
+                        if label_text == "رقم اللوحة":
+                            observed = complete.search(label["text"])
+                            if observed and len(value) <= len(observed.group()):
+                                continue
+                            candidate["box"]["x"] += left; candidate["box"]["y"] += top
+                            segments.append(candidate)
+                        else:
+                            key = value.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789"))
+                            observed_dates.setdefault(key, []).append(candidate)
+                if label_text == "تاريخ الحادث":
+                    for agreeing in observed_dates.values():
+                        if len(agreeing) < 2:
+                            continue
+                        winner = max(agreeing, key=lambda item: item["confidence"])
+                        winner["confidence"] = min(item["confidence"] for item in agreeing)
+                        winner["box"]["x"] += left; winner["box"]["y"] += top
+                        segments.append(winner)
+                        break
+        # The Arabic recognizer reads the label but can discard an adjacent
+        # Latin claim reference. Run the English recognizer only in that case;
+        # accept only a complete reference on the same physical line as the
+        # Arabic label. Never construct missing digits from a template.
+        from difflib import SequenceMatcher
+        labels = [segment for segment in segments if
+                  "رقم المطالبة" in segment["text"] or segment["text"].strip() == "المطالبة" or
+                  (segment["text"].strip().startswith("رقم ") and
+                   SequenceMatcher(None, segment["text"].strip()[:12], "رقم المطالبة").ratio() >= 0.72)]
+        reference = re.compile(r"\bC/[A-Z0-9]+(?:/[A-Z0-9]+){3,}\b", re.I)
+        if labels and not any(reference.search(segment["text"]) for segment in segments):
+            self.warm_english_model()
+            for candidate in self._segments(self._english_pipeline.predict(image)):
+                if candidate["confidence"] < 0.75 or not reference.search(candidate["text"]):
+                    continue
+                center = candidate["box"]["y"] + candidate["box"]["height"] / 2
+                aligned = any(abs(center - label["box"]["y"] - label["box"]["height"] / 2)
+                              <= max(candidate["box"]["height"], label["box"]["height"]) for label in labels)
+                if aligned:
+                    segments.append(candidate)
+        return "\n".join(segment["text"] for segment in segments), segments, (sum(segment["confidence"] for segment in segments) / len(segments) if segments else 0)
+
+
+def process_document(raw: bytes, filename: str, declared_mime: str, provider: Any,
+                     expected_sha256: str | None = None) -> dict[str, Any]:
+    validation = validate_document(raw, filename, declared_mime, expected_sha256)
+    started = time.monotonic()
+    output = []
+    for number, image, native_text, width, height in _image_pages(raw, validation.mime):
+        if image is None:
+            output.append({"number": number, "text": native_text[:200_000], "method": "native_pdf",
+                           "confidence": 0.99, "width": width, "height": height, "segments": []})
+            continue
+        best = ("", [], 0.0, "original")
+        for name, variant in _variants(image):
+            text, segments, confidence = provider.recognize(variant)
+            # A confident but empty / very short OCR result never wins.
+            score = confidence * min(1, len(text.strip()) / 20)
+            if score > best[2] * min(1, len(best[0].strip()) / 20):
+                best = (text, segments, confidence, name)
+            if score >= 0.80 and len(text.strip()) >= 50:
+                break
+        output.append({"number": number, "text": best[0][:200_000], "method": "ocr",
+                       "confidence": round(best[2], 3), "width": width, "height": height,
+                       "segments": best[1][:1000], "variant": best[3]})
+    return {"engine": provider.name, "model_version": provider.version, "sha256": validation.sha256,
+            "pages": output, "duration_ms": round((time.monotonic() - started) * 1000), "ai_used": False}

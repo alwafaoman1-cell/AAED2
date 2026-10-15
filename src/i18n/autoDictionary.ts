@@ -43,6 +43,19 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "قراءة فاتورة الشراء وبنودها": "Read Purchase Invoice and Lines",
+  "الاستخراج يملأ مسودة فقط. صفحة فواتير الشراء الحالية لا تزال تعتمد مخزنها المحلي؛ لا يعد هذا ربطًا محاسبيًا سحابيًا للمستند.": "Extraction fills a draft only. This purchase-invoice page still uses local storage; the document is not cloud-linked to an accounting invoice.",
+  "المورد المقروء:": "Read supplier:",
+  "— اختر المورد المطابق بنفسك.": "— Select the matching supplier yourself.",
+  "مسح مستند": "Scan Document",
+  "استخدام الأصل": "Use Original",
+  "إعادة التصوير": "Retake",
+  "اعتماد الصفحة": "Keep Page",
+  "الصور / الملفات": "Gallery / Files",
+  "إيقاف الفلاش": "Turn Off Flash",
+  "فلاش": "Flash",
+  "صفحة": "Page",
+  "استخراج إلى النموذج": "Extract to Form",
   "تعذر تحميل السندات — اضغط لإعادة المحاولة": "Could not load receipts — click to retry",
   "جارِ التصدير…": "Exporting…",
   "تصدير كل النتائج": "Export all results",

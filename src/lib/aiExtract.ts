@@ -14,6 +14,7 @@ export type ExtractSchema =
   | "insurance_claim"
   | "estimate_document"
   | "expense_receipt"
+  | "purchase_invoice"
   | "spare_part"
   | "delivery_receipt"
   | "diagnostic_report";

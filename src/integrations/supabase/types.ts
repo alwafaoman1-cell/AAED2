@@ -14,6 +14,348 @@ export type Database = {
   }
   public: {
     Tables: {
+      document_extraction_events: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          event_type: string
+          extraction_id: string
+          field_key: string | null
+          id: string
+          new_value: string | null
+          original_value: string | null
+          tenant_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          event_type: string
+          extraction_id: string
+          field_key?: string | null
+          id?: string
+          new_value?: string | null
+          original_value?: string | null
+          tenant_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          event_type?: string
+          extraction_id?: string
+          field_key?: string | null
+          id?: string
+          new_value?: string | null
+          original_value?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_event_extraction_fk"
+            columns: ["tenant_id", "extraction_id"]
+            isOneToOne: false
+            referencedRelation: "document_extractions"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      document_extraction_fields: {
+        Row: {
+          confidence: number
+          created_at: string
+          extraction_id: string
+          extraction_method: string
+          field_key: string
+          id: string
+          normalized_value: string
+          raw_value: string
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          reviewed_value: string | null
+          source_box: Json | null
+          source_page: number
+          tenant_id: string
+          validation_status: string
+        }
+        Insert: {
+          confidence: number
+          created_at?: string
+          extraction_id: string
+          extraction_method: string
+          field_key: string
+          id?: string
+          normalized_value: string
+          raw_value: string
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewed_value?: string | null
+          source_box?: Json | null
+          source_page: number
+          tenant_id: string
+          validation_status: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          extraction_id?: string
+          extraction_method?: string
+          field_key?: string
+          id?: string
+          normalized_value?: string
+          raw_value?: string
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewed_value?: string | null
+          source_box?: Json | null
+          source_page?: number
+          tenant_id?: string
+          validation_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_field_extraction_fk"
+            columns: ["tenant_id", "extraction_id"]
+            isOneToOne: false
+            referencedRelation: "document_extractions"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      document_extraction_pages: {
+        Row: {
+          confidence: number
+          created_at: string
+          extraction_id: string
+          extraction_method: string
+          height: number | null
+          id: string
+          page_number: number
+          segments: Json
+          tenant_id: string
+          text_content: string
+          width: number | null
+        }
+        Insert: {
+          confidence: number
+          created_at?: string
+          extraction_id: string
+          extraction_method: string
+          height?: number | null
+          id?: string
+          page_number: number
+          segments?: Json
+          tenant_id: string
+          text_content: string
+          width?: number | null
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          extraction_id?: string
+          extraction_method?: string
+          height?: number | null
+          id?: string
+          page_number?: number
+          segments?: Json
+          tenant_id?: string
+          text_content?: string
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_page_extraction_fk"
+            columns: ["tenant_id", "extraction_id"]
+            isOneToOne: false
+            referencedRelation: "document_extractions"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      document_extractions: {
+        Row: {
+          ai_used: boolean
+          attempt_count: number
+          created_at: string
+          detected_language: string
+          document_type: string
+          engine_version: string
+          error_code: string | null
+          extraction_method: string | null
+          file_id: string
+          id: string
+          issues: Json
+          lease_token: string | null
+          matches: Json
+          next_attempt_at: string | null
+          overall_confidence: number | null
+          page_count: number
+          processing_metrics: Json
+          processing_started_at: string | null
+          raw_text: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+          uploaded_by: string
+          verified_at: string | null
+          verified_by: string | null
+        }
+        Insert: {
+          ai_used?: boolean
+          attempt_count?: number
+          created_at?: string
+          detected_language?: string
+          document_type?: string
+          engine_version: string
+          error_code?: string | null
+          extraction_method?: string | null
+          file_id: string
+          id?: string
+          issues?: Json
+          lease_token?: string | null
+          matches?: Json
+          next_attempt_at?: string | null
+          overall_confidence?: number | null
+          page_count?: number
+          processing_metrics?: Json
+          processing_started_at?: string | null
+          raw_text?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+          uploaded_by?: string
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Update: {
+          ai_used?: boolean
+          attempt_count?: number
+          created_at?: string
+          detected_language?: string
+          document_type?: string
+          engine_version?: string
+          error_code?: string | null
+          extraction_method?: string | null
+          file_id?: string
+          id?: string
+          issues?: Json
+          lease_token?: string | null
+          matches?: Json
+          next_attempt_at?: string | null
+          overall_confidence?: number | null
+          page_count?: number
+          processing_metrics?: Json
+          processing_started_at?: string | null
+          raw_text?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          uploaded_by?: string
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_extraction_file_fk"
+            columns: ["tenant_id", "file_id"]
+            isOneToOne: false
+            referencedRelation: "document_files"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      document_files: {
+        Row: {
+          access_scope: string
+          byte_size: number
+          created_at: string
+          id: string
+          mime_type: string
+          original_file_name: string
+          sha256: string
+          storage_bucket: string
+          storage_path: string
+          tenant_id: string
+          uploaded_by: string
+        }
+        Insert: {
+          access_scope: string
+          byte_size: number
+          created_at?: string
+          id?: string
+          mime_type: string
+          original_file_name: string
+          sha256: string
+          storage_bucket: string
+          storage_path: string
+          tenant_id: string
+          uploaded_by?: string
+        }
+        Update: {
+          access_scope?: string
+          byte_size?: number
+          created_at?: string
+          id?: string
+          mime_type?: string
+          original_file_name?: string
+          sha256?: string
+          storage_bucket?: string
+          storage_path?: string
+          tenant_id?: string
+          uploaded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_files_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_links: {
+        Row: {
+          entity_id: string
+          entity_type: string
+          file_id: string
+          id: string
+          linked_at: string
+          linked_by: string
+          removed_at: string | null
+          tenant_id: string
+        }
+        Insert: {
+          entity_id: string
+          entity_type: string
+          file_id: string
+          id?: string
+          linked_at?: string
+          linked_by?: string
+          removed_at?: string | null
+          tenant_id: string
+        }
+        Update: {
+          entity_id?: string
+          entity_type?: string
+          file_id?: string
+          id?: string
+          linked_at?: string
+          linked_by?: string
+          removed_at?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_link_file_fk"
+            columns: ["tenant_id", "file_id"]
+            isOneToOne: false
+            referencedRelation: "document_files"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       accounting_account_mappings: {
         Row: {
           account_id: string
@@ -9393,6 +9735,27 @@ export type Database = {
       }
     }
     Functions: {
+      document_enqueue_processing: {
+        Args: { p_engine_version: string; p_file_id: string }
+        Returns: { extraction_id: string; processing_status: string }[]
+      }
+      document_claim_processing: {
+        Args: { p_engine_version: string; p_file_id: string }
+        Returns: {
+          acquired: boolean
+          extraction_id: string
+          lease: string
+          processing_status: string
+        }[]
+      }
+      document_verify_review: {
+        Args: { p_extraction_id: string; p_reviews: Json }
+        Returns: undefined
+      }
+      document_verify_review_internal: {
+        Args: { p_extraction_id: string; p_reviews: Json }
+        Returns: undefined
+      }
       mark_claim_estimate_sent: {
         Args: { p_claim_id: string }
         Returns: Json

@@ -22,6 +22,7 @@ import InsuranceEmployeeSelect from "@/components/insurance/InsuranceEmployeeSel
 import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicker";
 import UplItemsEditor, { DEFAULT_UPL_ITEMS, type UplItem } from "@/components/insurance/UplItemsEditor";
 import AiExtractButton from "@/components/ai/AiExtractButton";
+import { linkDocumentFile } from "@/lib/documentExtraction/persistence";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import { toEnglishDigits } from "@/lib/numberUtils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -117,6 +118,7 @@ export default function NewInsuranceClaim() {
   const { data: companies = [] } = useInsuranceCompanies(step === 0 && !!draft.companyId);
   const [savedDraftAt, setSavedDraftAt] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingDocumentFileId, setPendingDocumentFileId] = useState<string | null>(null);
   const draftHydratedRef = useRef(false);
   const skipNextDraftSaveRef = useRef(false);
   const savedDraftAtRef = useRef<number | null>(null);
@@ -539,6 +541,25 @@ export default function NewInsuranceClaim() {
         upl_items: draft.estimationType === "upl" ? draft.uplItems : [],
       });
 
+      if (pendingDocumentFileId) {
+        const savedFileId = pendingDocumentFileId;
+        try {
+          await linkDocumentFile({ tenantId: tenantId as string, fileId: savedFileId, entityType: "claim", entityId: created.id });
+          setPendingDocumentFileId(null);
+        } catch {
+          toast.warning(`حُفظت المطالبة، لكن لم يُربط المستند ${savedFileId}. لا تنشئ مطالبة أخرى.`, {
+            duration: Infinity,
+            action: {
+              label: "إعادة ربط المستند",
+              onClick: () => { void linkDocumentFile({ tenantId: tenantId as string, fileId: savedFileId, entityType: "claim", entityId: created.id })
+                .then(() => toast.success("تم ربط المستند بالمطالبة"))
+                .catch(() => toast.error("لم يُربط المستند بعد؛ احتفظ برقم الملف للمراجعة.")); },
+            },
+          });
+          setPendingDocumentFileId(null);
+        }
+      }
+
       clearStoredDraft();
 
       if (action === "save_and_open") {
@@ -658,9 +679,19 @@ export default function NewInsuranceClaim() {
           <AiExtractButton
             schema="insurance_claim"
             label="استخراج من مستند"
-            onExtracted={(d) => {
+            onExtracted={(d, document) => {
               const patch: Partial<Draft> = {};
-              if (d.insurance_company) patch.company = d.insurance_company;
+              if (document) {
+                setPendingDocumentFileId(document.fileId);
+                const existingCompany = d.insurance_company
+                  ? document.result.matches.filter((match) => match.entity === "insurance_company" && match.exact)
+                  : [];
+                if (existingCompany.length === 1) {
+                  patch.companyId = existingCompany[0].id;
+                  patch.company = existingCompany[0].label;
+                }
+              }
+              if (d.insurance_company && !patch.company) patch.company = d.insurance_company;
               if (d.claim_number) patch.claimNumber = d.claim_number;
               if (d.owner_name) patch.ownerName = d.owner_name;
               if (d.owner_phone) patch.ownerPhone = d.owner_phone;
@@ -728,6 +759,7 @@ export default function NewInsuranceClaim() {
             size="sm"
             onClick={() => {
               setDraft(emptyDraft());
+              setPendingDocumentFileId(null);
               clearStoredDraft();
               setSavedDraftAt(null);
               setStep(0);

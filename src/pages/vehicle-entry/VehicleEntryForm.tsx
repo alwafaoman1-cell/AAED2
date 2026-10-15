@@ -99,6 +99,7 @@ export default function VehicleEntryForm() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [vehicleSearch, setVehicleSearch] = useState("");
   const [deliveryDataSource, setDeliveryDataSource] = useState<"manual" | "owner" | "customer">("manual");
+  const [pendingDocumentFileId, setPendingDocumentFileId] = useState<string | null>(null);
   const [pendingPhotos, setPendingPhotos] = useState<PendingEntryPhoto[]>([]);
   const [activePhotoCategory, setActivePhotoCategory] = useState<PendingEntryPhoto["category"]>("front_view");
   const pendingPhotosRef = useRef<PendingEntryPhoto[]>([]);
@@ -247,6 +248,17 @@ export default function VehicleEntryForm() {
         form.customer_phone_before_edit !== undefined &&
         form.customer.phone.trim() !== (form.customer_phone_before_edit || "").trim();
       const saved = await saveVehicleEntry({ ...form, status }, user?.id);
+      let documentLinkWarning = Boolean(pendingDocumentFileId && !profile?.tenant_id);
+      const savedDocumentFileId = pendingDocumentFileId;
+      if (savedDocumentFileId && profile?.tenant_id) {
+        try {
+          const { linkDocumentFile } = await import("@/lib/documentExtraction/persistence");
+          await linkDocumentFile({ tenantId: profile.tenant_id, fileId: savedDocumentFileId, entityType: "vehicle_entry", entityId: saved.id });
+          setPendingDocumentFileId(null);
+        } catch {
+          documentLinkWarning = true;
+        }
+      }
       if (pendingPhotos.length) {
         try {
           for (const photo of pendingPhotos) {
@@ -279,6 +291,16 @@ export default function VehicleEntryForm() {
         ]);
       }
       toast.success(status === "Issued" ? "تم حفظ وإصدار نموذج الدخول" : "تم حفظ مسودة نموذج الدخول");
+      if (documentLinkWarning && savedDocumentFileId) toast.warning(
+        `حُفظ النموذج، لكن لم يُربط المستند ${savedDocumentFileId}. لا تنشئ نموذج دخول آخر.`,
+        { duration: Infinity, action: { label: "إعادة ربط المستند", onClick: () => {
+          if (!profile?.tenant_id) { toast.error("تعذر تحديد الورشة؛ أعد تسجيل الدخول."); return; }
+          void import("@/lib/documentExtraction/persistence").then(({ linkDocumentFile }) =>
+            linkDocumentFile({ tenantId: profile.tenant_id, fileId: savedDocumentFileId, entityType: "vehicle_entry", entityId: saved.id }))
+            .then(() => toast.success("تم ربط المستند بنموذج الدخول"))
+            .catch(() => toast.error("لم يُربط المستند بعد؛ احتفظ برقم الملف للمراجعة."));
+        } } },
+      );
       navigate(`/vehicle-entry/${saved.id}`, { replace: true });
     } catch (error: any) {
       if (error?.savedEntry?.id) {
@@ -473,7 +495,17 @@ export default function VehicleEntryForm() {
       <Section title="استخراج البيانات بالذكاء الاصطناعي" desc="لا يتم حفظ أي بيانات تلقائيًا. راجع البيانات ثم طبّقها على النموذج.">
         <AiExtractButton
           schema="insurance_claim"
-          onExtracted={(data: any) => {
+          expectedDocumentType="vehicle_registration"
+          onExtracted={(data: any, document) => {
+            if (document) {
+              setPendingDocumentFileId(document.fileId);
+              if (Object.keys(data).length === 0) {
+                toast.info("سيُرفق المستند عند حفظ نموذج الدخول؛ لم تتغير بيانات النموذج.");
+                return;
+              }
+              const existingVehicle = document.result.matches.find((match) => match.entity === "vehicle" && match.exact);
+              if (existingVehicle) toast.warning("توجد مركبة مطابقة في النظام. اخترها من البحث قبل الحفظ لتجنب التكرار.");
+            }
             patchCustomer({ name: data.owner_name || form.customer.name, phone: data.owner_phone || form.customer.phone, id_number: data.owner_id || form.customer.id_number });
             patchVehicle({
               plate_number: data.plate_number || form.vehicle.plate_number,

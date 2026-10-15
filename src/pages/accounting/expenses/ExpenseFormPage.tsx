@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { FolderTree, Loader2, Search } from "lucide-react";
@@ -12,6 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import SupplierPicker from "@/components/suppliers/SupplierPicker";
+import AiExtractButton from "@/components/ai/AiExtractButton";
+import { isDocumentEngineEnabled } from "@/lib/documentExtraction/config";
+import { getDocumentAttachment, linkDocumentFile } from "@/lib/documentExtraction/persistence";
+import { buildExpenseReceiptSuggestion } from "@/lib/documentExtraction/expenseDraft";
+import type { AppliedDocumentContext } from "@/components/ai/AiExtractButton";
 import { queryKeys } from "@/lib/queryKeys";
 import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
 import { canManageFinance } from "@/lib/permissions";
@@ -29,6 +34,8 @@ export default function ExpenseFormPage(){
  const {i18n}=useTranslation(); const isAr=i18n.language?.startsWith('ar');
  const {expenseId}=useParams(); const editing=!!expenseId; const [params]=useSearchParams(); const {profile,user}=useAuth(); const tenantId=profile?.tenant_id||""; const nav=useNavigate(); const qc=useQueryClient();
  const [form,setForm]=useState({...empty,work_order_id:params.get('work_order_id')||""}); const [woSearch,setWoSearch]=useState(""); const [supplierName,setSupplierName]=useState(""); const [file,setFile]=useState<File|null>(null);
+ const [extractedDocument,setExtractedDocument]=useState<AppliedDocumentContext|null>(null);
+ const savedExpenseIdRef=useRef<string|null>(null);
  const [debouncedWo,setDebouncedWo]=useState("");
  useEffect(()=>{const t=setTimeout(()=>setDebouncedWo(woSearch),300);return()=>clearTimeout(t)},[woSearch]);
  const categories=useQuery({queryKey:queryKeys.expenseManagement.categories({tenantId,active:true}),enabled:!!tenantId,queryFn:()=>listExpenseCategories(tenantId,false)});
@@ -41,7 +48,50 @@ export default function ExpenseFormPage(){
  const subs=useMemo(()=> (categories.data||[]).filter(c=>c.parent_id===form.expense_category_id),[categories.data,form.expense_category_id]);
  const hasSupplierTaxNumber=Boolean(String(form.supplier_tax_number||"").trim());
  const totals=useMemo(()=>deriveExpenseTotals(form.amount,hasSupplierTaxNumber),[form.amount,hasSupplierTaxNumber]);
- const save=useMutation({mutationFn:async({overrideReason}:{overrideReason?:string})=>{const documentHash=file?await sha256Blob(file):(form.document_sha256||null);const saved=await saveExpense({tenant_id:tenantId,date:form.date,expense_scope:form.expense_scope,work_order_id:form.expense_scope==='work_order'?form.work_order_id:null,linked_work_order_id:form.expense_scope==='work_order'?form.linked_work_order_id:null,department_id:form.department_id,expense_category_id:form.expense_category_id,subcategory_id:form.subcategory_id||null,cost_center_id:form.cost_center_id||null,supplier_id:form.supplier_id||null,supplier_tax_number:form.supplier_tax_number||null,supplier_invoice_number:form.supplier_invoice_number||null,supplier_invoice_date:form.supplier_invoice_date||null,payment_method:form.payment_method,description:form.description,notes:form.notes||null,reference_number:form.reference_number||null,subtotal:totals.subtotal,vat_amount:totals.vatAmount,total:totals.total,is_vat_applicable:hasSupplierTaxNumber,attachments:form.attachments||[],document_sha256:documentHash},user?.id||"",expenseId,overrideReason);if(file){try{const uploaded=await uploadExpenseAttachment(tenantId,saved.id,file);await setExpenseAttachments(tenantId,saved.id,[...(saved.attachments||[]),uploaded])}catch(error:any){throw new Error(`حُفظ سند الصرف ${saved.voucher_number||saved.id} لكن تعذر حفظ المرفق. لا تُعد إدخال المصروف؛ افتح السند وأضف المرفق. ${error?.message||""}`)}}return saved},onSuccess:()=>{toast.success("تم حفظ المصروف في Supabase");void qc.invalidateQueries({queryKey:queryKeys.expenseManagement.all});nav('/accounting/expenses')},onError:(error:Error)=>{if(error instanceof ExpensePotentialDuplicateError){const reason=requestPotentialDuplicateOverride(error.matches,canManageFinance(),isAr?'ar':'en');if(reason)save.mutate({overrideReason:reason});return}if(error instanceof ExpenseExactDuplicateError){const existing=error.matches[0];toast.error(error.message,{action:existing?{label:isAr?'فتح المصروف':'Open expense',onClick:()=>nav(`/accounting/expenses/${existing.id}/edit`)}:undefined});return}toast.error(error.message)}});
+ const save=useMutation({
+  mutationFn:async({overrideReason}:{overrideReason?:string})=>{
+   const selectedFileHash=file?await sha256Blob(file):null;
+   const documentHash=selectedFileHash||extractedDocument?.result.sha256||form.document_sha256||null;
+   const saved=await saveExpense({
+    tenant_id:tenantId,date:form.date,expense_scope:form.expense_scope,
+    work_order_id:form.expense_scope==='work_order'?form.work_order_id:null,
+    linked_work_order_id:form.expense_scope==='work_order'?form.linked_work_order_id:null,
+    department_id:form.department_id,expense_category_id:form.expense_category_id,
+    subcategory_id:form.subcategory_id||null,cost_center_id:form.cost_center_id||null,
+    supplier_id:form.supplier_id||null,supplier_tax_number:form.supplier_tax_number||null,
+    supplier_invoice_number:form.supplier_invoice_number||null,
+    supplier_invoice_date:form.supplier_invoice_date||null,payment_method:form.payment_method,
+    description:form.description,notes:form.notes||null,reference_number:form.reference_number||null,
+    subtotal:totals.subtotal,vat_amount:totals.vatAmount,total:totals.total,
+    is_vat_applicable:hasSupplierTaxNumber,attachments:form.attachments||[],document_sha256:documentHash,
+   },user?.id||"",expenseId||savedExpenseIdRef.current||undefined,overrideReason);
+   // The voucher is now durable. A retry after a failed attachment must update
+   // this same voucher, never create another business expense.
+   savedExpenseIdRef.current=saved.id;
+   try{
+    const attachments=[...(saved.attachments||[])];
+    if(extractedDocument){
+     const documentAttachment=await getDocumentAttachment(extractedDocument.fileId,tenantId);
+     if(!attachments.some((item:any)=>item.path===documentAttachment.path&&item.bucket===documentAttachment.bucket))attachments.push(documentAttachment);
+    }
+    if(file&&selectedFileHash!==extractedDocument?.result.sha256){
+     const uploaded=await uploadExpenseAttachment(tenantId,saved.id,file);
+     if(!attachments.some((item:any)=>item.path===uploaded.path&&item.bucket===uploaded.bucket))attachments.push(uploaded);
+    }
+    if(attachments.length!==(saved.attachments||[]).length)await setExpenseAttachments(tenantId,saved.id,attachments);
+    if(extractedDocument)await linkDocumentFile({tenantId,fileId:extractedDocument.fileId,entityType:'expense',entityId:saved.id});
+   }catch{
+    throw new Error(`حُفظ سند الصرف ${saved.voucher_number||saved.id} لكن تعذر ربط المستند. لا تُعد إدخال المصروف؛ افتح السند وأضف المرفق. أعد الضغط على حفظ لإعادة محاولة الربط بالسند نفسه.`);
+   }
+   return saved;
+  },
+  onSuccess:()=>{toast.success("تم حفظ المصروف في Supabase");void qc.invalidateQueries({queryKey:queryKeys.expenseManagement.all});nav('/accounting/expenses')},
+  onError:(error:Error)=>{
+   if(error instanceof ExpensePotentialDuplicateError){const reason=requestPotentialDuplicateOverride(error.matches,canManageFinance(),isAr?'ar':'en');if(reason)save.mutate({overrideReason:reason});return}
+   if(error instanceof ExpenseExactDuplicateError){const existing=error.matches[0];toast.error(error.message,{action:existing?{label:isAr?'فتح المصروف':'Open expense',onClick:()=>nav(`/accounting/expenses/${existing.id}/edit`)}:undefined});return}
+   toast.error(error.message);
+  },
+ });
  const submit=(e:FormEvent)=>{e.preventDefault();if(save.isPending)return;if(!tenantId||!form.department_id||!form.expense_category_id||!form.description.trim()||!totals.total){toast.error('أكمل الحقول المطلوبة');return}if(form.expense_scope==='work_order'&&!form.work_order_id){toast.error('اختر أمر العمل');return}save.mutate({})};
  const pickWo=(w:any)=>{setForm({...form,work_order_id:w.id,linked_work_order_id:w.order_number});setWoSearch(`${w.order_number} — ${w.plate||''}`)};
  return <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6" dir={isAr?'rtl':'ltr'}><div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-bold">{editing?'تعديل المصروف':'إضافة مصروف'}</h1><p className="text-sm text-muted-foreground">Full-page entry — الربط والتصنيف يُتحقق منهما داخل قاعدة البيانات</p></div><Button type="button" variant="outline" asChild><Link to="/accounting/expenses/categories"><FolderTree className="h-4 w-4"/> إدارة الأقسام والتصنيفات</Link></Button></div><form onSubmit={submit} className="space-y-4"><Card><CardHeader><CardTitle>نوع المصروف والربط</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">
@@ -59,6 +109,7 @@ export default function ExpenseFormPage(){
  <div><Label>المبلغ الإجمالي المدفوع شامل الضريبة OMR</Label><Input inputMode="decimal" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/><p className="mt-1 text-xs text-muted-foreground">لن تُضاف الضريبة فوق هذا المبلغ.</p></div><div><Label>حالة VAT</Label><div className="rounded border px-3 py-2 text-sm">{hasSupplierTaxNumber?'5% — تُستخرج من الإجمالي':'بدون VAT — المورد بلا رقم ضريبي'}</div></div><div className="rounded border p-3 text-sm"><div>Subtotal: {totals.subtotal.toFixed(3)}</div><div>VAT: {totals.vatAmount.toFixed(3)}</div><strong>Total: {totals.total.toFixed(3)} OMR</strong></div>
  <div><Label>طريقة الدفع</Label><Select value={form.payment_method} onValueChange={v=>setForm({...form,payment_method:v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="bank">Bank</SelectItem><SelectItem value="card">Card</SelectItem><SelectItem value="credit">Credit</SelectItem></SelectContent></Select></div><div><Label>رقم فاتورة المورد</Label><Input value={form.supplier_invoice_number} onChange={e=>setForm({...form,supplier_invoice_number:e.target.value})}/></div><div><Label>تاريخ فاتورة المورد</Label><Input type="date" value={form.supplier_invoice_date||""} onChange={e=>setForm({...form,supplier_invoice_date:e.target.value})}/></div><div><Label>المرجع</Label><Input value={form.reference_number} onChange={e=>setForm({...form,reference_number:e.target.value})}/></div>
  <div className="md:col-span-3"><Label>البيان</Label><Textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div><div className="md:col-span-2"><Label>ملاحظات</Label><Textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></div><div><Label>مرفق PDF/صورة (12MB)</Label><Input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={e=>setFile(e.target.files?.[0]||null)}/></div>
+ {isDocumentEngineEnabled()&&<div className="md:col-span-3 rounded border p-3"><AiExtractButton schema="expense_receipt" expectedDocumentType="expense_receipt" label={isAr?'قراءة إيصال أو فاتورة المورد':'Read supplier receipt or invoice'} onExtracted={(data,document)=>{if(!document)return;setExtractedDocument(document);if(Object.keys(data).length===0){toast.info(isAr?'سيُرفق المستند عند حفظ المصروف؛ لم تتغير بيانات النموذج.':'The document will attach when the expense is saved; form data was not changed.');return}const suggested=buildExpenseReceiptSuggestion(data,document.result);if(suggested.supplierName)setSupplierName(suggested.supplierName);setForm((current:any)=>({...current,supplier_id:suggested.supplierName?suggested.supplierId:current.supplier_id,supplier_tax_number:suggested.supplierName?suggested.supplierTaxNumber:current.supplier_tax_number,supplier_invoice_number:suggested.supplierInvoiceNumber||current.supplier_invoice_number,supplier_invoice_date:suggested.supplierInvoiceDate||current.supplier_invoice_date,amount:suggested.amount||current.amount}));if(suggested.warning)toast.warning(isAr?'الضريبة أو المورد لا يطابقان قواعد المصروف. لم يُعبأ المبلغ تلقائيًا؛ راجع الفاتورة واختر المورد قبل الحفظ.':'VAT or supplier does not match the expense rules. Amount was not filled; review the invoice and select the supplier.')}}/><p className="mt-1 text-xs text-muted-foreground">{isAr?'المراجعة تعبئ النموذج فقط؛ لا تحفظ مصروفًا ولا تصنفه تلقائيًا.':'Review fills the form only; it does not save or classify an expense.'}</p></div>}
  <div className="flex gap-2 md:col-span-3"><Button type="submit" disabled={save.isPending} aria-busy={save.isPending}>{save.isPending?<><Loader2 className="me-2 h-4 w-4 animate-spin" aria-hidden="true"/>جاري الحفظ والتحقق...</>:'حفظ المصروف'}</Button><Button variant="outline" asChild><Link to="/accounting/expenses">إلغاء</Link></Button></div>
  </CardContent></Card></form></div>;
 }
