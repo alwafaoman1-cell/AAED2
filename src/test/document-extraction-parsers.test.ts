@@ -84,6 +84,54 @@ describe("TEMO deterministic document extraction", () => {
     expect(result.fields.accident_date?.validation).not.toBe("valid");
   });
 
+  it("does not present headings, legal prose or a plate reference as claim vehicle fields", () => {
+    const result = parseDocumentPages([page([
+      "Identity Card required / بطاقة الشخصية", "رقم المطالبة: C/004/01/26/9999/00002",
+      "تاريخ الحادث", "تاريخ الإبلاغ", "رقم اللوحة", "تاريخالإبلاغ",
+      "VIN", "To leave my vehicle at the above-mentioned garage for repairs as per Unified Motor",
+      "Make: A R/4841", "Model: A R/4841", "Registration Date", "OD Vehicle",
+      "هاتف المالك: 91234567",
+    ].join("\n"), "ocr", 0.92)], "insurance_claim");
+    expect(result.fields.claim_number?.normalizedValue).toBe("C/004/01/26/9999/00002");
+    expect(result.fields.owner_phone?.normalizedValue).toBe("91234567");
+    expect(result.type).toBe("insurance_claim");
+    for (const key of ["accident_date", "plate_number", "vin", "make", "model", "registration_date"]) {
+      expect(result.fields[key], key).toBeUndefined();
+    }
+    expect(result.issues.some((issue) => issue.code === "DOCUMENT_TYPE_MISMATCH")).toBe(false);
+  });
+
+  it("parses a letters-first plate only at its own label, not as the make or model", () => {
+    const result = parseDocumentPages([page([
+      "Insurance Claim", "Claim No: C/004/01/26/9999/00002", "Plate No: A R/4841",
+      "Make: Toyota", "Model: RAV4",
+    ].join("\n"), "ocr", 0.9)], "insurance_claim");
+    expect(result.fields.plate_number?.normalizedValue).toBe("4841");
+    expect(result.fields.plate_letters?.normalizedValue).toBe("AR");
+    expect(result.fields.make?.normalizedValue).toBe("Toyota");
+    expect(result.fields.model?.normalizedValue).toBe("RAV4");
+  });
+
+  it("reads the real claim gate-pass layout without swapping the loss and report dates", () => {
+    const result = parseDocumentPages([page([
+      "Al Madina Takaful", "Claim No / Policy No.", "C/004/16/26/2510/00266",
+      "Vehicle Make & Model", "Toyota - Corolla", "نوع المركبة و الفئة",
+      "Vehicle No", "A R/4841", "رقم المركبة",
+      "Date of Intimation", "15/10/2026", "تاريخ الإبلاغ",
+      "Date of Loss", "14/10/2026", "تاريخ الحادث",
+      "VIN", "To leave my vehicle at the above-mentioned garage for repairs as per Unified Motor",
+    ].join("\n"), "ocr", 0.92)], "insurance_claim");
+    expect(result.fields.claim_number?.normalizedValue).toBe("C/004/16/26/2510/00266");
+    expect(result.fields.accident_date?.normalizedValue).toBe("2026-10-14");
+    expect(result.fields.plate_number?.normalizedValue).toBe("4841");
+    expect(result.fields.plate_letters?.normalizedValue).toBe("AR");
+    expect(result.fields.make?.normalizedValue).toBe("Toyota");
+    expect(result.fields.model?.normalizedValue).toBe("Corolla");
+    expect(result.fields.vin).toBeUndefined();
+    expect(result.fields.insurance_company?.normalizedValue).toBe("Al Madina Takaful");
+    expect(result.fields.insurance_company?.validation).toBe("warning");
+  });
+
   it("does not alter a supplier invoice to force VAT arithmetic", () => {
     const base = ["Tax Invoice", "Supplier Name: Example Parts LLC", "VATIN: OM123456789", "Invoice No: SUP-2026-44", "Invoice Date: 18/08/2026", "Subtotal: 100.000 OMR", "VAT Amount: 5.000 OMR"];
     const result = parseDocumentPages([page([...base, "Grand Total: 105.000 OMR"].join("\n"))]);
@@ -105,6 +153,12 @@ describe("TEMO deterministic document extraction", () => {
   it("classifies unclear documents as unknown instead of guessing", () => {
     expect(detectDocumentType("Hello 1234 and no document labels").type).toBe("unknown");
     expect(detectDocumentType("Purchase Invoice\nSupplier Name: TEST PARTS").type).toBe("purchase_invoice");
+  });
+
+  it("classifies a claim reference above an ID-card mention in authorization boilerplate", () => {
+    const reference = "C/004/01/26/9999/00002";
+    expect(detectDocumentType(`Claim No: ${reference}\nIdentity Card of owner`).type).toBe("insurance_claim");
+    expect(detectDocumentType("Identity Card of owner").type).toBe("customer_id");
   });
 
   it("normalizes an unambiguous short year in document dates", () => {

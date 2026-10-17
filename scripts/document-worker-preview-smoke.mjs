@@ -26,6 +26,8 @@ let userId;
 let fileId;
 let extractionId;
 let uploaded = false;
+let createdFile = false;
+let createdExtraction = false;
 let completed = false;
 
 try {
@@ -40,24 +42,38 @@ try {
 
   const login = await client.auth.signInWithPassword({ email, password });
   if (login.error) throw new Error('DOCUMENT_SMOKE_AUTH_FAILED');
-  const upload = await client.storage.from('temo-documents').upload(storagePath, image,
-    { contentType: 'image/png', upsert: false });
-  if (upload.error) throw new Error(`DOCUMENT_SMOKE_STORAGE_UPLOAD_FAILED:${upload.error.statusCode || 'unknown'}`);
-  uploaded = true;
+  // The golden fixture may already have a reviewed extraction. Reuse its
+  // immutable file record; never delete another run's file or review.
+  const existingFile = await client.from('document_files').select('id')
+    .eq('tenant_id', tenantId).eq('sha256', sha256).eq('access_scope', 'operational').maybeSingle();
+  if (existingFile.error) throw new Error(`DOCUMENT_SMOKE_FILE_LOOKUP_FAILED:${existingFile.error.code}`);
+  if (existingFile.data) fileId = existingFile.data.id;
+  else {
+    const upload = await client.storage.from('temo-documents').upload(storagePath, image,
+      { contentType: 'image/png', upsert: false });
+    if (upload.error) throw new Error(`DOCUMENT_SMOKE_STORAGE_UPLOAD_FAILED:${upload.error.statusCode || 'unknown'}`);
+    uploaded = true;
+    const inserted = await client.from('document_files').insert({
+      tenant_id: tenantId, sha256, original_file_name: 'synthetic_arabic_claim.png',
+      mime_type: 'image/png', byte_size: image.length, access_scope: 'operational',
+      storage_bucket: 'temo-documents', storage_path: storagePath,
+    }).select('id').single();
+    if (inserted.error || !inserted.data) throw new Error(`DOCUMENT_SMOKE_FILE_REGISTER_FAILED:${inserted.error?.code || 'unknown'}`);
+    fileId = inserted.data.id;
+    createdFile = true;
+  }
 
-  const inserted = await client.from('document_files').insert({
-    tenant_id: tenantId, sha256, original_file_name: 'synthetic_arabic_claim.png',
-    mime_type: 'image/png', byte_size: image.length, access_scope: 'operational',
-    storage_bucket: 'temo-documents', storage_path: storagePath,
-  }).select('id').single();
-  if (inserted.error || !inserted.data) throw new Error(`DOCUMENT_SMOKE_FILE_REGISTER_FAILED:${inserted.error?.code || 'unknown'}`);
-  fileId = inserted.data.id;
+  const existingExtraction = await client.from('document_extractions').select('id')
+    .eq('tenant_id', tenantId).eq('file_id', fileId).eq('engine_version', '1.0.1-worker').maybeSingle();
+  if (existingExtraction.error) throw new Error(`DOCUMENT_SMOKE_EXTRACTION_LOOKUP_FAILED:${existingExtraction.error.code}`);
+  if (existingExtraction.data) throw new Error('DOCUMENT_SMOKE_VERSION_ALREADY_USED');
 
   const queued = await client.rpc('document_enqueue_processing', {
-    p_file_id: fileId, p_engine_version: '1.0.0-worker',
+    p_file_id: fileId, p_engine_version: '1.0.1-worker',
   });
   if (queued.error || !queued.data?.[0]) throw new Error(`DOCUMENT_SMOKE_ENQUEUE_FAILED:${queued.error?.code || 'unknown'}`);
   extractionId = queued.data[0].extraction_id;
+  createdExtraction = true;
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
     const result = await client.from('document_extractions')
@@ -88,7 +104,7 @@ try {
 } finally {
   // Deleting test rows is restricted to the IDs created above. Never touch
   // the existing staging tenant or the invited human test account.
-  if (extractionId) {
+  if (createdExtraction && extractionId) {
     for (const table of ['document_extraction_events', 'document_extraction_fields', 'document_extraction_pages']) {
       const result = await admin.from(table).delete().eq('tenant_id', tenantId).eq('extraction_id', extractionId);
       if (result.error) throw new Error(`DOCUMENT_SMOKE_CLEANUP_FAILED:${table}`);
@@ -96,7 +112,7 @@ try {
     const removed = await admin.from('document_extractions').delete().eq('tenant_id', tenantId).eq('id', extractionId);
     if (removed.error) throw new Error('DOCUMENT_SMOKE_CLEANUP_FAILED:extraction');
   }
-  if (fileId) {
+  if (createdFile && fileId) {
     const removed = await admin.from('document_files').delete().eq('tenant_id', tenantId).eq('id', fileId);
     if (removed.error) throw new Error('DOCUMENT_SMOKE_CLEANUP_FAILED:file');
   }

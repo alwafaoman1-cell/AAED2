@@ -34,13 +34,22 @@ const INSURANCE_RULES: FieldRule[] = [
   { key: "claim_number", labels: ["Claim No", "Claim Number", "Claim Reference", "رقم المطالبة", "رقم المطالبة التأمينية", "رقم البلاغ", "رقم المرجع"], fallback: /\b(C\/[A-Z0-9/-]{8,})\b/i },
   { key: "insurance_company", labels: ["Insurance Company", "Insurer", "شركة التأمين", "شركة التامين"] },
   { key: "insured_name", labels: ["Insured Name", "Policy Holder", "اسم المؤمن له", "المؤمن له"] },
-  { key: "accident_date", labels: ["Accident Date", "Incident Date", "تاريخ الحادث"] },
+  { key: "accident_date", labels: ["Accident Date", "Incident Date", "Date of Loss", "تاريخ الحادث"] },
   { key: "approval_date", labels: ["Approval Date", "تاريخ الموافقة", "تاريخ الاعتماد"] },
   { key: "lpo_number", labels: ["LPO No", "LPO Number", "Repair Order No", "رقم أمر الإصلاح", "رقم الموافقة"] },
   { key: "estimate_number", labels: ["Estimate No", "Survey No", "رقم التقدير", "رقم المعاينة"] },
   { key: "approved_amount", labels: ["Approved Amount", "Approval Amount", "المبلغ المعتمد", "المبلغ الموافق عليه"] },
   { key: "excess", labels: ["Excess", "Deductible", "التحمل", "المبلغ المستقطع"] },
 ];
+
+// A claim/approval is not a vehicle registration form. Registration dates and
+// engine numbers are neither applied to the claim form nor reliable in its
+// densely printed layout; extracting them only creates misleading review rows.
+const CLAIM_VEHICLE_RULES = VEHICLE_RULES
+  .filter((rule) => !["registration_date", "registration_expiry", "engine_number"].includes(rule.key))
+  .map((rule) => rule.key === "plate_number"
+    ? { ...rule, labels: [...rule.labels, "Vehicle No"] }
+    : rule);
 
 const INVOICE_RULES: FieldRule[] = [
   { key: "supplier_name", labels: ["Supplier Name", "Vendor Name", "اسم المورد", "المورد"] },
@@ -60,7 +69,7 @@ const TYPE_CLUES: Array<{ type: DocumentType; clues: Array<[RegExp, number]> }> 
   { type: "vehicle_registration", clues: [[/vehicle\s+registration|registration\s+card|ملكية\s*(?:المركبة|السيارة)|رخصة\s*تسيير/i, 4], [/registration\s+expiry|تاريخ\s+انتهاء\s+الملكية/i, 2], [/plate\s*(?:no|number)|رقم\s+اللوحة/i, 1]] },
   { type: "insurance_approval", clues: [[/insurance\s+approval|approval\s+letter|خطاب\s+الموافقة|اعتماد\s+المطالبة/i, 4], [/approved\s+amount|المبلغ\s+المعتمد/i, 2], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 1]] },
   { type: "lpo", clues: [[/\bLPO\b|local\s+purchase\s+order|أمر\s+الإصلاح/i, 4], [/repair\s+order/i, 1]] },
-  { type: "insurance_claim", clues: [[/insurance\s+claim|مطالبة\s+تأمين|مطالبة\s+التأمين/i, 4], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 2], [/insurance\s+company|شركة\s+التأمين/i, 1]] },
+  { type: "insurance_claim", clues: [[/insurance\s+claim|مطالبة\s+تأمين|مطالبة\s+التأمين/i, 4], [/\bC\/[A-Z0-9/-]{8,}\b/i, 4], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 2], [/insurance\s+company|شركة\s+التأمين/i, 1]] },
   { type: "damage_report", clues: [[/damage\s+report|تقرير\s+الأضرار|تقرير\s+الحادث/i, 4], [/damage\s+details|تفاصيل\s+الأضرار/i, 1]] },
   { type: "customer_id", clues: [[/identity\s+card|resident\s+card|بطاقة\s+الشخصية|البطاقة\s+المدنية/i, 4]] },
   { type: "supplier_invoice", clues: [[/supplier\s+invoice|فاتورة\s+مورد|tax\s+invoice|فاتورة\s+ضريبية/i, 3], [/supplier|المورد/i, 1], [/VATIN|الرقم\s+الضريبي/i, 1]] },
@@ -126,8 +135,74 @@ function containsAnotherFieldLabel(text: string): boolean {
   return ALL_FIELD_LABELS.some((label) => normalized.includes(normalizeArabicForComparison(label)));
 }
 
+function plateComponents(raw: string): { number: string; letters?: string } | null {
+  const value = normalizeDigits(removeBidiControls(raw)).trim();
+  const digitsFirst = value.match(/^(\d{1,7})(?:\s*[/-]?\s*([A-Za-z\u0600-\u06ff]{1,3}(?:\s+[A-Za-z\u0600-\u06ff]{1,3})?))?$/u);
+  if (digitsFirst) return { number: digitsFirst[1], letters: digitsFirst[2]?.replace(/\s/g, "").toUpperCase() };
+  const lettersFirst = value.match(/^([A-Za-z\u0600-\u06ff]{1,3}(?:\s+[A-Za-z\u0600-\u06ff]{1,3})?)\s*\/\s*(\d{1,7})$/u);
+  return lettersFirst ? { number: lettersFirst[2], letters: lettersFirst[1].replace(/\s/g, "").toUpperCase() } : null;
+}
+
+function plausibleFieldEvidence(key: string, raw: string): boolean {
+  const value = normalizeDigits(removeBidiControls(raw)).trim();
+  // A nearby heading or narrative paragraph is not a damaged identifier.
+  // Leave the field empty for review instead of presenting it as an OCR value.
+  if (key === "vin") {
+    const compact = value.replace(/[\s-]/g, "");
+    return /^[A-Za-z0-9\s-]{15,30}$/.test(value) && compact.length >= 15 && compact.length <= 19;
+  }
+  if (key.endsWith("_date") || key === "registration_expiry")
+    return /\d{1,4}\s*[/-]\s*\d{1,2}\s*[/-]\s*\d{2,4}|^\s*\d{8}\s*$/.test(value);
+  if (key === "plate_number") return /\d/.test(value) && value.length <= 24;
+  if (key === "make" || key === "model") return normalizeCandidate(key, value).valid;
+  return true;
+}
+
+/** Some insurer gate passes print one shared vehicle make/model cell. Split only
+ * when an explicit separator is present; otherwise leave both for review. */
+function findCombinedMakeModel(pages: DocumentPage[]): { make: Candidate; model: Candidate } | null {
+  const combinedLabels = ["Vehicle Make & Model", "Make & Model", "Make / Model"];
+  for (const page of pages) {
+    const lines = page.text.split(/\r?\n/).map((line) => removeBidiControls(line).trim()).filter(Boolean);
+    for (let index = 0; index < lines.length; index++) {
+      for (const label of combinedLabels) {
+        const exactLabel = normalizeArabicForComparison(lines[index]) === normalizeArabicForComparison(label);
+        const raw = exactLabel ? lines[index + 1] : valueNearLabel(lines[index], label);
+        const parts = raw?.match(/^(.{2,40}?)\s+[-–—]\s+(.{2,40})$/u);
+        if (!parts || !normalizeCandidate("make", parts[1]).valid || !normalizeCandidate("model", parts[2]).valid) continue;
+        const source = page.segments?.find((segment) => segment.text.includes(raw!));
+        const candidate = { page, box: source?.box, evidence: ["label", "combined_vehicle_name"] };
+        return {
+          make: { ...candidate, key: "make", raw: parts[1].trim() },
+          model: { ...candidate, key: "model", raw: parts[2].trim() },
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function findInsurerHeader(pages: DocumentPage[]): Candidate | null {
+  const page = pages[0];
+  if (!page) return null;
+  const lines = page.text.split(/\r?\n/).map((line) => removeBidiControls(line).trim()).filter(Boolean);
+  const claimIndex = lines.findIndex((line) => /\bC\/[A-Z0-9/-]{8,}\b|claim\s*(?:no|number)|رقم\s*المطالبة/i.test(line));
+  const header = lines.slice(0, claimIndex < 0 ? 10 : Math.min(claimIndex, 12));
+  const names = header.filter((line) => line.length >= 6 && line.length <= 60 &&
+    line.split(/\s+/).length >= 2 &&
+    /\b(?:takaful|insurance)\b|تكافل|للتأمين/iu.test(line) &&
+    !/^(?:insurance\s+company|شركة\s+التأمين)$/iu.test(line));
+  const raw = names.find((line) => /\b(?:takaful|insurance)\b/i.test(line)) || names[0];
+  if (!raw) return null;
+  const source = page.segments?.find((segment) => segment.text.includes(raw));
+  return { key: "insurance_company", raw, page, box: source?.box, evidence: ["insurer_header"] };
+}
+
 function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null {
   const candidates: Candidate[] = [];
+  const addCandidate = (candidate: Candidate) => {
+    if (plausibleFieldEvidence(candidate.key, candidate.raw)) candidates.push(candidate);
+  };
   for (const page of pages) {
     const lines = page.text.split(/\r?\n/).map((line) => removeBidiControls(line).trim()).filter(Boolean);
     for (let index = 0; index < lines.length; index++) {
@@ -140,7 +215,7 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
         if (!raw || raw.length > 160) continue;
         if (!inline && !exactLabel) continue;
         const source = page.segments?.find((item) => item.text.includes(raw) || item.text.includes(label));
-        candidates.push({ key: rule.key, raw, page, box: source?.box, evidence: ["label"] });
+        addCandidate({ key: rule.key, raw, page, box: source?.box, evidence: ["label"] });
       }
     }
   }
@@ -167,7 +242,7 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
           const raw = combined.slice(offset + label.length).replace(/^\s*[:：-]\s*/, "").trim();
           if (!raw || raw.length > 160 || containsAnotherFieldLabel(raw)) continue;
           const source = row.find((segment) => segment.text.trim() === raw) || row.find((segment) => segment.text.includes(raw));
-          candidates.push({ key: rule.key, raw, page, box: source?.box, evidence: ["label", "layout"] });
+          addCandidate({ key: rule.key, raw, page, box: source?.box, evidence: ["label", "layout"] });
         }
       }
     }
@@ -176,7 +251,7 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
     for (const labelSegment of labelSegments) {
       if (!labelSegment.box) continue;
       const inline = rule.labels.map((label) => valueNearLabel(labelSegment.text, label)).find(Boolean);
-      if (inline) candidates.push({ key: rule.key, raw: inline, page, box: labelSegment.box, evidence: ["label", "layout"] });
+      if (inline) addCandidate({ key: rule.key, raw: inline, page, box: labelSegment.box, evidence: ["label", "layout"] });
       const midY = labelSegment.box.y + labelSegment.box.height / 2;
       const neighbors = page.segments.filter((segment) => segment !== labelSegment && segment.box &&
         !containsAnotherFieldLabel(segment.text) &&
@@ -189,7 +264,7 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
         const inlineDigits = normalizeDigits(labelSegment.text).match(/\d{1,7}$/)?.[0] || "";
         const distinctPlateValue = rule.key === "plate_number" && /^\d{2,7}$/.test(neighboringDigits)
           && neighboringDigits.length > inlineDigits.length;
-        candidates.push({ key: rule.key, raw: nearest.text.trim(), page, box: nearest.box,
+        addCandidate({ key: rule.key, raw: nearest.text.trim(), page, box: nearest.box,
           evidence: distinctPlateValue ? ["label", "layout", "adjacent_value"] : ["label", "layout"] });
       }
     }
@@ -200,7 +275,7 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
       if (!match?.[1]) continue;
       const raw = match[1].trim();
       const source = page.segments?.find((item) => item.text.includes(raw));
-      candidates.push({ key: rule.key, raw, page, box: source?.box, evidence: ["pattern"] });
+      addCandidate({ key: rule.key, raw, page, box: source?.box, evidence: ["pattern"] });
     }
   }
   // A geometrically nearby or first-seen candidate must never outrank a
@@ -274,10 +349,17 @@ export function normalizeCandidate(key: string, raw: string): { value: string; v
   }
   if (key === "year") return { value: value.match(/\b(?:19|20)\d{2}\b/)?.[0] || value, valid: /^(?:19|20)\d{2}$/.test(value), reason: "YEAR_INVALID" };
   if (key === "plate_number") {
-    const digits = value.match(/^\s*(\d{1,7})(?:\s*[/-]?\s*[A-Za-z\u0600-\u06ff]{1,6})?\s*$/)?.[1] || value.replace(/\s/g, "");
-    return { value: digits, valid: /^\d{1,7}$/.test(digits), reason: "PLATE_INVALID" };
+    const plate = plateComponents(value);
+    return { value: plate?.number || value, valid: !!plate, reason: "PLATE_INVALID" };
   }
-  if (key === "plate_letters") return { value: value.toUpperCase(), valid: /^[A-Z\u0600-\u06ff]{1,6}$/.test(value), reason: "PLATE_CODE_INVALID" };
+  if (key === "plate_letters") {
+    const letters = value.replace(/\s/g, "").toUpperCase();
+    return { value: letters, valid: /^[A-Z\u0600-\u06ff]{1,6}$/.test(letters), reason: "PLATE_CODE_INVALID" };
+  }
+  if (key === "make" || key === "model") {
+    const plateReference = /^[A-Za-z\u0600-\u06ff]{1,3}(?:\s+[A-Za-z\u0600-\u06ff]{1,3})?\s*\/\s*\d{2,7}$/u.test(value);
+    return { value, valid: !plateReference && value.length >= 2 && value.length <= 60 && /[A-Za-z\u0600-\u06ff]/u.test(value), reason: "VEHICLE_NAME_INVALID" };
+  }
   if (key === "owner_phone") return { value: value.replace(/[^\d+]/g, ""), valid: /^\+?\d{8,15}$/.test(value.replace(/[^\d+]/g, "")), reason: "PHONE_INVALID" };
   if (key === "claim_number") return { value, valid: value.length >= 4 && value.length <= 80 && /\d/.test(value) && !/[\n\r]/.test(value), reason: "CLAIM_NUMBER_INVALID" };
   if (key === "invoice_number" || key === "lpo_number") return { value, valid: value.length >= 3 && value.length <= 80, reason: "REFERENCE_INVALID" };
@@ -295,19 +377,24 @@ export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentTyp
   const text = pages.map((page) => page.text).join("\n");
   const detected = detectDocumentType(text, expected);
   const rules = detected.type === "vehicle_registration" ? VEHICLE_RULES
-    : ["insurance_claim", "insurance_approval", "lpo", "damage_report"].includes(detected.type) ? [...INSURANCE_RULES, ...VEHICLE_RULES]
+    : ["insurance_claim", "insurance_approval", "lpo", "damage_report"].includes(detected.type) ? [...INSURANCE_RULES, ...CLAIM_VEHICLE_RULES]
       : ["supplier_invoice", "purchase_invoice", "expense_receipt", "invoice", "quotation"].includes(detected.type) ? INVOICE_RULES
         : expected === "vehicle_registration" ? VEHICLE_RULES
-          : expected === "insurance_claim" ? [...INSURANCE_RULES, ...VEHICLE_RULES]
+          : expected === "insurance_claim" ? [...INSURANCE_RULES, ...CLAIM_VEHICLE_RULES]
             : expected === "expense_receipt" || expected === "supplier_invoice" ? INVOICE_RULES : [];
   const fields: Record<string, ExtractedField> = {};
   const issues: ExtractionIssue[] = [];
-  if (expected && detected.type !== "unknown" && detected.type !== expected) {
+  const combinedVehicleName = rules.some((rule) => rule.key === "make") ? findCombinedMakeModel(pages) : null;
+  const relatedInsuranceDocument = expected === "insurance_claim" &&
+    ["insurance_approval", "lpo", "damage_report"].includes(detected.type);
+  if (expected && detected.type !== "unknown" && detected.type !== expected && !relatedInsuranceDocument) {
     issues.push({ code: "DOCUMENT_TYPE_MISMATCH", severity: "warning", message: `Detected ${detected.type}; expected ${expected}. Confirm the document before applying any fields.` });
   }
   for (const rule of rules) {
     if (fields[rule.key]) continue;
-    const candidate = findCandidate(pages, rule);
+    const candidate = rule.key === "make" || rule.key === "model"
+      ? combinedVehicleName?.[rule.key] || findCandidate(pages, rule)
+      : findCandidate(pages, rule);
     if (!candidate) continue;
     const normalized = normalizeCandidate(rule.key, candidate.raw);
     const method: ExtractionMethod = candidate.page.method;
@@ -325,10 +412,18 @@ export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentTyp
     };
     if (!normalized.valid) issues.push({ code: normalized.reason || "FIELD_INVALID", severity: "warning", field: rule.key, message: `${rule.key} could not be validated.` });
   }
+  if (rules.some((rule) => rule.key === "insurance_company") && !fields.insurance_company) {
+    const header = findInsurerHeader(pages);
+    if (header) fields.insurance_company = {
+      key: "insurance_company", rawValue: header.raw, normalizedValue: header.raw,
+      confidence: 0.6, sourcePage: header.page.number, sourceBox: header.box,
+      method: header.page.method, validation: "warning", evidence: header.evidence,
+    };
+  }
   if (!fields.plate_letters && fields.plate_number) {
-    const trailing = normalizeDigits(fields.plate_number.rawValue).match(/^\s*\d{1,7}\s*[/-]?\s*([A-Za-z\u0600-\u06ff]{1,6})\s*$/);
-    if (trailing) fields.plate_letters = {
-      ...fields.plate_number, key: "plate_letters", rawValue: trailing[1], normalizedValue: trailing[1].toUpperCase(),
+    const plate = plateComponents(fields.plate_number.rawValue);
+    if (plate?.letters) fields.plate_letters = {
+      ...fields.plate_number, key: "plate_letters", rawValue: plate.letters, normalizedValue: plate.letters,
       confidence: Math.max(0, fields.plate_number.confidence - 0.04), evidence: ["plate_combination"],
     };
   }

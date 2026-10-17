@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from worker import Config, InvalidDocument, claim_next, download, run
+from worker import ENGINE_VERSIONS, Config, InvalidDocument, claim_next, download, run
 
 
 class FakeConnection:
@@ -106,6 +106,7 @@ class WorkerTests(unittest.TestCase):
     def test_claim_reaps_expired_lease_and_can_retry_stale_job(self):
         connection = FakeConnection()
         self.assertIsNone(claim_next(connection))
+        self.assertEqual(ENGINE_VERSIONS, ["1.0.0-worker", "1.0.1-worker"])
         self.assertEqual(len(connection.statements), 2)
         self.assertIn("DOCUMENT_OCR_WORKER_LOST", connection.statements[0])
         self.assertIn("skip locked", connection.statements[1].lower())

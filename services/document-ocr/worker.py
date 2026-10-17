@@ -23,7 +23,9 @@ from ocr_core import MAX_BYTES, InvalidDocument, PaddleProvider, TesseractProvid
 
 MAX_ATTEMPTS = 3
 MAX_SECONDS = 150
-ENGINE_VERSION = "1.0.0-worker"
+# Keep draining the previous queue while accepting parser-revision jobs.
+# The new version creates a separate immutable extraction for identical bytes.
+ENGINE_VERSIONS = ["1.0.0-worker", "1.0.1-worker"]
 
 
 @dataclass(frozen=True)
@@ -72,22 +74,22 @@ def claim_next(connection: psycopg.Connection) -> dict | None:
           update public.document_extractions
           set status = 'failed', error_code = 'DOCUMENT_OCR_WORKER_LOST',
               lease_token = null, next_attempt_at = null
-          where engine_version = %s and status = 'processing' and attempt_count >= %s
+          where engine_version = any(%s) and status = 'processing' and attempt_count >= %s
             and processing_started_at < now() - interval '5 minutes'
-        """, (ENGINE_VERSION, MAX_ATTEMPTS))
+        """, (ENGINE_VERSIONS, MAX_ATTEMPTS))
         row = connection.execute("""
           select e.id, e.tenant_id, e.file_id, e.attempt_count,
                  f.storage_bucket, f.storage_path, f.mime_type, f.sha256, f.original_file_name
           from public.document_extractions e
           join public.document_files f on f.tenant_id = e.tenant_id and f.id = e.file_id
-          where e.engine_version = %s and e.attempt_count < %s and
+          where e.engine_version = any(%s) and e.attempt_count < %s and
             ((e.status in ('queued', 'retryable_failed') and
               (e.next_attempt_at is null or e.next_attempt_at <= now()))
              or (e.status = 'processing' and
                  e.processing_started_at < now() - interval '5 minutes'))
           order by e.created_at
           for update of e skip locked limit 1
-        """, (ENGINE_VERSION, MAX_ATTEMPTS)).fetchone()
+        """, (ENGINE_VERSIONS, MAX_ATTEMPTS)).fetchone()
         if not row:
             return None
         lease = str(uuid4())

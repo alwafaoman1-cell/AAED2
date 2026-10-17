@@ -136,4 +136,6 @@ export const DEFAULT_EXTRACTION_POLICY: Readonly<ExtractionPolicy> = Object.free
   maxProcessingMs: 180_000,
 });
 
-export const DOCUMENT_ENGINE_VERSION = "1.0.0";
+// A parser revision must get a new immutable extraction for the same file.
+// Previously reviewed OCR evidence is never rewritten in place.
+export const DOCUMENT_ENGINE_VERSION = "1.0.1";
