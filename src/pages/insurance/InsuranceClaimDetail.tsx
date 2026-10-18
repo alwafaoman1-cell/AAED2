@@ -68,8 +68,10 @@ import { XCircle } from "lucide-react";
 import QuickEmailButton from "@/components/QuickEmailButton";
 import SendInsuranceEmailDialog from "@/components/insurance/SendInsuranceEmailDialog";
 import { useClaimDocuments } from "@/hooks/useClaimDocuments";
+import type { ClaimGeneratedDoc } from "@/hooks/useClaimDocuments";
 import { useClaimMedia, useDeleteClaimMedia, useUploadClaimMedia } from "@/hooks/useClaimMedia";
 import { mediaToLegacyDocuments, mediaToLegacyPhotoUrls } from "@/lib/insurance/claimMediaService";
+import { validateDocumentFile } from "@/lib/documentExtraction/fileSafety";
 import { Mail, Send } from "lucide-react";
 import Can from "@/components/Can";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
@@ -486,31 +488,71 @@ export default function InsuranceClaimDetail() {
     }, "media");
   };
 
-  const handleDocUpload = async (files: FileList | null, type: string) => {
-    if (!files?.length) return;
+  const handleDocUpload = async (files: File[], type: string): Promise<boolean> => {
+    if (!files.length) return false;
     if (isNew || !id) {
       toast.error("احفظ المطالبة أولًا قبل رفع المستندات");
-      return;
+      return false;
     }
-    for (const f of Array.from(files)) {
-      await uploadClaimMedia.mutateAsync({
-        claimId: id,
-        tenantId: (existing as any)?.tenant_id,
-        workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
-        vehicleId: vehicleId || (existing as any)?.vehicle_id || null,
-        file: f,
-        mediaType: "document",
-        category: type || "other",
-        source: "claim_detail",
-      });
+    setUploading(true);
+    let saved = 0;
+    try {
+      // Reject an invalid batch before uploading any file. Scanner output is a
+      // PDF and follows this same validated, single-copy cloud path.
+      const validated = await Promise.all(files.map(async (file) => {
+        const mime = await validateDocumentFile(file);
+        return file.type === mime ? file : new File([file], file.name, { type: mime, lastModified: file.lastModified });
+      }));
+      for (const file of validated) {
+        try {
+          await uploadClaimMedia.mutateAsync({
+            claimId: id,
+            tenantId: (existing as any)?.tenant_id,
+            workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
+            vehicleId: vehicleId || (existing as any)?.vehicle_id || null,
+            file,
+            mediaType: "document",
+            category: type || "other",
+            source: "claim_detail",
+          });
+          saved += 1;
+        } catch (caught) {
+          console.warn("Claim document upload failed", caught);
+        }
+      }
+      if (saved) {
+        // Reconcile the optimistic cache with the committed vehicle_media rows.
+        // A claim-media read that started before the upload must not make the
+        // newly saved document disappear when it finishes later.
+        await queryClient.invalidateQueries({ queryKey: queryKeys.claimMedia.list(id) });
+        try {
+          await writeClaimAudit("claim_media_uploaded", { media_type: "document", count: saved, category: type || "other" }, "media");
+        } catch (caught) {
+          console.warn("Document saved but audit event failed", caught);
+          toast.warning("حُفظ الملف، لكن تعذر تسجيل حدث الأرشفة في السجل الزمني");
+        }
+      }
+      if (saved !== files.length) toast.error(`حُفظ ${saved} من ${files.length} مستندات. تحقق من الملفات المتبقية وأعد المحاولة.`);
+      if (saved === files.length && type === "lpo") toast.success("تم حفظ أمر الشراء (LPO) مع المطالبة.");
+      return saved === files.length;
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "تعذر التحقق من المستند");
+      return false;
+    } finally {
+      setUploading(false);
     }
-    await writeClaimAudit("claim_media_uploaded", {
-      media_type: "document",
-      count: files.length,
-      category: type || "other",
-    }, "media");
-    if (type === "lpo") {
-      toast.success("تم رفع أمر الشراء (LPO). يمكن إصدار فاتورة التأمين لاحقًا من قسم الفاتورة والدفع.");
+  };
+
+  const handleDeleteDocument = async (document: ClaimGeneratedDoc) => {
+    if (!id || !isUuid(document.id)) throw new Error("لا يمكن حذف مستند غير مرتبط بالسجل السحابي");
+    await deleteClaimMedia.mutateAsync({ id: document.id, claimId: id });
+    try {
+      await writeClaimAudit("claim_media_deleted", {
+        media_id: document.id, media_type: "document", category: document.category,
+      }, "media");
+    } catch (caught) {
+      console.warn("Document removed but audit event failed", caught);
+      toast.warning("أُزيل المستند، لكن تعذر تسجيل الحدث في السجل الزمني");
     }
   };
 
@@ -3345,53 +3387,13 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             )}
           </Card>
 
-          {/* Inspection report upload */}
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <FileText size={16} className="text-primary" /> تقرير الفحص والمستندات
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(docTypeLabels).map(([type, label]) => (
-                  <label key={type} className="cursor-pointer">
-                    <input type="file" multiple accept=".pdf,image/*" className="hidden"
-                      onChange={(e) => handleDocUpload(e.target.files, type)} disabled={uploading} />
-                    <Button variant="outline" size="sm" className="gap-1" asChild>
-                      <span><FileUp size={12} /> {label}</span>
-                    </Button>
-                  </label>
-                ))}
-              </div>
-            </div>
-            {claimMediaLoading ? (
-              <div className="text-center py-6 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
-                Loading claim documents...
-              </div>
-            ) : documents.length === 0 ? (
-              <div className="text-center py-6 text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
-                ارفع تقرير الفحص الفني أو أي مستندات مساندة.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {documents.map((doc, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <FileText size={16} className="text-primary shrink-0" />
-                      <div className="min-w-0">
-                        <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-primary hover:underline truncate block">
-                          {doc.name}
-                        </a>
-                        <Badge variant="secondary" className="text-[10px] mt-0.5">{docTypeLabels[doc.type] ?? doc.type}</Badge>
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteMediaByUrl(doc.url, "document", i)}>
-                      <Trash2 size={12} />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
+          {!isNew && id ? <ClaimDocumentsPanel
+            claimId={id}
+            claimNumber={claimNumber}
+            insuranceEmail={insuranceCo?.email ?? undefined}
+            onUpload={handleDocUpload}
+            onDelete={handleDeleteDocument}
+          /> : <Card className="p-5 text-sm text-muted-foreground">احفظ المطالبة أولًا لرفع المستندات أو مسحها وحفظ نسخة PDF.</Card>}
 
           <div className="flex justify-end">
             <Button onClick={() => setTab("estimate")} className="gap-2">
@@ -3748,10 +3750,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           )}
         </TabsContent>
 
-        {/* ── 7) Documents Archive ── */}
-        <TabsContent value="documents" className="space-y-4 mt-4">
-          {!isNew && id && <ClaimDocumentsPanel claimId={id} />}
-        </TabsContent>
       </Tabs>
 
       {!isNew && (

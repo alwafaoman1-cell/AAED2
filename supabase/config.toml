@@ -14,3 +14,7 @@ verify_jwt = false
 
 [functions.vehicle-entry-signature-media]
 verify_jwt = false
+
+# Worker-to-worker only; X-Worker-Secret and the active DB lease are both required.
+[functions.document-worker-download]
+verify_jwt = false

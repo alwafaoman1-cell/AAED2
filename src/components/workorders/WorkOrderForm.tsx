@@ -791,11 +791,11 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
       <div className="flex items-center justify-between gap-2 bg-primary/5 border border-primary/20 rounded-lg p-3" style={{ display: wizardVisible(0) ? undefined : "none" }}>
         <div className="text-xs">
           <div className="font-medium text-foreground">âڑ، تعبئة سريعة بالذكاء الاصطناعي</div>
-          <div className="text-muted-foreground">ارفع صورة المَلكية / الاستمارة / الرخصة وسيستخرج البيانات تلقائياً</div>
+          <div className="text-muted-foreground">ارفع PDF أو صورة المَلكية / الاستمارة / الرخصة لاستخراج البيانات للمراجعة</div>
         </div>
         <AiExtractButton
           schema="vehicle_customer"
-          label="تعبئة من صورة"
+          label="تعبئة من PDF أو صورة"
           onExtracted={(d) => {
             setForm((prev) => ({
               ...prev,

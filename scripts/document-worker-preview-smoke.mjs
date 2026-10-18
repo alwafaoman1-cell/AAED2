@@ -19,7 +19,12 @@ const admin = createClient(url, process.env.TEMO_SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false, autoRefreshToken: false } });
 const client = createClient(url, process.env.TEMO_SUPABASE_ANON_KEY,
   { auth: { persistSession: false, autoRefreshToken: false } });
-const image = await readFile(join(tmpdir(), 'temo-ocr-golden-synthetic-1', 'arabic_claim.png'));
+// PNG decoders ignore trailing bytes; a random nonce gives every smoke run a
+// fresh hash without mutating an immutable reviewed extraction from a prior run.
+const image = Buffer.concat([
+  await readFile(join(tmpdir(), 'temo-ocr-golden-synthetic-1', 'arabic_claim.png')),
+  Buffer.from(randomUUID()),
+]);
 const sha256 = createHash('sha256').update(image).digest('hex');
 const storagePath = `${tenantId}/operational/${sha256}.png`;
 let userId;

@@ -1,4 +1,13 @@
 {
+  "daemons": {
+    "temo-document-ocr": {
+      "root": "services/document-ocr/",
+      "entrypoint": "Dockerfile",
+      "instances": { "syd1": 1 },
+      "resources": { "requests": { "memory": "2Gi" } },
+      "terminationGracePeriodSeconds": 180
+    }
+  },
   "build": {
     "env": {
       "VITE_ACCOUNTING_SETUP_ENABLED": "true",

@@ -678,7 +678,7 @@ export default function NewInsuranceClaim() {
           </div>
           <AiExtractButton
             schema="insurance_claim"
-            label="استخراج من مستند"
+            label="رفع PDF أو صورة"
             onExtracted={(d, document) => {
               const patch: Partial<Draft> = {};
               if (document) {

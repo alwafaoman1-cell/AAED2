@@ -14,6 +14,7 @@ const dataset = process.env.TEMO_OCR_DATASET || join(tmpdir(), "temo-ocr-golden-
 const manifest = JSON.parse(await readFile(join(dataset, "manifest.json"), "utf8"));
 if (!manifest.sanitized || !manifest.version?.startsWith("synthetic-")) throw new Error("DOCUMENT_E2E_SYNTHETIC_ONLY");
 const bytes = await readFile(join(dataset, "arabic_claim.png"));
+const pdfBytes = await readFile(join(dataset, "approval_multipage.pdf"));
 const purchaseBytes = await readFile(join(dataset, "parts_table.png"));
 const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 const tenantId = randomUUID();
@@ -124,7 +125,7 @@ try {
   // deduplicated and the worker receives no additional job.
   const base = process.env.DOCUMENT_SMOKE_URL || "http://127.0.0.1:4174";
   await page.goto(`${base}/insurance/new`);
-  await page.getByRole("button", { name: "استخراج من مستند" }).waitFor({ timeout: 30_000 });
+  await page.getByRole("button", { name: "رفع PDF أو صورة" }).waitFor({ timeout: 30_000 });
   await page.locator('input[type="file"][accept="image/*,application/pdf"]').first()
     .setInputFiles({ name: "arabic_claim.png", mimeType: "image/png", buffer: bytes });
   await page.getByRole("dialog").getByText("مراجعة البيانات المستخرجة").waitFor({ timeout: 30_000 });
@@ -133,7 +134,21 @@ try {
   const claimUi = await page.locator('input[placeholder="من شركة التأمين أو ولّد رقماً مؤقتاً"]').inputValue();
   if (claimUi !== expected.claim_number || pageErrors.length) throw new Error("DOCUMENT_E2E_CLAIM_FORM_UI_FAILED");
 
-  await page.getByRole("button", { name: "مسح مستند" }).click();
+  // The same upload control must accept a real, multi-page PDF and expose
+  // fields from its second page for review without saving a business record.
+  await page.locator('input[type="file"][accept="image/*,application/pdf"]').first()
+    .setInputFiles({ name: "approval_multipage.pdf", mimeType: "application/pdf", buffer: pdfBytes });
+  const pdfReview = page.getByRole("dialog").filter({ hasText: "مراجعة البيانات المستخرجة" });
+  await pdfReview.waitFor({ timeout: 120_000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] input')]
+    .some((input) => input.value === "DEMO-LPO-12"), null, { timeout: 120_000 });
+  const pdfFields = await pdfReview.locator("input").evaluateAll((inputs) => inputs.map((input) => input.value));
+  if (!pdfFields.includes(expected.claim_number) || !pdfFields.includes("150.000") || pageErrors.length) {
+    throw new Error("DOCUMENT_E2E_MULTIPAGE_PDF_REVIEW_FAILED");
+  }
+  await pdfReview.getByRole("button", { name: "إلغاء دون تطبيق" }).click();
+
+  await page.getByRole("button", { name: "مسح بالكاميرا" }).click();
   await page.locator('input[type="file"][accept="image/jpeg,image/png,image/webp"]')
     .setInputFiles({ name: "arabic_claim.png", mimeType: "image/png", buffer: bytes });
   await page.getByRole("button", { name: "اعتماد الصفحة" }).waitFor();
@@ -163,7 +178,7 @@ try {
   if (pageErrors.length) throw new Error("DOCUMENT_E2E_PURCHASE_FORM_UI_FAILED");
   process.stdout.write(JSON.stringify({ development_browser_e2e: "PASS", upload: "PASS", worker: outcome.engine,
     review_rpc: "PASS", apply_to_form: "PASS", critical_fields_auto_selected: false,
-    claim_form_ui: "PASS", scanner_to_worker_form: "PASS", purchase_form_ui: "PASS", purchase_lines: "2/2 reviewed",
+    claim_form_ui: "PASS", multipage_pdf_review: "PASS", scanner_to_worker_form: "PASS", purchase_form_ui: "PASS", purchase_lines: "2/2 reviewed",
     no_external_ai: true, duplicate_blocked: true,
     wrong_tenant_denied: true, page_errors: pageErrors.length }) + "\n");
 } finally {

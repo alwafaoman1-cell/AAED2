@@ -30,22 +30,40 @@ class FakeConnection:
 
 
 class WorkerTests(unittest.TestCase):
-    def test_refuses_production_project(self):
+    def test_accepts_production_only_when_environment_and_role_match(self):
         with patch.dict(os.environ, {
             "TEMO_ALLOWED_SUPABASE_REF": "ifnfwssdtjuzdtshnrht",
+            "TEMO_WORKER_ENVIRONMENT": "production",
             "TEMO_SUPABASE_URL": "https://ifnfwssdtjuzdtshnrht.supabase.co",
-            "TEMO_DOCUMENT_DB_DSN": "postgresql://postgres.ifnfwssdtjuzdtshnrht@example.invalid/db",
-            "TEMO_SUPABASE_SERVICE_ROLE_KEY": "test-only",
+            "TEMO_DOCUMENT_DB_DSN": "postgresql://temo_document_worker:password@db.ifnfwssdtjuzdtshnrht.supabase.co/postgres?sslmode=require",
+            "TEMO_DOCUMENT_DOWNLOAD_SECRET": "x" * 64,
         }):
-            with self.assertRaisesRegex(RuntimeError, "DOCUMENT_WORKER_DEVELOPMENT_ONLY"):
+            self.assertEqual(Config.from_env().project_ref, "ifnfwssdtjuzdtshnrht")
+
+    def test_refuses_cross_environment_production_or_short_secret(self):
+        env = {
+            "TEMO_ALLOWED_SUPABASE_REF": "ifnfwssdtjuzdtshnrht",
+            "TEMO_WORKER_ENVIRONMENT": "development",
+            "TEMO_SUPABASE_URL": "https://ifnfwssdtjuzdtshnrht.supabase.co",
+            "TEMO_DOCUMENT_DB_DSN": "postgresql://temo_document_worker:password@db.ifnfwssdtjuzdtshnrht.supabase.co/postgres?sslmode=require",
+            "TEMO_DOCUMENT_DOWNLOAD_SECRET": "x" * 64,
+        }
+        with patch.dict(os.environ, env):
+            with self.assertRaisesRegex(RuntimeError, "DOCUMENT_WORKER_ENVIRONMENT_MISMATCH"):
+                Config.from_env()
+        env["TEMO_WORKER_ENVIRONMENT"] = "production"
+        env["TEMO_DOCUMENT_DOWNLOAD_SECRET"] = "short"
+        with patch.dict(os.environ, env):
+            with self.assertRaisesRegex(RuntimeError, "DOCUMENT_WORKER_DOWNLOAD_SECRET_INVALID"):
                 Config.from_env()
 
     def test_refuses_mismatched_database_and_host(self):
         env = {
             "TEMO_ALLOWED_SUPABASE_REF": "rrhyglrnlveygyiandhs",
+            "TEMO_WORKER_ENVIRONMENT": "development",
             "TEMO_SUPABASE_URL": "https://rrhyglrnlveygyiandhs.supabase.co",
             "TEMO_DOCUMENT_DB_DSN": "postgresql://postgres.other@example.invalid/db",
-            "TEMO_SUPABASE_SERVICE_ROLE_KEY": "test-only",
+            "TEMO_DOCUMENT_DOWNLOAD_SECRET": "x" * 64,
         }
         with patch.dict(os.environ, env):
             with self.assertRaisesRegex(RuntimeError, "DOCUMENT_WORKER_DB_PROJECT_UNVERIFIED"):
@@ -59,9 +77,10 @@ class WorkerTests(unittest.TestCase):
         ref = "rrhyglrnlveygyiandhs"
         env = {
             "TEMO_ALLOWED_SUPABASE_REF": ref,
+            "TEMO_WORKER_ENVIRONMENT": "development",
             "TEMO_SUPABASE_URL": f"https://{ref}.supabase.co",
             "TEMO_DOCUMENT_DB_DSN": f"postgresql://postgres:password@db.other.supabase.co/postgres?application_name={ref}",
-            "TEMO_SUPABASE_SERVICE_ROLE_KEY": "test-only",
+            "TEMO_DOCUMENT_DOWNLOAD_SECRET": "x" * 64,
         }
         with patch.dict(os.environ, env):
             with self.assertRaisesRegex(RuntimeError, "DOCUMENT_WORKER_DB_PROJECT_UNVERIFIED"):
@@ -71,9 +90,10 @@ class WorkerTests(unittest.TestCase):
         ref = "rrhyglrnlveygyiandhs"
         with patch.dict(os.environ, {
             "TEMO_ALLOWED_SUPABASE_REF": ref,
+            "TEMO_WORKER_ENVIRONMENT": "development",
             "TEMO_SUPABASE_URL": f"https://{ref}.supabase.co",
-            "TEMO_DOCUMENT_DB_DSN": f"postgresql://temo_document_worker.{ref}:password@aws-0-ap-south-1.pooler.supabase.com:6543/postgres",
-            "TEMO_SUPABASE_SERVICE_ROLE_KEY": "test-only",
+            "TEMO_DOCUMENT_DB_DSN": f"postgresql://temo_document_worker.{ref}:password@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?sslmode=require",
+            "TEMO_DOCUMENT_DOWNLOAD_SECRET": "x" * 64,
         }):
             self.assertEqual(Config.from_env().project_ref, ref)
 
@@ -81,9 +101,10 @@ class WorkerTests(unittest.TestCase):
         ref = "rrhyglrnlveygyiandhs"
         with patch.dict(os.environ, {
             "TEMO_ALLOWED_SUPABASE_REF": ref,
+            "TEMO_WORKER_ENVIRONMENT": "development",
             "TEMO_SUPABASE_URL": f"https://{ref}.supabase.co",
-            "TEMO_DOCUMENT_DB_DSN": f"postgresql://postgres:password@db.{ref}.supabase.co/postgres",
-            "TEMO_SUPABASE_SERVICE_ROLE_KEY": "test-only",
+            "TEMO_DOCUMENT_DB_DSN": f"postgresql://postgres:password@db.{ref}.supabase.co/postgres?sslmode=require",
+            "TEMO_DOCUMENT_DOWNLOAD_SECRET": "x" * 64,
         }):
             with self.assertRaisesRegex(RuntimeError, "DOCUMENT_WORKER_DB_PROJECT_UNVERIFIED"):
                 Config.from_env()
@@ -92,14 +113,15 @@ class WorkerTests(unittest.TestCase):
         ref = "rrhyglrnlveygyiandhs"
         base = {
             "TEMO_ALLOWED_SUPABASE_REF": ref,
+            "TEMO_WORKER_ENVIRONMENT": "development",
             "TEMO_SUPABASE_URL": f"https://{ref}.supabase.co",
-            "TEMO_SUPABASE_SERVICE_ROLE_KEY": "test-only",
+            "TEMO_DOCUMENT_DOWNLOAD_SECRET": "x" * 64,
         }
         with patch.dict(os.environ, base | {"TEMO_DOCUMENT_DB_DSN":
-                f"postgresql://temo_document_worker.{ref}:password@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres"}):
+                f"postgresql://temo_document_worker.{ref}:password@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres?sslmode=require"}):
             self.assertEqual(Config.from_env().project_ref, ref)
         with patch.dict(os.environ, base | {"TEMO_DOCUMENT_DB_DSN":
-                f"postgresql://other_role.{ref}:password@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres"}):
+                f"postgresql://other_role.{ref}:password@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres?sslmode=require"}):
             with self.assertRaisesRegex(RuntimeError, "DOCUMENT_WORKER_DB_PROJECT_UNVERIFIED"):
                 Config.from_env()
 
@@ -113,20 +135,22 @@ class WorkerTests(unittest.TestCase):
         self.assertIn("processing_started_at < now() - interval '5 minutes'", connection.statements[1])
 
     def test_private_storage_path_is_tenant_scoped(self):
-        config = Config("", "https://example.invalid", "test-only", "development", "paddleocr")
+        config = Config("", "https://example.invalid", "x" * 64, "development", "paddleocr")
         with self.assertRaisesRegex(InvalidDocument, "DOCUMENT_STORAGE_SCOPE_INVALID"):
             download(config, {"bucket": "public", "path": "other/file.pdf", "tenant_id": "expected"})
 
     def test_storage_redirect_does_not_forward_server_credentials(self):
         from unittest.mock import MagicMock
-        config = Config("", "https://example.invalid", "test-only", "development", "paddleocr")
+        config = Config("", "https://example.invalid", "x" * 64, "development", "paddleocr")
         response = MagicMock()
         response.__enter__.return_value.status_code = 302
-        job = {"bucket": "temo-documents", "path": "tenant-id/file.png", "tenant_id": "tenant-id"}
-        with patch("worker.requests.get", return_value=response) as request:
+        job = {"bucket": "temo-documents", "path": "tenant-id/file.png", "tenant_id": "tenant-id",
+               "id": "extraction-id", "lease": "lease-id"}
+        with patch("worker.requests.post", return_value=response) as request:
             with self.assertRaisesRegex(RuntimeError, "DOCUMENT_STORAGE_DOWNLOAD_FAILED"):
                 download(config, job)
         self.assertFalse(request.call_args.kwargs["allow_redirects"])
+        self.assertNotIn("apikey", request.call_args.kwargs["headers"])
 
     def test_reconnects_after_database_connection_failure(self):
         from unittest.mock import MagicMock
@@ -135,7 +159,7 @@ class WorkerTests(unittest.TestCase):
         first.__enter__.side_effect = __import__("psycopg").OperationalError("lost")
         second = MagicMock()
         second.__enter__.return_value = second
-        config = Config("development-dsn", "https://example.invalid", "test-only", "development", "paddleocr")
+        config = Config("development-dsn", "https://example.invalid", "x" * 64, "development", "paddleocr")
         with patch("worker.Config.from_env", return_value=config), \
              patch("worker.psycopg.connect", side_effect=[first, second]) as connect, \
              patch("worker.process_one", return_value=True), \

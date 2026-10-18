@@ -84,11 +84,11 @@ export default function AiExtractButton({
   const nativeEnabled = isDocumentEngineEnabled() && ["vehicle_customer", "insurance_claim", "expense_receipt", "purchase_invoice"].includes(schema);
   const progressText = progress && (english ? {
     validating: "Checking file", uploading: "Uploading privately", native: "Reading PDF text",
-    ocr: "Reading image", parsing: "Identifying fields", matching: "Checking existing records",
+    ocr: "Reading document pages", parsing: "Identifying fields", matching: "Checking existing records",
     saving: "Saving review draft", done: "Ready to review",
   } : {
     validating: "فحص الملف", uploading: "رفع خاص للمستند", native: "قراءة نص PDF",
-    ocr: "قراءة الصورة", parsing: "تحديد الحقول", matching: "مطابقة السجلات الموجودة",
+    ocr: "قراءة صفحات المستند", parsing: "تحديد الحقول", matching: "مطابقة السجلات الموجودة",
     saving: "حفظ مسودة المراجعة", done: "جاهز للمراجعة",
   })[progress.stage];
 
@@ -182,7 +182,7 @@ export default function AiExtractButton({
       />
       <div className="flex flex-wrap gap-2">
         {nativeEnabled && <Button type="button" variant={variant} size={size} disabled={busy} onClick={() => setScannerOpen(true)} className="gap-1.5">
-          <Camera size={14} className="text-primary" />{english ? "Scan document" : "مسح مستند"}
+          <Camera size={14} className="text-primary" />{english ? "Scan with camera" : "مسح بالكاميرا"}
         </Button>}
         <Button
           type="button"

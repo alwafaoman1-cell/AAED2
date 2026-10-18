@@ -15,7 +15,7 @@ const MESSAGES: Record<string, [string, string]> = {
   DOCUMENT_PREVIOUS_PROCESSING_FAILED_RETRY: ["فشلت معالجة سابقة للمستند؛ أعد المحاولة.", "A previous extraction failed; retry the document."],
   DOCUMENT_PROCESSING_TIMEOUT: ["انتهت مهلة قراءة المستند؛ احتُفظ بالملف إن اكتمل رفعه. أعد المحاولة لاحقًا.", "Document processing timed out. If upload completed, the file was retained; retry later."],
   DOCUMENT_PROCESSING_CANCELLED: ["أُلغيت معالجة المستند؛ لم تُطبّق بيانات على النموذج.", "Document processing was cancelled; no form data was applied."],
-  DOCUMENT_WORKER_REQUIRED: ["قراءة المطالبات وفواتير الشراء تتطلب عامل المعالجة على Development؛ أدخل البيانات يدويًا حتى يصبح متاحًا.", "Claim and purchase invoice extraction requires the Development worker; enter the data manually until it is available."],
+  DOCUMENT_WORKER_REQUIRED: ["قراءة المطالبات وفواتير الشراء تتطلب عامل المعالجة؛ أدخل البيانات يدويًا حتى يصبح متاحًا.", "Claim and purchase invoice extraction requires the document worker; enter the data manually until it is available."],
 };
 
 /** Never send a raw PostgREST/SQL/worker exception to the operator. */

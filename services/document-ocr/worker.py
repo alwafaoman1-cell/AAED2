@@ -1,4 +1,4 @@
-"""Private Supabase Development OCR queue consumer.
+"""Private, project-bound Supabase OCR queue consumer.
 
 Deploy separately from Vercel/Edge. Run one instance or more: PostgreSQL
 SKIP LOCKED prevents two workers from claiming the same extraction. Secrets are
@@ -10,10 +10,12 @@ import json
 import multiprocessing as mp
 import os
 import re
+import signal
 import sys
 import time
 from dataclasses import dataclass
-from urllib.parse import quote, urlparse
+from threading import Event
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import psycopg
@@ -32,7 +34,7 @@ ENGINE_VERSIONS = ["1.0.0-worker", "1.0.1-worker"]
 class Config:
     db_dsn: str
     supabase_url: str
-    service_key: str
+    download_secret: str
     project_ref: str
     provider: str
 
@@ -42,8 +44,10 @@ class Config:
         url = os.environ["TEMO_SUPABASE_URL"].rstrip("/")
         if urlparse(url).scheme != "https" or urlparse(url).hostname != f"{ref}.supabase.co":
             raise RuntimeError("DOCUMENT_WORKER_PROJECT_MISMATCH")
-        if ref != "rrhyglrnlveygyiandhs":
-            raise RuntimeError("DOCUMENT_WORKER_DEVELOPMENT_ONLY")
+        environment = os.environ["TEMO_WORKER_ENVIRONMENT"]
+        projects = {"development": "rrhyglrnlveygyiandhs", "production": "ifnfwssdtjuzdtshnrht"}
+        if projects.get(environment) != ref:
+            raise RuntimeError("DOCUMENT_WORKER_ENVIRONMENT_MISMATCH")
         dsn = os.environ["TEMO_DOCUMENT_DB_DSN"]
         try:
             from psycopg.conninfo import conninfo_to_dict
@@ -58,12 +62,15 @@ class Config:
         permitted_users = {"temo_document_worker"}
         direct = host == f"db.{ref}.supabase.co" and user in permitted_users
         pooled = host.endswith(".pooler.supabase.com") and user in {f"{role}.{ref}" for role in permitted_users}
-        if not (direct or pooled):
+        if not (direct or pooled) or connection.get("sslmode") not in {"require", "verify-ca", "verify-full"}:
             raise RuntimeError("DOCUMENT_WORKER_DB_PROJECT_UNVERIFIED")
         provider = os.environ.get("TEMO_OCR_PROVIDER", "paddleocr")
         if provider not in {"paddleocr", "tesseract"}:
             raise RuntimeError("DOCUMENT_WORKER_PROVIDER_INVALID")
-        return cls(dsn, url, os.environ["TEMO_SUPABASE_SERVICE_ROLE_KEY"], ref, provider)
+        secret = os.environ["TEMO_DOCUMENT_DOWNLOAD_SECRET"]
+        if len(secret) < 48:
+            raise RuntimeError("DOCUMENT_WORKER_DOWNLOAD_SECRET_INVALID")
+        return cls(dsn, url, secret, ref, provider)
 
 
 def claim_next(connection: psycopg.Connection) -> dict | None:
@@ -105,9 +112,10 @@ def claim_next(connection: psycopg.Connection) -> dict | None:
 def download(config: Config, job: dict) -> bytes:
     if job["bucket"] != "temo-documents" or not job["path"].startswith(str(job["tenant_id"]) + "/"):
         raise InvalidDocument("DOCUMENT_STORAGE_SCOPE_INVALID")
-    url = f"{config.supabase_url}/storage/v1/object/authenticated/temo-documents/{quote(job['path'], safe='/')}"
-    with requests.get(url, headers={"Authorization": f"Bearer {config.service_key}", "apikey": config.service_key},
-                      timeout=(5, 25), stream=True, allow_redirects=False) as response:
+    url = f"{config.supabase_url}/functions/v1/document-worker-download"
+    with requests.post(url, headers={"X-Worker-Secret": config.download_secret},
+                       json={"extraction_id": str(job["id"]), "tenant_id": str(job["tenant_id"]), "lease_token": job["lease"]},
+                       timeout=(5, 25), stream=True, allow_redirects=False) as response:
         if response.status_code != 200:
             raise RuntimeError("DOCUMENT_STORAGE_DOWNLOAD_FAILED")
         response.raise_for_status()
@@ -223,25 +231,27 @@ def process_one(config: Config, connection: psycopg.Connection) -> bool:
 
 def run():
     config = Config.from_env()
+    shutdown = Event()
+    signal.signal(signal.SIGTERM, lambda *_: shutdown.set())
     one_shot = os.environ.get("TEMO_WORKER_ONCE") == "1"
     test_max_jobs = int(os.environ.get("TEMO_WORKER_TEST_MAX_JOBS", "1")) if one_shot else None
     if test_max_jobs is not None and not 1 <= test_max_jobs <= 4:
         raise RuntimeError("DOCUMENT_WORKER_TEST_JOB_LIMIT_INVALID")
     completed = 0
     deadline = time.monotonic() + 120 * test_max_jobs if one_shot else None
-    while True:
+    while not shutdown.is_set():
         try:
             # A dropped connection cannot be reused. Reopen it so queued jobs
-            # continue after a transient Development database interruption.
+            # continue after a transient database interruption.
             with psycopg.connect(config.db_dsn, autocommit=True) as connection:
-                while True:
+                while not shutdown.is_set():
                     if process_one(config, connection) and one_shot:
                         completed += 1
                         if completed >= test_max_jobs:
                             return
                     if deadline and time.monotonic() >= deadline:
                         raise RuntimeError("DOCUMENT_WORKER_TEST_QUEUE_TIMEOUT")
-                    time.sleep(2)
+                    shutdown.wait(2)
         except psycopg.Error as error:
             if deadline and time.monotonic() >= deadline:
                 raise RuntimeError("DOCUMENT_WORKER_TEST_QUEUE_TIMEOUT") from None
@@ -254,7 +264,7 @@ def run():
                 primary,
             ) else 'unknown'
             print(f"DOCUMENT_WORKER_DATABASE_RETRY:{type(error).__name__}:{error.sqlstate or 'none'}:{safe_primary}", file=sys.stderr)
-            time.sleep(5)
+            shutdown.wait(5)
 
 
 if __name__ == "__main__":

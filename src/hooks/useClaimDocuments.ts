@@ -1,30 +1,36 @@
-// قائمة المستندات المولّدة لمطالبة معينة (مأخوذة من claim_audit_logs حيث action='document_generated')
+// مستندات المطالبة، المرفوعة والمولّدة، من مصدر vehicle_media الموحد.
 import { useQuery } from "@tanstack/react-query";
-import type { ClaimDocCategory } from "@/lib/uploadHtmlAsPdf";
 import { queryKeys } from "@/lib/queryKeys";
-import { getClaimMedia } from "@/lib/insurance/claimMediaService";
+import { getClaimMedia, type ClaimMediaRecord } from "@/lib/insurance/claimMediaService";
 
 export interface ClaimGeneratedDoc {
   id: string;
-  category: ClaimDocCategory;
+  category: string;
   file_path: string;
+  storage_bucket: string;
   url: string;
   file_name: string;
+  mime_type: string | null;
+  source: string | null;
   created_at: string;
 }
 
 export function useClaimDocuments(claimId?: string) {
-  return useQuery<ClaimGeneratedDoc[]>({
-    queryKey: queryKeys.claimDocuments(claimId),
+  return useQuery<ClaimMediaRecord[], Error, ClaimGeneratedDoc[]>({
+    // The claim detail also reads these rows. Share its in-flight request and cache.
+    queryKey: queryKeys.claimMedia.list(claimId),
     enabled: !!claimId,
-    queryFn: async () => {
-      const rows = await getClaimMedia(claimId);
+    queryFn: () => getClaimMedia(claimId),
+    select: (rows) => {
       const documents = rows.filter((row) => row.media_type === "document").map((row) => ({
         id: row.id,
-        category: (row.category || "claim_summary") as ClaimDocCategory,
+        category: row.category || "other",
         file_path: row.storage_path || "",
+        storage_bucket: row.storage_bucket || "insurance-docs",
         url: row.url || row.public_url || "",
         file_name: row.file_name || row.storage_path?.split("/").pop() || "document.html",
+        mime_type: row.mime_type,
+        source: (row as ClaimMediaRecord & { source?: string | null }).source || null,
         created_at: row.uploaded_at,
       }));
 

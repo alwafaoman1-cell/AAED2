@@ -40,13 +40,14 @@ $rotationSql = "alter role temo_document_worker password '$password'"
 $null = $rotationSql | & $cli db query --linked --project-ref $ref 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'DOCUMENT_WORKER_ROLE_ROTATION_FAILED' }
 
-$keys = & $cli projects api-keys --project-ref $ref --reveal --output json 2>$null | ConvertFrom-Json
-$serviceKey = ($keys | Where-Object { $_.name -eq 'service_role' } | Select-Object -First 1).api_key
-if (!$serviceKey) { throw 'DOCUMENT_WORKER_DEV_STORAGE_KEY_UNAVAILABLE' }
+$downloadSecret = [Convert]::ToHexString([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
+$null = & $cli secrets set --project-ref $ref "TEMO_DOCUMENT_DOWNLOAD_SECRET=$downloadSecret" 2>$null
+if ($LASTEXITCODE -ne 0) { throw 'DOCUMENT_WORKER_DEV_DOWNLOAD_SECRET_SETUP_FAILED' }
 
 $env:TEMO_ALLOWED_SUPABASE_REF = $ref
+$env:TEMO_WORKER_ENVIRONMENT = 'development'
 $env:TEMO_SUPABASE_URL = "https://$ref.supabase.co"
-$env:TEMO_SUPABASE_SERVICE_ROLE_KEY = $serviceKey
+$env:TEMO_DOCUMENT_DOWNLOAD_SECRET = $downloadSecret
 $env:TEMO_DOCUMENT_DB_DSN = "postgresql://temo_document_worker:$password@db.$ref.supabase.co:5432/postgres?sslmode=require"
 $env:TEMO_OCR_PROVIDER = 'paddleocr'
 $env:PYTHONIOENCODING = 'utf-8'
@@ -63,14 +64,14 @@ try {
   [pscustomobject]@{ project_ref = $ref; worker_pid = $worker.Id; running = $true; stderr_log = "$logBase.stderr.log" }
 } finally {
   $env:TEMO_ALLOWED_SUPABASE_REF = $null
+  $env:TEMO_WORKER_ENVIRONMENT = $null
   $env:TEMO_SUPABASE_URL = $null
-  $env:TEMO_SUPABASE_SERVICE_ROLE_KEY = $null
+  $env:TEMO_DOCUMENT_DOWNLOAD_SECRET = $null
   $env:TEMO_DOCUMENT_DB_DSN = $null
   $env:TEMO_OCR_PROVIDER = $null
   $env:PYTHONIOENCODING = $null
   $env:PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK = $null
   $password = $null
-  $serviceKey = $null
-  $keys = $null
+  $downloadSecret = $null
   $rotationSql = $null
 }

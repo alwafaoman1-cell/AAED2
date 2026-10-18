@@ -24,6 +24,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onExtract: (file: File) => boolean | void | Promise<boolean | void>;
+  submitLabel?: { ar: string; en: string };
 }
 
 const FILTERS: Array<{ key: ScanFilter; ar: string; en: string }> = [
@@ -68,7 +69,7 @@ function qualityWarnings(quality: ScanQuality, english: boolean): string[] {
   return quality.warnings.map((code) => messages[code][english ? 1 : 0]);
 }
 
-export default function DocumentScanner({ open, onClose, onExtract }: Props) {
+export default function DocumentScanner({ open, onClose, onExtract, submitLabel }: Props) {
   const { i18n } = useTranslation();
   const english = i18n.language?.startsWith("en") || false;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -345,7 +346,7 @@ export default function DocumentScanner({ open, onClose, onExtract }: Props) {
             {cameraError && <div className="absolute inset-0 flex items-center justify-center p-5 text-center text-sm text-white">{cameraError}</div>}
           </div>
           <div className="flex justify-center gap-2">
-            <Button type="button" variant="outline" onClick={() => galleryRef.current?.click()}><ImagePlus size={16} className="me-1" />{english ? "Gallery / files" : "الصور / الملفات"}</Button>
+            <Button type="button" variant="outline" onClick={() => galleryRef.current?.click()}><ImagePlus size={16} className="me-1" />{english ? "Import images" : "استيراد صور"}</Button>
             <Button type="button" variant="outline" onClick={() => void toggleTorch()}><Flashlight size={16} className="me-1" />{torch ? (english ? "Flash off" : "إيقاف الفلاش") : (english ? "Flash" : "فلاش")}</Button>
             <Button type="button" disabled={busy || !!cameraError || pages.length >= 8} onClick={() => void capture()}><Camera size={16} className="me-1" />{english ? "Capture" : "التقاط"}</Button>
           </div>
@@ -365,7 +366,7 @@ export default function DocumentScanner({ open, onClose, onExtract }: Props) {
         </select>
         <span className="me-auto text-xs text-muted-foreground">{pages.length}/8 {english ? "pages" : "صفحات"}</span>
         <Button type="button" variant="outline" disabled={busy || !pages.length || pages.some((p) => !p.processed)} onClick={() => void finish(false)}><Download size={16} className="me-1" />{english ? "Download PDF" : "تنزيل PDF"}</Button>
-        <Button type="button" disabled={busy || !pages.length || pages.some((p) => !p.processed)} onClick={() => void finish(true)}>{busy ? <Loader2 size={16} className="me-1 animate-spin" /> : <ScanLine size={16} className="me-1" />}{english ? "Extract to form" : "استخراج إلى النموذج"}</Button>
+        <Button type="button" disabled={busy || !pages.length || pages.some((p) => !p.processed)} onClick={() => void finish(true)}>{busy ? <Loader2 size={16} className="me-1 animate-spin" /> : <ScanLine size={16} className="me-1" />}{submitLabel ? submitLabel[english ? "en" : "ar"] : (english ? "Extract to form" : "استخراج إلى النموذج")}</Button>
         <Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X size={16} className="me-1" />{english ? "Close" : "إغلاق"}</Button>
       </div>
     </DialogContent>
