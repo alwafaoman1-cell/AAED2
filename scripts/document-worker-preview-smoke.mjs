@@ -69,12 +69,12 @@ try {
   }
 
   const existingExtraction = await client.from('document_extractions').select('id')
-    .eq('tenant_id', tenantId).eq('file_id', fileId).eq('engine_version', '1.0.1-worker').maybeSingle();
+    .eq('tenant_id', tenantId).eq('file_id', fileId).eq('engine_version', '1.0.2-worker').maybeSingle();
   if (existingExtraction.error) throw new Error(`DOCUMENT_SMOKE_EXTRACTION_LOOKUP_FAILED:${existingExtraction.error.code}`);
   if (existingExtraction.data) throw new Error('DOCUMENT_SMOKE_VERSION_ALREADY_USED');
 
   const queued = await client.rpc('document_enqueue_processing', {
-    p_file_id: fileId, p_engine_version: '1.0.1-worker',
+    p_file_id: fileId, p_engine_version: '1.0.2-worker',
   });
   if (queued.error || !queued.data?.[0]) throw new Error(`DOCUMENT_SMOKE_ENQUEUE_FAILED:${queued.error?.code || 'unknown'}`);
   extractionId = queued.data[0].extraction_id;

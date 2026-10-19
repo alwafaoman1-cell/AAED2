@@ -40,42 +40,140 @@ export function assessScanQuality(image: ImageData): ScanQuality {
   return { brightness, blur, glare: glareRatio, warnings };
 }
 
-/** Conservative paper detector: refuses low-contrast scenes instead of silently cropping text. */
-export function detectDocumentQuad(image: ImageData): { quad: ScanQuad; confidence: number; quality: ScanQuality } {
-  const quality = assessScanQuality(image);
-  const { width, height } = image;
-  const step = Math.max(1, Math.ceil(Math.max(width, height) / 550));
-  const corners = [[0, 0], [width - 1, 0], [0, height - 1], [width - 1, height - 1]];
-  const background = corners.map(([x, y]) => pixel(image, x, y)).sort((a, b) => a - b)[2];
-  const candidates: Array<{ x: number; y: number }> = [];
-  for (let y = step * 2; y < height - step * 2; y += step) {
-    for (let x = step * 2; x < width - step * 2; x += step) {
-      const value = pixel(image, x, y);
-      if (Math.abs(value - background) < 48) continue;
-      // A local edge plus a contrast from the corner background avoids most printed text.
-      if (Math.abs(value - pixel(image, Math.min(width - 1, x + step * 2), y)) < 10 &&
-          Math.abs(value - pixel(image, x, Math.min(height - 1, y + step * 2))) < 10) continue;
-      candidates.push({ x: x / width, y: y / height });
+function quadArea(quad: ScanQuad): number {
+  return Math.abs(quad.reduce((sum, point, index) => {
+    const next = quad[(index + 1) % 4];
+    return sum + point.x * next.y - next.x * point.y;
+  }, 0)) / 2;
+}
+
+export function isValidScanQuad(quad: ScanQuad): boolean {
+  if (quad.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y) ||
+    point.x < 0 || point.x > 1 || point.y < 0 || point.y > 1) || quadArea(quad) < 0.01) return false;
+  const turns = quad.map((point, index) => {
+    const next = quad[(index + 1) % 4], after = quad[(index + 2) % 4];
+    return (next.x - point.x) * (after.y - next.y) - (next.y - point.y) * (after.x - next.x);
+  });
+  return turns.every((turn) => turn > 0.002);
+}
+
+interface EdgeSample { position: number; boundary: number }
+
+function fitEdge(samples: EdgeSample[]): { slope: number; offset: number; error: number } | null {
+  if (samples.length < 12) return null;
+  // Near each corner a horizontal/vertical scan meets the adjacent edge first.
+  // Fit only the middle of a side, then extend that line to its intersections.
+  const inner = samples.slice(Math.floor(samples.length * .18), Math.ceil(samples.length * .82));
+  const solve = (points: EdgeSample[]) => {
+    const meanPosition = points.reduce((sum, sample) => sum + sample.position, 0) / points.length;
+    const meanBoundary = points.reduce((sum, sample) => sum + sample.boundary, 0) / points.length;
+    let numerator = 0, denominator = 0;
+    for (const sample of points) {
+      numerator += (sample.position - meanPosition) * (sample.boundary - meanBoundary);
+      denominator += (sample.position - meanPosition) ** 2;
+    }
+    if (denominator < 0.001) return null;
+    const slope = numerator / denominator, offset = meanBoundary - slope * meanPosition;
+    const error = points.reduce((sum, sample) => sum + Math.abs(sample.boundary - slope * sample.position - offset), 0) / points.length;
+    return { slope, offset, error };
+  };
+  const initial = solve(inner);
+  if (!initial) return null;
+  const residuals = inner.map((sample) => Math.abs(sample.boundary - initial.slope * sample.position - initial.offset));
+  const median = [...residuals].sort((a, b) => a - b)[Math.floor(residuals.length / 2)];
+  const inliers = inner.filter((_, index) => residuals[index] <= Math.max(.015, median * 3));
+  return inliers.length >= 12 ? solve(inliers) : initial;
+}
+
+/** Find the longest contrasting run, bridging small printed-text gaps inside paper. */
+function longestRun(length: number, at: (index: number) => boolean, maxGap: number): [number, number] | null {
+  let start = -1, end = -1, gap = 0, bestStart = -1, bestEnd = -1;
+  for (let index = 0; index <= length; index++) {
+    if (index < length && at(index)) {
+      if (start < 0) start = index;
+      end = index; gap = 0;
+    } else if (start >= 0 && index < length && gap < maxGap) gap++;
+    else if (start >= 0) {
+      if (end - start > bestEnd - bestStart) { bestStart = start; bestEnd = end; }
+      start = -1; end = -1; gap = 0;
     }
   }
-  if (candidates.length < 80) return { quad: FULL_SCAN_QUAD, confidence: 0, quality };
-  const pick = (score: (point: ScanPoint) => number, low: boolean) =>
-    candidates.reduce((best, point) => (low ? score(point) < score(best) : score(point) > score(best)) ? point : best);
-  const quad: ScanQuad = [
-    pick((p) => p.x + p.y, true), pick((p) => p.x - p.y, false),
-    pick((p) => p.x + p.y, false), pick((p) => p.x - p.y, true),
-  ];
-  const area = Math.abs(quad.reduce((sum, p, index) => {
-    const next = quad[(index + 1) % 4];
-    return sum + p.x * next.y - next.x * p.y;
-  }, 0)) / 2;
-  const minX = Math.min(...quad.map((p) => p.x)), maxX = Math.max(...quad.map((p) => p.x));
-  const minY = Math.min(...quad.map((p) => p.y)), maxY = Math.max(...quad.map((p) => p.y));
-  if (area < 0.20 || area > 0.96 || minX < 0.008 || minY < 0.008 || maxX > 0.992 || maxY > 0.992) {
-    quality.warnings.push(area < 0.20 ? "too_far" : "cropped_edge");
-    return { quad: FULL_SCAN_QUAD, confidence: 0, quality };
+  return bestStart >= 0 ? [bestStart, bestEnd] : null;
+}
+
+/** Conservative paper segmentation; uncertain scenes retain the entire photo for manual corners. */
+export function detectDocumentQuad(image: ImageData): { quad: ScanQuad; confidence: number; quality: ScanQuality } {
+  const quality = assessScanQuality(image);
+  const step = Math.max(1, Math.ceil(Math.max(image.width, image.height) / 550));
+  const width = Math.ceil(image.width / step), height = Math.ceil(image.height / step);
+  const fallback = () => ({ quad: FULL_SCAN_QUAD, confidence: 0, quality });
+  if (width < 40 || height < 40) return fallback();
+
+  // Sample patches at all four corners, not single noisy pixels. A sheet touching
+  // the image border is rejected below rather than cropped on a guessed edge.
+  const borderColors: number[][] = [[], [], []];
+  for (const xSide of [0, 1]) for (const ySide of [0, 1]) {
+    for (let dy = 0; dy < 5; dy++) for (let dx = 0; dx < 5; dx++) {
+      const x = Math.min(image.width - 1, Math.round((xSide ? .96 : .04) * image.width) + dx * step);
+      const y = Math.min(image.height - 1, Math.round((ySide ? .96 : .04) * image.height) + dy * step);
+      const offset = (y * image.width + x) * 4;
+      for (let channel = 0; channel < 3; channel++) borderColors[channel].push(image.data[offset + channel]);
+    }
   }
-  return { quad, confidence: Math.min(0.8, area), quality };
+  const background = borderColors.map((channel) => channel.sort((a, b) => a - b)[Math.floor(channel.length / 2)]);
+  const mask = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const source = (Math.min(image.height - 1, y * step) * image.width + Math.min(image.width - 1, x * step)) * 4;
+    const difference = (Math.abs(image.data[source] - background[0]) +
+      Math.abs(image.data[source + 1] - background[1]) + Math.abs(image.data[source + 2] - background[2])) / 3;
+    mask[y * width + x] = difference >= 38 ? 1 : 0;
+  }
+
+  const left: EdgeSample[] = [], right: EdgeSample[] = [], top: EdgeSample[] = [], bottom: EdgeSample[] = [];
+  const rowGap = Math.max(2, Math.round(width * .05));
+  const columnGap = Math.max(2, Math.round(height * .05));
+  for (let y = 0; y < height; y++) {
+    const run = longestRun(width, (x) => mask[y * width + x] === 1, rowGap);
+    if (!run || run[1] - run[0] < width * .15 || run[0] <= 1 || run[1] >= width - 2) continue;
+    left.push({ position: y / (height - 1), boundary: run[0] / (width - 1) });
+    right.push({ position: y / (height - 1), boundary: run[1] / (width - 1) });
+  }
+  for (let x = 0; x < width; x++) {
+    const run = longestRun(height, (y) => mask[y * width + x] === 1, columnGap);
+    if (!run || run[1] - run[0] < height * .15 || run[0] <= 1 || run[1] >= height - 2) continue;
+    top.push({ position: x / (width - 1), boundary: run[0] / (height - 1) });
+    bottom.push({ position: x / (width - 1), boundary: run[1] / (height - 1) });
+  }
+  const leftLine = fitEdge(left), rightLine = fitEdge(right), topLine = fitEdge(top), bottomLine = fitEdge(bottom);
+  if (!leftLine || !rightLine || !topLine || !bottomLine) return fallback();
+  const intersect = (vertical: typeof leftLine, horizontal: typeof topLine): ScanPoint => {
+    const divisor = 1 - vertical.slope * horizontal.slope;
+    if (Math.abs(divisor) < .01) return { x: NaN, y: NaN };
+    const x = (vertical.slope * horizontal.offset + vertical.offset) / divisor;
+    return { x, y: horizontal.slope * x + horizontal.offset };
+  };
+  const quad: ScanQuad = [intersect(leftLine, topLine), intersect(rightLine, topLine),
+    intersect(rightLine, bottomLine), intersect(leftLine, bottomLine)];
+  const area = quadArea(quad);
+  const meanError = (leftLine.error + rightLine.error + topLine.error + bottomLine.error) / 4;
+  // Text on a similarly coloured desk can form four apparent boundaries; a
+  // real contrasting page also fills most of the proposed quadrilateral.
+  let inside = 0, filled = 0;
+  for (let row = 1; row <= 9; row++) for (let column = 1; column <= 9; column++) {
+    const u = column / 10, v = row / 10;
+    const x = Math.round(((1 - u) * (1 - v) * quad[0].x + u * (1 - v) * quad[1].x +
+      u * v * quad[2].x + (1 - u) * v * quad[3].x) * (width - 1));
+    const y = Math.round(((1 - u) * (1 - v) * quad[0].y + u * (1 - v) * quad[1].y +
+      u * v * quad[2].y + (1 - u) * v * quad[3].y) * (height - 1));
+    if (x >= 0 && x < width && y >= 0 && y < height) { inside++; filled += mask[y * width + x]; }
+  }
+  if (!isValidScanQuad(quad) || area < .12 || area > .94 || meanError > .045 ||
+    inside < 60 || filled / inside < .65 ||
+    quad.some((point) => point.x < .015 || point.x > .985 || point.y < .015 || point.y > .985)) {
+    quality.warnings.push(area < .12 ? "too_far" : "cropped_edge");
+    return fallback();
+  }
+  return { quad, confidence: Math.max(.36, Math.min(.95, .92 - meanError * 9)), quality };
 }
 
 function solve8(matrix: number[][], vector: number[]): number[] {
@@ -112,6 +210,7 @@ function homography(quad: ScanQuad, width: number, height: number): number[] {
 }
 
 export function perspectiveCorrect(image: ImageData, quad: ScanQuad, filter: ScanFilter, maxSide = 2400): ImageData {
+  if (!isValidScanQuad(quad)) throw new Error("SCAN_CORNERS_INVALID");
   const distance = (a: ScanPoint, b: ScanPoint) => Math.hypot((a.x - b.x) * image.width, (a.y - b.y) * image.height);
   const rawWidth = Math.max(distance(quad[0], quad[1]), distance(quad[3], quad[2]));
   const rawHeight = Math.max(distance(quad[0], quad[3]), distance(quad[1], quad[2]));

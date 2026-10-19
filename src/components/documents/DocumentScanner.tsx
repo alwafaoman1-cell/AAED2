@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { validateDocumentFile } from "@/lib/documentExtraction/fileSafety";
-import { FULL_SCAN_QUAD, type ScanFilter, type ScanPoint, type ScanQuad, type ScanQuality } from "@/lib/documentExtraction/scannerCore";
+import { FULL_SCAN_QUAD, isValidScanQuad, type ScanFilter, type ScanPoint, type ScanQuad, type ScanQuality } from "@/lib/documentExtraction/scannerCore";
 
 interface ScanPage {
   id: string;
@@ -87,6 +87,7 @@ export default function DocumentScanner({ open, onClose, onExtract, submitLabel 
   const [torch, setTorch] = useState(false);
   const [liveQuad, setLiveQuad] = useState<ScanQuad | null>(null);
   const [dragCorner, setDragCorner] = useState<number | null>(null);
+  const [showCorrected, setShowCorrected] = useState(false);
   const [qualityProfile, setQualityProfile] = useState<"standard" | "high" | "archive">("high");
   const previewRef = useRef<HTMLDivElement>(null);
   const pagesRef = useRef<ScanPage[]>([]);
@@ -134,7 +135,8 @@ export default function DocumentScanner({ open, onClose, onExtract, submitLabel 
       return;
     }
     let cancelled = false;
-    void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+    const portrait = window.innerHeight > window.innerWidth && window.innerWidth < 900;
+    void navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: portrait ? 2560 : 1080 } }, audio: false })
       .then((stream) => {
         if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return; }
         streamRef.current = stream;
@@ -156,19 +158,22 @@ export default function DocumentScanner({ open, onClose, onExtract, submitLabel 
   useEffect(() => {
     if (!open || !cameraReady || !streamRef.current || selectedId || busy) return;
     let cancelled = false;
+    let detecting = false;
     const timer = window.setInterval(async () => {
       const video = videoRef.current;
-      if (cancelled || !video?.videoWidth || !video.videoHeight || !workerRef.current) return;
+      if (cancelled || detecting || !video?.videoWidth || !video.videoHeight || !workerRef.current) return;
+      detecting = true;
       const canvas = document.createElement("canvas");
       const ratio = Math.min(1, 320 / Math.max(video.videoWidth, video.videoHeight));
       canvas.width = Math.round(video.videoWidth * ratio); canvas.height = Math.round(video.videoHeight * ratio);
       const context = canvas.getContext("2d", { willReadFrequently: true });
-      if (!context) return;
+      if (!context) { detecting = false; return; }
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       try {
         const found = await askWorker<{ quad: ScanQuad; confidence: number }>("detect", context.getImageData(0, 0, canvas.width, canvas.height));
         if (!cancelled) setLiveQuad(found.confidence >= 0.35 ? found.quad : null);
       } catch { if (!cancelled) setLiveQuad(null); }
+      finally { detecting = false; }
     }, 1000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [open, cameraReady, selectedId, busy, askWorker]);
@@ -185,7 +190,7 @@ export default function DocumentScanner({ open, onClose, onExtract, submitLabel 
         id: crypto.randomUUID(), capture: blob, original: blob, originalUrl: makeUrl(blob), quad: detected.confidence >= 0.35 ? detected.quad : FULL_SCAN_QUAD,
         filter: "auto", confidence: detected.confidence, quality: detected.quality,
       };
-      setPages((current) => [...current, page]); setSelectedId(page.id);
+      setPages((current) => [...current, page]); setShowCorrected(false); setSelectedId(page.id);
     } finally { setBusy(false); }
   }, [askWorker, makeUrl]);
 
@@ -211,7 +216,7 @@ export default function DocumentScanner({ open, onClose, onExtract, submitLabel 
 
   const selected = pages.find((page) => page.id === selectedId);
   async function keepPage() {
-    if (!selected) return;
+    if (!selected || !isValidScanQuad(selected.quad)) return;
     setBusy(true);
     try {
       const corrected = await askWorker<ImageData>("process", await imageDataFor(selected.original), selected.quad, selected.filter);
@@ -295,6 +300,7 @@ export default function DocumentScanner({ open, onClose, onExtract, submitLabel 
     if (!rect || !selected) return;
     const point: ScanPoint = { x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)) };
     releaseUrl(selected.processedUrl);
+    setShowCorrected(false);
     setPages((current) => current.map((page) => page.id === selected.id ? { ...page, quad: page.quad.map((old, i) => i === index ? point : old) as ScanQuad, processed: undefined, processedUrl: undefined } : page));
   }
 
@@ -302,47 +308,57 @@ export default function DocumentScanner({ open, onClose, onExtract, submitLabel 
     const page = pages.find((entry) => entry.id === id);
     releaseUrl(page?.originalUrl); releaseUrl(page?.processedUrl);
     setPages((current) => current.filter((entry) => entry.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    if (selectedId === id) { setSelectedId(null); setShowCorrected(false); }
   }
 
   return <Dialog open={open} onOpenChange={(value) => { if (!value && !busy) onClose(); }}>
-    <DialogContent className="flex h-[95dvh] max-h-[95dvh] w-[min(98vw,1050px)] max-w-none flex-col overflow-hidden p-3 sm:p-5" dir={english ? "ltr" : "rtl"}>
-      <DialogHeader><DialogTitle className="flex items-center gap-2"><ScanLine size={20} />{english ? "TEMO Document Scanner" : "ماسح المستندات TEMO"}</DialogTitle></DialogHeader>
+    <DialogContent className="!fixed !inset-0 !flex !h-[100dvh] !max-h-[100dvh] !w-screen !max-w-none !translate-x-0 !translate-y-0 !flex-col !gap-2 !overflow-hidden !rounded-none !p-2 !pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:!p-4" dir={english ? "ltr" : "rtl"}>
+      <DialogHeader className="shrink-0 pe-8"><DialogTitle className="flex items-center gap-2"><ScanLine size={20} />{english ? "TEMO Document Scanner" : "ماسح المستندات TEMO"}</DialogTitle></DialogHeader>
       <input ref={galleryRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={async (event) => {
         for (const file of Array.from(event.target.files || [])) {
           try { await importPage(file); } catch { toast.error(english ? "Use JPG, PNG or WebP images up to 12 MB and 8 pages" : "استخدم صور JPG أو PNG أو WebP حتى 12 ميغابايت و8 صفحات"); break; }
         }
         event.target.value = "";
       }} />
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
         {selected ? <>
-          <div className="relative mx-auto max-h-[55vh] max-w-full touch-none overflow-hidden rounded-lg bg-slate-900" ref={previewRef}
-            onPointerMove={(event) => { if (dragCorner !== null) updateCorner(dragCorner, event.clientX, event.clientY); }}
-            onPointerUp={() => setDragCorner(null)} onPointerCancel={() => setDragCorner(null)}>
-            <img src={selected.originalUrl} className="block max-h-[55vh] max-w-full object-contain" alt={english ? "Original capture" : "الصورة الأصلية"} />
-            <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <polygon points={selected.quad.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} fill="rgba(217,164,35,.13)" stroke="#eab308" strokeWidth=".5" />
-            </svg>
-            {selected.quad.map((point, index) => <button key={index} type="button" aria-label={`${english ? "Corner" : "الزاوية"} ${index + 1}`}
-              className="absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full border-2 border-white bg-amber-500 shadow-lg"
-              style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
-              onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setDragCorner(index); }}
-              onPointerMove={(event) => { if (event.buttons) updateCorner(index, event.clientX, event.clientY); }}
-              onPointerUp={() => setDragCorner(null)} />)}
+          <div className="mx-auto flex w-full min-h-[200px] items-center justify-center rounded-lg bg-slate-900 p-5">
+            <div className="relative max-w-full touch-none" ref={previewRef}>
+              <img src={showCorrected && selected.processedUrl ? selected.processedUrl : selected.originalUrl}
+                className="block max-h-[70dvh] max-w-full object-contain" alt={showCorrected ? (english ? "Straightened scan" : "الصفحة بعد تصحيح المنظور") : (english ? "Original capture" : "الصورة الأصلية")} />
+              {!showCorrected && <>
+                <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <polygon points={selected.quad.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} fill="rgba(217,164,35,.13)" stroke="#eab308" strokeWidth=".5" />
+                </svg>
+                {selected.quad.map((point, index) => <button key={index} type="button" aria-label={`${english ? "Corner" : "الزاوية"} ${index + 1}`}
+                  className={`absolute h-9 w-9 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full border-2 border-white bg-amber-500 shadow-lg ${dragCorner === index ? "ring-4 ring-amber-300/70" : ""}`}
+                  style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
+                  onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setDragCorner(index); }}
+                  onPointerMove={(event) => { if (event.buttons) updateCorner(index, event.clientX, event.clientY); }}
+                  onPointerUp={() => setDragCorner(null)} onPointerCancel={() => setDragCorner(null)} />)}
+              </>}
+            </div>
           </div>
+          <p className="text-center text-xs text-muted-foreground">{english ? "Drag the four corners onto the paper; Keep page straightens and crops it." : "اسحب الزوايا الأربع إلى حدود الورقة؛ اعتماد الصفحة يصحح المنظور ويقصّها."}</p>
+          {!!selected.processedUrl && <Button type="button" className="mx-auto" size="sm" variant="outline" onClick={() => setShowCorrected((value) => !value)}>
+            {showCorrected ? (english ? "Edit corners" : "تعديل الزوايا") : (english ? "Preview straightened page" : "معاينة الصفحة المصححة")}
+          </Button>}
           <div className="flex flex-wrap justify-center gap-1.5">{FILTERS.map((filter) => <Button key={filter.key} type="button" size="sm" variant={selected.filter === filter.key ? "default" : "outline"}
-            onClick={() => { releaseUrl(selected.processedUrl); setPages((current) => current.map((page) => page.id === selected.id ? { ...page, filter: filter.key, processed: undefined, processedUrl: undefined } : page)); }}>{english ? filter.en : filter.ar}</Button>)}</div>
+            onClick={() => { releaseUrl(selected.processedUrl); setShowCorrected(false); setPages((current) => current.map((page) => page.id === selected.id ? { ...page, filter: filter.key, processed: undefined, processedUrl: undefined } : page)); }}>{english ? filter.en : filter.ar}</Button>)}</div>
           {selected.confidence < 0.35 && <p role="status" className="text-center text-xs text-amber-700">{english ? "Automatic edges were uncertain; adjust corners or keep the full image." : "كشف الحواف غير مؤكد؛ عدّل الزوايا أو احتفظ بالصورة كاملة."}</p>}
+          {!isValidScanQuad(selected.quad) && <p role="alert" className="text-center text-xs text-red-600">{english ? "Corners cross or overlap; move them back around the paper." : "الزوايا متقاطعة أو متداخلة؛ أعد وضعها حول الورقة."}</p>}
           {qualityWarnings(selected.quality, english).map((warning) => <p key={warning} className="text-center text-xs text-amber-700">{warning}</p>)}
           <div className="flex flex-wrap justify-center gap-2">
             <Button type="button" variant="outline" onClick={() => restoreCapture(selected)}>{english ? "Use original" : "استخدام الأصل"}</Button>
             <Button type="button" variant="outline" onClick={() => { removePage(selected.id); }}>{english ? "Retake" : "إعادة التصوير"}</Button>
-            <Button type="button" disabled={busy} onClick={() => void keepPage()}>{busy && <Loader2 className="me-1 animate-spin" size={16} />}{english ? "Keep page" : "اعتماد الصفحة"}</Button>
+            <Button type="button" disabled={busy || !isValidScanQuad(selected.quad)} onClick={() => void keepPage()}>{busy && <Loader2 className="me-1 animate-spin" size={16} />}{english ? "Keep page" : "اعتماد الصفحة"}</Button>
           </div>
         </> : <>
-          <div className="relative mx-auto flex min-h-[250px] max-h-[52vh] w-full max-w-2xl items-center justify-center overflow-hidden rounded-xl bg-slate-900">
-            <video ref={videoRef} autoPlay muted playsInline className="h-full max-h-[52vh] w-full object-contain" />
-            {liveQuad && <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points={liveQuad.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} fill="rgba(217,164,35,.10)" stroke="#eab308" strokeWidth=".7" /></svg>}
+          <div className="relative mx-auto flex min-h-[250px] w-full max-w-4xl items-center justify-center rounded-xl bg-slate-900 p-2">
+            <div className="relative max-w-full">
+              <video ref={videoRef} autoPlay muted playsInline className="block max-h-[65dvh] max-w-full" />
+              {liveQuad && <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points={liveQuad.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} fill="rgba(217,164,35,.10)" stroke="#eab308" strokeWidth=".7" /></svg>}
+            </div>
             {cameraError && <div className="absolute inset-0 flex items-center justify-center p-5 text-center text-sm text-white">{cameraError}</div>}
           </div>
           <div className="flex justify-center gap-2">
@@ -353,14 +369,14 @@ export default function DocumentScanner({ open, onClose, onExtract, submitLabel 
           <p className="text-center text-xs text-muted-foreground">{english ? "Manual capture is always available. No video frames are uploaded." : "التصوير اليدوي متاح دائمًا. لا تُرفع إطارات الفيديو."}</p>
         </>}
         {!!pages.length && <div className="flex gap-2 overflow-x-auto rounded-lg border p-2">{pages.map((page, index) => <div key={page.id} className="flex w-24 shrink-0 flex-col gap-1">
-          <button type="button" className={`relative overflow-hidden rounded border ${selectedId === page.id ? "border-amber-500" : "border-slate-300"}`} onClick={() => setSelectedId(page.id)}>
+          <button type="button" className={`relative overflow-hidden rounded border ${selectedId === page.id ? "border-amber-500" : "border-slate-300"}`} onClick={() => { setShowCorrected(!!page.processedUrl); setSelectedId(page.id); }}>
             <img src={page.processedUrl || page.originalUrl} alt={`${english ? "Page" : "صفحة"} ${index + 1}`} className="h-24 w-24 object-cover" /><span className="absolute bottom-0 right-0 bg-black/60 px-1 text-xs text-white">{index + 1}</span>
           </button><div className="flex justify-between"><button type="button" aria-label="Move left" disabled={index === 0} onClick={() => setPages((current) => { const copy = [...current]; [copy[index - 1], copy[index]] = [copy[index], copy[index - 1]]; return copy; })}><GripVertical size={15} /></button>
           <button type="button" aria-label="Rotate" disabled={busy} onClick={() => void rotatePage(page)}><RotateCcw size={15} /></button>
           <button type="button" aria-label="Delete" onClick={() => removePage(page.id)}><Trash2 size={15} /></button></div>
         </div>)}</div>}
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-t pt-2">
         <select aria-label={english ? "PDF quality" : "جودة PDF"} className="rounded border bg-background p-2 text-sm" value={qualityProfile} onChange={(event) => setQualityProfile(event.target.value as typeof qualityProfile)}>
           <option value="standard">{english ? "Standard" : "عادي"}</option><option value="high">{english ? "High quality" : "جودة عالية"}</option><option value="archive">{english ? "Archive quality" : "جودة أرشيف"}</option>
         </select>

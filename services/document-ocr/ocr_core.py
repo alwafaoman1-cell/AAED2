@@ -88,14 +88,21 @@ def _image_pages(raw: bytes, mime: str):
         with pymupdf.open(stream=raw, filetype="pdf") as pdf:
             for number, page in enumerate(pdf, 1):
                 native = page.get_text("text", sort=True)
-                if len(re.sub(r"\s", "", native)) >= 45:
+                # A scanned form may have a short selectable header or footer.
+                # Character count alone cannot establish that its image content
+                # was read. Small logos do not trigger the expensive OCR path.
+                page_area = page.rect.width * page.rect.height
+                image_area = sum((pymupdf.Rect(info["bbox"]) & page.rect).get_area()
+                                 for info in page.get_image_info())
+                has_document_image = page_area > 0 and image_area / page_area >= 0.45
+                if len(re.sub(r"\s", "", native)) >= 45 and not has_document_image:
                     yield number, None, native, int(page.rect.width), int(page.rect.height)
                     continue
                 pixels = page.get_pixmap(matrix=pymupdf.Matrix(2.5, 2.5), alpha=False)
                 if pixels.width * pixels.height > MAX_PIXELS:
                     raise InvalidDocument("DOCUMENT_IMAGE_PIXEL_LIMIT")
                 image = Image.open(io.BytesIO(pixels.tobytes("png"))).convert("RGB")
-                yield number, image, "", image.width, image.height
+                yield number, image, native, image.width, image.height
     else:
         image = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
         yield 1, image, "", image.width, image.height
@@ -115,6 +122,35 @@ def _variants(image: Any):
 def _line(text: str, confidence: float, box: list[float]) -> dict[str, Any]:
     return {"text": text, "confidence": max(0.0, min(1.0, confidence)),
             "box": {"x": box[0], "y": box[1], "width": box[2], "height": box[3]}}
+
+
+def _merge_pdf_text(native: str, recognized: str) -> str:
+    """Retain the selectable layer and add only lines missing from it."""
+    native_lines = [line.strip() for line in native.splitlines() if line.strip()]
+    seen = {re.sub(r"\s+", " ", line).casefold() for line in native_lines}
+    result = native_lines[:]
+    for line in recognized.splitlines():
+        cleaned = line.strip()
+        key = re.sub(r"\s+", " ", cleaned).casefold()
+        if key and key not in seen:
+            result.append(cleaned)
+            seen.add(key)
+    return "\n".join(result)
+
+
+def _ocr_score(text: str, confidence: float) -> float:
+    # Confidence alone favored a flawless 50-character fragment over the
+    # remainder of a scanned page. Still reject long low-confidence noise.
+    characters = len(re.sub(r"\s", "", text))
+    return confidence * (0.35 + 0.65 * min(1.0, characters / 1000)) if characters else 0.0
+
+
+def _probably_complete_ocr(text: str, segments: list[dict[str, Any]], confidence: float, height: int) -> bool:
+    if confidence < 0.88 or len(re.sub(r"\s", "", text)) < 500 or height <= 0:
+        return False
+    boxes = [segment["box"] for segment in segments if segment.get("box", {}).get("height", 0) > 0]
+    return bool(boxes) and min(box["y"] for box in boxes) <= height * 0.25 and \
+        max(box["y"] + box["height"] for box in boxes) >= height * 0.72
 
 
 class TesseractProvider:
@@ -193,6 +229,49 @@ class PaddleProvider:
 
     def recognize(self, image: Any) -> tuple[str, list[dict[str, Any]], float]:
         segments = self._segments(self._pipeline.predict(image))
+        # On bilingual gate passes a dense "Year / السنة : 2021" cell may be
+        # recognized as only "21السنة". Re-read that cell at higher resolution,
+        # anchored to the vehicle row, rather than guessing a year from the
+        # policy/accident dates elsewhere on the page.
+        if image is not None:
+            vehicle_labels = [segment for segment in segments
+                              if "Vehicle Make & Model" in segment["text"]]
+            year_labels = [segment for segment in segments if "السنة" in segment["text"]]
+            for label in year_labels:
+                box = label["box"]
+                center = box["y"] + box["height"] / 2
+                aligned = any(abs(center - vehicle["box"]["y"] - vehicle["box"]["height"] / 2)
+                              <= max(box["height"], vehicle["box"]["height"]) * 0.8
+                              for vehicle in vehicle_labels)
+                if not aligned or box["width"] <= 0 or box["height"] <= 0:
+                    continue
+                if any(re.fullmatch(r"(?:19|20)\d{2}", segment["text"].strip()) and
+                       abs(segment["box"]["y"] + segment["box"]["height"] / 2 - center)
+                       <= max(box["height"], segment["box"]["height"]) * 0.65
+                       for segment in segments):
+                    continue
+                import cv2
+                import numpy as np
+                left = max(0, int(box["x"] + box["width"] * 0.35))
+                top = max(0, int(box["y"] - 5))
+                right = min(image.shape[1], int(box["x"] + box["width"] + max(90, box["height"] * 3)))
+                bottom = min(image.shape[0], int(box["y"] + box["height"] + 7))
+                if right - left < 30 or bottom - top < 20:
+                    continue
+                crop = np.ascontiguousarray(image[top:bottom, left:right])
+                enlarged = cv2.resize(crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+                recovered = [candidate for candidate in self._segments(self._pipeline.predict(enlarged))
+                             if candidate["confidence"] >= 0.90 and
+                             re.fullmatch(r"(?:19|20)\d{2}", candidate["text"].strip())]
+                if len({candidate["text"].strip() for candidate in recovered}) != 1:
+                    continue
+                candidate = max(recovered, key=lambda item: item["confidence"])
+                candidate["box"] = {"x": left + candidate["box"]["x"] / 3,
+                                    "y": top + candidate["box"]["y"] / 3,
+                                    "width": candidate["box"]["width"] / 3,
+                                    "height": candidate["box"]["height"] / 3}
+                segments.append(candidate)
+                break
         # Whole-line Arabic recognition can retain a label but drop a compact
         # Arabic-Indic value. Re-read only the value side of the detected line;
         # the crop is derived from OCR coordinates, not from a document template.
@@ -284,6 +363,7 @@ def process_document(raw: bytes, filename: str, declared_mime: str, provider: An
     validation = validate_document(raw, filename, declared_mime, expected_sha256)
     started = time.monotonic()
     output = []
+    issues = []
     for number, image, native_text, width, height in _image_pages(raw, validation.mime):
         if image is None:
             output.append({"number": number, "text": native_text[:200_000], "method": "native_pdf",
@@ -292,14 +372,18 @@ def process_document(raw: bytes, filename: str, declared_mime: str, provider: An
         best = ("", [], 0.0, "original")
         for name, variant in _variants(image):
             text, segments, confidence = provider.recognize(variant)
-            # A confident but empty / very short OCR result never wins.
-            score = confidence * min(1, len(text.strip()) / 20)
-            if score > best[2] * min(1, len(best[0].strip()) / 20):
+            if _ocr_score(text, confidence) > _ocr_score(best[0], best[2]):
                 best = (text, segments, confidence, name)
-            if score >= 0.80 and len(text.strip()) >= 50:
+            if _probably_complete_ocr(text, segments, confidence, height):
                 break
-        output.append({"number": number, "text": best[0][:200_000], "method": "ocr",
-                       "confidence": round(best[2], 3), "width": width, "height": height,
+        merged = _merge_pdf_text(native_text, best[0]) if native_text else best[0]
+        if not best[0].strip():
+            issues.append({"code": "OCR_NO_TEXT", "severity": "warning",
+                           "message": f"Page {number} contains an image but OCR found no readable text; review it manually."})
+        method = "ocr" if best[0].strip() or not native_text.strip() else "native_pdf"
+        output.append({"number": number, "text": merged[:200_000], "method": method,
+                       "confidence": round(best[2] if method == "ocr" else 0.95, 3), "width": width, "height": height,
                        "segments": best[1][:1000], "variant": best[3]})
     return {"engine": provider.name, "model_version": provider.version, "sha256": validation.sha256,
-            "pages": output, "duration_ms": round((time.monotonic() - started) * 1000), "ai_used": False}
+            "pages": output, "issues": issues,
+            "duration_ms": round((time.monotonic() - started) * 1000), "ai_used": False}

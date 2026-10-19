@@ -49,6 +49,10 @@ const CLAIM_VEHICLE_RULES = VEHICLE_RULES
   .filter((rule) => !["registration_date", "registration_expiry", "engine_number"].includes(rule.key))
   .map((rule) => rule.key === "plate_number"
     ? { ...rule, labels: [...rule.labels, "Vehicle No"] }
+    : rule.key === "owner_name"
+      ? { ...rule, labels: [...rule.labels, "Name of Driver, Owner of"] }
+    : rule.key === "year"
+      ? { ...rule, labels: [...rule.labels, "السنة"] }
     : rule);
 
 const INVOICE_RULES: FieldRule[] = [
@@ -69,7 +73,7 @@ const TYPE_CLUES: Array<{ type: DocumentType; clues: Array<[RegExp, number]> }> 
   { type: "vehicle_registration", clues: [[/vehicle\s+registration|registration\s+card|ملكية\s*(?:المركبة|السيارة)|رخصة\s*تسيير/i, 4], [/registration\s+expiry|تاريخ\s+انتهاء\s+الملكية/i, 2], [/plate\s*(?:no|number)|رقم\s+اللوحة/i, 1]] },
   { type: "insurance_approval", clues: [[/insurance\s+approval|approval\s+letter|خطاب\s+الموافقة|اعتماد\s+المطالبة/i, 4], [/approved\s+amount|المبلغ\s+المعتمد/i, 2], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 1]] },
   { type: "lpo", clues: [[/\bLPO\b|local\s+purchase\s+order|أمر\s+الإصلاح/i, 4], [/repair\s+order/i, 1]] },
-  { type: "insurance_claim", clues: [[/insurance\s+claim|مطالبة\s+تأمين|مطالبة\s+التأمين/i, 4], [/\bC\/[A-Z0-9/-]{8,}\b/i, 4], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 2], [/insurance\s+company|شركة\s+التأمين/i, 1]] },
+  { type: "insurance_claim", clues: [[/insurance\s+claim|مطالبة\s+تأمين|مطالبة\s+التأمين/i, 4], [/repair\s+gate\s+pass|تصريح\s+المرور\s+لتصليح\s+المركبات/i, 4], [/\bC\/[A-Z0-9/-]{8,}\b/i, 4], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 2], [/insurance\s+company|شركة\s+التأمين/i, 1]] },
   { type: "damage_report", clues: [[/damage\s+report|تقرير\s+الأضرار|تقرير\s+الحادث/i, 4], [/damage\s+details|تفاصيل\s+الأضرار/i, 1]] },
   { type: "customer_id", clues: [[/identity\s+card|resident\s+card|بطاقة\s+الشخصية|البطاقة\s+المدنية/i, 4]] },
   { type: "supplier_invoice", clues: [[/supplier\s+invoice|فاتورة\s+مورد|tax\s+invoice|فاتورة\s+ضريبية/i, 3], [/supplier|المورد/i, 1], [/VATIN|الرقم\s+الضريبي/i, 1]] },
@@ -126,7 +130,7 @@ function valueNearLabel(text: string, label: string): string | null {
   return before?.[1]?.trim() || null;
 }
 
-const ALL_FIELD_LABELS = [...VEHICLE_RULES, ...INSURANCE_RULES, ...INVOICE_RULES]
+const ALL_FIELD_LABELS = [...VEHICLE_RULES, ...CLAIM_VEHICLE_RULES, ...INSURANCE_RULES, ...INVOICE_RULES]
   .flatMap((rule) => rule.labels)
   .filter((label) => label.length >= 4);
 
@@ -215,7 +219,8 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
         if (!raw || raw.length > 160) continue;
         if (!inline && !exactLabel) continue;
         const source = page.segments?.find((item) => item.text.includes(raw) || item.text.includes(label));
-        addCandidate({ key: rule.key, raw, page, box: source?.box, evidence: ["label"] });
+        addCandidate({ key: rule.key, raw, page, box: source?.box,
+          evidence: label === "Name of Driver, Owner of" ? ["label", "ambiguous_driver_or_owner"] : ["label"] });
       }
     }
   }
@@ -253,9 +258,13 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
       const inline = rule.labels.map((label) => valueNearLabel(labelSegment.text, label)).find(Boolean);
       if (inline) addCandidate({ key: rule.key, raw: inline, page, box: labelSegment.box, evidence: ["label", "layout"] });
       const midY = labelSegment.box.y + labelSegment.box.height / 2;
+      // Dense gate-pass tables put the model year immediately above the plate.
+      // A loose vertical radius can incorrectly accept that year as a valid
+      // plate number. Numeric identity cells must overlap the label's row.
+      const rowTolerance = rule.key === "plate_number" || rule.key === "year" ? 0.65 : 1.4;
       const neighbors = page.segments.filter((segment) => segment !== labelSegment && segment.box &&
         !containsAnotherFieldLabel(segment.text) &&
-        Math.abs(segment.box.y + segment.box.height / 2 - midY) < Math.max(labelSegment.box.height, segment.box.height) * 1.4 &&
+        Math.abs(segment.box.y + segment.box.height / 2 - midY) < Math.max(labelSegment.box.height, segment.box.height) * rowTolerance &&
         Math.abs(segment.box.x - labelSegment.box.x) < page.width! * 0.55);
       neighbors.sort((a, b) => Math.abs(a.box!.x - labelSegment.box!.x) - Math.abs(b.box!.x - labelSegment.box!.x));
       const nearest = neighbors[0];
@@ -367,6 +376,17 @@ export function normalizeCandidate(key: string, raw: string): { value: string; v
   return { value, valid: value.length > 0 };
 }
 
+function rulesForDocumentType(type?: DocumentType): FieldRule[] {
+  if (type === "vehicle_registration") return VEHICLE_RULES;
+  if (["insurance_claim", "insurance_approval", "lpo", "damage_report"].includes(type || "")) {
+    return [...INSURANCE_RULES, ...CLAIM_VEHICLE_RULES];
+  }
+  if (["supplier_invoice", "purchase_invoice", "expense_receipt", "invoice", "quotation"].includes(type || "")) {
+    return INVOICE_RULES;
+  }
+  return [];
+}
+
 export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentType): {
   type: DocumentType;
   typeConfidence: number;
@@ -376,12 +396,12 @@ export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentTyp
 } {
   const text = pages.map((page) => page.text).join("\n");
   const detected = detectDocumentType(text, expected);
-  const rules = detected.type === "vehicle_registration" ? VEHICLE_RULES
-    : ["insurance_claim", "insurance_approval", "lpo", "damage_report"].includes(detected.type) ? [...INSURANCE_RULES, ...CLAIM_VEHICLE_RULES]
-      : ["supplier_invoice", "purchase_invoice", "expense_receipt", "invoice", "quotation"].includes(detected.type) ? INVOICE_RULES
-        : expected === "vehicle_registration" ? VEHICLE_RULES
-          : expected === "insurance_claim" ? [...INSURANCE_RULES, ...CLAIM_VEHICLE_RULES]
-            : expected === "expense_receipt" || expected === "supplier_invoice" ? INVOICE_RULES : [];
+  // A mixed PDF may mention invoices more often than the claim form it was
+  // attached to. Keep the independent type warning, but extract candidates
+  // relevant to the form being reviewed. The mismatch still deselects every
+  // candidate until the user explicitly verifies it.
+  const expectedRules = rulesForDocumentType(expected);
+  const rules = expectedRules.length ? expectedRules : rulesForDocumentType(detected.type);
   const fields: Record<string, ExtractedField> = {};
   const issues: ExtractionIssue[] = [];
   const combinedVehicleName = rules.some((rule) => rule.key === "make") ? findCombinedMakeModel(pages) : null;
@@ -404,12 +424,15 @@ export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentTyp
       (normalized.valid ? 0.12 : -0.2) +
       detected.confidence * 0.08,
     ));
+    const ambiguousOwner = rule.key === "owner_name" && candidate.evidence.includes("ambiguous_driver_or_owner");
     fields[rule.key] = {
       key: rule.key, rawValue: candidate.raw, normalizedValue: normalized.value,
-      confidence: Number(score.toFixed(3)), sourcePage: candidate.page.number,
-      sourceBox: candidate.box, method, validation: normalized.valid ? "valid" : "warning",
+      confidence: Number((ambiguousOwner ? Math.min(score, 0.6) : score).toFixed(3)), sourcePage: candidate.page.number,
+      sourceBox: candidate.box, method, validation: normalized.valid && !ambiguousOwner ? "valid" : "warning",
       evidence: candidate.evidence,
     };
+    if (ambiguousOwner) issues.push({ code: "DRIVER_OR_OWNER_REVIEW_REQUIRED", severity: "warning", field: rule.key,
+      message: "The document labels this person as driver or owner; confirm their role before applying the name." });
     if (!normalized.valid) issues.push({ code: normalized.reason || "FIELD_INVALID", severity: "warning", field: rule.key, message: `${rule.key} could not be validated.` });
   }
   if (rules.some((rule) => rule.key === "insurance_company") && !fields.insurance_company) {

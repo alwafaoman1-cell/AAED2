@@ -39,8 +39,9 @@ try {
     const page = await context.newPage();
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
-    await page.goto(`${baseUrl}/src/test/fixtures/document-scanner-harness.html`);
-    await page.getByRole("dialog").waitFor();
+    const response = await page.goto(`${baseUrl}/src/test/fixtures/document-scanner-harness.html`, { waitUntil: "domcontentloaded", timeout: 60000 });
+    try { await page.getByRole("dialog").waitFor({ timeout: 15000 }); }
+    catch { throw new Error(`SCANNER_DIALOG_NOT_READY HTTP ${response?.status()}; ${pageErrors.join(" | ")}; ${(await page.locator("body").innerText()).slice(0, 700)}`); }
     const camera = page.locator("video");
     await page.waitForFunction(() => document.querySelector("video")?.videoWidth > 0, null, { timeout: 15000 });
     await page.getByRole("button", { name: "Capture" }).click();
@@ -62,6 +63,20 @@ try {
     }, [...image1]);
     await page.locator('input[type="file"]').setInputFiles({ name: "synthetic-one.jpg", mimeType: "image/jpeg", buffer: image1 });
     await page.getByRole("button", { name: "Keep page" }).waitFor();
+    const layout = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]')?.getBoundingClientRect();
+      const image = document.querySelector('img[alt="Original capture"]')?.getBoundingClientRect();
+      const stage = document.querySelector('img[alt="Original capture"]')?.parentElement?.parentElement?.getBoundingClientRect();
+      const overlay = document.querySelector('img[alt="Original capture"]')?.nextElementSibling?.getBoundingClientRect();
+      return { dialogTop: dialog?.top, dialogBottom: dialog?.bottom, viewportHeight: innerHeight,
+        imageTop: image?.top, imageBottom: image?.bottom, stageTop: stage?.top, stageBottom: stage?.bottom,
+        imageWidth: image?.width, imageHeight: image?.height, overlayWidth: overlay?.width, overlayHeight: overlay?.height };
+    });
+    if (Math.abs(layout.dialogTop || 0) > 2 || (layout.dialogBottom || 0) > layout.viewportHeight + 2 ||
+      !layout.imageWidth || !layout.imageHeight || (layout.imageTop || 0) < (layout.stageTop || 0) ||
+      (layout.imageBottom || 0) > (layout.stageBottom || 0) ||
+      Math.abs((layout.overlayWidth || 0) - layout.imageWidth) > 2 ||
+      Math.abs((layout.overlayHeight || 0) - layout.imageHeight) > 2) throw new Error(`SCAN_PAGE_CLIPPED ${JSON.stringify(layout)}`);
     const corners = await page.getByRole("button", { name: /Corner \d/ }).count();
     const buttonLabels = await page.locator('button[aria-label]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')));
     if (corners !== 4) throw new Error(`CORNERS_MISSING: ${JSON.stringify(buttonLabels)}; ${pageErrors.join(' | ')}`);
@@ -76,6 +91,11 @@ try {
     await page.getByRole("button", { name: "Keep page" }).click();
     await camera.waitFor();
     await page.waitForFunction(() => document.querySelector("video")?.videoWidth > 0);
+    await page.getByRole("button", { name: "Page 1" }).click();
+    if (!await page.getByRole("img", { name: "Straightened scan" }).count()) throw new Error("CORRECTED_SCAN_PREVIEW_MISSING");
+    await page.getByRole("button", { name: "Edit corners" }).click();
+    await page.getByRole("button", { name: "Keep page" }).click();
+    await camera.waitFor();
     await page.locator('input[type="file"]').setInputFiles({ name: "synthetic-two.jpg", mimeType: "image/jpeg", buffer: image2 });
     await page.getByRole("button", { name: "Keep page" }).click();
     await page.getByRole("button", { name: "Move left" }).last().click();
@@ -106,7 +126,7 @@ try {
     cases.push({ mode: mobile ? "Chrome mobile emulation" : "Chrome desktop", camera: true, gallery: true,
       corners, cornerMoved: initialLeft !== movedLeft, multiPage: pdfPages, pdfBytes: pdfBytes.length,
       extracted, arabicClaim: { ocrPages: arabicClaim?.ocrPages, claimReferenceCorrect: arabicClaim?.claimNumber === "C/004/01/26/9999/00001" },
-      baselineMarkerMatches: baseline, rtl, processingMs: Date.now() - started, pageErrors });
+      baselineMarkerMatches: baseline, rtl, layout, processingMs: Date.now() - started, pageErrors });
     await context.close();
   }
   process.stdout.write(`${JSON.stringify(cases, null, 2)}\n`);

@@ -136,6 +136,7 @@ export default function DocumentExtractionReview({ result, file, onClose, onAppl
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="rounded bg-muted px-2 py-1">{result.documentType.replace(/_/g, " ")}</span>
               <span className="rounded bg-muted px-2 py-1">{result.method}</span>
+              <span className="rounded bg-muted px-2 py-1">{english ? "Pages read" : "الصفحات المقروءة"}: {result.pages.length}</span>
               <span>{english ? "File retained privately; nothing has been saved to a customer, vehicle or invoice." : "الملف محفوظ بشكل خاص؛ لم يُنشأ عميل أو مركبة أو فاتورة."}</span>
             </div>
             <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -157,6 +158,18 @@ export default function DocumentExtractionReview({ result, file, onClose, onAppl
                 ) : <p className="p-4 text-sm text-muted-foreground">{english ? "Preview unavailable" : "المعاينة غير متاحة"}</p>}
               </div>
               <div className="min-h-0 overflow-auto space-y-3 pr-1">
+                <div className="rounded-md border p-2 text-xs">
+                  <div className="mb-1 font-semibold">{english ? "Extracted text by page — compare with the original" : "النص المستخرج حسب الصفحة — قارنه بالأصل"}</div>
+                  {result.pages.map((page) => (
+                    <details key={page.number} className="border-t py-1 first:border-t-0">
+                      <summary className="cursor-pointer">
+                        {english ? "Page" : "صفحة"} {page.number} · {page.method === "ocr" ? "OCR" : english ? "PDF text" : "نص PDF"}
+                        {!page.text.trim() && <span className="ms-2 text-amber-700">{english ? "No text read" : "لم يُقرأ نص"}</span>}
+                      </summary>
+                      <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-2 font-sans leading-relaxed" dir="auto">{page.text || (english ? "No text extracted from this page." : "لم يُستخرج نص من هذه الصفحة.")}</pre>
+                    </details>
+                  ))}
+                </div>
                 {result.issues.map((issue, index) => (
                   <div key={`${issue.code}-${index}`} className={`flex gap-2 rounded-md border p-2 text-xs ${issue.severity === "error" ? "border-destructive/40 text-destructive" : "border-amber-400/40"}`}>
                     <AlertTriangle size={15} className="shrink-0" /><span>{documentIssueMessage(issue, english)}</span>

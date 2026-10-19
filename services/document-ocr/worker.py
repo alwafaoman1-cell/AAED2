@@ -27,7 +27,7 @@ MAX_ATTEMPTS = 3
 MAX_SECONDS = 150
 # Keep draining the previous queue while accepting parser-revision jobs.
 # The new version creates a separate immutable extraction for identical bytes.
-ENGINE_VERSIONS = ["1.0.0-worker", "1.0.1-worker"]
+ENGINE_VERSIONS = ["1.0.0-worker", "1.0.1-worker", "1.0.2-worker"]
 
 
 @dataclass(frozen=True)
@@ -180,11 +180,13 @@ def finalize(connection: psycopg.Connection, job: dict, result: dict):
         connection.execute("""
           update public.document_extractions
           set status = 'extracted', extraction_method = %s, raw_text = %s,
-              page_count = %s, processing_metrics = %s::jsonb, lease_token = null
+              page_count = %s, processing_metrics = %s::jsonb,
+              issues = %s::jsonb, lease_token = null
           where id = %s and tenant_id = %s and lease_token = %s
         """, ("ocr" if any(p["method"] == "ocr" for p in result["pages"]) else "native_pdf",
               "\n\f\n".join(p["text"] for p in result["pages"])[:1_000_000], len(result["pages"]),
               json.dumps({"ocrEngine": result["engine"], "ocrModelVersion": result["model_version"], "ocrMs": result["duration_ms"]}),
+              json.dumps(result.get("issues", [])),
               job["id"], job["tenant_id"], job["lease"]))
 
 

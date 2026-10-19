@@ -3,7 +3,7 @@ import { isDocumentWorkerEnabled } from "./config";
 import { DocumentFileError, sha256File, validateDocumentFile, type SupportedDocumentMime } from "./fileSafety";
 import { overallDocumentConfidence } from "./confidence";
 import { matchExtractedEntities } from "./matching";
-import { openDocumentPdf, extractNativePdfPage, renderPdfPageForOcr } from "./nativePdf";
+import { openDocumentPdf, extractNativePdfPage, hasPageSizedPdfImage, mergeNativeAndOcrPage, renderPdfPageForOcr } from "./nativePdf";
 import { createBrowserOcrProvider, imageDimensions, type OcrProvider } from "./ocr";
 import { normalizeCandidate, parseDocumentPages } from "./parsers";
 import { extractPurchaseLineItems } from "./lineItems";
@@ -122,7 +122,13 @@ export async function processDocumentLocally(
           const page = await pdf.getPage(pageNumber);
           const native = await extractNativePdfPage(page, pageNumber);
           nativeMs += elapsed(pageStart);
-          if (native.text.replace(/\s/g, "").length >= policy.nativeMinCharacters) {
+          const enoughNativeText = native.text.replace(/\s/g, "").length >= policy.nativeMinCharacters;
+          let pageSizedImage = false;
+          if (enoughNativeText) {
+            try { pageSizedImage = await hasPageSizedPdfImage(page); }
+            catch { pageSizedImage = true; } // OCR is safer than assuming a partially parsed PDF is complete.
+          }
+          if (enoughNativeText && !pageSizedImage) {
             pages.push(native);
           } else {
             const ocrStart = performance.now();
@@ -132,7 +138,7 @@ export async function processDocumentLocally(
               const worker = await getOcr();
               const recognized = await worker.recognize({ blob: rendered.blob, page: pageNumber, width: rendered.width, height: rendered.height },
                 (percent) => options.onProgress?.({ stage: "ocr", page: pageNumber, totalPages: pdf.numPages, percent }));
-              pages.push(recognized.text.trim() ? recognized : native);
+              pages.push(recognized.text.trim() ? mergeNativeAndOcrPage(native, recognized) : native);
               if (!recognized.text.trim()) issues.push({ code: "OCR_NO_TEXT", severity: "warning", message: `Page ${pageNumber} has no readable text.` });
             } catch {
               pages.push(native);
