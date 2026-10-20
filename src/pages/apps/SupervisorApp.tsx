@@ -129,7 +129,8 @@ export default function SupervisorApp() {
     () => workOrders.find((o) => o.id === partsOrderId) || null,
     [workOrders, partsOrderId]
   );
-  const IN_WORKSHOP = (o: WorkOrder) => !["تم التسليم", "مغلق"].includes(o.status);
+  const IN_WORKSHOP = (o: WorkOrder) => !["تم التسليم", "مغلق"].includes(o.status)
+    && !(o.temporaryInspectionReleaseId && o.vehiclePresenceStatus === "with_customer");
   // معيار موحّد للتصنيف: يعتبر "تأمين" إذا توفر أي من:
   // 1) اسم شركة تأمين  2) رقم مطالبة  3) نوع الخدمة = حادث
   // غير ذلك → ورشة (كاش). نفس المعيار يستخدم في الفلتر والعدّاد والشارة.

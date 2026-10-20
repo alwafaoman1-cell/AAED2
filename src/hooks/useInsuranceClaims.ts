@@ -68,6 +68,8 @@ export interface InsuranceClaim {
   work_started_at: string | null;
   work_completed_at: string | null;
   delivered_at: string | null;
+  vehicle_presence_status?: string | null;
+  temporary_inspection_release_id?: string | null;
   // joined
   customer?: { name: string; phone: string | null; customer_code?: string | null };
   vehicle?: {

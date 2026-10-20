@@ -1196,6 +1196,17 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "مسودة": "Draft",
   "جاهز للإرسال": "Ready to Send",
   "تم التعديل بعد الإرسال": "Modified After Sending",
+  "معاينة وخروج مؤقت": "Inspection and Temporary Release",
+  "حفظ المحضر في السحابة": "Save Report to Cloud",
+  "تأكيد عودة المركبة فعليًا إلى الورشة؟": "Confirm the Vehicle Has Returned to the Workshop?",
+  "تسجيل عودة المركبة": "Record Vehicle Return",
+  "بدء محضر خروج جديد": "Start Another Release Report",
+  "إنشاء رابط توقيع العميل": "Create Customer Signature Link",
+  "إلغاء الرابط وتعديل المحضر": "Revoke Link and Edit Report",
+  "تحديث حالة التوقيع": "Refresh Signature Status",
+  "تعذر تحديث صور المركبة": "Could Not Refresh Vehicle Photos",
+  "تعذر فتح المستند": "Could Not Open Document",
+  "عرض المستند": "View Document",
 };
 
 // UI literals are normalized before lookup because JSX formatting commonly

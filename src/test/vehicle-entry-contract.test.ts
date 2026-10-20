@@ -239,7 +239,7 @@ describe("vehicle entry receipt contract", () => {
     expect(mediaFunction).toContain('.eq("media_type", "image")');
     expect(mediaFunction).toContain('.is("deleted_at", null)');
     expect(mediaFunction).toContain("createSignedUrl(path, 900)");
-    expect(mediaFunction).toContain("path.startsWith(`${link.tenant_id}/vehicle-entry/${link.vehicle_entry_id}/`)");
+    expect(mediaFunction).toContain("path.startsWith(`${tenantId}/vehicle-entry/${entryId}/`)");
     expect(mediaFunction).not.toContain('"Access-Control-Allow-Origin": "*"');
     expect(config).toContain("[functions.vehicle-entry-signature-media]\nverify_jwt = false");
   });

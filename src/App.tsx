@@ -121,6 +121,7 @@ const EstimateDetail = lazy(() => import("./pages/estimates/EstimateDetail"));
 const VehicleEntryList = lazy(() => import("./pages/vehicle-entry/VehicleEntryList"));
 const VehicleEntryForm = lazy(() => import("./pages/vehicle-entry/VehicleEntryForm"));
 const VehicleEntryDetail = lazy(() => import("./pages/vehicle-entry/VehicleEntryDetail"));
+const VehicleInspectionReleasePage = lazy(() => import("./pages/vehicle-entry/VehicleInspectionReleasePage"));
 const ExecutiveDashboard = lazy(() => import("./pages/dashboard/ExecutiveDashboard"));
 const PrintTemplates = lazy(() => import("./pages/settings/PrintTemplates"));
 const PrintTemplateVariants = lazy(() => import("./pages/settings/PrintTemplateVariants"));
@@ -165,6 +166,7 @@ const SaasAdminConsole = lazy(() => import("./pages/admin/SaasAdminConsole"));
 const TenantFiles = lazy(() => import("./pages/admin/TenantFiles"));
 const WorkOrderSignPage = lazy(() => import("./pages/public/WorkOrderSignPage"));
 const VehicleEntrySignPage = lazy(() => import("./pages/public/VehicleEntrySignPage"));
+const VehicleInspectionReleaseSignPage = lazy(() => import("./pages/public/VehicleInspectionReleaseSignPage"));
 const accountingSetupPage = <K extends keyof typeof import("./pages/accounting/setup/AccountingSetupPages")>(name: K) =>
   lazy(() => import("./pages/accounting/setup/AccountingSetupPages").then((module) => ({ default: module[name] as ComponentType })));
 const AccountingSetupCenterPage = accountingSetupPage("AccountingSetupCenterPage");
@@ -276,6 +278,7 @@ const App = () => (
             <Route path="/c/approve/:token" element={<SupplementApprovalPage />} />
             <Route path="/sign/:token" element={<WorkOrderSignPage />} />
             <Route path="/vehicle-entry/sign/:token" element={<VehicleEntrySignPage />} />
+            <Route path="/vehicle-entry/inspection-release/sign/:token" element={<VehicleInspectionReleaseSignPage />} />
             <Route path="/pdf/:documentType/:id" element={<ProtectedRoute><PdfV2PreviewPage /></ProtectedRoute>} />
             <Route path="/pdf-preview/:documentType/:id" element={<ProtectedRoute><PdfV2PreviewPage /></ProtectedRoute>} />
             <Route path="/technician" element={<ProtectedRoute roles={["admin","manager","technician"]}><TechnicianApp /></ProtectedRoute>} />
@@ -336,6 +339,7 @@ const App = () => (
               <Route path="/vehicle-entry/new" element={<VehicleEntryForm />} />
               <Route path="/vehicle-entry/:id" element={<VehicleEntryDetail />} />
               <Route path="/vehicle-entry/:id/edit" element={<VehicleEntryForm />} />
+              <Route path="/vehicle-entry/:id/inspection-release" element={<ProtectedRoute roles={["admin","manager","insurance","supervisor"]}><VehicleInspectionReleasePage /></ProtectedRoute>} />
               <Route path="/accounting" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Accounting /></ProtectedRoute>} />
               <Route path="/accounting/expenses" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpensesManagementPage /></ProtectedRoute>} />
               <Route path="/accounting/expenses/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseFormPage /></ProtectedRoute>} />

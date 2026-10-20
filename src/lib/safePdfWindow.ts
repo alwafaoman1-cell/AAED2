@@ -31,7 +31,7 @@ export async function printPdfBlob(blob: Blob): Promise<void> {
   document.body.appendChild(frame);
 }
 
-export function openSanitizedPdfWindow(html: string): Window | null {
+export function openSanitizedPdfWindow(html: string, targetWindow?: Window | null): Window | null {
   const clean = DOMPurify.sanitize(html, {
     WHOLE_DOCUMENT: true,
     ADD_TAGS: ["style", "link", "meta"],
@@ -41,7 +41,7 @@ export function openSanitizedPdfWindow(html: string): Window | null {
   // isolate the about:blank popup immediately, which leaves the preview tab
   // empty because document.write() cannot populate it. We write sanitized HTML
   // first, then defensively detach the opener reference below.
-  const win = window.open("", "_blank");
+  const win = targetWindow || window.open("", "_blank");
   if (!win) return null;
   try {
     // Defensive: ensure no opener reference remains

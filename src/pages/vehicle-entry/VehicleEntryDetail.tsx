@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Copy, Edit, ExternalLink, FileText, Link2, MessageCircle, Printer, RefreshCw, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
+import { ArrowRight, ClipboardCheck, Copy, Edit, ExternalLink, FileText, Link2, MessageCircle, Printer, RefreshCw, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +44,8 @@ export default function VehicleEntryDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
+  const { i18n } = useTranslation();
   const [printing, setPrinting] = useState(false);
   const [customerSignatureLink, setCustomerSignatureLink] = useState<string | null>(null);
 
@@ -185,6 +187,7 @@ export default function VehicleEntryDetail() {
           )}
           <Button variant="outline" disabled={claimMutation.isPending} onClick={() => claimMutation.mutate()} className="gap-2"><Shield size={16} /> إنشاء/فتح مطالبة</Button>
           <Button variant="outline" disabled={workOrderMutation.isPending} onClick={() => workOrderMutation.mutate()} className="gap-2"><Wrench size={16} /> إنشاء/فتح أمر عمل</Button>
+          {hasRole("admin", "manager", "insurance", "supervisor") && <Button variant="outline" onClick={() => navigate(`/vehicle-entry/${entry.id}/inspection-release`)} className="gap-2"><ClipboardCheck size={16} /> {i18n.language.startsWith("ar") ? "معاينة وخروج مؤقت" : "Inspection & Temporary Release"}</Button>}
           <Button onClick={() => navigate(`/vehicle-entry/${entry.id}/edit`)} className="gap-2"><Edit size={16} /> تعديل</Button>
         </div>
       </div>

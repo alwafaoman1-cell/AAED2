@@ -19,6 +19,9 @@ export function getClaimVehicleLocation(claim: InsuranceClaim): ClaimVehicleLoca
   if (claim.status === "paid") return "paid_archive";
   if (claim.status === "cancelled" || claim.status === "rejected") return "cancelled";
   if (claim.delivered_at) return "delivered";
+  // A signed inspection release is not a final delivery. Keep the historical
+  // arrival date, but show the vehicle with its recipient until it re-enters.
+  if (claim.temporary_inspection_release_id && claim.vehicle_presence_status === "with_customer") return "with_customer";
   if (claim.workshop_arrival_date) return "in_workshop";
   return "with_customer";
 }

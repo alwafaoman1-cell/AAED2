@@ -77,6 +77,8 @@ export interface WorkOrder {
   trackingExpiresAt?: string;
   archivedAt?: string;
   deletedAt?: string;
+  vehiclePresenceStatus?: string;
+  temporaryInspectionReleaseId?: string;
   customer: string;
   phone: string;
   plate: string;
@@ -729,6 +731,8 @@ function mapCloudRow(
     trackingExpiresAt: r.tracking_expires_at || undefined,
     archivedAt: r.archived_at || undefined,
     deletedAt: r.deleted_at || undefined,
+    vehiclePresenceStatus: r.vehicle_presence_status || undefined,
+    temporaryInspectionReleaseId: r.temporary_inspection_release_id || undefined,
     customer: c?.name || "",
     phone: c?.phone || "",
     plate: v?.plate || "",
