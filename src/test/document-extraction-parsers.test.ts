@@ -255,6 +255,119 @@ describe("TEMO deterministic document extraction", () => {
     expect(selected.owner_phone).toBe(false);
   });
 
+  it("reads an insurer repair order as an LPO without mixing approval amounts with an invoice", () => {
+    const result = parseDocumentPages([page([
+      "EXAMPLE INSURANCE COMPANY (S.A.O.G)", "MOTOR VEHICLE REPAIR ORDER",
+      "LPO No.", "90783", "Print Date", "17/09/2026", "Issue Date", "14/09/2026",
+      "Ref. Our Claim No", ": 103/0502/2026/C/001669", "Policy No", ": 103/0502/2026/P/034138",
+      "Accident Date", ": 11/09/2026", "Owners", "SAMPLE PERSON",
+      "Cont.No.", ":99601817", "Regn.No.: DD/94260", "Make", "BYD", "Model", "Qin Pro", "Year", "2025",
+      "Spare Parts", "1,200.000", "Labour Charges", "250.000", "Total", "1,450.000",
+    ].join("\n"), "ocr", 0.92)], "insurance_claim");
+    expect(result.type).toBe("lpo");
+    expect(result.issues.some((issue) => issue.code === "DOCUMENT_TYPE_MISMATCH")).toBe(false);
+    expect(result.fields.lpo_number?.normalizedValue).toBe("90783");
+    expect(result.fields.claim_number?.normalizedValue).toBe("103/0502/2026/C/001669");
+    expect(result.fields.policy_number?.normalizedValue).toBe("103/0502/2026/P/034138");
+    expect(result.fields.accident_date?.normalizedValue).toBe("2026-09-11");
+    expect(result.fields.lpo_issue_date?.normalizedValue).toBe("2026-09-14");
+    expect(result.fields.owner_name?.normalizedValue).toBe("SAMPLE PERSON");
+    expect(result.fields.owner_phone?.normalizedValue).toBe("99601817");
+    expect(result.fields.plate_number?.normalizedValue).toBe("94260");
+    expect(result.fields.plate_letters?.normalizedValue).toBe("DD");
+    expect(result.fields.make?.normalizedValue).toBe("BYD");
+    expect(result.fields.model?.normalizedValue).toBe("Qin Pro");
+    expect(result.fields.approved_amount?.normalizedValue).toBe("1450.000");
+    expect(result.fields.lpo_parts_amount?.normalizedValue).toBe("1200.000");
+    expect(result.fields.lpo_labour_amount?.normalizedValue).toBe("250.000");
+    expect(result.fields.invoice_number).toBeUndefined();
+    const selected = defaultReviewSelection({ status: "needs_review", fields: result.fields, issues: result.issues } as DocumentExtractionResult);
+    expect(selected.approved_amount).toBe(false);
+    expect(selected.lpo_number).toBe(false);
+  });
+
+  it("reads a filled gate pass but does not borrow an unlabeled handwritten phone or a form date", () => {
+    const result = parseDocumentPages([page([
+      "77123306", "EXAMPLE INSURANCE COMPANY", "Gate Pass To Workshop",
+      "Claim No : 706/0502/2026/C/000072", "Date of Accident : 04/10/2026",
+      "Customer Name", "SAMPLE CUSTOMER", "Customer Contact", "91329999",
+      "Vehicle Type", "SUV", "Registration No.", "DD 44872", "Make /Model", "BYD/Song Plus",
+      "Delivery Date:", "", "Date", "06/10/2026",
+    ].join("\n"), "ocr", 0.88)], "insurance_claim");
+    expect(result.type).toBe("insurance_claim");
+    expect(result.fields.claim_number?.normalizedValue).toBe("706/0502/2026/C/000072");
+    expect(result.fields.owner_name?.normalizedValue).toBe("SAMPLE CUSTOMER");
+    expect(result.fields.owner_phone?.normalizedValue).toBe("91329999");
+    expect(result.fields.plate_number?.normalizedValue).toBe("44872");
+    expect(result.fields.plate_letters?.normalizedValue).toBe("DD");
+    expect(result.fields.make?.normalizedValue).toBe("BYD");
+    expect(result.fields.model?.normalizedValue).toBe("Song Plus");
+    expect(result.fields.accident_date?.normalizedValue).toBe("2026-10-04");
+    expect(result.fields.approved_amount).toBeUndefined();
+  });
+
+  it("does not turn an OCR question mark in a scanned contact number into a valid phone", () => {
+    const parsed = parseDocumentPages([page([
+      "Repair Gate Pass For Accident vehicle", "Claim No / Policy No. C/004/16/26/2501/00140",
+      "Contact No", "9956 6626?", "Date of Intimation", "18/10/2026", "Date of Loss", "16/10/2026",
+    ].join("\n"), "ocr", 0.9)], "insurance_claim");
+    expect(parsed.fields.owner_phone?.normalizedValue).toBe("9956 6626?");
+    expect(parsed.fields.owner_phone?.validation).toBe("warning");
+    expect(parsed.fields.accident_date?.normalizedValue).toBe("2026-10-16");
+  });
+
+  it("keeps LPO identity cells on their own OCR row when other printed values share it", () => {
+    const rows: Array<[string, number, number]> = [
+      ["MOTOR VEHICLE REPAIR ORDER", 337, 116], ["LPO No.", 68, 134], ["90783", 168, 136],
+      ["Print Date 17/09/2026", 623, 137], ["Issue Date 14/09/2026", 625, 163],
+      ["Ref. Our Claim No", 286, 254], [": 103/0502/2026/C/001669", 424, 252],
+      ["Policy No", 285, 280], [": 103/0502/2026/P/034138", 436, 281],
+      ["Accident Date", 285, 306], [": 11/09/2026", 436, 304],
+      ["Owners", 70, 408], ["SAMPLE PERSON", 158, 405],
+      ["Cont.No.", 70, 435], [":99601817", 161, 436],
+      ["Make", 454, 433], ["BYD", 571, 434], ["Regn.No.: DD/94260", 68, 458],
+      ["Model", 455, 460], ["Qin Pro", 562, 461], ["Year", 456, 487], ["2025", 569, 488],
+      ["Spare Parts", 71, 571], ["1,200.000", 327, 573],
+      ["Labour Charges", 71, 595], ["250.000", 325, 597],
+      ["Total", 72, 646], ["1,450.000", 325, 648],
+    ];
+    const result = parseDocumentPages([{
+      number: 1, method: "ocr", confidence: 0.93, width: 932, height: 1200,
+      text: ["EXAMPLE INSURANCE COMPANY", ...rows.map(([value]) => value)].join("\n"),
+      segments: rows.map(([value, x, y]) => ({ text: value, box: { x, y, width: value.length * 7, height: 22 } })),
+    }], "insurance_claim");
+    expect(result.type).toBe("lpo");
+    expect(result.fields.lpo_number?.normalizedValue).toBe("90783");
+    expect(result.fields.policy_number?.normalizedValue).toBe("103/0502/2026/P/034138");
+    expect(result.fields.make?.normalizedValue).toBe("BYD");
+    expect(result.fields.model?.normalizedValue).toBe("Qin Pro");
+    expect(result.fields.approved_amount?.normalizedValue).toBe("1450.000");
+    expect(normalizeCandidate("policy_number", "103/0502/2026/C/001669").valid).toBe(false);
+    expect(normalizeCandidate("claim_number", "103/0502/2026/P/034138").valid).toBe(false);
+    expect(normalizeCandidate("lpo_number", "Print Date 17/09/2026").valid).toBe(false);
+  });
+
+  it("reads the combined make/model and year from the correct printed row of a scanned gate pass", () => {
+    const rows: Array<[string, number, number]> = [
+      ["Repair Gate Pass For Accident vehicle", 284, 227],
+      ["Claim No / Policy No.", 122, 299], ["C/004/16/26/2501/00140", 403, 299],
+      ["Vehicle Make & Model", 123, 441], ["Toyota - Camry", 401, 435],
+      ["Year/: 2019", 780, 437], ["Vehicle No", 120, 479], ["R W/2525", 403, 475],
+      ["Date of Intimation", 122, 514], ["18/10/2026", 402, 514],
+      ["Date of Loss", 123, 553], ["16/10/2026", 402, 548],
+    ];
+    const result = parseDocumentPages([{
+      number: 1, method: "ocr", confidence: 0.88, width: 1488, height: 2105,
+      text: rows.map(([value]) => value).join("\n"),
+      segments: rows.map(([value, x, y]) => ({ text: value, box: { x, y, width: value.length * 8, height: 26 } })),
+    }], "insurance_claim");
+    expect(result.fields.make?.normalizedValue).toBe("Toyota");
+    expect(result.fields.model?.normalizedValue).toBe("Camry");
+    expect(result.fields.year?.normalizedValue).toBe("2019");
+    expect(result.fields.plate_number?.normalizedValue).toBe("2525");
+    expect(result.fields.accident_date?.normalizedValue).toBe("2026-10-16");
+  });
+
   it("does not alter a supplier invoice to force VAT arithmetic", () => {
     const base = ["Tax Invoice", "Supplier Name: Example Parts LLC", "VATIN: OM123456789", "Invoice No: SUP-2026-44", "Invoice Date: 18/08/2026", "Subtotal: 100.000 OMR", "VAT Amount: 5.000 OMR"];
     const result = parseDocumentPages([page([...base, "Grand Total: 105.000 OMR"].join("\n"))]);

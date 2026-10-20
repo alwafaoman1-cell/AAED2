@@ -194,7 +194,7 @@ class TesseractProvider:
 
 class PaddleProvider:
     name = "paddleocr"
-    version = "PP-OCRv5-en-first-ar-fallback"
+    version = "PP-OCRv5-en-insurer-forms-ar-fallback"
 
     def __init__(self):
         from paddleocr import PaddleOCR
@@ -312,16 +312,44 @@ class PaddleProvider:
         # labeled values on their own physical rows before skipping fallback.
         return confidence >= .70 and cls._english_claim_evidence(segments) == 5
 
+    @classmethod
+    def _english_lpo_complete(cls, segments: list[dict[str, Any]], confidence: float) -> bool:
+        """Do not OCR a clearly filled English repair order again in Arabic.
+
+        All evidence is attached to its own printed label/row. In particular,
+        the print/issue date cannot stand in for the accident date and the
+        insurer's footer total cannot become the approved repair total.
+        """
+        text = "\n".join(segment["text"] for segment in segments)
+        if confidence < .70 or not re.search(r"motor\s+vehicle\s+repair\s+order", text, re.I):
+            return False
+        reference = r"\b\d{2,4}/\d{3,5}/\d{4}/C/\d{4,}\b"
+        date = r"\b\d{1,2}/\d{1,2}/\d{4}\b"
+        plate = r"\b(?:[A-Z]{1,3}\s*){1,2}[/ ]\s*\d{2,7}\b"
+        person = r"\b[A-Z][A-Z'.-]*(?:\s+[A-Z][A-Z'.-]*){1,}\b"
+        money = r"\b\d{1,3}(?:,\d{3})*\.\d{3}\b"
+        complete = (
+            cls._labeled_value(segments, r"\bLPO\s*No\.?", r"\b\d{3,10}\b"),
+            cls._labeled_value(segments, r"(?:ref\.\s*our\s+)?claim\s*no\.?", reference),
+            cls._labeled_value(segments, r"accident\s+date", date),
+            cls._labeled_value(segments, r"\bowners\b|owner\s+name", person),
+            cls._labeled_value(segments, r"regn\.?\s*no\.?|registration\s+no\.?(?:umber)?", plate),
+            cls._labeled_value(segments, r"^make\b", r"\b[A-Z][A-Z0-9-]{1,20}\b"),
+            cls._labeled_value(segments, r"^model\b", r"\b[A-Z][A-Za-z0-9 -]{1,30}\b"),
+            cls._labeled_value(segments, r"^total\b", money),
+        )
+        return all(complete)
+
     def complete_document(self, segments: list[dict[str, Any]], confidence: float) -> bool:
         # A short English gate pass can have every critical field while still
         # missing the generic 500-character threshold. Do not OCR the entire
         # page again just to read boilerplate; review still guards each field.
-        return self._english_claim_complete(segments, confidence)
+        return PaddleProvider._english_lpo_complete(segments, confidence) or self._english_claim_complete(segments, confidence)
 
     def should_stop_after_variant(self, text: str, segments: list[dict[str, Any]],
                                   confidence: float, height: int) -> bool:
         claim_like = bool(re.search(r"claim\s*(?:no\.?|number)|repair\s+gate\s+pass|"
-                                    r"gate\s+pass\s+to|رقم\s+المطالبة", text, re.I))
+                                    r"gate\s+pass\s+to|motor\s+vehicle\s+repair\s+order|رقم\s+المطالبة", text, re.I))
         # A long page of clear legal text must not hide a missing plate/date.
         # On non-claim documents keep the pre-existing generic completeness gate.
         return self.complete_document(segments, confidence) if claim_like else \
@@ -338,7 +366,7 @@ class PaddleProvider:
         specs = (
             (r"claim\s*(?:no\.?|number|reference)", r"\b(?:C/[A-Z0-9]+(?:/[A-Z0-9]+){3,}|\d{2,4}/\d{3,5}/\d{4}/C/\d{4,})\b"),
             (r"date\s+of\s+(?:loss|accident)|incident\s+date", r"\b\d{1,2}/\d{1,2}/\d{4}\b"),
-            (r"vehicle\s+no\.?|registration\s+(?:no\.?|number)|plate\s+(?:no\.?|number)", r"\b(?:[A-Z]{1,3}\s*){1,2}[/ ]\s*\d{2,7}\b"),
+            (r"vehicle\s+no\.?|registration\s+(?:no\.?|number)|regn\.?\s*no\.?|plate\s+(?:no\.?|number)", r"\b(?:[A-Z]{1,3}\s*){1,2}[/ ]\s*\d{2,7}\b"),
         )
         attempts = 0
         for label, value in specs:
@@ -382,10 +410,10 @@ class PaddleProvider:
         if not getattr(self, "_english_first", False):
             return self._recognize_arabic(image)
         english_segments = self._segments(self._english_pipeline.predict(image))
-        if not self._english_claim_complete(english_segments, self._result(english_segments)[2]):
+        if not self.complete_document(english_segments, self._result(english_segments)[2]):
             english_segments = self._recover_english_rows(image, english_segments)
         english = self._result(english_segments)
-        if self._english_claim_complete(english_segments, english[2]):
+        if self.complete_document(english_segments, english[2]):
             return english
         self.warm_arabic_model()
         arabic = self._recognize_arabic(image, english_segments)

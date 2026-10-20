@@ -31,9 +31,9 @@ const ALLOWED_KEYS: Record<ExtractSchema, Readonly<Record<string, string>>> = {
 // Require an explicit click for identifiers, dates and money, regardless of OCR score.
 const OCR_CRITICAL_KEYS = new Set([
   "vin", "plate_number", "plate_letters", "year", "claim_number", "lpo_number", "invoice_number",
-  "supplier_vatin", "owner_phone", "accident_date", "approval_date", "invoice_date",
+  "supplier_vatin", "owner_phone", "accident_date", "approval_date", "invoice_date", "lpo_issue_date", "policy_number",
   "registration_date", "registration_expiry", "subtotal", "vat", "discount", "total",
-  "approved_amount", "excess",
+  "approved_amount", "excess", "lpo_parts_amount", "lpo_labour_amount",
 ]);
 
 export function buildAutofillPayload(

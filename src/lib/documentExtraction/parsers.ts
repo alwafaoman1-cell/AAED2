@@ -23,7 +23,7 @@ const VEHICLE_RULES: FieldRule[] = [
   { key: "model", labels: ["Model", "الموديل", "الطراز"] },
   { key: "year", labels: ["Model Year", "Year", "سنة الصنع", "سنة الموديل"] },
   { key: "owner_name", labels: ["Owner Name", "Vehicle Owner", "اسم المالك", "المالك"] },
-  { key: "owner_phone", labels: ["Contact No", "Mobile", "Phone", "رقم التواصل", "هاتف المالك", "رقم الهاتف"] },
+  { key: "owner_phone", labels: ["Contact No", "Cont.No.", "Cont. No.", "Mobile", "Phone", "رقم التواصل", "هاتف المالك", "رقم الهاتف"] },
   { key: "registration_expiry", labels: ["Expiry Date", "Registration Expiry", "تاريخ انتهاء الملكية", "تاريخ الانتهاء"] },
   { key: "registration_date", labels: ["Registration Date", "تاريخ التسجيل"] },
   { key: "color", labels: ["Color", "Colour", "اللون"] },
@@ -31,12 +31,12 @@ const VEHICLE_RULES: FieldRule[] = [
 ];
 
 const INSURANCE_RULES: FieldRule[] = [
-  { key: "claim_number", labels: ["Claim No / Policy No.", "Claim No / Policy No", "Claim No", "Claim Number", "Claim Reference", "رقم المطالبة", "رقم المطالبة التأمينية", "رقم البلاغ", "رقم المرجع"], fallback: /\b(C\/[A-Z0-9/-]{8,})\b/i },
+  { key: "claim_number", labels: ["Claim No / Policy No.", "Claim No / Policy No", "Ref. Our Claim No", "Our Claim No", "Claim No", "Claim Number", "Claim Reference", "رقم المطالبة", "رقم المطالبة التأمينية", "رقم البلاغ", "رقم المرجع"], fallback: /\b(C\/[A-Z0-9/-]{8,})\b/i },
   { key: "insurance_company", labels: ["Insurance Company", "Insurer", "شركة التأمين", "شركة التامين"] },
   { key: "insured_name", labels: ["Insured Name", "Policy Holder", "اسم المؤمن له", "المؤمن له"] },
   { key: "accident_date", labels: ["Accident Date", "Date of Accident", "Incident Date", "Date of Loss", "تاريخ الحادث"] },
   { key: "approval_date", labels: ["Approval Date", "تاريخ الموافقة", "تاريخ الاعتماد"] },
-  { key: "lpo_number", labels: ["LPO No", "LPO Number", "Repair Order No", "رقم أمر الإصلاح", "رقم الموافقة"] },
+  { key: "lpo_number", labels: ["LPO No.", "LPO No", "LPO Number", "Repair Order No", "رقم أمر الإصلاح", "رقم الموافقة"] },
   { key: "estimate_number", labels: ["Estimate No", "Survey No", "رقم التقدير", "رقم المعاينة"] },
   { key: "approved_amount", labels: ["Approved Amount", "Approval Amount", "المبلغ المعتمد", "المبلغ الموافق عليه"] },
   { key: "excess", labels: ["Excess", "Deductible", "التحمل", "المبلغ المستقطع"] },
@@ -48,14 +48,28 @@ const INSURANCE_RULES: FieldRule[] = [
 const CLAIM_VEHICLE_RULES = VEHICLE_RULES
   .filter((rule) => !["registration_date", "registration_expiry", "engine_number"].includes(rule.key))
   .map((rule) => rule.key === "plate_number"
-    ? { ...rule, labels: [...rule.labels, "Vehicle No", "Registration No", "Registration Number"] }
+    ? { ...rule, labels: [...rule.labels, "Vehicle No", "Registration No.", "Registration No", "Registration Number", "Regn.No.", "Regn. No.", "Regn.No", "Regn. No"] }
     : rule.key === "owner_name"
-      ? { ...rule, labels: [...rule.labels, "Name of Driver, Owner of the vehicle", "Name of Driver, Owner of", "Customer Name"] }
+      ? { ...rule, labels: [...rule.labels, "Name of Driver, Owner of the vehicle", "Name of Driver, Owner of", "Customer Name", "Owners"] }
     : rule.key === "owner_phone"
       ? { ...rule, labels: [...rule.labels, "Customer Contact", "Customer Phone"] }
     : rule.key === "year"
-      ? { ...rule, labels: [...rule.labels, "السنة"] }
+      ? { ...rule, labels: [...rule.labels, "Year/:", "Year / السنة", "السنة"] }
     : rule);
+
+// An insurer repair order is an approval, not a supplier invoice. Its printed
+// Total is the approved repair amount; parts and labour are review-only source
+// details, never silently converted into a customer invoice or expense.
+const LPO_RULES: FieldRule[] = [
+  ...INSURANCE_RULES.map((rule) => rule.key === "approved_amount"
+    ? { ...rule, labels: [...rule.labels, "Total Repair Costs", "Total"] }
+    : rule),
+  { key: "policy_number", labels: ["Policy No.", "Policy No", "Policy Number"] },
+  { key: "lpo_issue_date", labels: ["Issue Date"] },
+  { key: "lpo_parts_amount", labels: ["Spare Parts"] },
+  { key: "lpo_labour_amount", labels: ["Labour Charges", "Labor Charges"] },
+  ...CLAIM_VEHICLE_RULES,
+];
 
 const INVOICE_RULES: FieldRule[] = [
   { key: "supplier_name", labels: ["Supplier Name", "Vendor Name", "اسم المورد", "المورد"] },
@@ -74,8 +88,8 @@ const INVOICE_RULES: FieldRule[] = [
 const TYPE_CLUES: Array<{ type: DocumentType; clues: Array<[RegExp, number]> }> = [
   { type: "vehicle_registration", clues: [[/vehicle\s+registration|registration\s+card|ملكية\s*(?:المركبة|السيارة)|رخصة\s*تسيير/i, 4], [/registration\s+expiry|تاريخ\s+انتهاء\s+الملكية/i, 2], [/plate\s*(?:no|number)|رقم\s+اللوحة/i, 1]] },
   { type: "insurance_approval", clues: [[/insurance\s+approval|approval\s+letter|خطاب\s+الموافقة|اعتماد\s+المطالبة/i, 4], [/approved\s+amount|المبلغ\s+المعتمد/i, 2], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 1]] },
-  { type: "lpo", clues: [[/\bLPO\b|local\s+purchase\s+order|أمر\s+الإصلاح/i, 4], [/repair\s+order/i, 1]] },
-  { type: "insurance_claim", clues: [[/insurance\s+claim|مطالبة\s+تأمين|مطالبة\s+التأمين/i, 4], [/repair\s+gate\s+pass|تصريح\s+المرور\s+لتصليح\s+المركبات/i, 4], [/\bC\/[A-Z0-9/-]{8,}\b/i, 4], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 2], [/insurance\s+company|شركة\s+التأمين/i, 1]] },
+  { type: "lpo", clues: [[/\bLPO\b|local\s+purchase\s+order|أمر\s+الإصلاح/i, 4], [/motor\s+vehicle\s+repair\s+order/i, 4], [/repair\s+order/i, 1]] },
+  { type: "insurance_claim", clues: [[/insurance\s+claim|مطالبة\s+تأمين|مطالبة\s+التأمين/i, 4], [/repair\s+gate\s+pass|gate\s+pass\s+to|تصريح\s+المرور\s+لتصليح\s+المركبات/i, 4], [/\bC\/[A-Z0-9/-]{8,}\b/i, 4], [/claim\s*(?:no|number)|رقم\s+المطالبة/i, 2], [/insurance\s+company|شركة\s+التأمين/i, 1]] },
   { type: "damage_report", clues: [[/damage\s+report|تقرير\s+الأضرار|تقرير\s+الحادث/i, 4], [/damage\s+details|تفاصيل\s+الأضرار/i, 1]] },
   { type: "customer_id", clues: [[/identity\s+card|resident\s+card|بطاقة\s+الشخصية|البطاقة\s+المدنية/i, 4]] },
   { type: "supplier_invoice", clues: [[/supplier\s+invoice|فاتورة\s+مورد|tax\s+invoice|فاتورة\s+ضريبية/i, 3], [/supplier|المورد/i, 1], [/VATIN|الرقم\s+الضريبي/i, 1]] },
@@ -188,6 +202,27 @@ function plausibleFieldEvidence(key: string, raw: string): boolean {
 function findCombinedMakeModel(pages: DocumentPage[]): { make: Candidate; model: Candidate } | null {
   const combinedLabels = ["Vehicle Make & Model", "Make & Model", "Make / Model"];
   for (const page of pages) {
+    if (page.segments?.length && page.width) {
+      for (const labelSegment of page.segments.filter((segment) => segment.box)) {
+        if (!combinedLabels.some((label) => normalizeArabicForComparison(labelSegment.text) === normalizeArabicForComparison(label))) continue;
+        const labelBox = labelSegment.box!;
+        const center = labelBox.y + labelBox.height / 2;
+        const sameRow = page.segments.filter((segment) => segment !== labelSegment && segment.box &&
+          segment.box.x > labelBox.x + labelBox.width * 0.7 &&
+          segment.box.x - labelBox.x < page.width! * 0.5 &&
+          Math.abs(segment.box.y + segment.box.height / 2 - center) < Math.max(segment.box.height, labelBox.height) * 0.65)
+          .sort((a, b) => a.box!.x - b.box!.x);
+        for (const source of sameRow) {
+          const parts = source.text.trim().match(/^(.{2,40}?)\s*[-–—/]\s*(.{2,40})$/u);
+          if (!parts || !normalizeCandidate("make", parts[1]).valid || !normalizeCandidate("model", parts[2]).valid) continue;
+          const candidate = { page, box: source.box, evidence: ["label", "layout", "combined_vehicle_name"] };
+          return {
+            make: { ...candidate, key: "make", raw: parts[1].trim() },
+            model: { ...candidate, key: "model", raw: parts[2].trim() },
+          };
+        }
+      }
+    }
     const lines = page.text.split(/\r?\n/).map((line) => removeBidiControls(line).trim()).filter(Boolean);
     for (let index = 0; index < lines.length; index++) {
       for (const label of combinedLabels) {
@@ -235,7 +270,7 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
         const exactLabel = normalizeArabicForComparison(lines[index]) === normalizeArabicForComparison(label);
         const inline = valueNearLabel(lines[index], label);
         const next = exactLabel && lines[index + 1] && !containsAnotherFieldLabel(lines[index + 1])
-          ? lines[index + 1] : "";
+          ? lines[index + 1].replace(/^\s*[:：]\s*/u, "") : "";
         const raw = (inline || next || "").trim();
         if (!raw || raw.length > 160) continue;
         if (!inline && !exactLabel) continue;
@@ -288,7 +323,7 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
       // Dense gate-pass tables put the model year immediately above the plate.
       // A loose vertical radius can incorrectly accept that year as a valid
       // plate number. Numeric identity cells must overlap the label's row.
-      const rowTolerance = ["plate_number", "year", "owner_name"].includes(rule.key) ? 0.65 : 1.4;
+      const rowTolerance = ["plate_number", "year", "owner_name"].includes(rule.key) ? 0.65 : 0.85;
       const neighbors = page.segments.filter((segment) => segment !== labelSegment && segment.box &&
         !containsAnotherFieldLabel(segment.text) &&
         !continuesFieldLabel(rule, matchedLabel, segment.text.trim()) &&
@@ -297,11 +332,12 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
       neighbors.sort((a, b) => Math.abs(a.box!.x - labelSegment.box!.x) - Math.abs(b.box!.x - labelSegment.box!.x));
       const nearest = neighbors[0];
       if (nearest && nearest.text.trim().length <= 160) {
-        const neighboringDigits = normalizeDigits(nearest.text.trim());
+        const neighboringValue = nearest.text.trim().replace(/^[:：]\s*/u, "");
+        const neighboringDigits = normalizeDigits(neighboringValue);
         const inlineDigits = normalizeDigits(labelSegment.text).match(/\d{1,7}$/)?.[0] || "";
         const distinctPlateValue = rule.key === "plate_number" && /^\d{2,7}$/.test(neighboringDigits)
           && neighboringDigits.length > inlineDigits.length;
-        addCandidate({ key: rule.key, raw: nearest.text.trim(), page, box: nearest.box,
+        addCandidate({ key: rule.key, raw: neighboringValue, page, box: nearest.box,
           evidence: [...labelEvidence(rule, matchedLabel, true), ...(distinctPlateValue ? ["adjacent_value"] : [])] });
       }
     }
@@ -380,7 +416,7 @@ export function normalizeCandidate(key: string, raw: string): { value: string; v
     const date = normalizeDate(value);
     return { value: date || value, valid: !!date, reason: "DATE_INVALID" };
   }
-  if (["subtotal", "vat", "total", "discount", "approved_amount", "excess"].includes(key)) {
+  if (["subtotal", "vat", "total", "discount", "approved_amount", "excess", "lpo_parts_amount", "lpo_labour_amount"].includes(key)) {
     const milli = parseMoneyMilli(value);
     return { value: milli === null ? value : (milli / 1000).toFixed(3), valid: milli !== null, reason: "AMOUNT_INVALID" };
   }
@@ -397,17 +433,32 @@ export function normalizeCandidate(key: string, raw: string): { value: string; v
     const plateReference = /^[A-Za-z\u0600-\u06ff]{1,3}(?:\s+[A-Za-z\u0600-\u06ff]{1,3})?\s*\/\s*\d{2,7}$/u.test(value);
     return { value, valid: !plateReference && value.length >= 2 && value.length <= 60 && /[A-Za-z\u0600-\u06ff]/u.test(value), reason: "VEHICLE_NAME_INVALID" };
   }
-  if (key === "owner_phone") return { value: value.replace(/[^\d+]/g, ""), valid: /^\+?\d{8,15}$/.test(value.replace(/[^\d+]/g, "")), reason: "PHONE_INVALID" };
+  if (key === "owner_phone") {
+    const compact = value.replace(/[\s-]/g, "");
+    // OCR often reads an uncertain final digit as '?' or merges two phone
+    // numbers. Stripping that uncertainty would create a plausible but false
+    // contact number, so leave the raw evidence visible for manual review.
+    return { value: /^\+?[\d\s-]+$/.test(value) ? compact : value,
+      valid: /^\+?[\d\s-]+$/.test(value) && /^\+?\d{8,15}$/.test(compact), reason: "PHONE_INVALID" };
+  }
   if (key === "claim_number") return { value, valid: value.length >= 4 && value.length <= 80 && /\d/.test(value) && !/[\n\r]/.test(value) &&
-    !/\b(?:policy\s+no|claim\s+no|date\s+of)\b/i.test(value), reason: "CLAIM_NUMBER_INVALID" };
-  if (key === "invoice_number" || key === "lpo_number") return { value, valid: value.length >= 3 && value.length <= 80, reason: "REFERENCE_INVALID" };
+    !/\b(?:policy\s+no|claim\s+no|date\s+of)\b/i.test(value) &&
+    !/^\d+\/\d+\/\d{4}\/P\/\d+$/i.test(value), reason: "CLAIM_NUMBER_INVALID" };
+  if (key === "policy_number") return { value, valid: value.length >= 5 && value.length <= 80 && /\d/.test(value) &&
+    !/\b(?:claim\s+no|policy\s+no|date\s+of)\b/i.test(value) &&
+    !/^\d+\/\d+\/\d{4}\/C\/\d+$/i.test(value), reason: "POLICY_NUMBER_INVALID" };
+  if (key === "lpo_number") return { value, valid: value.length >= 3 && value.length <= 80 && /\d/.test(value) &&
+    !/\b(?:print\s+date|issue\s+date|claim\s+no|policy\s+no)\b/i.test(value) &&
+    !/\b\d{1,2}\/\d{1,2}\/\d{4}\b/.test(value), reason: "REFERENCE_INVALID" };
+  if (key === "invoice_number") return { value, valid: value.length >= 3 && value.length <= 80, reason: "REFERENCE_INVALID" };
   if (key === "supplier_vatin") return { value: value.replace(/\s/g, "").toUpperCase(), valid: /^[A-Z0-9-]{8,30}$/i.test(value.replace(/\s/g, "")), reason: "VATIN_INVALID" };
   return { value, valid: value.length > 0 };
 }
 
 function rulesForDocumentType(type?: DocumentType): FieldRule[] {
   if (type === "vehicle_registration") return VEHICLE_RULES;
-  if (["insurance_claim", "insurance_approval", "lpo", "damage_report"].includes(type || "")) {
+  if (type === "lpo") return LPO_RULES;
+  if (["insurance_claim", "insurance_approval", "damage_report"].includes(type || "")) {
     return [...INSURANCE_RULES, ...CLAIM_VEHICLE_RULES];
   }
   if (["supplier_invoice", "purchase_invoice", "expense_receipt", "invoice", "quotation"].includes(type || "")) {
@@ -430,7 +481,8 @@ export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentTyp
   // relevant to the form being reviewed. The mismatch still deselects every
   // candidate until the user explicitly verifies it.
   const expectedRules = rulesForDocumentType(expected);
-  const rules = expectedRules.length ? expectedRules : rulesForDocumentType(detected.type);
+  const rules = detected.type === "lpo" && ["insurance_claim", "insurance_approval", "lpo"].includes(expected || "")
+    ? LPO_RULES : expectedRules.length ? expectedRules : rulesForDocumentType(detected.type);
   const fields: Record<string, ExtractedField> = {};
   const issues: ExtractionIssue[] = [];
   const combinedVehicleName = rules.some((rule) => rule.key === "make") ? findCombinedMakeModel(pages) : null;

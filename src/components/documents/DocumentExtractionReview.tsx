@@ -29,6 +29,8 @@ const FIELD_LABELS: Record<string, [string, string]> = {
   owner_phone: ["هاتف المالك", "Owner phone"], insurance_company: ["شركة التأمين", "Insurer"],
   claim_number: ["رقم المطالبة", "Claim number"], accident_date: ["تاريخ الحادث", "Accident date"],
   lpo_number: ["رقم أمر الإصلاح", "Repair order number"], approved_amount: ["المبلغ المعتمد", "Approved amount"],
+  policy_number: ["رقم الوثيقة", "Policy number"], lpo_issue_date: ["تاريخ إصدار أمر الإصلاح", "Repair order issue date"],
+  lpo_parts_amount: ["قطع الغيار المعتمدة", "Approved parts amount"], lpo_labour_amount: ["أجرة العمل المعتمدة", "Approved labour amount"],
   supplier_name: ["اسم المورد", "Supplier"], supplier_vatin: ["الرقم الضريبي", "Supplier VATIN"],
   invoice_number: ["رقم الفاتورة", "Invoice number"], invoice_date: ["تاريخ الفاتورة", "Invoice date"],
   subtotal: ["المبلغ قبل الضريبة", "Subtotal"], vat: ["الضريبة", "VAT"], total: ["الإجمالي", "Total"],

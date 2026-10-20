@@ -185,7 +185,7 @@ export async function processDocumentLocally(
     timings: { nativeMs, ocrMs, parseMs, matchMs: 0, totalMs: 0 },
     ocrEngine: method === "ocr" ? "tesseract.js" : "pdfjs-native",
     ocrModelVersion: method === "ocr" ? "ara+eng" : "pdf-text-layer",
-    parserVersion: "rules-1.4", profileVersion: "default-1.0",
+    parserVersion: "rules-1.5", profileVersion: "default-1.0",
   };
   addClaimCompletenessWarning(result, options.expectedType);
   options.onProgress?.({ stage: "matching" });
@@ -229,7 +229,7 @@ async function parseServerPages(result: DocumentExtractionResult, options: Docum
   result.fields = { ...parsed.fields, ...purchaseLines?.fields };
   result.issues.push(...parsed.issues, ...(purchaseLines?.issues || []));
   addClaimCompletenessWarning(result, options.expectedType);
-  result.parserVersion = "rules-1.4";
+  result.parserVersion = "rules-1.5";
   result.profileVersion = "default-1.0";
   options.onProgress?.({ stage: "matching" });
   try {

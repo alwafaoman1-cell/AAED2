@@ -228,6 +228,34 @@ class FileSafetyTests(unittest.TestCase):
 
 
 class ClaimOcrRecoveryTests(unittest.TestCase):
+    def test_filled_english_lpo_stops_before_an_unnecessary_arabic_pass(self):
+        provider = PaddleProvider.__new__(PaddleProvider)
+        provider._english_first = True
+        texts = [
+            "MOTOR VEHICLE REPAIR ORDER", "LPO No.: 90783",
+            "Ref. Our Claim No: 103/0502/2026/C/001669", "Accident Date: 11/09/2026",
+            "Owners: SAMPLE PERSON", "Regn.No.: DD/94260", "Make: BYD",
+            "Model: Qin Pro", "Total: 1,450.000",
+        ]
+        provider._english_pipeline = SequencePipeline(FakePipeline(texts, [.95] * len(texts),
+                                                                  list(range(100, 100 + 40 * len(texts), 40))))
+        provider._pipeline = SequencePipeline(FakePipeline(["Arabic fallback not needed"], [.90], [100]))
+        text, _, _ = provider.recognize(None)
+        self.assertIn("Total: 1,450.000", text)
+        self.assertEqual(provider._english_pipeline.calls, 1)
+        self.assertEqual(provider._pipeline.calls, 0)
+
+    def test_lpo_missing_accident_date_is_not_considered_complete(self):
+        segments = [
+            {"text": "MOTOR VEHICLE REPAIR ORDER"}, {"text": "LPO No.: 90783"},
+            {"text": "Ref. Our Claim No: 103/0502/2026/C/001669"},
+            {"text": "Print Date: 17/09/2026"}, {"text": "Issue Date: 14/09/2026"},
+            {"text": "Owners: SAMPLE PERSON"}, {"text": "Regn.No.: DD/94260"},
+            {"text": "Make: BYD"}, {"text": "Model: Qin Pro"},
+            {"text": "Total: 1,450.000"},
+        ]
+        self.assertFalse(PaddleProvider._english_lpo_complete(segments, .95))
+
     def test_long_claim_boilerplate_does_not_hide_missing_critical_fields(self):
         provider = PaddleProvider.__new__(PaddleProvider)
         segments = [
