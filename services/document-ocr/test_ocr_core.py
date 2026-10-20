@@ -4,7 +4,7 @@ import unittest
 
 from PIL import Image
 
-from ocr_core import InvalidDocument, PaddleProvider, process_document, validate_document
+from ocr_core import InvalidDocument, PaddleProvider, _probably_complete_ocr, process_document, validate_document
 
 
 class FakePipeline:
@@ -142,6 +142,60 @@ class FileSafetyTests(unittest.TestCase):
         self.assertEqual(provider.calls, 2)
         self.assertIn("Accident Date: 27/04/2026", result["pages"][0]["text"])
 
+    def test_complete_short_claim_does_not_run_expensive_second_variant(self):
+        class ClaimProvider:
+            name = "synthetic-test"
+            version = "1"
+            calls = 0
+
+            def recognize(self, _image):
+                self.calls += 1
+                return "Claim No: C/004/01/26/2510/00545", [
+                    {"text": "Claim No: C/004/01/26/2510/00545"},
+                    {"text": "Date of Loss: 01/10/2026"},
+                    {"text": "Vehicle No: A A/39566"},
+                    {"text": "Customer Name: SAMPLE CUSTOMER"},
+                    {"text": "Make / Model: Toyota - Land Cruiser"},
+                ], .81
+
+            def complete_document(self, segments, confidence):
+                return PaddleProvider._english_claim_complete(segments, confidence)
+
+            should_stop_after_variant = PaddleProvider.should_stop_after_variant
+
+        provider = ClaimProvider()
+        result = process_document(self.png, "scan.png", "image/png", provider)
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(result["pages"][0]["variant"], "original")
+
+    def test_complete_claim_variant_wins_over_longer_boilerplate(self):
+        class ClaimProvider:
+            name = "synthetic-test"
+            version = "1"
+            calls = 0
+            complete_document = PaddleProvider.complete_document
+            should_stop_after_variant = PaddleProvider.should_stop_after_variant
+
+            @staticmethod
+            def _english_claim_complete(segments, confidence):
+                return PaddleProvider._english_claim_complete(segments, confidence)
+
+            def recognize(self, _image):
+                self.calls += 1
+                if self.calls == 1:
+                    text = "Claim No: C/004/01/26/2510/00545\n" + "Legal terms " * 100
+                    return text, [{"text": "Claim No: C/004/01/26/2510/00545"}], .96
+                text = "\n".join(("Claim No: C/004/01/26/2510/00545", "Date of Loss: 01/10/2026",
+                                  "Vehicle No: A A/39566", "Customer Name: SAMPLE CUSTOMER",
+                                  "Make / Model: Toyota - Land Cruiser"))
+                return text, [{"text": line} for line in text.splitlines()], .75
+
+        provider = ClaimProvider()
+        result = process_document(self.png, "scan.png", "image/png", provider)
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(result["pages"][0]["variant"], "local_contrast")
+        self.assertIn("Date of Loss: 01/10/2026", result["pages"][0]["text"])
+
     def test_unreadable_image_is_reported_instead_of_silently_treated_as_complete(self):
         class EmptyProvider:
             name = "synthetic-test"
@@ -174,6 +228,88 @@ class FileSafetyTests(unittest.TestCase):
 
 
 class ClaimOcrRecoveryTests(unittest.TestCase):
+    def test_long_claim_boilerplate_does_not_hide_missing_critical_fields(self):
+        provider = PaddleProvider.__new__(PaddleProvider)
+        segments = [
+            {"text": "Claim No: C/004/01/26/2510/00545", "box": {"x": 30, "y": 30, "width": 400, "height": 25}},
+            {"text": "Legal notes " + "document " * 90, "box": {"x": 30, "y": 800, "width": 600, "height": 25}},
+        ]
+        text = "\n".join(item["text"] for item in segments)
+        self.assertTrue(_probably_complete_ocr(text, segments, .96, 1000))
+        self.assertFalse(provider.should_stop_after_variant(text, segments, .96, 1000))
+
+    def test_english_gate_pass_uses_english_model_without_arabic_pass_when_complete(self):
+        provider = PaddleProvider.__new__(PaddleProvider)
+        provider._english_first = True
+        provider._english_pipeline = SequencePipeline(FakePipeline([
+            "Claim No: C/004/01/26/2510/00545",
+            "Date of Loss: 01/10/2026",
+            "Vehicle No: A A/39566",
+            "Name of Driver, Owner of: AMAL SALIM AL ISMAILI",
+            "Vehicle Make & Model: Toyota - Land Cruiser",
+        ], [.94] * 5, [100, 150, 200, 250, 300]))
+        provider._pipeline = SequencePipeline(FakePipeline(["لا ينبغي تشغيل النموذج العربي"], [.9], [100]))
+        text, _, _ = provider.recognize(None)
+        self.assertIn("AMAL SALIM AL ISMAILI", text)
+        self.assertEqual(provider._english_pipeline.calls, 1)
+        self.assertEqual(provider._pipeline.calls, 0)
+
+    def test_issue_date_does_not_substitute_for_missing_loss_date(self):
+        english = [
+            {"text": "Claim No: C/004/01/26/2510/00545", "box": {"x": 50, "y": 100, "width": 450, "height": 30}},
+            {"text": "Date: 08/10/2026", "box": {"x": 700, "y": 30, "width": 280, "height": 30}},
+            {"text": "Date of Loss", "box": {"x": 50, "y": 300, "width": 170, "height": 30}},
+            {"text": "Vehicle No: A A/39566", "box": {"x": 50, "y": 200, "width": 300, "height": 30}},
+            {"text": "Customer Name: SAMPLE CUSTOMER", "box": {"x": 50, "y": 250, "width": 480, "height": 30}},
+            {"text": "Make / Model: Toyota - Land Cruiser", "box": {"x": 50, "y": 350, "width": 480, "height": 30}},
+        ]
+        self.assertFalse(PaddleProvider._english_claim_complete(english, .95))
+        english.append({"text": "01/10/2026", "box": {"x": 320, "y": 301, "width": 150, "height": 30}})
+        self.assertTrue(PaddleProvider._english_claim_complete(english, .95))
+
+    def test_intimation_date_on_same_row_cannot_satisfy_missing_loss_date(self):
+        segments = [
+            {"text": "Date of Loss", "box": {"x": 50, "y": 100, "width": 160, "height": 28}},
+            {"text": "Date of Intimation", "box": {"x": 420, "y": 100, "width": 230, "height": 28}},
+            {"text": "05/10/2026", "box": {"x": 700, "y": 100, "width": 155, "height": 28}},
+        ]
+        self.assertFalse(PaddleProvider._labeled_value(segments, r"date\s+of\s+loss", r"\b\d{1,2}/\d{1,2}/\d{4}\b"))
+        self.assertFalse(PaddleProvider._labeled_value([
+            {"text": "Date of Loss / Date of Intimation: 05/10/2026"},
+        ], r"date\s+of\s+loss", r"\b\d{1,2}/\d{1,2}/\d{4}\b"))
+
+    def test_incomplete_english_page_falls_back_to_existing_arabic_model(self):
+        provider = PaddleProvider.__new__(PaddleProvider)
+        provider._english_first = True
+        provider._english_pipeline = SequencePipeline(FakePipeline(
+            ["Claim No: C/004/01/26/2510/00545"], [.76], [100]))
+        provider._pipeline = SequencePipeline(FakePipeline([
+            "رقم المطالبة C/004/01/26/2510/00545", "تاريخ الحادث: 01/10/2026",
+            "رقم اللوحة: 39566", "اسم المالك: عميل تجريبي",
+        ], [.94] * 4, [100, 200, 300, 400]))
+        text, _, _ = provider.recognize(None)
+        self.assertIn("تاريخ الحادث", text)
+        self.assertEqual(provider._english_pipeline.calls, 1)
+        self.assertEqual(provider._pipeline.calls, 1)
+
+    def test_missing_english_loss_date_is_reread_only_on_its_printed_row(self):
+        import numpy as np
+        provider = PaddleProvider.__new__(PaddleProvider)
+        provider._english_first = True
+        provider._english_pipeline = SequencePipeline(
+            FakePipeline([
+                "Claim No: C/004/01/26/2510/00545", "Date of Loss",
+                "Vehicle No: A A/39566", "Customer Name: SAMPLE CUSTOMER",
+                "Make / Model: Toyota - Land Cruiser",
+            ], [.93] * 5, [100, 150, 200, 250, 300]),
+            FakePipeline(["Date of Loss: 01/10/2026"], [.95], [10]),
+        )
+        provider._pipeline = SequencePipeline(FakePipeline(["لا حاجة لإعادة قراءة العربية"], [.9], [100]))
+        text, _, _ = provider.recognize(np.zeros((500, 1000, 3), dtype=np.uint8))
+        self.assertIn("Date of Loss: 01/10/2026", text)
+        self.assertEqual(provider._english_pipeline.calls, 2)
+        self.assertEqual(provider._pipeline.calls, 0)
+
     def test_vehicle_year_is_recovered_only_from_its_own_gate_pass_row(self):
         import numpy as np
         provider = PaddleProvider.__new__(PaddleProvider)

@@ -185,7 +185,7 @@ export async function processDocumentLocally(
     timings: { nativeMs, ocrMs, parseMs, matchMs: 0, totalMs: 0 },
     ocrEngine: method === "ocr" ? "tesseract.js" : "pdfjs-native",
     ocrModelVersion: method === "ocr" ? "ara+eng" : "pdf-text-layer",
-    parserVersion: "rules-1.3", profileVersion: "default-1.0",
+    parserVersion: "rules-1.4", profileVersion: "default-1.0",
   };
   addClaimCompletenessWarning(result, options.expectedType);
   options.onProgress?.({ stage: "matching" });
@@ -208,7 +208,7 @@ export async function processDocumentLocally(
 }
 
 async function waitForExisting(tenantId: string, extractionId: string, signal?: AbortSignal): Promise<DocumentExtractionResult> {
-  for (let attempt = 0; attempt < 90; attempt++) {
+  for (let attempt = 0; attempt < 180; attempt++) {
     assertActive(signal);
     const result = await loadDocumentExtraction(tenantId, extractionId);
     if (["needs_review", "extracted", "verified"].includes(result.status)) return result;
@@ -229,7 +229,7 @@ async function parseServerPages(result: DocumentExtractionResult, options: Docum
   result.fields = { ...parsed.fields, ...purchaseLines?.fields };
   result.issues.push(...parsed.issues, ...(purchaseLines?.issues || []));
   addClaimCompletenessWarning(result, options.expectedType);
-  result.parserVersion = "rules-1.3";
+  result.parserVersion = "rules-1.4";
   result.profileVersion = "default-1.0";
   options.onProgress?.({ stage: "matching" });
   try {

@@ -24,10 +24,10 @@ import requests
 from ocr_core import MAX_BYTES, InvalidDocument, PaddleProvider, TesseractProvider, process_document
 
 MAX_ATTEMPTS = 3
-MAX_SECONDS = 150
-# Keep draining the previous queue while accepting parser-revision jobs.
+MAX_SECONDS = 270
+# Keep draining earlier queues while accepting English-first OCR jobs.
 # The new version creates a separate immutable extraction for identical bytes.
-ENGINE_VERSIONS = ["1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker"]
+ENGINE_VERSIONS = ["1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker", "1.0.4-worker"]
 
 
 @dataclass(frozen=True)
@@ -82,7 +82,7 @@ def claim_next(connection: psycopg.Connection) -> dict | None:
           set status = 'failed', error_code = 'DOCUMENT_OCR_WORKER_LOST',
               lease_token = null, next_attempt_at = null
           where engine_version = any(%s) and status = 'processing' and attempt_count >= %s
-            and processing_started_at < now() - interval '5 minutes'
+            and processing_started_at < now() - interval '6 minutes'
         """, (ENGINE_VERSIONS, MAX_ATTEMPTS))
         row = connection.execute("""
           select e.id, e.tenant_id, e.file_id, e.attempt_count,
@@ -93,7 +93,7 @@ def claim_next(connection: psycopg.Connection) -> dict | None:
             ((e.status in ('queued', 'retryable_failed') and
               (e.next_attempt_at is null or e.next_attempt_at <= now()))
              or (e.status = 'processing' and
-                 e.processing_started_at < now() - interval '5 minutes'))
+                 e.processing_started_at < now() - interval '6 minutes'))
           order by e.created_at
           for update of e skip locked limit 1
         """, (ENGINE_VERSIONS, MAX_ATTEMPTS)).fetchone()
@@ -132,7 +132,10 @@ def _run_ocr(raw: bytes, job: dict, provider_name: str, connection):
     try:
         if sys.platform != "win32":
             import resource
-            resource.setrlimit(resource.RLIMIT_CPU, (120, 125))
+            # Paddle uses multiple CPU threads; RLIMIT_CPU counts their sum,
+            # so a 120-second CPU cap could kill a successful 80-second page.
+            # The parent still enforces the shorter wall-clock deadline.
+            resource.setrlimit(resource.RLIMIT_CPU, (600, 610))
             resource.setrlimit(resource.RLIMIT_AS, (6 * 1024**3, 6 * 1024**3))
         provider = PaddleProvider() if provider_name == "paddleocr" else TesseractProvider()
         result = process_document(raw, job["filename"], job["mime"], provider, job["sha256"])

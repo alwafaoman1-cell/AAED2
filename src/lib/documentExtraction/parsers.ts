@@ -31,7 +31,7 @@ const VEHICLE_RULES: FieldRule[] = [
 ];
 
 const INSURANCE_RULES: FieldRule[] = [
-  { key: "claim_number", labels: ["Claim No", "Claim Number", "Claim Reference", "رقم المطالبة", "رقم المطالبة التأمينية", "رقم البلاغ", "رقم المرجع"], fallback: /\b(C\/[A-Z0-9/-]{8,})\b/i },
+  { key: "claim_number", labels: ["Claim No / Policy No.", "Claim No / Policy No", "Claim No", "Claim Number", "Claim Reference", "رقم المطالبة", "رقم المطالبة التأمينية", "رقم البلاغ", "رقم المرجع"], fallback: /\b(C\/[A-Z0-9/-]{8,})\b/i },
   { key: "insurance_company", labels: ["Insurance Company", "Insurer", "شركة التأمين", "شركة التامين"] },
   { key: "insured_name", labels: ["Insured Name", "Policy Holder", "اسم المؤمن له", "المؤمن له"] },
   { key: "accident_date", labels: ["Accident Date", "Date of Accident", "Incident Date", "Date of Loss", "تاريخ الحادث"] },
@@ -398,7 +398,8 @@ export function normalizeCandidate(key: string, raw: string): { value: string; v
     return { value, valid: !plateReference && value.length >= 2 && value.length <= 60 && /[A-Za-z\u0600-\u06ff]/u.test(value), reason: "VEHICLE_NAME_INVALID" };
   }
   if (key === "owner_phone") return { value: value.replace(/[^\d+]/g, ""), valid: /^\+?\d{8,15}$/.test(value.replace(/[^\d+]/g, "")), reason: "PHONE_INVALID" };
-  if (key === "claim_number") return { value, valid: value.length >= 4 && value.length <= 80 && /\d/.test(value) && !/[\n\r]/.test(value), reason: "CLAIM_NUMBER_INVALID" };
+  if (key === "claim_number") return { value, valid: value.length >= 4 && value.length <= 80 && /\d/.test(value) && !/[\n\r]/.test(value) &&
+    !/\b(?:policy\s+no|claim\s+no|date\s+of)\b/i.test(value), reason: "CLAIM_NUMBER_INVALID" };
   if (key === "invoice_number" || key === "lpo_number") return { value, valid: value.length >= 3 && value.length <= 80, reason: "REFERENCE_INVALID" };
   if (key === "supplier_vatin") return { value: value.replace(/\s/g, "").toUpperCase(), valid: /^[A-Z0-9-]{8,30}$/i.test(value.replace(/\s/g, "")), reason: "VATIN_INVALID" };
   return { value, valid: value.length > 0 };

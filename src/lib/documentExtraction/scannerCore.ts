@@ -21,12 +21,22 @@ function pixel(data: ImageData, x: number, y: number): number {
 
 export function assessScanQuality(image: ImageData): ScanQuality {
   const step = Math.max(1, Math.floor(Math.min(image.width, image.height) / 180));
-  let total = 0, samples = 0, glare = 0, edge = 0;
+  let total = 0, samples = 0, glare = 0, clipped = 0, edge = 0;
   for (let y = step; y < image.height - step; y += step) {
     for (let x = step; x < image.width - step; x += step) {
       const value = pixel(image, x, y);
       total += value; samples++;
-      if (value > 250) glare++;
+      // White paper is not glare. Count only isolated clipped highlights
+      // against a substantially darker surrounding area.
+      if (value > 252) {
+        clipped++;
+        const radius = Math.max(4, step * 8);
+        const around = [
+          pixel(image, Math.max(0, x - radius), y), pixel(image, Math.min(image.width - 1, x + radius), y),
+          pixel(image, x, Math.max(0, y - radius)), pixel(image, x, Math.min(image.height - 1, y + radius)),
+        ];
+        if (around.filter((brightness) => brightness < 205).length >= 2) glare++;
+      }
       edge += Math.abs(value - pixel(image, x + step, y)) + Math.abs(value - pixel(image, x, y + step));
     }
   }
@@ -36,7 +46,7 @@ export function assessScanQuality(image: ImageData): ScanQuality {
   const warnings: ScanQuality["warnings"] = [];
   if (brightness < 65) warnings.push("low_light");
   if (blur < 5) warnings.push("blur");
-  if (glareRatio > 0.16) warnings.push("glare");
+  if (glareRatio > .003 && clipped / Math.max(1, samples) < .2) warnings.push("glare");
   return { brightness, blur, glare: glareRatio, warnings };
 }
 
@@ -120,13 +130,43 @@ export function detectDocumentQuad(image: ImageData): { quad: ScanQuad; confiden
       for (let channel = 0; channel < 3; channel++) borderColors[channel].push(image.data[offset + channel]);
     }
   }
-  const background = borderColors.map((channel) => channel.sort((a, b) => a - b)[Math.floor(channel.length / 2)]);
+  // A document can occupy two of the four corners in a handheld photo. The
+  // median then describes the paper, not the desk, and segmentation fails.
+  // Use the darker border quartile as the desk candidate; the later fill and
+  // four-corner checks still reject incomplete or ambiguous pages.
+  const background = borderColors.map((channel) => channel.sort((a, b) => a - b)[Math.floor(channel.length * .25)]);
+  const luminance = (red: number, green: number, blue: number) => red * .299 + green * .587 + blue * .114;
+  const backgroundBrightness = luminance(background[0], background[1], background[2]);
+  const centerSamples: number[] = [];
+  const centerChroma: number[] = [];
+  for (let row = 0; row < 9; row++) for (let column = 0; column < 9; column++) {
+    const x = Math.round((.3 + column * .05) * (image.width - 1));
+    const y = Math.round((.3 + row * .05) * (image.height - 1));
+    const offset = (y * image.width + x) * 4;
+    const red = image.data[offset], green = image.data[offset + 1], blue = image.data[offset + 2];
+    centerSamples.push(luminance(red, green, blue));
+    centerChroma.push(Math.max(red, green, blue) - Math.min(red, green, blue));
+  }
+  const centerBrightness = centerSamples.sort((a, b) => a - b)[Math.floor(centerSamples.length / 2)];
+  const centerColor = centerChroma.sort((a, b) => a - b)[Math.floor(centerChroma.length / 2)];
+  // Mixed desks, keyboards and shadows make a single RGB corner colour
+  // unreliable. Only prefer the bright, neutral-paper mask when the centre
+  // clearly differs from the border; otherwise retain conservative detection.
+  const brightPaper = centerBrightness > 155 && centerBrightness - backgroundBrightness > 35 && centerColor < 55;
+  // Phone shadows can darken the lower half of the same sheet by 25+ points.
+  // The neutral-colour check below still separates paper from a coloured desk.
+  const paperThreshold = Math.max(155, backgroundBrightness + 10);
+  const chromaLimit = Math.min(80, centerColor + 48);
   const mask = new Uint8Array(width * height);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const source = (Math.min(image.height - 1, y * step) * image.width + Math.min(image.width - 1, x * step)) * 4;
+    const red = image.data[source], green = image.data[source + 1], blue = image.data[source + 2];
     const difference = (Math.abs(image.data[source] - background[0]) +
       Math.abs(image.data[source + 1] - background[1]) + Math.abs(image.data[source + 2] - background[2])) / 3;
-    mask[y * width + x] = difference >= 38 ? 1 : 0;
+    const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
+    mask[y * width + x] = brightPaper
+      ? (luminance(red, green, blue) >= paperThreshold && chroma <= chromaLimit ? 1 : 0)
+      : (difference >= 38 ? 1 : 0);
   }
 
   const left: EdgeSample[] = [], right: EdgeSample[] = [], top: EdgeSample[] = [], bottom: EdgeSample[] = [];
@@ -232,13 +272,15 @@ export function perspectiveCorrect(image: ImageData, quad: ScanQuad, filter: Sca
     }
     const ix = Math.floor(sx), iy = Math.floor(sy), fx = sx - ix, fy = sy - iy;
     const a = (iy * image.width + ix) * 4, b = a + 4, c = a + image.width * 4, d = c + 4;
+    const channels = [0, 1, 2].map((channel) =>
+      source[a + channel] * (1 - fx) * (1 - fy) + source[b + channel] * fx * (1 - fy) +
+        source[c + channel] * (1 - fx) * fy + source[d + channel] * fx * fy
+    );
+    const gray = channels[0] * .299 + channels[1] * .587 + channels[2] * .114;
     for (let channel = 0; channel < 3; channel++) {
-      let value = source[a + channel] * (1 - fx) * (1 - fy) + source[b + channel] * fx * (1 - fy) +
-        source[c + channel] * (1 - fx) * fy + source[d + channel] * fx * fy;
-      if (filter === "gray" || filter === "bw") {
-        const luminance = source[a] * 0.299 + source[a + 1] * 0.587 + source[a + 2] * 0.114;
-        value = filter === "bw" ? (luminance >= 150 ? 255 : 0) : luminance;
-      } else if (filter === "auto" || filter === "document") value = Math.min(255, Math.max(0, (value - 128) * (filter === "document" ? 1.16 : 1.06) + 132));
+      let value = channels[channel];
+      if (filter === "gray" || filter === "bw") value = filter === "bw" ? (gray >= 150 ? 255 : 0) : gray;
+      else if (filter === "auto" || filter === "document") value = Math.min(255, Math.max(0, (value - 128) * (filter === "document" ? 1.16 : 1.06) + 132));
       else if (filter === "color") value = Math.min(255, Math.max(0, (value - 128) * 1.12 + 128));
       result[dest + channel] = value;
     }

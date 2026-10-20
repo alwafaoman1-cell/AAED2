@@ -142,7 +142,13 @@ def _ocr_score(text: str, confidence: float) -> float:
     # Confidence alone favored a flawless 50-character fragment over the
     # remainder of a scanned page. Still reject long low-confidence noise.
     characters = len(re.sub(r"\s", "", text))
-    return confidence * (0.35 + 0.65 * min(1.0, characters / 1000)) if characters else 0.0
+    if not characters:
+        return 0.0
+    # Prefer a readable form over a longer block of legal boilerplate. These
+    # bonuses require printed labels and values; they never synthesize fields.
+    reference = bool(re.search(r"\b(?:C/[A-Z0-9]+(?:/[A-Z0-9]+){3,}|\d{2,4}/\d{3,5}/\d{4}/C/\d{4,})\b", text, re.I))
+    loss_date = bool(re.search(r"(?:date\s+of\s+(?:loss|accident)|تاريخ\s+الحادث)\s*[:：/-]?\s*\d{1,2}/\d{1,2}/\d{4}", text, re.I))
+    return confidence * (0.35 + 0.65 * min(1.0, characters / 1000)) + 0.06 * reference + 0.04 * loss_date
 
 
 def _probably_complete_ocr(text: str, segments: list[dict[str, Any]], confidence: float, height: int) -> bool:
@@ -188,17 +194,20 @@ class TesseractProvider:
 
 class PaddleProvider:
     name = "paddleocr"
-    version = "PP-OCRv5-ar+en-claim"
+    version = "PP-OCRv5-en-first-ar-fallback"
 
     def __init__(self):
         from paddleocr import PaddleOCR
-        self._pipeline = PaddleOCR(device="cpu",
-                                   text_detection_model_name="PP-OCRv5_mobile_det",
-                                   text_recognition_model_name="arabic_PP-OCRv5_mobile_rec",
-                                   enable_mkldnn=False, cpu_threads=2,
-                                   use_doc_orientation_classify=False, use_doc_unwarping=False,
-                                   use_textline_orientation=False)
-        self._english_pipeline = None
+        # Most submitted gate passes are English. Keep the Arabic model lazy:
+        # a clear English page should not pay for loading or running it.
+        self._pipeline = None
+        self._english_first = True
+        self._english_pipeline = PaddleOCR(device="cpu",
+                                           text_detection_model_name="PP-OCRv5_mobile_det",
+                                           text_recognition_model_name="en_PP-OCRv5_mobile_rec",
+                                           enable_mkldnn=False, cpu_threads=2,
+                                           use_doc_orientation_classify=False, use_doc_unwarping=False,
+                                           use_textline_orientation=False)
 
     def warm_english_model(self):
         if self._english_pipeline is None:
@@ -209,6 +218,16 @@ class PaddleProvider:
                                                enable_mkldnn=False, cpu_threads=2,
                                                use_doc_orientation_classify=False, use_doc_unwarping=False,
                                                use_textline_orientation=False)
+
+    def warm_arabic_model(self):
+        if self._pipeline is None:
+            from paddleocr import PaddleOCR
+            self._pipeline = PaddleOCR(device="cpu",
+                                       text_detection_model_name="PP-OCRv5_mobile_det",
+                                       text_recognition_model_name="arabic_PP-OCRv5_mobile_rec",
+                                       enable_mkldnn=False, cpu_threads=2,
+                                       use_doc_orientation_classify=False, use_doc_unwarping=False,
+                                       use_textline_orientation=False)
 
     @staticmethod
     def _segments(results: Any) -> list[dict[str, Any]]:
@@ -227,7 +246,157 @@ class PaddleProvider:
                 segments.append(_line(text, float(scores[index]) if index < len(scores) else 0, box))
         return segments
 
+    @staticmethod
+    def _result(segments: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]], float]:
+        return ("\n".join(segment["text"] for segment in segments), segments,
+                sum(segment["confidence"] for segment in segments) / len(segments) if segments else 0)
+
+    @staticmethod
+    def _labeled_value(segments: list[dict[str, Any]], label: str, value: str) -> bool:
+        label_pattern, value_pattern = re.compile(label, re.I), re.compile(value, re.I)
+        other_label = re.compile(
+            r"\b(?:claim\s*(?:no\.?|number|reference)|date\s+of\s+\w+|incident\s+date|"
+            r"vehicle\s+(?:no\.?|make)|registration\s+(?:no\.?|number)|plate\s+(?:no\.?|number)|"
+            r"customer\s+name|owner\s+name|name\s+of\s+driver|make\s*/\s*model)\b", re.I)
+        for anchor in segments:
+            match = label_pattern.search(anchor["text"])
+            if not match:
+                continue
+            tail = anchor["text"][match.end():]
+            inline = value_pattern.search(tail)
+            if inline and not other_label.search(tail[:inline.start()]):
+                return True
+            box = anchor.get("box") or {}
+            if box.get("height", 0) <= 0:
+                continue
+            center = box["y"] + box["height"] / 2
+            for neighbor in segments:
+                if neighbor is anchor:
+                    continue
+                observed = value_pattern.search(neighbor["text"])
+                if not observed or other_label.search(neighbor["text"][:observed.start()]):
+                    continue
+                candidate = neighbor.get("box") or {}
+                if candidate.get("height", 0) <= 0:
+                    continue
+                same_row = abs(center - candidate["y"] - candidate["height"] / 2) <= max(box["height"], candidate["height"]) * .7
+                to_right = box["x"] + box["width"] * .5 <= candidate["x"] <= box["x"] + box["width"] + 1000
+                blocked = any(other is not anchor and other is not neighbor and
+                              box["x"] + box["width"] <= (other.get("box") or {}).get("x", -1) < candidate["x"] and
+                              abs(center - (other["box"]["y"] + other["box"]["height"] / 2)) <=
+                              max(box["height"], other["box"]["height"]) * .7 and
+                              other_label.search(other["text"])
+                              for other in segments if (other.get("box") or {}).get("height", 0) > 0)
+                if same_row and to_right and not blocked:
+                    return True
+        return False
+
+    @classmethod
+    def _english_claim_evidence(cls, segments: list[dict[str, Any]]) -> int:
+        reference = r"\b(?:C/[A-Z0-9]+(?:/[A-Z0-9]+){3,}|\d{2,4}/\d{3,5}/\d{4}/C/\d{4,})\b"
+        date = r"\b\d{1,2}/\d{1,2}/\d{4}\b"
+        plate = r"\b(?:[A-Z]{1,3}\s*){1,2}[/ ]\s*\d{2,7}\b"
+        person = r"\b(?!(?:the vehicle|owner of|customer name|name of driver)\b)[A-Z][A-Z'.-]*(?:\s+[A-Z][A-Z'.-]*){1,}\b"
+        vehicle = r"\b[A-Z][A-Z0-9 -]{1,30}\s*[-/]\s*[A-Z0-9][A-Z0-9 -]{1,30}\b"
+        return sum((
+            cls._labeled_value(segments, r"claim\s*(?:no\.?|number|reference)", reference),
+            cls._labeled_value(segments, r"date\s+of\s+(?:loss|accident)|incident\s+date", date),
+            cls._labeled_value(segments, r"vehicle\s+no\.?|registration\s+no\.?(?:umber)?|plate\s+no\.?(?:umber)?", plate),
+            cls._labeled_value(segments, r"customer\s+name|name\s+of\s+driver(?:,\s*owner\s+of)?|owner\s+name", person),
+            cls._labeled_value(segments, r"vehicle\s+make\s*(?:&|and|/)\s*model|make\s*/\s*model", vehicle),
+        ))
+
+    @classmethod
+    def _english_claim_complete(cls, segments: list[dict[str, Any]], confidence: float) -> bool:
+        # A high-scoring header is not a complete claim. Require all five
+        # labeled values on their own physical rows before skipping fallback.
+        return confidence >= .70 and cls._english_claim_evidence(segments) == 5
+
+    def complete_document(self, segments: list[dict[str, Any]], confidence: float) -> bool:
+        # A short English gate pass can have every critical field while still
+        # missing the generic 500-character threshold. Do not OCR the entire
+        # page again just to read boilerplate; review still guards each field.
+        return self._english_claim_complete(segments, confidence)
+
+    def should_stop_after_variant(self, text: str, segments: list[dict[str, Any]],
+                                  confidence: float, height: int) -> bool:
+        claim_like = bool(re.search(r"claim\s*(?:no\.?|number)|repair\s+gate\s+pass|"
+                                    r"gate\s+pass\s+to|رقم\s+المطالبة", text, re.I))
+        # A long page of clear legal text must not hide a missing plate/date.
+        # On non-claim documents keep the pre-existing generic completeness gate.
+        return self.complete_document(segments, confidence) if claim_like else \
+            _probably_complete_ocr(text, segments, confidence, height)
+
+    def _recover_english_rows(self, image: Any, segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if image is None or not hasattr(image, "shape"):
+            return segments
+        # Re-read at most three incomplete identity rows at higher resolution.
+        # The crop is anchored to the OCR label, not a fixed insurer template.
+        import cv2
+        import numpy as np
+        recovered = list(segments)
+        specs = (
+            (r"claim\s*(?:no\.?|number|reference)", r"\b(?:C/[A-Z0-9]+(?:/[A-Z0-9]+){3,}|\d{2,4}/\d{3,5}/\d{4}/C/\d{4,})\b"),
+            (r"date\s+of\s+(?:loss|accident)|incident\s+date", r"\b\d{1,2}/\d{1,2}/\d{4}\b"),
+            (r"vehicle\s+no\.?|registration\s+(?:no\.?|number)|plate\s+(?:no\.?|number)", r"\b(?:[A-Z]{1,3}\s*){1,2}[/ ]\s*\d{2,7}\b"),
+        )
+        attempts = 0
+        for label, value in specs:
+            if self._labeled_value(recovered, label, value):
+                continue
+            for anchor in segments:
+                if not re.search(label, anchor["text"], re.I):
+                    continue
+                box = anchor.get("box") or {}
+                if box.get("width", 0) <= 0 or box.get("height", 0) <= 0:
+                    continue
+                left = max(0, int(box["x"] - 6))
+                top = max(0, int(box["y"] - box["height"] * .3))
+                right = min(image.shape[1], int(box["x"] + box["width"] + image.shape[1] * .48))
+                bottom = min(image.shape[0], int(box["y"] + box["height"] * 1.3))
+                if right - left < 40 or bottom - top < 15:
+                    continue
+                attempts += 1
+                crop = np.ascontiguousarray(image[top:bottom, left:right])
+                enlarged = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+                candidates = self._segments(self._english_pipeline.predict(enlarged))
+                matches = [candidate for candidate in candidates if candidate["confidence"] >= .80 and
+                           re.search(value, candidate["text"], re.I)]
+                if matches:
+                    winner = max(matches, key=lambda candidate: candidate["confidence"])
+                    winner["box"] = {"x": left + winner["box"]["x"] / 2,
+                                     "y": top + winner["box"]["y"] / 2,
+                                     "width": winner["box"]["width"] / 2,
+                                     "height": winner["box"]["height"] / 2}
+                    recovered.append(winner)
+                    break
+                if attempts >= 3:
+                    return recovered
+            if attempts >= 3:
+                break
+        return recovered
+
     def recognize(self, image: Any) -> tuple[str, list[dict[str, Any]], float]:
+        # A test provider built without __init__ retains the legacy Arabic
+        # path, so existing Arabic recovery cases remain independently tested.
+        if not getattr(self, "_english_first", False):
+            return self._recognize_arabic(image)
+        english_segments = self._segments(self._english_pipeline.predict(image))
+        if not self._english_claim_complete(english_segments, self._result(english_segments)[2]):
+            english_segments = self._recover_english_rows(image, english_segments)
+        english = self._result(english_segments)
+        if self._english_claim_complete(english_segments, english[2]):
+            return english
+        self.warm_arabic_model()
+        arabic = self._recognize_arabic(image, english_segments)
+        # Compare actual recognized evidence, not a language preference.
+        # Preserve the English result when it contains a clear reference even
+        # if the Arabic model read more surrounding bilingual boilerplate.
+        english_score = _ocr_score(english[0], english[2]) + .07 * self._english_claim_evidence(english_segments)
+        arabic_score = _ocr_score(arabic[0], arabic[2])
+        return english if english_score >= arabic_score else arabic
+
+    def _recognize_arabic(self, image: Any, english_segments: list[dict[str, Any]] | None = None) -> tuple[str, list[dict[str, Any]], float]:
         segments = self._segments(self._pipeline.predict(image))
         # On bilingual gate passes a dense "Year / السنة : 2021" cell may be
         # recognized as only "21السنة". Re-read that cell at higher resolution,
@@ -346,8 +515,10 @@ class PaddleProvider:
                    SequenceMatcher(None, segment["text"].strip()[:12], "رقم المطالبة").ratio() >= 0.72)]
         reference = re.compile(r"\bC/[A-Z0-9]+(?:/[A-Z0-9]+){3,}\b", re.I)
         if labels and not any(reference.search(segment["text"]) for segment in segments):
-            self.warm_english_model()
-            for candidate in self._segments(self._english_pipeline.predict(image)):
+            if english_segments is None:
+                self.warm_english_model()
+                english_segments = self._segments(self._english_pipeline.predict(image))
+            for candidate in english_segments:
                 if candidate["confidence"] < 0.75 or not reference.search(candidate["text"]):
                     continue
                 center = candidate["box"]["y"] + candidate["box"]["height"] / 2
@@ -355,7 +526,7 @@ class PaddleProvider:
                               <= max(candidate["box"]["height"], label["box"]["height"]) for label in labels)
                 if aligned:
                     segments.append(candidate)
-        return "\n".join(segment["text"] for segment in segments), segments, (sum(segment["confidence"] for segment in segments) / len(segments) if segments else 0)
+        return self._result(segments)
 
 
 def process_document(raw: bytes, filename: str, declared_mime: str, provider: Any,
@@ -370,11 +541,19 @@ def process_document(raw: bytes, filename: str, declared_mime: str, provider: An
                            "confidence": 0.99, "width": width, "height": height, "segments": []})
             continue
         best = ("", [], 0.0, "original")
+        best_structured_complete = False
         for name, variant in _variants(image):
             text, segments, confidence = provider.recognize(variant)
-            if _ocr_score(text, confidence) > _ocr_score(best[0], best[2]):
+            complete_document = getattr(provider, "complete_document", None)
+            structured_complete = bool(complete_document(segments, confidence)) if complete_document else False
+            if (structured_complete and not best_structured_complete) or \
+               (structured_complete == best_structured_complete and
+                _ocr_score(text, confidence) > _ocr_score(best[0], best[2])):
                 best = (text, segments, confidence, name)
-            if _probably_complete_ocr(text, segments, confidence, height):
+                best_structured_complete = structured_complete
+            stop_after_variant = getattr(provider, "should_stop_after_variant", None)
+            if (stop_after_variant(text, segments, confidence, height) if stop_after_variant else
+                    _probably_complete_ocr(text, segments, confidence, height)):
                 break
         merged = _merge_pdf_text(native_text, best[0]) if native_text else best[0]
         if not best[0].strip():

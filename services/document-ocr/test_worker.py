@@ -128,11 +128,11 @@ class WorkerTests(unittest.TestCase):
     def test_claim_reaps_expired_lease_and_can_retry_stale_job(self):
         connection = FakeConnection()
         self.assertIsNone(claim_next(connection))
-        self.assertEqual(ENGINE_VERSIONS, ["1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker"])
+        self.assertEqual(ENGINE_VERSIONS, ["1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker", "1.0.4-worker"])
         self.assertEqual(len(connection.statements), 2)
         self.assertIn("DOCUMENT_OCR_WORKER_LOST", connection.statements[0])
         self.assertIn("skip locked", connection.statements[1].lower())
-        self.assertIn("processing_started_at < now() - interval '5 minutes'", connection.statements[1])
+        self.assertIn("processing_started_at < now() - interval '6 minutes'", connection.statements[1])
 
     def test_private_storage_path_is_tenant_scoped(self):
         config = Config("", "https://example.invalid", "x" * 64, "development", "paddleocr")

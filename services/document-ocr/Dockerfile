@@ -12,5 +12,5 @@ USER worker
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 HOME=/home/worker PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 # Cache both recognition models in the image. A private document must not
 # trigger a model-host download during an OCR job.
-RUN python -c "from ocr_core import PaddleProvider; provider = PaddleProvider(); provider.warm_english_model()"
+RUN python -c "from ocr_core import PaddleProvider; provider = PaddleProvider(); provider.warm_arabic_model()"
 ENTRYPOINT ["python", "worker.py"]

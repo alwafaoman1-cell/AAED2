@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildAutofillPayload, defaultReviewSelection } from "@/lib/documentExtraction/autofill";
 import { overallDocumentConfidence } from "@/lib/documentExtraction/confidence";
-import { detectDocumentType, parseDocumentPages, parseMoneyMilli } from "@/lib/documentExtraction/parsers";
+import { detectDocumentType, normalizeCandidate, parseDocumentPages, parseMoneyMilli } from "@/lib/documentExtraction/parsers";
 import type { DocumentPage, DocumentExtractionResult } from "@/lib/documentExtraction/types";
 
 function page(text: string, method: "native_pdf" | "ocr" = "native_pdf", confidence = 0.95): DocumentPage {
@@ -110,6 +110,18 @@ describe("TEMO deterministic document extraction", () => {
     expect(result.fields.plate_letters?.normalizedValue).toBe("AR");
     expect(result.fields.make?.normalizedValue).toBe("Toyota");
     expect(result.fields.model?.normalizedValue).toBe("RAV4");
+  });
+
+  it("extracts only the value from an English Claim No / Policy No. cell", () => {
+    const result = parseDocumentPages([page([
+      "Al Madina Takaful", "Repair Gate Pass For Accident vehicle",
+      "Claim No / Policy No. C/004/01/26/2501/00545",
+      "Date of Loss 01/10/2026", "Date of Intimation 05/10/2026",
+      "Vehicle Make & Model Toyota - Land Cruiser",
+    ].join("\n"), "ocr", .88)], "insurance_claim");
+    expect(result.fields.claim_number?.normalizedValue).toBe("C/004/01/26/2501/00545");
+    expect(result.fields.accident_date?.normalizedValue).toBe("2026-10-01");
+    expect(normalizeCandidate("claim_number", "Policy No. C/004/01/26/2501/00545").valid).toBe(false);
   });
 
   it("reads the real claim gate-pass layout without swapping the loss and report dates", () => {

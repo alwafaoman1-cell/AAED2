@@ -52,7 +52,7 @@ export function createDocumentDownloadHandler(environment: Environment) {
       const [extraction] = await extractionResponse.json() as Array<Record<string, unknown>>;
       if (!extraction || extraction.id !== id || extraction.tenant_id !== tenantId ||
           extraction.lease_token !== lease || extraction.status !== "processing" ||
-          !["1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker"].includes(String(extraction.engine_version)) ||
+          !["1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker", "1.0.4-worker"].includes(String(extraction.engine_version)) ||
           typeof extraction.file_id !== "string" || !uuid.test(extraction.file_id)) return forbidden();
 
       const fileUrl = new URL("/rest/v1/document_files", base);

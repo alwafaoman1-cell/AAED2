@@ -68,6 +68,47 @@ describe("document scanner image safety", () => {
     expect(rectified.data[center]).toBeGreaterThan(220);
   });
 
+  it("finds paper against a desk with different background colours and keyboard", () => {
+    const expected: ScanQuad = [
+      { x: .18, y: .15 }, { x: .81, y: .12 }, { x: .86, y: .88 }, { x: .13, y: .85 },
+    ];
+    const source = skewedPage(440, 560, expected);
+    for (let y = 0; y < source.height; y++) for (let x = 0; x < source.width; x++) {
+      const offset = (y * source.width + x) * 4;
+      if (source.data[offset] === 235) continue;
+      const colour = y < 170 ? [33, 36, 42] : [181, 137, 97];
+      source.data[offset] = colour[0]; source.data[offset + 1] = colour[1]; source.data[offset + 2] = colour[2];
+    }
+    const found = detectDocumentQuad(source);
+    expect(found.confidence).toBeGreaterThan(.35);
+    for (let index = 0; index < 4; index++) {
+      expect(Math.abs(found.quad[index].x - expected[index].x)).toBeLessThan(.07);
+      expect(Math.abs(found.quad[index].y - expected[index].y)).toBeLessThan(.07);
+    }
+  });
+
+  it("uses exposed desk corners when a shadowed page occupies other corner patches", () => {
+    const expected: ScanQuad = [
+      { x: .025, y: .025 }, { x: .86, y: .09 }, { x: .97, y: .96 }, { x: .12, y: .90 },
+    ];
+    const source = skewedPage(440, 560, expected);
+    for (let y = 0; y < source.height; y++) for (let x = 0; x < source.width; x++) {
+      const offset = (y * source.width + x) * 4;
+      if (source.data[offset] === 235) {
+        const value = Math.round(235 - 43 * y / source.height);
+        source.data[offset] = source.data[offset + 1] = source.data[offset + 2] = value;
+      } else {
+        source.data[offset] = 137; source.data[offset + 1] = 128; source.data[offset + 2] = 112;
+      }
+    }
+    const detected = detectDocumentQuad(source);
+    expect(detected.confidence).toBeGreaterThan(.35);
+    for (let index = 0; index < 4; index++) {
+      expect(Math.abs(detected.quad[index].x - expected[index].x)).toBeLessThan(.07);
+      expect(Math.abs(detected.quad[index].y - expected[index].y)).toBeLessThan(.07);
+    }
+  });
+
   it("does not mistake dark printed headings inside the paper for document edges", () => {
     const expected: ScanQuad = [
       { x: .19, y: .13 }, { x: .78, y: .17 }, { x: .86, y: .89 }, { x: .12, y: .82 },
@@ -108,6 +149,7 @@ describe("document scanner image safety", () => {
     const detected = detectDocumentQuad(skewedPage(440, 560, cutOff));
     expect(detected.confidence).toBe(0);
     expect(detected.quad).toEqual(FULL_SCAN_QUAD);
+    expect(detected.quality.warnings).toContain("cropped_edge");
   });
 
   it("does not crop to dark text when the paper and desk have the same colour", () => {
@@ -133,5 +175,23 @@ describe("document scanner image safety", () => {
 
   it("flags poor lighting instead of silently accepting it", () => {
     expect(assessScanQuality(image(400, 500, false)).warnings).toContain("low_light");
+  });
+
+  it("does not call an ordinary white sheet glare", () => {
+    const source = image(400, 500);
+    for (let y = 40; y <= 460; y++) for (let x = 50; x <= 350; x++) {
+      const offset = (y * source.width + x) * 4;
+      source.data[offset] = source.data[offset + 1] = source.data[offset + 2] = 253;
+    }
+    expect(assessScanQuality(source).warnings).not.toContain("glare");
+  });
+
+  it("still warns about an isolated clipped highlight", () => {
+    const source = image(400, 500, false);
+    for (let y = 200; y < 300; y++) for (let x = 150; x < 250; x++) {
+      const offset = (y * source.width + x) * 4;
+      source.data[offset] = source.data[offset + 1] = source.data[offset + 2] = 255;
+    }
+    expect(assessScanQuality(source).warnings).toContain("glare");
   });
 });

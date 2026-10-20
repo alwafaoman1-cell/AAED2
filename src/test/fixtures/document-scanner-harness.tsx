@@ -17,8 +17,12 @@ window.__setScannerLanguage = (language) => i18n.changeLanguage(language);
 
 export function Harness() {
   const [open, setOpen] = useState(true);
+  const [verification, setVerification] = useState("");
   return <>
     <button type="button" onClick={() => setOpen(true)}>Reopen scanner</button>
+    <button type="button" onClick={() => void i18n.changeLanguage("ar")}>عربي</button>
+    <button type="button" onClick={() => void i18n.changeLanguage("en")}>English</button>
+    <output role="status">{verification}</output>
     <DocumentScanner open={open} onClose={() => setOpen(false)} onExtract={async (file) => {
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
@@ -33,9 +37,11 @@ export function Harness() {
           ocrEngine: result.ocrEngine, fields: Object.keys(result.fields),
           claimNumber: result.fields.claim_number?.normalizedValue,
           markerMatches: ["temo", "syn001"].filter((value) => result.rawText.replace(/[^a-z0-9]/gi, "").toLowerCase().includes(value)).length };
+        setVerification(`PDF valid: ${pdfMagic}; OCR pages: ${window.__scannerExtracted.ocrPages}`);
         return true;
       } catch (error) {
         window.__scannerError = error instanceof Error ? error.message : String(error);
+        setVerification(`Scanner error: ${window.__scannerError}`);
         return false;
       }
     }} />
