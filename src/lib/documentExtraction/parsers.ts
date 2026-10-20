@@ -34,7 +34,7 @@ const INSURANCE_RULES: FieldRule[] = [
   { key: "claim_number", labels: ["Claim No", "Claim Number", "Claim Reference", "رقم المطالبة", "رقم المطالبة التأمينية", "رقم البلاغ", "رقم المرجع"], fallback: /\b(C\/[A-Z0-9/-]{8,})\b/i },
   { key: "insurance_company", labels: ["Insurance Company", "Insurer", "شركة التأمين", "شركة التامين"] },
   { key: "insured_name", labels: ["Insured Name", "Policy Holder", "اسم المؤمن له", "المؤمن له"] },
-  { key: "accident_date", labels: ["Accident Date", "Incident Date", "Date of Loss", "تاريخ الحادث"] },
+  { key: "accident_date", labels: ["Accident Date", "Date of Accident", "Incident Date", "Date of Loss", "تاريخ الحادث"] },
   { key: "approval_date", labels: ["Approval Date", "تاريخ الموافقة", "تاريخ الاعتماد"] },
   { key: "lpo_number", labels: ["LPO No", "LPO Number", "Repair Order No", "رقم أمر الإصلاح", "رقم الموافقة"] },
   { key: "estimate_number", labels: ["Estimate No", "Survey No", "رقم التقدير", "رقم المعاينة"] },
@@ -48,9 +48,11 @@ const INSURANCE_RULES: FieldRule[] = [
 const CLAIM_VEHICLE_RULES = VEHICLE_RULES
   .filter((rule) => !["registration_date", "registration_expiry", "engine_number"].includes(rule.key))
   .map((rule) => rule.key === "plate_number"
-    ? { ...rule, labels: [...rule.labels, "Vehicle No"] }
+    ? { ...rule, labels: [...rule.labels, "Vehicle No", "Registration No", "Registration Number"] }
     : rule.key === "owner_name"
-      ? { ...rule, labels: [...rule.labels, "Name of Driver, Owner of"] }
+      ? { ...rule, labels: [...rule.labels, "Name of Driver, Owner of the vehicle", "Name of Driver, Owner of", "Customer Name"] }
+    : rule.key === "owner_phone"
+      ? { ...rule, labels: [...rule.labels, "Customer Contact", "Customer Phone"] }
     : rule.key === "year"
       ? { ...rule, labels: [...rule.labels, "السنة"] }
     : rule);
@@ -139,11 +141,29 @@ function containsAnotherFieldLabel(text: string): boolean {
   return ALL_FIELD_LABELS.some((label) => normalized.includes(normalizeArabicForComparison(label)));
 }
 
+function isStandaloneFieldLabel(text: string): boolean {
+  const normalized = normalizeArabicForComparison(text);
+  return ALL_FIELD_LABELS.some((label) => normalized === normalizeArabicForComparison(label));
+}
+
+function continuesFieldLabel(rule: FieldRule, matchedLabel: string, value: string): boolean {
+  const prefix = normalizeArabicForComparison(`${matchedLabel} ${value}`);
+  return rule.labels.some((label) => normalizeArabicForComparison(label) === prefix);
+}
+
+function labelEvidence(rule: FieldRule, label: string, layout = false): string[] {
+  const evidence = ["label", ...(layout ? ["layout"] : [])];
+  if (rule.key === "owner_name" && normalizeArabicForComparison(label).includes("name of driver owner of")) {
+    evidence.push("ambiguous_driver_or_owner");
+  }
+  return evidence;
+}
+
 function plateComponents(raw: string): { number: string; letters?: string } | null {
   const value = normalizeDigits(removeBidiControls(raw)).trim();
   const digitsFirst = value.match(/^(\d{1,7})(?:\s*[/-]?\s*([A-Za-z\u0600-\u06ff]{1,3}(?:\s+[A-Za-z\u0600-\u06ff]{1,3})?))?$/u);
   if (digitsFirst) return { number: digitsFirst[1], letters: digitsFirst[2]?.replace(/\s/g, "").toUpperCase() };
-  const lettersFirst = value.match(/^([A-Za-z\u0600-\u06ff]{1,3}(?:\s+[A-Za-z\u0600-\u06ff]{1,3})?)\s*\/\s*(\d{1,7})$/u);
+  const lettersFirst = value.match(/^([A-Za-z\u0600-\u06ff]{1,3}(?:\s+[A-Za-z\u0600-\u06ff]{1,3})?)\s*(?:\/|\s)\s*(\d{1,7})$/u);
   return lettersFirst ? { number: lettersFirst[2], letters: lettersFirst[1].replace(/\s/g, "").toUpperCase() } : null;
 }
 
@@ -158,7 +178,8 @@ function plausibleFieldEvidence(key: string, raw: string): boolean {
   if (key.endsWith("_date") || key === "registration_expiry")
     return /\d{1,4}\s*[/-]\s*\d{1,2}\s*[/-]\s*\d{2,4}|^\s*\d{8}\s*$/.test(value);
   if (key === "plate_number") return /\d/.test(value) && value.length <= 24;
-  if (key === "make" || key === "model") return normalizeCandidate(key, value).valid;
+  if (key === "make" || key === "model") return normalizeCandidate(key, value).valid && !isStandaloneFieldLabel(value) && !/^[/:：-]/u.test(value);
+  if (key === "insurance_company") return value.length >= 3 && /[\p{L}]{3}/u.test(value) && !/https?:\/\/|www\.|@/i.test(value);
   return true;
 }
 
@@ -172,7 +193,7 @@ function findCombinedMakeModel(pages: DocumentPage[]): { make: Candidate; model:
       for (const label of combinedLabels) {
         const exactLabel = normalizeArabicForComparison(lines[index]) === normalizeArabicForComparison(label);
         const raw = exactLabel ? lines[index + 1] : valueNearLabel(lines[index], label);
-        const parts = raw?.match(/^(.{2,40}?)\s+[-–—]\s+(.{2,40})$/u);
+        const parts = raw?.match(/^(.{2,40}?)\s*[-–—/]\s*(.{2,40})$/u);
         if (!parts || !normalizeCandidate("make", parts[1]).valid || !normalizeCandidate("model", parts[2]).valid) continue;
         const source = page.segments?.find((segment) => segment.text.includes(raw!));
         const candidate = { page, box: source?.box, evidence: ["label", "combined_vehicle_name"] };
@@ -218,9 +239,10 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
         const raw = (inline || next || "").trim();
         if (!raw || raw.length > 160) continue;
         if (!inline && !exactLabel) continue;
+        if (continuesFieldLabel(rule, label, raw)) continue;
         const source = page.segments?.find((item) => item.text.includes(raw) || item.text.includes(label));
         addCandidate({ key: rule.key, raw, page, box: source?.box,
-          evidence: label === "Name of Driver, Owner of" ? ["label", "ambiguous_driver_or_owner"] : ["label"] });
+          evidence: labelEvidence(rule, label) });
       }
     }
   }
@@ -255,15 +277,21 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
       normalizeArabicForComparison(segment.text).includes(normalizeArabicForComparison(label))));
     for (const labelSegment of labelSegments) {
       if (!labelSegment.box) continue;
-      const inline = rule.labels.map((label) => valueNearLabel(labelSegment.text, label)).find(Boolean);
-      if (inline) addCandidate({ key: rule.key, raw: inline, page, box: labelSegment.box, evidence: ["label", "layout"] });
+      const matchedLabel = [...rule.labels].sort((a, b) => b.length - a.length).find((label) =>
+        normalizeArabicForComparison(labelSegment.text).includes(normalizeArabicForComparison(label)));
+      if (!matchedLabel) continue;
+      const inline = valueNearLabel(labelSegment.text, matchedLabel);
+      if (inline && !continuesFieldLabel(rule, matchedLabel, inline)) {
+        addCandidate({ key: rule.key, raw: inline, page, box: labelSegment.box, evidence: labelEvidence(rule, matchedLabel, true) });
+      }
       const midY = labelSegment.box.y + labelSegment.box.height / 2;
       // Dense gate-pass tables put the model year immediately above the plate.
       // A loose vertical radius can incorrectly accept that year as a valid
       // plate number. Numeric identity cells must overlap the label's row.
-      const rowTolerance = rule.key === "plate_number" || rule.key === "year" ? 0.65 : 1.4;
+      const rowTolerance = ["plate_number", "year", "owner_name"].includes(rule.key) ? 0.65 : 1.4;
       const neighbors = page.segments.filter((segment) => segment !== labelSegment && segment.box &&
         !containsAnotherFieldLabel(segment.text) &&
+        !continuesFieldLabel(rule, matchedLabel, segment.text.trim()) &&
         Math.abs(segment.box.y + segment.box.height / 2 - midY) < Math.max(labelSegment.box.height, segment.box.height) * rowTolerance &&
         Math.abs(segment.box.x - labelSegment.box.x) < page.width! * 0.55);
       neighbors.sort((a, b) => Math.abs(a.box!.x - labelSegment.box!.x) - Math.abs(b.box!.x - labelSegment.box!.x));
@@ -274,7 +302,7 @@ function findCandidate(pages: DocumentPage[], rule: FieldRule): Candidate | null
         const distinctPlateValue = rule.key === "plate_number" && /^\d{2,7}$/.test(neighboringDigits)
           && neighboringDigits.length > inlineDigits.length;
         addCandidate({ key: rule.key, raw: nearest.text.trim(), page, box: nearest.box,
-          evidence: distinctPlateValue ? ["label", "layout", "adjacent_value"] : ["label", "layout"] });
+          evidence: [...labelEvidence(rule, matchedLabel, true), ...(distinctPlateValue ? ["adjacent_value"] : [])] });
       }
     }
   }

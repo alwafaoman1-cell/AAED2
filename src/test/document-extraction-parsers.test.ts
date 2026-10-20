@@ -167,6 +167,82 @@ describe("TEMO deterministic document extraction", () => {
     expect(result.fields.registration_date).toBeUndefined();
   });
 
+  it("takes the name from the gate-pass value cell, not the next line of its split label", () => {
+    const result = parseDocumentPages([{
+      number: 1, method: "ocr", confidence: 0.92, width: 1489, height: 2106,
+      text: [
+        "تصريح المرور لتصليح المركبات المتضررة", "Claim No: C/004/01/26/9999/00001",
+        "Name of Driver, Owner of", "AMAL SALIM AL HARTHI", "the vehicle", "اسم السائق ، مالك المركبة",
+        "Contact No: 91234567",
+      ].join("\n"),
+      segments: [
+        { text: "AMAL SALIM AL HARTHI", box: { x: 408, y: 315, width: 440, height: 24 } },
+        { text: "Name of Driver, Owner of", box: { x: 127, y: 316, width: 241, height: 24 } },
+        { text: "the vehicle", box: { x: 127, y: 342, width: 106, height: 25 } },
+      ],
+    }], "insurance_claim");
+    expect(result.fields.owner_name?.normalizedValue).toBe("AMAL SALIM AL HARTHI");
+    expect(result.fields.owner_name?.sourceBox?.x).toBe(408);
+    expect(result.fields.owner_name?.validation).toBe("warning");
+    expect(result.issues.map((issue) => issue.code)).toContain("DRIVER_OR_OWNER_REVIEW_REQUIRED");
+    expect(defaultReviewSelection({ status: "needs_review", fields: result.fields, issues: result.issues } as DocumentExtractionResult).owner_name).toBe(false);
+  });
+
+  it("does not offer a split gate-pass label as a customer name when the value cell is empty", () => {
+    const result = parseDocumentPages([{
+      number: 1, method: "ocr", confidence: 0.92, width: 1489, height: 2106,
+      text: "تصريح المرور لتصليح المركبات المتضررة\nName of Driver, Owner of\nthe vehicle\nContact No: 91234567",
+      segments: [
+        { text: "Name of Driver, Owner of", box: { x: 127, y: 316, width: 241, height: 24 } },
+        { text: "the vehicle", box: { x: 127, y: 342, width: 106, height: 25 } },
+      ],
+    }], "insurance_claim");
+    expect(result.fields.owner_name).toBeUndefined();
+  });
+
+  it("extracts a second insurer gate-pass layout from its labeled value cells", () => {
+    const result = parseDocumentPages([{
+      number: 1, method: "ocr", confidence: 0.868, width: 1178, height: 1599,
+      text: [
+        "SAMPLE INSURANCE COMPANY (S.A.O.G)", "C", "Gate Pass To Example Workshop LLC",
+        "Claim No : 103/0501/2026/C/009999", "Date of Accident : 06/10/2026",
+        "Customer Name", "SAMPLE CUSTOMER", "Customer Contact", "91234567", "92972932",
+        "Vehicle Type", "11014", "Registration No.", "RW 1620", "Make /Model", "Mitsubishi /L200",
+      ].join("\n"),
+      segments: [
+        { text: "SAMPLE INSURANCE COMPANY (S.A.O.G)", box: { x: 267, y: 122, width: 352, height: 34 } },
+        { text: "C", box: { x: 870, y: 127, width: 29, height: 16 } },
+        { text: "Claim No : 103/0501/2026/C/009999", box: { x: 53, y: 226, width: 455, height: 37 } },
+        { text: "Date of Accident : 06/10/2026", box: { x: 707, y: 236, width: 358, height: 39 } },
+        { text: "Customer Name", box: { x: 47, y: 263, width: 191, height: 33 } },
+        { text: "SAMPLE CUSTOMER", box: { x: 339, y: 266, width: 296, height: 36 } },
+        { text: "Customer Contact", box: { x: 44, y: 289, width: 213, height: 35 } },
+        { text: "91234567", box: { x: 335, y: 290, width: 124, height: 37 } },
+        { text: "92972932", box: { x: 493, y: 300, width: 215, height: 54 } },
+        { text: "Vehicle Type", box: { x: 42, y: 317, width: 165, height: 40 } },
+        { text: "11014", box: { x: 335, y: 320, width: 85, height: 36 } },
+        { text: "Registration No.", box: { x: 42, y: 349, width: 192, height: 37 } },
+        { text: "RW 1620", box: { x: 334, y: 351, width: 129, height: 38 } },
+        { text: "Make /Model", box: { x: 43, y: 381, width: 163, height: 35 } },
+        { text: "Mitsubishi /L200", box: { x: 336, y: 382, width: 201, height: 41 } },
+      ],
+    }], "insurance_claim");
+    expect(result.type).toBe("insurance_claim");
+    expect(result.fields.claim_number?.normalizedValue).toBe("103/0501/2026/C/009999");
+    expect(result.fields.insurance_company?.normalizedValue).toBe("SAMPLE INSURANCE COMPANY (S.A.O.G)");
+    expect(result.fields.insurance_company?.validation).toBe("warning");
+    expect(result.fields.owner_name?.normalizedValue).toBe("SAMPLE CUSTOMER");
+    expect(result.fields.owner_phone?.normalizedValue).toBe("91234567");
+    expect(result.fields.plate_number?.normalizedValue).toBe("1620");
+    expect(result.fields.plate_letters?.normalizedValue).toBe("RW");
+    expect(result.fields.make?.normalizedValue).toBe("Mitsubishi");
+    expect(result.fields.model?.normalizedValue).toBe("L200");
+    expect(result.fields.accident_date?.normalizedValue).toBe("2026-10-06");
+    const selected = defaultReviewSelection({ status: "needs_review", fields: result.fields, issues: result.issues } as DocumentExtractionResult);
+    expect(selected.plate_number).toBe(false);
+    expect(selected.owner_phone).toBe(false);
+  });
+
   it("does not alter a supplier invoice to force VAT arithmetic", () => {
     const base = ["Tax Invoice", "Supplier Name: Example Parts LLC", "VATIN: OM123456789", "Invoice No: SUP-2026-44", "Invoice Date: 18/08/2026", "Subtotal: 100.000 OMR", "VAT Amount: 5.000 OMR"];
     const result = parseDocumentPages([page([...base, "Grand Total: 105.000 OMR"].join("\n"))]);

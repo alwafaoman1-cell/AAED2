@@ -27,7 +27,7 @@ MAX_ATTEMPTS = 3
 MAX_SECONDS = 150
 # Keep draining the previous queue while accepting parser-revision jobs.
 # The new version creates a separate immutable extraction for identical bytes.
-ENGINE_VERSIONS = ["1.0.0-worker", "1.0.1-worker", "1.0.2-worker"]
+ENGINE_VERSIONS = ["1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker"]
 
 
 @dataclass(frozen=True)

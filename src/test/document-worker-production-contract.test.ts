@@ -7,15 +7,16 @@ import { createDocumentDownloadHandler } from "../../supabase/functions/document
 afterEach(() => vi.unstubAllEnvs());
 
 describe("project-bound OCR rollout", () => {
-  it("keeps the OCR revision scoped to an immutable version across queue and RLS", () => {
-    const sql = readFileSync(new URL("../../supabase/migrations/20261018110000_document_worker_ocr_coverage_revision.sql", import.meta.url), "utf8");
-    expect(DOCUMENT_ENGINE_VERSION).toBe("1.0.2");
+  it("keeps the parser revision scoped to an immutable version across queue and RLS", () => {
+    const sql = readFileSync(new URL("../../supabase/migrations/20261019100000_document_worker_name_parser_revision.sql", import.meta.url), "utf8");
+    expect(DOCUMENT_ENGINE_VERSION).toBe("1.0.3");
     expect(sql).toContain("document_worker_file_read");
     expect(sql).toContain("document_worker_extraction_update");
     expect(sql).toContain("document_worker_page_insert");
     expect(sql).toContain("document_worker_write_guard()");
     expect(sql).toContain("document_enqueue_processing(p_file_id uuid, p_engine_version text)");
-    expect(sql.match(/'1\.0\.2-worker'/g)?.length).toBeGreaterThanOrEqual(7);
+    expect(sql.match(/'1\.0\.3-worker'/g)?.length).toBeGreaterThanOrEqual(7);
+    expect(sql).toContain("'1.0.2-worker'");
     expect(sql).not.toMatch(/\b(create|drop|truncate)\s+table\b/i);
   });
 
@@ -67,7 +68,7 @@ describe("project-bound OCR rollout", () => {
     expect(response.headers.get("cache-control")).toContain("no-store");
     engineVersion = "1.0.0-worker";
     expect((await handler(makeRequest("s".repeat(64)))).status).toBe(200);
-    engineVersion = "1.0.3-worker";
+    engineVersion = "1.0.4-worker";
     expect((await handler(makeRequest("s".repeat(64)))).status).toBe(403);
     fetcher.mockClear();
     expect((await handler(makeRequest("s".repeat(64), "00000000-0000-4000-8000-000000005745"))).status).toBe(403);

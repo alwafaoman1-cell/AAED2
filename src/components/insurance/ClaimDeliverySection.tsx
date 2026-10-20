@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, Upload, X, Loader2, PackageCheck, FileSignature, FileCheck2 } from "lucide-react";
 import { toast } from "sonner";
 import type { WorkOrder } from "@/lib/workOrdersStore";
-import { getWorkOrderById, refreshWorkOrdersFromCloud } from "@/lib/workOrdersStore";
+import { fetchWorkOrderFromCloudByIdentifier } from "@/lib/workOrdersStore";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 
@@ -30,17 +30,6 @@ interface Props {
 }
 
 type SlotKey = "delivery_photos" | "satisfaction_photos" | "receiver_id_photo";
-
-const SUPA_STATUS_TO_AR: Record<string, string> = {
-  received: "تحت الفحص",
-  diagnosing: "تحت الفحص",
-  awaiting_parts: "بانتظار قطع الغيار",
-  in_progress: "تحت الإصلاح",
-  quality_check: "ضبط الجودة",
-  ready: "جاهز للتسليم",
-  delivered: "تم التسليم",
-  closed: "مغلق",
-};
 
 async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
   const { error } = await supabase.from("claim_audit_logs").insert(payload as any);
@@ -82,64 +71,27 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
     return () => { cancelled = true; };
   }, [deliveryPhotos, satisfactionPhotos, receiverIdPhoto]);
 
-  /** Fetch linked job order from Supabase and adapt to local WorkOrder shape. */
+  /** Verify the linked order in Supabase before opening an editable handover. */
   async function ensureWorkOrder(): Promise<WorkOrder | null> {
     if (!workOrderId) {
       toast.error("لا يوجد أمر عمل مرتبط بهذه المطالبة");
       return null;
     }
-    const local = getWorkOrderById(workOrderId);
-    if (local) return local;
     setLoadingWo(true);
     try {
-      const { data, error } = await supabase
-        .from("job_orders")
-        .select(`
-          id, order_number, status, description, diagnosis,
-          labor_cost, parts_cost, final_total, created_at,
-          insurance_claim_number, insurance_approved,
-          customer:customers(name, phone),
-          vehicle:vehicles(brand, model, plate_number, year, color, vin_number)
-        `)
-        .eq("id", workOrderId)
-        .maybeSingle();
-      if (error || !data) {
+      const order = await fetchWorkOrderFromCloudByIdentifier(workOrderId);
+      if (!order) {
         toast.error("تعذر تحميل أمر العمل");
         return null;
       }
-      const v: any = (data as any).vehicle || {};
-      const c: any = (data as any).customer || {};
-      const labor = Number((data as any).labor_cost) || 0;
-      const parts = Number((data as any).parts_cost) || 0;
-      const total = Number((data as any).final_total) || labor + parts;
-      const adapted: WorkOrder = {
-        id: (data as any).id,
-        customer: c.name || "—",
-        phone: c.phone || "",
-        plate: v.plate_number || "—",
-        vehicleType: v.brand || "",
-        model: v.model || "",
-        year: v.year ? String(v.year) : "",
-        vin: v.vin_number || "",
-        color: v.color || "",
-        mileage: "",
-        insurance: (data as any).insurance_approved ? "تأمين" : "-",
-        claimNumber: (data as any).insurance_claim_number || "-",
-        entryDate: ((data as any).created_at || "").slice(0, 10),
-        technician: "",
-        serviceType: (data as any).insurance_claim_number ? "حادث" : "صيانة",
-        status: SUPA_STATUS_TO_AR[(data as any).status] || "تحت الفحص",
-        totalCost: total,
-        laborCost: labor,
-        partsCost: parts,
-        diagnosis: (data as any).diagnosis || (data as any).description || "",
-        description: (data as any).description || "",
-        photos: [],
-        partsNeeded: [],
-        displayNumber: (data as any).order_number || undefined,
-      };
-      await refreshWorkOrdersFromCloud().catch(() => {});
-      return adapted;
+      if (order.deletedAt) {
+        toast.error("أمر العمل المرتبط محذوف في Supabase. تحقّق من سبب الحذف قبل استعادته أو إصدار إقرار تسليم.");
+        return null;
+      }
+      return order;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تحميل أمر العمل");
+      return null;
     } finally {
       setLoadingWo(false);
     }

@@ -52,6 +52,7 @@ interface DeliveryReceiptWorkOrderRef {
 type DeliveryReceiptWorkOrderRow = {
   id: string;
   tenant_id: string;
+  deleted_at: string | null;
   claim_id: string | null;
   vehicle_id: string;
   customer_id: string | null;
@@ -105,21 +106,27 @@ function rowToDraft(row: any): VehicleDeliveryReceiptDraft {
 async function findDeliveryReceiptWorkOrder(ref: DeliveryReceiptWorkOrderRef) {
   const select = () => supabase
     .from("job_orders")
-    .select("id, tenant_id, claim_id, vehicle_id, customer_id, vehicle_entry_id, visit_number, metadata")
-    .is("deleted_at", null)
+    .select("id, tenant_id, deleted_at, claim_id, vehicle_id, customer_id, vehicle_entry_id, visit_number, metadata")
     .limit(1);
+
+  const requireActive = (row: DeliveryReceiptWorkOrderRow | null) => {
+    if (row?.deleted_at) {
+      throw new Error("أمر العمل محذوف في Supabase، ولا يمكن حفظ إقرار تسليم له. راجع سجل الحذف قبل أي استعادة مضبوطة.");
+    }
+    return row;
+  };
 
   if (isUuid(ref.id)) {
     const byId = await select().eq("id", ref.id).maybeSingle();
     if (byId.error) throw byId.error;
-    if (byId.data) return byId.data;
+    if (byId.data) return requireActive(byId.data as DeliveryReceiptWorkOrderRow);
   }
 
   const orderNumber = String(ref.orderNumber || ref.id || "").trim();
   if (!orderNumber) return null;
   const byNumber = await select().eq("order_number", orderNumber).maybeSingle();
   if (byNumber.error) throw byNumber.error;
-  return byNumber.data as DeliveryReceiptWorkOrderRow | null;
+  return requireActive(byNumber.data as DeliveryReceiptWorkOrderRow | null);
 }
 
 export async function loadVehicleDeliveryReceiptDraft(

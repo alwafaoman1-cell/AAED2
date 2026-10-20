@@ -574,102 +574,40 @@ export function restoreWorkOrder(order: WorkOrder) {
 export async function restoreWorkOrderFromTrash(order: WorkOrder): Promise<WorkOrder> {
   const ctx = await tenantContext();
   if (!ctx) throw new Error("Tenant was not loaded. Please refresh and try again.");
-  const restoreStartedAt = new Date(Date.now() - 60_000).toISOString();
-  const orderNumber = order.displayNumber || order.id;
-  const expectedOrderNumber = /^WO-/i.test(orderNumber || "") ? orderNumber : null;
-  let foundId: string | null = null;
+  const cloudId = order.cloudId || (isUuid(order.id) ? order.id : "");
+  if (!isUuid(cloudId)) throw new Error("لا يمكن استعادة أمر العمل دون معرّف سحابي مؤكد");
 
-  if (expectedOrderNumber) {
-    const { data, error } = await supabase
-      .from("job_orders")
-      .select("id")
-      .eq("tenant_id", ctx.tenantId)
-      .eq("order_number", expectedOrderNumber)
-      .maybeSingle();
-    if (error) throw error;
-    foundId = data?.id || null;
-  }
-
-  if (!foundId && order.cloudId && isUuid(order.cloudId)) {
-    const { data, error } = await supabase
-      .from("job_orders")
-      .select("id")
-      .eq("tenant_id", ctx.tenantId)
-      .eq("id", order.cloudId)
-      .maybeSingle();
-    if (error) throw error;
-    foundId = data?.id || null;
-  }
-
-  if (!foundId && orderNumber) {
-    const { data, error } = await supabase
-      .from("job_orders")
-      .select("id")
-      .eq("tenant_id", ctx.tenantId)
-      .eq("order_number", orderNumber)
-      .maybeSingle();
-    if (error) throw error;
-    foundId = data?.id || null;
-  }
-
-  if (!foundId) throw new Error("Work order was not found in Supabase");
-
-  let { data, error } = await (supabase.from("job_orders") as any)
-    .update({ deleted_at: null, archived_at: null, deleted_by: null })
-    .eq("tenant_id", ctx.tenantId)
-    .eq("id", foundId)
-    .select("*")
-    .maybeSingle();
-
-  if (error && isMissingJobOrderColumnError(error)) {
-    ({ data, error } = await (supabase.from("job_orders") as any)
-      .update({ archived_at: null })
-      .eq("tenant_id", ctx.tenantId)
-      .eq("id", foundId)
-      .select("*")
-      .maybeSingle());
-  }
-  if (error) throw error;
-  if (!data?.id) throw new Error("Restore did not return a work order from Supabase");
-  if (expectedOrderNumber && data.order_number && data.order_number !== expectedOrderNumber) {
-    const archivedAt = new Date().toISOString();
-    await (supabase.from("job_orders") as any)
-      .update({ deleted_at: archivedAt, archived_at: archivedAt })
-      .eq("tenant_id", ctx.tenantId)
-      .eq("id", foundId);
-    throw new Error(`Trash restore mismatch: expected ${expectedOrderNumber}, got ${data.order_number}. Please refresh the trash and try again.`);
-  }
-
-  const { data: verified, error: verifyError } = await supabase
+  // Read the current row, never trust an old trash payload or a locally cached
+  // deleted_at. The RPC checks this timestamp under a row lock and updates the
+  // order, audit and trash record in one database transaction.
+  const { data: current, error: readError } = await supabase
     .from("job_orders")
-    .select("*")
+    .select("id,tenant_id,order_number,deleted_at,archived_at,status")
     .eq("tenant_id", ctx.tenantId)
-    .eq("id", foundId)
-    .is("deleted_at", null)
-    .is("archived_at", null)
+    .eq("id", cloudId)
     .maybeSingle();
-  if (verifyError) throw verifyError;
-  if (!verified?.id) throw new Error("Work order restore was not visible after verification");
-  if (expectedOrderNumber && verified.order_number && verified.order_number !== expectedOrderNumber) {
-    const archivedAt = new Date().toISOString();
-    await (supabase.from("job_orders") as any)
-      .update({ deleted_at: archivedAt, archived_at: archivedAt })
-      .eq("tenant_id", ctx.tenantId)
-      .eq("id", foundId);
-    throw new Error(`Trash restore mismatch: expected ${expectedOrderNumber}, got ${verified.order_number}. Please refresh the trash and try again.`);
+  if (readError) throw readError;
+  if (!current?.id) throw new Error("أمر العمل غير موجود في Supabase");
+  const expectedNumber = order.displayNumber || (!isUuid(order.id) ? order.id : "");
+  if (expectedNumber && current.order_number?.toUpperCase() !== expectedNumber.toUpperCase()) {
+    throw new Error("رقم أمر العمل لا يطابق السجل السحابي؛ أعد فتح السجل قبل الاستعادة");
   }
-  if (expectedOrderNumber && (verified as any).customer_id && (verified as any).vehicle_id) {
-    const archivedAt = new Date().toISOString();
-    await (supabase.from("job_orders") as any)
-      .update({ deleted_at: archivedAt, archived_at: archivedAt })
-      .eq("tenant_id", ctx.tenantId)
-      .eq("customer_id", (verified as any).customer_id)
-      .eq("vehicle_id", (verified as any).vehicle_id)
-      .neq("order_number", expectedOrderNumber)
-      .gte("created_at", restoreStartedAt);
+  if (!current.deleted_at) throw new Error("أمر العمل ليس محذوفًا؛ حدّث الصفحة");
+
+  const { data, error } = await (supabase as any).rpc("restore_deleted_work_order", {
+    p_order_id: cloudId,
+    p_expected_deleted_at: current.deleted_at,
+  });
+  if (error) throw error;
+  if (!data?.id || data.id !== cloudId || data.tenant_id !== ctx.tenantId || data.deleted_at) {
+    throw new Error("لم تؤكد قاعدة البيانات استعادة أمر العمل المطلوب");
+  }
+  if (["delivered", "closed", "تم التسليم", "مغلق"].includes(String(current.status || "").toLowerCase())
+      && (!data.archived_at || (current.archived_at && data.archived_at !== current.archived_at))) {
+    throw new Error("أُعيد أمر العمل لكن تعذر تأكيد بقاء حالة الأرشفة؛ راجع السجل فورًا");
   }
 
-  const saved = await mapSavedJobOrder(verified);
+  const saved = await mapSavedJobOrder(data);
   cache = cache.filter((o) => o.id !== saved.id && o.cloudId !== saved.cloudId);
   cache.unshift(saved);
   persist();

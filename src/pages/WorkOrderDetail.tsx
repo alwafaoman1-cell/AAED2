@@ -24,6 +24,8 @@ import {
   Send,
   Wallet,
   Loader2,
+  AlertTriangle,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -32,6 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import {
   getWorkOrderById,
@@ -47,6 +50,7 @@ import {
   refreshWorkOrdersFromCloud,
   upsertWorkOrderInCache,
   fetchWorkOrderFromCloudByIdentifier,
+  restoreWorkOrderFromTrash,
   isPartStillNeeded,
   normalizeWorkOrderStatus,
 } from "@/lib/workOrdersStore";
@@ -170,8 +174,11 @@ Object.assign(SUPA_STATUS_TO_AR, {
 export default function WorkOrderDetail() {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { i18n } = useTranslation();
+  const isEnglish = i18n.language.startsWith("en");
   const [order, setOrder] = useState<WorkOrder | undefined>(() => getWorkOrderById(id));
-  const [loadingRemote, setLoadingRemote] = useState(false);
+  const [loadingRemote, setLoadingRemote] = useState(true);
+  const [restoring, setRestoring] = useState(false);
   const [cloudJobOrderId, setCloudJobOrderId] = useState<string | null>(null);
   const [unifiedMedia, setUnifiedMedia] = useState<UnifiedMediaRecord[]>([]);
   const [resolvedLegacyPhotos, setResolvedLegacyPhotos] = useState<StagePhoto[]>([]);
@@ -280,6 +287,8 @@ export default function WorkOrderDetail() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    setLoadingRemote(true);
     const local = getWorkOrderById(id);
     setOrder(local);
     const unsub = subscribeWorkOrders(() => setOrder((prev) => getWorkOrderById(id) || prev));
@@ -296,7 +305,7 @@ export default function WorkOrderDetail() {
             id, order_number, status, description, diagnosis,
             labor_cost, parts_cost, final_total, subtotal, created_at,
             insurance_claim_number, insurance_company, insurance_approved,
-            work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at,
+            work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at, deleted_at,
             parts_needed, work_items,
             customer:customers(name, phone),
             vehicle:vehicles(brand, model, plate_number, year, color, vin, vin_number)
@@ -311,7 +320,7 @@ export default function WorkOrderDetail() {
               id, order_number, status, description, diagnosis,
               labor_cost, parts_cost, final_total, subtotal, created_at,
               insurance_claim_number, insurance_company, insurance_approved,
-              work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at,
+              work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at, deleted_at,
               parts_needed, work_items
             `);
           const baseResult = isUuid
@@ -323,9 +332,11 @@ export default function WorkOrderDetail() {
         if ((error || !data) && !isUuid && woMatch) {
           const aliased = await fetchWorkOrderFromCloudByIdentifier(woMatch).catch(() => null);
           if (aliased) {
-            setOrder(aliased);
-            setCloudJobOrderId(aliased.cloudId || null);
-            setLoadingRemote(false);
+            if (active) {
+              setOrder(aliased);
+              setCloudJobOrderId(aliased.cloudId || null);
+              setLoadingRemote(false);
+            }
             return;
           }
         }
@@ -388,6 +399,7 @@ export default function WorkOrderDetail() {
             trackingToken: (data as any).tracking_token || undefined,
             trackingExpiresAt: (data as any).tracking_expires_at || undefined,
             archivedAt: (data as any).archived_at || undefined,
+            deletedAt: (data as any).deleted_at || undefined,
             customer: c.name || "—",
             phone: c.phone || "",
             plate: v.plate_number || "—",
@@ -418,16 +430,27 @@ export default function WorkOrderDetail() {
             receivedAt: unified?.vehicle_received_at || (data as any).received_at || undefined,
           };
           const cached = upsertWorkOrderInCache(adapted);
-          setOrder(cached);
+          if (active) setOrder(cached);
         }
-        setLoadingRemote(false);
-      })();
+        if (active) setLoadingRemote(false);
+      })().catch(() => {
+        if (active) {
+          setOrder(undefined);
+          setLoadingRemote(false);
+        }
+      });
     } else if (id && (isUuid || woMatch)) {
       void fetchWorkOrderFromCloudByIdentifier(id).then((fresh) => {
-        if (fresh) setOrder(fresh);
-      }).catch(() => {});
+        if (active) setOrder(fresh || undefined);
+      }).catch(() => {
+        if (active) setOrder(undefined);
+      }).finally(() => {
+        if (active) setLoadingRemote(false);
+      });
+    } else {
+      setLoadingRemote(false);
     }
-    return () => unsub();
+    return () => { active = false; unsub(); };
   }, [id]);
 
   const inspections = useMemo(
@@ -586,8 +609,28 @@ export default function WorkOrderDetail() {
     return () => { cancelled = true; };
   }, [order?.claimId, order?.cloudId, order?.id, order?.vehicleId, order?.photos, cloudJobOrderId]);
 
+  async function handleRestoreDeletedOrder() {
+    if (!order?.deletedAt || !allowDelete || restoring) return;
+    setRestoring(true);
+    try {
+      const restored = await restoreWorkOrderFromTrash(order);
+      setOrder(restored);
+      toast.success(isEnglish ? "Work order restored. Its delivery and archive status were preserved." : "استُعيد أمر العمل مع الحفاظ على حالة التسليم والأرشفة.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : (isEnglish ? "Could not restore the work order" : "تعذرت استعادة أمر العمل"));
+    } finally {
+      setRestoring(false);
+    }
+  }
 
-
+  if (loadingRemote) {
+    return (
+      <div className="flex min-h-[45vh] items-center justify-center gap-2 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        {isEnglish ? "Checking the work order in the cloud…" : "جارٍ التحقق من أمر العمل في السحابة…"}
+      </div>
+    );
+  }
 
   if (!order) {
     return (
@@ -599,6 +642,36 @@ export default function WorkOrderDetail() {
           <Car size={40} className="mx-auto mb-3 opacity-40" />
           <p>{loadingRemote ? "جاري تحميل أمر العمل..." : "لم يتم العثور على أمر العمل"}</p>
           <p className="text-xs font-mono mt-1">{id}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (order.deletedAt) {
+    const deletedNumber = order.displayNumber || order.id;
+    return (
+      <div className="mx-auto max-w-3xl space-y-4">
+        <Button variant="ghost" onClick={() => smartBack(navigate, "/work-orders")} className="gap-2">
+          <ArrowRight size={16} /> {isEnglish ? "Back to work orders" : "العودة إلى أوامر العمل"}
+        </Button>
+        <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-6 space-y-4">
+          <div className="flex items-center gap-2 text-destructive">
+            <AlertTriangle size={20} />
+            <h1 className="text-lg font-bold">{isEnglish ? "Deleted work order" : "أمر عمل محذوف"}</h1>
+          </div>
+          <p className="font-mono font-semibold" dir="ltr">{deletedNumber}</p>
+          <p className="text-sm text-muted-foreground">
+            {isEnglish
+              ? "This work order is soft-deleted in the cloud. Editing, delivery and financial actions are unavailable until it is restored. Restoring will not create another order or reopen a delivered vehicle."
+              : "هذا الأمر محذوف منطقيًا في السحابة. التعديل والتسليم والإجراءات المالية غير متاحة قبل الاستعادة. لن تنشئ الاستعادة أمرًا جديدًا ولن تعيد مركبة مُسلّمة إلى قائمة الورشة النشطة."}
+          </p>
+          {allowDelete && (
+            <Button onClick={() => void handleRestoreDeletedOrder()} disabled={restoring} className="gap-2">
+              {restoring ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+              {isEnglish ? "Restore work order" : "استعادة أمر العمل"}
+            </Button>
+          )}
+          {!allowDelete && <p className="text-sm text-muted-foreground">{isEnglish ? "Ask an administrator or manager to restore it." : "اطلب الاستعادة من المدير أو المسؤول."}</p>}
         </div>
       </div>
     );

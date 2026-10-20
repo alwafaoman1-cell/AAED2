@@ -686,11 +686,11 @@ export default function ExpenseNew() {
           )}
         </div>
 
-        {/* تعبئة تلقائية من صورة الفاتورة */}
+        {/* تعبئة تلقائية من PDF أو صورة الفاتورة */}
         <div className="flex items-center justify-between gap-3 bg-primary/5 border border-primary/20 rounded-lg p-3 mb-4">
           <div className="text-xs">
-            <div className="font-medium text-foreground">⚡ تعبئة من صورة الفاتورة بالذكاء</div>
-            <div className="text-muted-foreground">صوّر إيصال المصروف أو فاتورة الشراء، وسنستخرج المبلغ والتاريخ والمورد</div>
+            <div className="font-medium text-foreground">⚡ تعبئة من PDF أو صورة الفاتورة</div>
+            <div className="text-muted-foreground">ارفع PDF أو صورة إيصال المصروف أو فاتورة الشراء لاستخراج المبلغ والتاريخ والمورد</div>
           </div>
           <AiExtractButton
             schema="expense_receipt"

@@ -27,6 +27,7 @@ interface StoreOptions<T extends BaseEntity> {
 export function createStore<T extends BaseEntity>({ key }: StoreOptions<T>) {
   let cache: T[] | null = null;
   let bootstrapped = false;
+  let bootstrapPromise: Promise<void> | null = null;
   let storeEpoch = 0;
   let pendingMutations = 0;
   let mutationQueue: Promise<void> = Promise.resolve();
@@ -36,7 +37,7 @@ export function createStore<T extends BaseEntity>({ key }: StoreOptions<T>) {
 
   function notify() {
     listeners.forEach((listener) => {
-      try { listener(); } catch {}
+      try { listener(); } catch { /* One subscriber must not block the others. */ }
     });
   }
 
@@ -51,21 +52,23 @@ export function createStore<T extends BaseEntity>({ key }: StoreOptions<T>) {
     mutationQueue = Promise.resolve();
     cache = null;
     bootstrapped = false;
+    bootstrapPromise = null;
     unsubscribeCloud?.();
     unsubscribeCloud = null;
     notify();
   });
 
   function bootstrap() {
-    if (bootstrapped) return;
+    if (bootstrapped) return bootstrapPromise ?? Promise.resolve();
     bootstrapped = true;
     const epoch = storeEpoch;
-    void readCloudSetting<T[]>(key, []).then((rows) => {
+    bootstrapPromise = readCloudSetting<T[]>(key, []).then((rows) => {
       if (epoch === storeEpoch && pendingMutations === 0) setCache(rows);
     }).catch(() => undefined);
     unsubscribeCloud = subscribeCloudSetting<T[]>(key, (rows) => {
       if (epoch === storeEpoch && pendingMutations === 0) setCache(rows || []);
     });
+    return bootstrapPromise;
   }
 
   function load(): T[] {
@@ -189,6 +192,16 @@ export function createStore<T extends BaseEntity>({ key }: StoreOptions<T>) {
       void readCloudSetting<T[]>(key, []).then((rows) => {
         if (epoch === storeEpoch && pendingMutations === 0) setCache(rows);
       }).catch(() => undefined);
+    },
+    /** A confirmed fresh snapshot before reconciling derived legacy entries. */
+    async refreshConfirmed(): Promise<void> {
+      const epoch = storeEpoch;
+      await bootstrap();
+      await mutationQueue;
+      if (epoch !== storeEpoch) throw new Error("SESSION_CHANGED_BEFORE_REFRESH");
+      const rows = await readCloudSettingFresh<T[]>(key, []);
+      if (epoch !== storeEpoch || pendingMutations !== 0) throw new Error("STORE_CHANGED_DURING_REFRESH");
+      setCache(rows);
     },
     setMutationHandler(handler: typeof mutationHandler) {
       mutationHandler = handler;

@@ -4,20 +4,33 @@
 import { expensesStore } from "./expensesStore";
 import { postExpense, removeExpenseJournal } from "./salesAccounting";
 import { removeJournalBySource, journalStore } from "./journalStore";
+import { getCloudSettingsScopeVersion, subscribeCloudSettingsScopeChange } from "./cloudSettings";
+import { getCurrentTenantId } from "./cloud/createCloudStore";
 import { getWorkOrders, subscribeWorkOrders } from "./workOrdersStore";
 import { archiveVehicleByPlate, vehiclesStore } from "./vehiclesStore";
 
 let started = false;
 const knownIds = new Set<string>();
+let reconcilePromise: Promise<void> | null = null;
+let reconcileAgain = false;
 
 const CLOSED_STATUSES = new Set(["مغلق", "تم التسليم", "جاهز للتسليم"]);
 
-function syncExpensesToJournal() {
+async function syncExpensesToJournal() {
+  if (!expensesStore.isHydrated()) return;
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) return;
+  const scopeVersion = getCloudSettingsScopeVersion();
+  // The legacy journal cache starts empty. Writing derived entries before its
+  // persisted snapshot arrives reuses JE numbers and creates false save errors.
+  await journalStore.refreshConfirmed();
+  if (scopeVersion !== getCloudSettingsScopeVersion() || !expensesStore.isHydrated()) return;
   const all = expensesStore.getAll();
   const currentIds = new Set(all.map((e) => e.id));
 
   // ترحيل/تحديث القيود لكل مصروف موجود
   for (const e of all) {
+    if (scopeVersion !== getCloudSettingsScopeVersion()) return;
     const m = (e.paymentMethod || "").toString().toLowerCase();
     const paidFrom = m.includes("bank") || m.includes("بنك") ? "bank" : "cash";
     postExpense({
@@ -34,11 +47,31 @@ function syncExpensesToJournal() {
 
   // إزالة قيود المصاريف المحذوفة
   for (const id of Array.from(knownIds)) {
+    if (scopeVersion !== getCloudSettingsScopeVersion()) return;
     if (!currentIds.has(id)) {
       removeExpenseJournal(id);
       knownIds.delete(id);
     }
   }
+}
+
+function scheduleExpenseJournalSync() {
+  if (!expensesStore.isHydrated()) return;
+  if (reconcilePromise) {
+    reconcileAgain = true;
+    return;
+  }
+  reconcilePromise = (async () => {
+    do {
+      reconcileAgain = false;
+      await syncExpensesToJournal();
+    } while (reconcileAgain);
+  })().catch((error) => {
+    console.warn("accountingBridge: expense sync failed", error);
+  }).finally(() => {
+    reconcilePromise = null;
+    if (reconcileAgain) scheduleExpenseJournalSync();
+  });
 }
 
 /** أرشفة تلقائية للسيارات التي كل أوامر العمل المرتبطة بها مغلقة/مسلمة */
@@ -73,18 +106,15 @@ export function startAccountingBridge() {
   if (started) return;
   started = true;
 
-  // ترحيل أولي
-  syncExpensesToJournal();
+  subscribeCloudSettingsScopeChange(() => knownIds.clear());
   syncVehicleArchive();
 
   // تحديث عند أي تغير
-  expensesStore.subscribe(() => {
-    try { syncExpensesToJournal(); } catch (e) { console.warn("accountingBridge: expense sync failed", e); }
-  });
+  expensesStore.subscribe(scheduleExpenseJournalSync);
   try {
     // Pull cloud/imported expenses after the authenticated session is ready so
     // accounting totals do not depend on an earlier empty in-memory cache.
-    expensesStore.refresh();
+    void expensesStore.refresh().then(scheduleExpenseJournalSync);
   } catch (e) {
     console.warn("accountingBridge: expense refresh failed", e);
   }

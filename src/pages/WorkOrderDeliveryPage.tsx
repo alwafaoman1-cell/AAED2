@@ -21,18 +21,25 @@ export default function WorkOrderDeliveryPage() {
   const location = useLocation();
   const routeState = (location.state || {}) as DeliveryRouteState;
   const [order, setOrder] = useState<WorkOrder | null>(() => getWorkOrderById(id));
-  const [loading, setLoading] = useState(!order);
+  const [deletedOrderNumber, setDeletedOrderNumber] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError("");
+    setDeletedOrderNumber(null);
     void fetchWorkOrderFromCloudByIdentifier(id)
       .then((result) => {
         if (!active) return;
-        setOrder(result);
-        if (!result) setError("أمر العمل غير موجود");
+        setOrder(result?.deletedAt ? null : result);
+        if (result?.deletedAt) {
+          setDeletedOrderNumber(result.displayNumber || result.id);
+          setError("أمر العمل محذوف في Supabase، ولا يمكن حفظ إقرار تسليم له. راجع سجل الحذف أولًا؛ أي استعادة يجب أن تُبقي حالة التسليم والأرشفة صحيحة.");
+        } else if (!result) {
+          setError("أمر العمل غير موجود");
+        }
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -61,6 +68,11 @@ export default function WorkOrderDeliveryPage() {
     return (
       <div className="mx-auto max-w-3xl space-y-4 rounded-xl border border-destructive/30 bg-card p-6 text-center">
         <p className="font-semibold text-destructive">{error || "أمر العمل غير موجود"}</p>
+        {deletedOrderNumber && (
+          <Button onClick={() => navigate(`/work-orders/${encodeURIComponent(deletedOrderNumber)}`)}>
+            فتح الأمر المحذوف واستعادته
+          </Button>
+        )}
         <Button variant="outline" onClick={() => navigate("/work-orders")}>
           <ArrowRight className="h-4 w-4" /> العودة إلى أوامر العمل
         </Button>

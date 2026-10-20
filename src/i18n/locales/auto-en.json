@@ -4476,6 +4476,8 @@
   "أعمدة الجدول": "Table columns",
   "إظهار وإخفاء أعمدة الجدول": "Show or hide table columns",
   "إظهار الكل": "Show all",
+  "بحث برقم فاتورة المورد": "Search by supplier invoice number",
+  "تطبيق بحث المورد": "Apply supplier search",
   "إلغاء دون تطبيق": "Cancel without applying",
   "تحقق وعبئ النموذج فقط": "Verify and fill the form only",
   "إرفاق المستند فقط": "Attach document only",
@@ -4486,5 +4488,7 @@
   "عرض المرفق السابق": "View previous attachment",
   "التراخيص والعقود": "Licences & Contracts",
   "تعديل الزوايا": "Edit corners",
-  "معاينة الصفحة المصححة": "Preview straightened page"
+  "معاينة الصفحة المصححة": "Preview straightened page",
+  "استعادة أمر العمل": "Restore work order",
+  "فتح الأمر المحذوف واستعادته": "Open and restore deleted work order"
 }

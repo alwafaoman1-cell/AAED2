@@ -62,7 +62,7 @@ export interface ExpenseManagementFilters {
   category_id?: string; subcategory_id?: string; supplier_id?: string; payment_method?: string;
   cost_center_id?: string; amount_from?: string; amount_to?: string; vat?: string; search?: string;
   insurance_company?: string; classification_status?: string; work_order?: string; claim?: string;
-  vehicle?: string; customer?: string; supplier?: string;
+  vehicle?: string; customer?: string; supplier?: string; supplier_invoice_number?: string;
 }
 
 export interface ExpenseManagementRow extends Record<string, unknown> {
