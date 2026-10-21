@@ -1,4 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
+import i18n from "@/i18n";
+import { findPrimaryClaimWorkOrder } from "@/lib/claimWorkOrderGuard";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { ensureVehicleForCustomer, normalizeVin } from "@/lib/vehicleIdentity";
 import { extractPlateDigits, extractPlateLetters, formatPlate } from "@/lib/plateUtils";
@@ -984,6 +986,24 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
   if ((existing.data as any)?.id) {
     await supabase.from("vehicle_entries" as any).update({ work_order_id: (existing.data as any).id, converted_work_order_id: (existing.data as any).id } as any).eq("tenant_id", tenantId).eq("id", entryId);
     return { existing: true, work_order_id: (existing.data as any).id, order_number: (existing.data as any).order_number };
+  }
+
+  const linkedClaimId = entry.insurance_claim_id || entry.converted_claim_id;
+  if (linkedClaimId) {
+    const claimOrder = await findPrimaryClaimWorkOrder(tenantId, linkedClaimId);
+    if (claimOrder) {
+      if (claimOrder.vehicle_id !== entry.vehicle_id) throw new Error(i18n.t("claimWorkOrder.vehicleMismatch"));
+      const { data: linkedEntry, error: linkError } = await supabase
+        .from("vehicle_entries" as any)
+        .update({ status: "Converted to Work Order", work_order_id: claimOrder.id, converted_work_order_id: claimOrder.id } as any)
+        .eq("tenant_id", tenantId)
+        .eq("id", entryId)
+        .select("id")
+        .maybeSingle();
+      if (linkError) throw linkError;
+      if (!(linkedEntry as any)?.id) throw new Error(i18n.t("claimWorkOrder.claimMissing"));
+      return { existing: true, work_order_id: claimOrder.id, order_number: claimOrder.order_number };
+    }
   }
 
   const orderNumber = await allocateWorkOrderNumber(tenantId);

@@ -19,6 +19,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
+import i18n from "@/i18n";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { findPrimaryClaimWorkOrder } from "@/lib/claimWorkOrderGuard";
 import { toast } from "sonner";
 import {
   useCustomers,
@@ -1264,6 +1267,24 @@ export default function InsuranceClaimDetail() {
   const handleConvertToWorkOrder = async () => {
     if (status !== "approved") {
       toast.error("يجب الموافقة على المطالبة أولاً");
+      return;
+    }
+    if (!id || !isUuid(id) || isNew) {
+      toast.error(i18n.t("claimWorkOrder.claimMissing"));
+      return;
+    }
+    try {
+      const tenantId = (existing as any)?.tenant_id || await getCurrentTenantId();
+      if (!tenantId) throw new Error(i18n.t("claimWorkOrder.claimMissing"));
+      const linked = await findPrimaryClaimWorkOrder(tenantId, id);
+      if (linked) {
+        setLinkedWorkOrderId(linked.id);
+        toast.info(i18n.t("claimWorkOrder.existingOpened", { number: linked.order_number }));
+        navigate(`/work-orders/${linked.id}`);
+        return;
+      }
+    } catch (error: any) {
+      toast.error(error?.message || i18n.t("claimWorkOrder.claimMissing"));
       return;
     }
     // ── Smart fallback: use inline claim fields when relational vehicle/customer are missing
@@ -3586,7 +3607,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             </div>
 
             {/* عند وجود أمر عمل تلقائي مرتبط بالموافقة → 3 خيارات */}
-            {linkedWorkOrderId ? (
+            {hasLinkedWorkOrder ? (
               <div className="space-y-3">
                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg flex items-center gap-2 text-emerald-700 dark:text-emerald-400 text-sm">
                   <CheckCircle2 size={16} />
@@ -3602,7 +3623,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                     <Wrench size={16} /> {showWorkOrderInline ? "إخفاء العرض هنا" : "فتح أمر العمل هنا"}
                   </Button>
                   <Button
-                    onClick={() => navigate(`/work-orders/${linkedWorkOrderId}`)}
+                    onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)}
                     variant="outline"
                     className="gap-2"
                     size="sm"
@@ -3619,7 +3640,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   </Button>
                 </div>
                 {/* عرض الملخص inline داخل نفس الصفحة */}
-                {showWorkOrderInline && <InlineWorkOrderSummary workOrderId={linkedWorkOrderId} />}
+                {showWorkOrderInline && <InlineWorkOrderSummary workOrderId={effectiveWorkOrderId} />}
               </div>
             ) : (
               <Button

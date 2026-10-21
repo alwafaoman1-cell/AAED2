@@ -1,4 +1,11 @@
 {
+  "claimWorkOrder": {
+    "alreadyExists": "A work order already exists for this claim: {{number}}. Open it instead of creating another.",
+    "conflict": "This claim is linked to multiple work orders ({{numbers}}). Stop and ask a manager to reconcile them.",
+    "claimMissing": "The claim is missing from this workshop or cannot be accessed.",
+    "existingOpened": "Opened the existing work order {{number}} without creating another.",
+    "vehicleMismatch": "The existing work order belongs to a different vehicle. Review the claim and entry links before continuing."
+  },
   "tech": {
     "title": "Technician App",
     "subtitle": "{{name}} · {{count}} tasks · today {{mins}}m",
@@ -320,6 +327,11 @@
     "switch": "Language",
     "ar": "العربية",
     "en": "English"
+  },
+  "vehicleEntry": {
+    "downloadPdf": "Download PDF",
+    "pdfSourceMissing": "Could not refresh the vehicle entry from the cloud. Reopen the record and try again.",
+    "pdfDownloadFailed": "Could not prepare the PDF. Please try again."
   },
   "pdf": {
     "workOrder": "Work Order",

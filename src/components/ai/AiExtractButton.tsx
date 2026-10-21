@@ -12,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { isDocumentEngineEnabled } from "@/lib/documentExtraction/config";
 import { buildAutofillPayload } from "@/lib/documentExtraction/autofill";
 import { documentErrorMessage } from "@/lib/documentExtraction/errors";
-import type { DocumentExtractionResult, DocumentType, ExtractionProgress } from "@/lib/documentExtraction/types";
+import { VEHICLE_ENTRY_AUTO_ENGINE_VERSION, type DocumentExtractionResult, type DocumentType, type ExtractionProgress } from "@/lib/documentExtraction/types";
 import DocumentExtractionReview from "@/components/documents/DocumentExtractionReview";
 import DocumentScanner from "@/components/documents/DocumentScanner";
 
@@ -25,7 +25,8 @@ export interface AppliedDocumentContext {
 interface Props {
   schema: ExtractSchema;
   onExtracted: (data: Record<string, string>, document?: AppliedDocumentContext) => void;
-  expectedDocumentType?: DocumentType;
+  expectedDocumentType?: DocumentType | "auto";
+  vehicleMakes?: string[];
   label?: string;
   hint?: string;
   /** accept attribute — defaults to images + PDF */
@@ -61,6 +62,7 @@ export default function AiExtractButton({
   schema,
   onExtracted,
   expectedDocumentType,
+  vehicleMakes,
   label = "تعبئة تلقائية من صورة/PDF",
   hint,
   accept = "image/*,application/pdf",
@@ -105,8 +107,13 @@ export default function AiExtractButton({
       if (nativeEnabled) {
         if (!profile?.tenant_id) throw new Error("DOCUMENT_TENANT_MISMATCH");
         const { extractAndPersistDocument } = await import("@/lib/documentExtraction/engine");
-        const expectedType = expectedDocumentType || (schema === "vehicle_customer" ? "vehicle_registration" : schema === "expense_receipt" ? "expense_receipt" : schema === "purchase_invoice" ? "purchase_invoice" : "insurance_claim");
-        const result = await extractAndPersistDocument(file, { tenantId: profile.tenant_id, expectedType, onProgress: setProgress });
+        const expectedType = expectedDocumentType === "auto" ? undefined :
+          expectedDocumentType || (schema === "vehicle_customer" ? "vehicle_registration" : schema === "expense_receipt" ? "expense_receipt" : schema === "purchase_invoice" ? "purchase_invoice" : "insurance_claim");
+        const result = await extractAndPersistDocument(file, {
+          tenantId: profile.tenant_id, expectedType, requireWorker: expectedDocumentType === "auto",
+          vehicleMakes, engineVersion: expectedDocumentType === "auto" ? VEHICLE_ENTRY_AUTO_ENGINE_VERSION : undefined,
+          onProgress: setProgress,
+        });
         setDocumentFile(file);
         setDocumentReview(result);
         if (!Object.keys(result.fields).length) toast.warning(english

@@ -9,11 +9,14 @@ import { normalizeCandidate, parseDocumentPages } from "./parsers";
 import { extractPurchaseLineItems } from "./lineItems";
 import { withDocumentDeadline } from "./timing";
 import { claimDocumentProcessing, enqueueDocumentProcessing, loadDocumentExtraction, markDocumentExtractionFailed, registerDocumentFile, scopeForDocument, persistDocumentExtraction } from "./persistence";
-import { DEFAULT_EXTRACTION_POLICY, type DocumentExtractionResult, type DocumentPage, type DocumentType, type ExtractionIssue, type ExtractionPolicy, type ExtractionProgress } from "./types";
+import { DEFAULT_EXTRACTION_POLICY, DOCUMENT_ENGINE_VERSION, type DocumentExtractionResult, type DocumentPage, type DocumentType, type ExtractionIssue, type ExtractionPolicy, type ExtractionProgress } from "./types";
 
 export interface DocumentEngineOptions {
   tenantId: string;
   expectedType?: DocumentType;
+  requireWorker?: boolean;
+  vehicleMakes?: string[];
+  engineVersion?: string;
   policy?: Partial<ExtractionPolicy>;
   onProgress?: (progress: ExtractionProgress) => void;
   signal?: AbortSignal;
@@ -171,7 +174,7 @@ export async function processDocumentLocally(
   assertActive(options.signal);
   options.onProgress?.({ stage: "parsing" });
   const parseStart = performance.now();
-  const parsed = parseDocumentPages(pages, options.expectedType);
+  const parsed = parseDocumentPages(pages, options.expectedType, { vehicleMakes: options.vehicleMakes });
   const purchaseLines = options.expectedType === "purchase_invoice" ? extractPurchaseLineItems(pages) : null;
   const parseMs = elapsed(parseStart);
   const rawText = pages.map((page) => page.text).join("\n\f\n");
@@ -187,7 +190,7 @@ export async function processDocumentLocally(
     ocrModelVersion: method === "ocr" ? "ara+eng" : "pdf-text-layer",
     parserVersion: "rules-1.5", profileVersion: "default-1.0",
   };
-  addClaimCompletenessWarning(result, options.expectedType);
+  addClaimCompletenessWarning(result, options.expectedType || result.documentType);
   options.onProgress?.({ stage: "matching" });
   const matchStart = performance.now();
   try {
@@ -221,14 +224,14 @@ async function waitForExisting(tenantId: string, extractionId: string, signal?: 
 async function parseServerPages(result: DocumentExtractionResult, options: DocumentEngineOptions): Promise<DocumentExtractionResult> {
   if (result.status !== "extracted" || !result.pages.length) throw new Error("DOCUMENT_WORKER_RESULT_MISSING");
   options.onProgress?.({ stage: "parsing" });
-  const parsed = parseDocumentPages(result.pages, options.expectedType);
+  const parsed = parseDocumentPages(result.pages, options.expectedType, { vehicleMakes: options.vehicleMakes });
   const purchaseLines = options.expectedType === "purchase_invoice" ? extractPurchaseLineItems(result.pages) : null;
   result.documentType = parsed.type;
   result.documentTypeConfidence = parsed.typeConfidence;
   result.language = parsed.language;
   result.fields = { ...parsed.fields, ...purchaseLines?.fields };
   result.issues.push(...parsed.issues, ...(purchaseLines?.issues || []));
-  addClaimCompletenessWarning(result, options.expectedType);
+  addClaimCompletenessWarning(result, options.expectedType || result.documentType);
   result.parserVersion = "rules-1.5";
   result.profileVersion = "default-1.0";
   options.onProgress?.({ stage: "matching" });
@@ -255,20 +258,21 @@ export async function extractAndPersistDocument(file: File, options: DocumentEng
   // The local WASM provider is a useful compatibility baseline, not an
   // acceptable Arabic-claim or purchase-table engine. Never silently degrade
   // these reviewed workflows to its known lower-accuracy path.
-  if (["insurance_claim", "insurance_approval", "lpo", "purchase_invoice"].includes(options.expectedType || "") &&
+  if ((options.requireWorker || ["insurance_claim", "insurance_approval", "lpo", "purchase_invoice"].includes(options.expectedType || "")) &&
       !isDocumentWorkerEnabled() && !options.ocrFactory) {
     throw new DocumentFileError("DOCUMENT_WORKER_REQUIRED", "Document worker is required for this extraction.");
   }
   const sha256 = await sha256File(file);
   const scope = scopeForDocument(options.expectedType);
-  const key = `${options.tenantId}:${scope}:${sha256}`;
+  const engineVersion = options.engineVersion || DOCUMENT_ENGINE_VERSION;
+  const key = `${options.tenantId}:${scope}:${sha256}:${engineVersion}`;
   const previous = inFlight.get(key);
   if (previous) return previous;
   const task = (async () => {
     options.onProgress?.({ stage: "uploading" });
     const registered = await registerDocumentFile({ tenantId: options.tenantId, file, sha256, mimeType, scope });
     if (isDocumentWorkerEnabled() && !options.ocrFactory) {
-      const queued = await enqueueDocumentProcessing(registered.id);
+      const queued = await enqueueDocumentProcessing(registered.id, engineVersion);
       options.onProgress?.({ stage: "ocr" });
       const remote = await waitForExisting(options.tenantId, queued.extractionId, options.signal);
       const result = remote.status === "extracted" ? await parseServerPages(remote, options) : remote;

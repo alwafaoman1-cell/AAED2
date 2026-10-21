@@ -55,6 +55,7 @@ const ARABIC_ISSUES: Record<string, string> = {
   LINE_ITEMS_NOT_DETECTED: "لم يُعثر على جدول بنود موثوق؛ أدخل البنود يدويًا.",
   CLAIM_CRITICAL_FIELDS_MISSING: "بعض بيانات المطالبة الحرجة غير واضحة أو مفقودة؛ راجع رقم المطالبة والشركة واللوحة وتاريخ الحادث يدويًا.",
   DRIVER_OR_OWNER_REVIEW_REQUIRED: "المستند يذكر الشخص بصفة سائق أو مالك؛ تأكد من صفته قبل استخدام الاسم في النموذج.",
+  COMBINED_MAKE_MODEL_REVIEW_REQUIRED: "الماركة والموديل مطبوعان في خانة واحدة؛ تأكد من فصل القيمتين قبل تطبيقهما.",
 };
 
 export function documentIssueMessage(issue: ExtractionIssue, english: boolean): string {

@@ -139,3 +139,6 @@ export const DEFAULT_EXTRACTION_POLICY: Readonly<ExtractionPolicy> = Object.free
 // A parser revision must get a new immutable extraction for the same file.
 // Previously reviewed OCR evidence is never rewritten in place.
 export const DOCUMENT_ENGINE_VERSION = "1.0.5";
+// Only the vehicle-entry auto-detection flow must re-read previously cached
+// gate passes. Other extraction workflows keep their established queue version.
+export const VEHICLE_ENTRY_AUTO_ENGINE_VERSION = "1.0.6";

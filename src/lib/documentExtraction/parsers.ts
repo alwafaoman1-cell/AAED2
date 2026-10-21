@@ -14,6 +14,11 @@ interface FieldRule {
   fallback?: RegExp;
 }
 
+export interface ParseDocumentOptions {
+  /** Names from the live vehicle catalog, never inferred from a generic word split. */
+  vehicleMakes?: string[];
+}
+
 const VEHICLE_RULES: FieldRule[] = [
   { key: "plate_number", labels: ["Plate No", "Plate Number", "رقم اللوحة", "رقم المركبة"], fallback: /(?:\bplate\b|اللوحة)\s*(?:no\.?|number|رقم)?\s*[:：-]?\s*([0-9٠-٩۰-۹]{2,7})/i },
   { key: "plate_letters", labels: ["Plate Code", "Plate Letters", "حروف اللوحة", "رمز اللوحة"] },
@@ -197,9 +202,22 @@ function plausibleFieldEvidence(key: string, raw: string): boolean {
   return true;
 }
 
-/** Some insurer gate passes print one shared vehicle make/model cell. Split only
- * when an explicit separator is present; otherwise leave both for review. */
-function findCombinedMakeModel(pages: DocumentPage[]): { make: Candidate; model: Candidate } | null {
+/** Some insurer gate passes print one shared vehicle make/model cell. A catalog
+ * match may split it, but both values still require explicit user review. */
+function splitCombinedMakeModel(raw: string | null | undefined, vehicleMakes: string[]): { make: string; model: string; catalogMatch: boolean } | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const separated = value.match(/^(.{2,40}?)\s+[-–—]\s*(.{2,40})$/u)
+    || value.match(/^(.{2,40}?)\s*\/\s*(.{2,40})$/u);
+  if (separated) return { make: separated[1].trim(), model: separated[2].trim(), catalogMatch: false };
+  const make = [...vehicleMakes].filter((name) => name.trim().length >= 2)
+    .sort((a, b) => b.length - a.length)
+    .find((name) => value.toLocaleLowerCase().startsWith(`${name.trim().toLocaleLowerCase()} `));
+  if (!make) return null;
+  return { make: value.slice(0, make.trim().length).trim(), model: value.slice(make.trim().length).trim(), catalogMatch: true };
+}
+
+function findCombinedMakeModel(pages: DocumentPage[], vehicleMakes: string[] = []): { make: Candidate; model: Candidate } | null {
   const combinedLabels = ["Vehicle Make & Model", "Make & Model", "Make / Model"];
   for (const page of pages) {
     if (page.segments?.length && page.width) {
@@ -213,12 +231,12 @@ function findCombinedMakeModel(pages: DocumentPage[]): { make: Candidate; model:
           Math.abs(segment.box.y + segment.box.height / 2 - center) < Math.max(segment.box.height, labelBox.height) * 0.65)
           .sort((a, b) => a.box!.x - b.box!.x);
         for (const source of sameRow) {
-          const parts = source.text.trim().match(/^(.{2,40}?)\s*[-–—/]\s*(.{2,40})$/u);
-          if (!parts || !normalizeCandidate("make", parts[1]).valid || !normalizeCandidate("model", parts[2]).valid) continue;
-          const candidate = { page, box: source.box, evidence: ["label", "layout", "combined_vehicle_name"] };
+          const parts = splitCombinedMakeModel(source.text, vehicleMakes);
+          if (!parts || !normalizeCandidate("make", parts.make).valid || !normalizeCandidate("model", parts.model).valid) continue;
+          const candidate = { page, box: source.box, evidence: ["label", "layout", "combined_vehicle_name", ...(parts.catalogMatch ? ["catalog_make_match"] : [])] };
           return {
-            make: { ...candidate, key: "make", raw: parts[1].trim() },
-            model: { ...candidate, key: "model", raw: parts[2].trim() },
+            make: { ...candidate, key: "make", raw: parts.make },
+            model: { ...candidate, key: "model", raw: parts.model },
           };
         }
       }
@@ -228,13 +246,13 @@ function findCombinedMakeModel(pages: DocumentPage[]): { make: Candidate; model:
       for (const label of combinedLabels) {
         const exactLabel = normalizeArabicForComparison(lines[index]) === normalizeArabicForComparison(label);
         const raw = exactLabel ? lines[index + 1] : valueNearLabel(lines[index], label);
-        const parts = raw?.match(/^(.{2,40}?)\s*[-–—/]\s*(.{2,40})$/u);
-        if (!parts || !normalizeCandidate("make", parts[1]).valid || !normalizeCandidate("model", parts[2]).valid) continue;
+        const parts = splitCombinedMakeModel(raw, vehicleMakes);
+        if (!parts || !normalizeCandidate("make", parts.make).valid || !normalizeCandidate("model", parts.model).valid) continue;
         const source = page.segments?.find((segment) => segment.text.includes(raw!));
-        const candidate = { page, box: source?.box, evidence: ["label", "combined_vehicle_name"] };
+        const candidate = { page, box: source?.box, evidence: ["label", "combined_vehicle_name", ...(parts.catalogMatch ? ["catalog_make_match"] : [])] };
         return {
-          make: { ...candidate, key: "make", raw: parts[1].trim() },
-          model: { ...candidate, key: "model", raw: parts[2].trim() },
+          make: { ...candidate, key: "make", raw: parts.make },
+          model: { ...candidate, key: "model", raw: parts.model },
         };
       }
     }
@@ -467,7 +485,7 @@ function rulesForDocumentType(type?: DocumentType): FieldRule[] {
   return [];
 }
 
-export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentType): {
+export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentType, options: ParseDocumentOptions = {}): {
   type: DocumentType;
   typeConfidence: number;
   language: "ar" | "en" | "mixed" | "unknown";
@@ -485,7 +503,7 @@ export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentTyp
     ? LPO_RULES : expectedRules.length ? expectedRules : rulesForDocumentType(detected.type);
   const fields: Record<string, ExtractedField> = {};
   const issues: ExtractionIssue[] = [];
-  const combinedVehicleName = rules.some((rule) => rule.key === "make") ? findCombinedMakeModel(pages) : null;
+  const combinedVehicleName = rules.some((rule) => rule.key === "make") ? findCombinedMakeModel(pages, options.vehicleMakes) : null;
   const relatedInsuranceDocument = expected === "insurance_claim" &&
     ["insurance_approval", "lpo", "damage_report"].includes(detected.type);
   if (expected && detected.type !== "unknown" && detected.type !== expected && !relatedInsuranceDocument) {
@@ -508,13 +526,25 @@ export function parseDocumentPages(pages: DocumentPage[], expected?: DocumentTyp
     const ambiguousOwner = rule.key === "owner_name" && candidate.evidence.includes("ambiguous_driver_or_owner");
     fields[rule.key] = {
       key: rule.key, rawValue: candidate.raw, normalizedValue: normalized.value,
-      confidence: Number((ambiguousOwner ? Math.min(score, 0.6) : score).toFixed(3)), sourcePage: candidate.page.number,
-      sourceBox: candidate.box, method, validation: normalized.valid && !ambiguousOwner ? "valid" : "warning",
+      confidence: Number((ambiguousOwner || candidate.evidence.includes("catalog_make_match") ? Math.min(score, 0.6) : score).toFixed(3)), sourcePage: candidate.page.number,
+      sourceBox: candidate.box, method, validation: normalized.valid && !ambiguousOwner && !candidate.evidence.includes("catalog_make_match") ? "valid" : "warning",
       evidence: candidate.evidence,
     };
     if (ambiguousOwner) issues.push({ code: "DRIVER_OR_OWNER_REVIEW_REQUIRED", severity: "warning", field: rule.key,
       message: "The document labels this person as driver or owner; confirm their role before applying the name." });
     if (!normalized.valid) issues.push({ code: normalized.reason || "FIELD_INVALID", severity: "warning", field: rule.key, message: `${rule.key} could not be validated.` });
+  }
+  if (combinedVehicleName?.make.evidence.includes("catalog_make_match")) {
+    issues.push({ code: "COMBINED_MAKE_MODEL_REVIEW_REQUIRED", severity: "warning", field: "make",
+      message: "Make and model were separated using the vehicle catalog; confirm both values." });
+  } else if (fields.make && fields.model && fields.make.normalizedValue === fields.model.normalizedValue &&
+    /\s/u.test(fields.make.normalizedValue)) {
+    for (const key of ["make", "model"] as const) {
+      fields[key].validation = "warning";
+      fields[key].confidence = Math.min(fields[key].confidence, 0.6);
+    }
+    issues.push({ code: "COMBINED_MAKE_MODEL_REVIEW_REQUIRED", severity: "warning", field: "make",
+      message: "A combined make/model cell could not be split reliably; review both values." });
   }
   if (rules.some((rule) => rule.key === "insurance_company") && !fields.insurance_company) {
     const header = findInsurerHeader(pages);

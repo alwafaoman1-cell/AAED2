@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { subscribeCloudSettingsScopeChange } from "@/lib/cloudSettings";
 
 export interface InspectionRecord {
   id: string;
@@ -33,27 +34,23 @@ export function parseDamageReportSequence(value?: string | null): number | null 
 }
 
 export function getNextDamageReportNumberFromRecords(records: Array<{ id?: string | null; inspection_code?: string | null; kind?: string | null; inspection_kind?: string | null }>): string {
-  const reportRecords = records.filter((record) => {
-    const kind = record.kind || record.inspection_kind;
-    const code = record.inspection_code || record.id || "";
-    return kind === "insurance" || /^DR-/i.test(code);
-  });
-  const usedSequences = new Set<number>();
   let maxSequence = 0;
-  for (const record of reportRecords) {
+  for (const record of records) {
     const sequence = parseDamageReportSequence(record.inspection_code || record.id);
     if (!sequence) continue;
-    usedSequences.add(sequence);
     maxSequence = Math.max(maxSequence, sequence);
   }
-  let nextSequence = Math.max(reportRecords.length + 1, maxSequence + 1, 1);
-  while (usedSequences.has(nextSequence)) nextSequence += 1;
-  return formatDamageReportNumber(nextSequence);
+  return formatDamageReportNumber(maxSequence + 1);
 }
 
 let cache: InspectionRecord[] = [];
 let started = false;
 const listeners = new Set<() => void>();
+subscribeCloudSettingsScopeChange(() => {
+  cache = [];
+  started = false;
+  emit();
+});
 
 function emit() {
   listeners.forEach((listener) => listener());
@@ -184,7 +181,8 @@ export async function getNextDamageReportNumber(): Promise<string> {
   const { data, error } = await (supabase.from("inspections") as any)
     .select("inspection_code,inspection_kind")
     .eq("tenant_id", currentTenant)
-    .like("inspection_code", "DR-%")
+    // Five-character LIKE suffix excludes legacy six-digit timestamp codes.
+    .like("inspection_code", "DR-_____")
     .order("inspection_code", { ascending: false })
     .limit(1);
   if (error) {

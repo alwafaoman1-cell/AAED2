@@ -2,12 +2,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ClipboardCheck, Copy, Edit, ExternalLink, FileText, Link2, MessageCircle, Printer, RefreshCw, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
+import { ArrowRight, ClipboardCheck, Copy, Download, Edit, ExternalLink, FileText, Link2, Loader2, MessageCircle, Printer, RefreshCw, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { queryKeys } from "@/lib/queryKeys";
+import { getTemplateSettingsAsync } from "@/lib/pdfGenerator";
 import {
   buildVehicleEntryHtml,
   convertVehicleEntryToClaim,
@@ -17,7 +18,7 @@ import {
   issueVehicleEntry,
   softDeleteVehicleEntryMedia,
 } from "@/lib/vehicleEntryService";
-import { openAndPrintWindow, openSanitizedPdfWindow } from "@/lib/safePdfWindow";
+import { downloadSanitizedPdf, openAndPrintWindow, openSanitizedPdfWindow } from "@/lib/safePdfWindow";
 import { toast } from "sonner";
 
 function fmtDateTime(value?: string | null) {
@@ -45,8 +46,9 @@ export default function VehicleEntryDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user, hasRole } = useAuth();
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [printing, setPrinting] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [customerSignatureLink, setCustomerSignatureLink] = useState<string | null>(null);
 
   const detail = useQuery({
@@ -121,6 +123,25 @@ export default function VehicleEntryDetail() {
     openSanitizedPdfWindow(buildVehicleEntryHtml(entry));
   }
 
+  async function downloadEntry() {
+    if (!entry || downloadingPdf) return;
+    setDownloadingPdf(true);
+    try {
+      // Refresh signed Storage URLs and company settings before rendering.
+      const [refreshed] = await Promise.all([detail.refetch(), getTemplateSettingsAsync()]);
+      if (refreshed.error) throw refreshed.error;
+      if (!refreshed.data) throw new Error(t("vehicleEntry.pdfSourceMissing"));
+      await downloadSanitizedPdf(
+        buildVehicleEntryHtml(refreshed.data),
+        refreshed.data.entry_number || "vehicle-entry",
+      );
+    } catch (error: any) {
+      toast.error(error?.message || t("vehicleEntry.pdfDownloadFailed"));
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
   async function copyCustomerSignatureLink() {
     if (!customerSignatureLink) return;
     try {
@@ -180,6 +201,10 @@ export default function VehicleEntryDetail() {
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={previewEntry} className="gap-2"><FileText size={16} /> معاينة</Button>
           <Button variant="outline" disabled={printing} onClick={printEntry} className="gap-2"><Printer size={16} /> طباعة</Button>
+          <Button variant="outline" disabled={downloadingPdf} onClick={() => void downloadEntry()} className="gap-2">
+            {downloadingPdf ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            {t("vehicleEntry.downloadPdf")}
+          </Button>
           {entry.status === "Draft" && (
             <Button variant="outline" disabled={issueMutation.isPending} onClick={() => issueMutation.mutate()} className="gap-2">
               <ShieldCheck size={16} /> إصدار

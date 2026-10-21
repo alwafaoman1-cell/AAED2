@@ -144,6 +144,65 @@ describe("TEMO deterministic document extraction", () => {
     expect(result.fields.insurance_company?.validation).toBe("warning");
   });
 
+  it("auto-detects a vehicle-entry gate pass and reviews a catalog-split make/model", () => {
+    // Anonymized layout of the insurer PDF that had previously been parsed as
+    // vehicle_registration and yielded only five fields.
+    const result = parseDocumentPages([{
+      number: 1, method: "ocr", confidence: 0.83, width: 1488, height: 2105,
+      text: [
+        "Al Madina Takaful", "Repair Gate Pass For Accident vehicle",
+        "Claim No / Policy No.", "C/004/05/26/2503/00999",
+        "Name of Driver, Owner of", "SAMPLE CUSTOMER", "the vehicle",
+        "Contact No", "90000000",
+        "Vehicle Make & Model", "Nissan Micra", "Year/: 2020",
+        "Vehicle No", "T H/369", "Date of Intimation", "01/09/2026",
+        "Date of Loss", "22/08/2026", "First Registration Date", "01/01/2020",
+      ].join("\n"),
+      segments: [
+        { text: "Name of Driver, Owner of", box: { x: 125, y: 315, width: 245, height: 26 } },
+        { text: "SAMPLE CUSTOMER", box: { x: 405, y: 315, width: 310, height: 26 } },
+        { text: "the vehicle", box: { x: 125, y: 343, width: 115, height: 26 } },
+        { text: "Vehicle Make & Model", box: { x: 120, y: 429, width: 245, height: 27 } },
+        { text: "Nissan Micra", box: { x: 405, y: 429, width: 210, height: 27 } },
+        { text: "Vehicle No", box: { x: 120, y: 475, width: 150, height: 27 } },
+        { text: "T H/369", box: { x: 405, y: 475, width: 130, height: 27 } },
+      ],
+    }], undefined, { vehicleMakes: ["Nissan", "Land Rover"] });
+    expect(result.type).toBe("insurance_claim");
+    expect(result.issues.some((issue) => issue.code === "DOCUMENT_TYPE_MISMATCH")).toBe(false);
+    expect(result.fields.claim_number?.normalizedValue).toBe("C/004/05/26/2503/00999");
+    expect(result.fields.owner_name?.normalizedValue).toBe("SAMPLE CUSTOMER");
+    expect(result.fields.owner_name?.validation).toBe("warning");
+    expect(result.fields.owner_phone?.normalizedValue).toBe("90000000");
+    expect(result.fields.make?.normalizedValue).toBe("Nissan");
+    expect(result.fields.model?.normalizedValue).toBe("Micra");
+    expect(result.fields.make?.validation).toBe("warning");
+    expect(result.fields.model?.validation).toBe("warning");
+    expect(result.fields.year?.normalizedValue).toBe("2020");
+    expect(result.fields.plate_number?.normalizedValue).toBe("369");
+    expect(result.fields.plate_letters?.normalizedValue).toBe("TH");
+    expect(result.fields.accident_date?.normalizedValue).toBe("2026-08-22");
+    expect(result.fields.registration_date).toBeUndefined();
+    expect(defaultReviewSelection({ status: "needs_review", fields: result.fields, issues: result.issues } as DocumentExtractionResult).make).toBe(false);
+  });
+
+  it("does not split a hyphenated make or auto-accept an unresolved combined make/model", () => {
+    const result = parseDocumentPages([page([
+      "Insurance Claim", "Claim No: C/004/05/26/2503/00999",
+      "Vehicle Make & Model", "Mercedes-Benz C-Class",
+    ].join("\n"), "ocr", 0.9)], undefined, { vehicleMakes: ["Mercedes-Benz"] });
+    expect(result.fields.make?.normalizedValue).toBe("Mercedes-Benz");
+    expect(result.fields.model?.normalizedValue).toBe("C-Class");
+    expect(result.fields.make?.validation).toBe("warning");
+    expect(result.fields.model?.validation).toBe("warning");
+    const unresolved = parseDocumentPages([page([
+      "Insurance Claim", "Claim No: C/004/05/26/2503/00999",
+      "Vehicle Make & Model", "Unlisted Brand Model",
+    ].join("\n"), "ocr", 0.9)]);
+    expect(unresolved.fields.make).toBeUndefined();
+    expect(unresolved.fields.model).toBeUndefined();
+  });
+
   it("reads a scanned insurance gate pass in OCR order without treating the report date as the accident date", () => {
     const result = parseDocumentPages([{
       number: 1, method: "ocr", confidence: 0.88, width: 1488, height: 2105,

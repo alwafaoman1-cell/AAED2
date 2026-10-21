@@ -69,9 +69,9 @@ export async function claimDocumentProcessing(fileId: string): Promise<{
   return { extractionId: claim.extraction_id, acquired: claim.acquired, status: claim.processing_status as ProcessingStatus, lease: claim.lease };
 }
 
-export async function enqueueDocumentProcessing(fileId: string): Promise<{ extractionId: string; status: ProcessingStatus }> {
+export async function enqueueDocumentProcessing(fileId: string, engineVersion = DOCUMENT_ENGINE_VERSION): Promise<{ extractionId: string; status: ProcessingStatus }> {
   const { data, error } = await supabase.rpc("document_enqueue_processing", {
-    p_file_id: fileId, p_engine_version: `${DOCUMENT_ENGINE_VERSION}-worker`,
+    p_file_id: fileId, p_engine_version: `${engineVersion}-worker`,
   });
   if (error) throw error;
   const queued = data?.[0];

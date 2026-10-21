@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { findPrimaryClaimWorkOrder } from "@/lib/claimWorkOrderGuard";
 import { calculateVatExclusive, roundMoney } from "@/lib/money";
 
 export type EstimateType = "independent" | "insurance" | "supplementary";
@@ -272,18 +273,8 @@ async function findWorkOrderByEstimateOrClaim(estimate: UnifiedEstimate) {
   if (bySourceRow?.id) return bySourceRow;
 
   if (estimate.claim_id) {
-    const { data, error } = await supabase
-      .from("job_orders" as any)
-      .select("id,order_number,status")
-      .eq("tenant_id", estimate.tenant_id)
-      .eq("claim_id", estimate.claim_id)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    const row = data as any;
-    if (row?.id) return row;
+    const row = await findPrimaryClaimWorkOrder(estimate.tenant_id, estimate.claim_id);
+    if (row) return row;
   }
   return null;
 }

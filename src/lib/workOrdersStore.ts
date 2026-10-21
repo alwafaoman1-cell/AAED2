@@ -1,5 +1,6 @@
 ﻿import { classifyWorkOrderCosts, type ClaimApprovalMode, type ClaimApprovalInfo } from "@/lib/workOrderCosting";
 import { addUnifiedVehicleMedia, upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
+import { ClaimWorkOrderAlreadyExistsError, findPrimaryClaimWorkOrder } from "@/lib/claimWorkOrderGuard";
 import { extractWorkOrderNumber, isSupportedWorkOrderNumber, normalizeWorkOrderNumber } from "@/lib/workOrderNumber";
 import { buildWorkOrderActualCostMap, type WorkOrderExpenseCostRow } from "@/lib/workOrderActualCosts";
 
@@ -1583,6 +1584,10 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
   assertNoTemporaryOperationalIds(order);
   const ctx = await tenantContext();
   if (!ctx) throw new Error("تعذر تحديد الورشة الحالية");
+  if (!order.cloudId && order.claimId && !order.parentWorkOrderId) {
+    const existingClaimOrder = await findPrimaryClaimWorkOrder(ctx.tenantId, order.claimId);
+    if (existingClaimOrder) throw new ClaimWorkOrderAlreadyExistsError(existingClaimOrder);
+  }
   const customerId = await resolveCustomerId(ctx.tenantId, order);
   if (!customerId || !isUuid(customerId)) throw new Error("لا يمكن حفظ أمر العمل بدون customer_id صالح");
   const vehicleId = await resolveVehicleId(ctx.tenantId, customerId, order);
@@ -1638,6 +1643,11 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
       ? (supabase.from("job_orders") as any).update(fallbackPayload).eq("tenant_id", ctx.tenantId).eq("id", targetId).select("*").single()
       : (supabase.from("job_orders") as any).insert(fallbackPayload).select("*").single();
     ({ data, error } = await write);
+  }
+  if (error && !targetId && order.claimId && error.code === "23505"
+      && /one_primary_per_claim|primary work order/i.test(String(error.message || ""))) {
+    const existingClaimOrder = await findPrimaryClaimWorkOrder(ctx.tenantId, order.claimId);
+    if (existingClaimOrder) throw new ClaimWorkOrderAlreadyExistsError(existingClaimOrder);
   }
   if (error) throw error;
   if (!data?.id || !isUuid(data.id)) throw new Error("تعذر تأكيد حفظ أمر العمل في Supabase");

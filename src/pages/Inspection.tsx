@@ -67,12 +67,15 @@ export default function Inspection() {
   }, []);
 
   const filtered = useMemo(() => {
-    // إزالة التكرار: فحص واحد لكل سيارة (نفس اللوحة + نفس النوع) — نُبقي الأحدث
+    // General inspections retain the legacy one-per-plate view. Each insurance
+    // damage report is a separately numbered document and must remain visible.
     const dedupMap = new Map<string, InspectionRecord>();
     [...list]
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
       .forEach((i) => {
-        const key = `${i.kind || "general"}::${normalizePlate(i.plate || i.vehicle) || i.id}`;
+        const key = i.kind === "insurance"
+          ? `insurance::${i.id}`
+          : `general::${normalizePlate(i.plate || i.vehicle) || i.id}`;
         dedupMap.set(key, i);
       });
     const deduped = Array.from(dedupMap.values()).sort((a, b) => (b.date || "").localeCompare(a.date || ""));

@@ -14,6 +14,7 @@ import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicke
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompanyAutocomplete";
 import { useInsuranceEmployees } from "@/hooks/useInsuranceEmployees";
+import { useVehicleMakes } from "@/hooks/useVehicleMakesModels";
 import { useAuth } from "@/contexts/AuthContext";
 import { queryKeys } from "@/lib/queryKeys";
 import {
@@ -106,6 +107,7 @@ export default function VehicleEntryForm() {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const { data: insuranceEmployees = [] } = useInsuranceEmployees(form.insurance_company_id || undefined);
+  const { data: vehicleMakes = [] } = useVehicleMakes();
 
   const detail = useQuery({
     queryKey: queryKeys.vehicleEntries.detail(id),
@@ -495,7 +497,8 @@ export default function VehicleEntryForm() {
       <Section title="استخراج البيانات بالذكاء الاصطناعي" desc="لا يتم حفظ أي بيانات تلقائيًا. راجع البيانات ثم طبّقها على النموذج.">
         <AiExtractButton
           schema="insurance_claim"
-          expectedDocumentType="vehicle_registration"
+          expectedDocumentType="auto"
+          vehicleMakes={vehicleMakes.map((make) => make.name)}
           onExtracted={(data: any, document) => {
             if (document) {
               setPendingDocumentFileId(document.fileId);

@@ -4,6 +4,14 @@ import DOMPurify from "dompurify";
 import { injectPageMarginStyle } from "./pdfLayoutSettings";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "./htmlToPdf";
 
+function sanitizeGeneratedPdfHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    WHOLE_DOCUMENT: true,
+    ADD_TAGS: ["style", "link", "meta"],
+    ADD_ATTR: ["target", "dir", "lang"],
+  });
+}
+
 export async function printPdfBlob(blob: Blob): Promise<void> {
   const url = URL.createObjectURL(blob);
   const frame = document.createElement("iframe");
@@ -32,11 +40,7 @@ export async function printPdfBlob(blob: Blob): Promise<void> {
 }
 
 export function openSanitizedPdfWindow(html: string, targetWindow?: Window | null): Window | null {
-  const clean = DOMPurify.sanitize(html, {
-    WHOLE_DOCUMENT: true,
-    ADD_TAGS: ["style", "link", "meta"],
-    ADD_ATTR: ["target", "dir", "lang"],
-  });
+  const clean = sanitizeGeneratedPdfHtml(html);
   // Do not pass `noopener` in the feature string here. Some Chromium builds
   // isolate the about:blank popup immediately, which leaves the preview tab
   // empty because document.write() cannot populate it. We write sanitized HTML
@@ -64,11 +68,7 @@ export function openSanitizedPdfWindow(html: string, targetWindow?: Window | nul
  * race that happens with a fixed setTimeout.
  */
 export async function openAndPrintWindow(html: string): Promise<void> {
-  const clean = DOMPurify.sanitize(html, {
-    WHOLE_DOCUMENT: true,
-    ADD_TAGS: ["style", "link", "meta"],
-    ADD_ATTR: ["target", "dir", "lang"],
-  });
+  const clean = sanitizeGeneratedPdfHtml(html);
   const blob = await generatePdfFromHtml({
     htmlContent: clean,
     fileName: `print-${Date.now()}`,
@@ -76,6 +76,16 @@ export async function openAndPrintWindow(html: string): Promise<void> {
     margins: DEFAULT_MARGINS,
   });
   await printPdfBlob(blob);
+}
+
+/** Download the same sanitized template used by preview and printing. */
+export async function downloadSanitizedPdf(html: string, fileName: string): Promise<void> {
+  await generatePdfFromHtml({
+    htmlContent: sanitizeGeneratedPdfHtml(html),
+    fileName,
+    download: true,
+    margins: DEFAULT_MARGINS,
+  });
 }
 
 export async function printCurrentPageAsPdf(fileName = "report"): Promise<void> {

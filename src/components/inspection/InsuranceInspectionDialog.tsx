@@ -20,8 +20,9 @@ import {
 import VehicleAnnotationCanvas, { DEFAULT_VEHICLE_SVG_DATA_URL } from "./VehicleAnnotationCanvas";
 import { VEHICLE_TEMPLATES } from "@/lib/vehicleDiagrams";
 import { getWorkOrders, getWorkOrderById } from "@/lib/workOrdersStore";
-import { inspectionsStore, findInspectionByPlate, getNextDamageReportNumber, parseDamageReportSequence } from "@/lib/inspectionsStore";
+import { inspectionsStore, getNextDamageReportNumber } from "@/lib/inspectionsStore";
 import { insuranceInspectionStore } from "@/lib/insuranceInspectionStore";
+import { saveInsuranceDamageReport } from "@/lib/insuranceDamageReportService";
 import { logActivity } from "@/lib/auditLogStore";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
 import { cn } from "@/lib/utils";
@@ -77,6 +78,12 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
   const [claimPickerOpen, setClaimPickerOpen] = useState(false);
   const [linkedClaimId, setLinkedClaimId] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const requestIdRef = useRef(crypto.randomUUID());
+  const savedCodeRef = useRef<string | null>(editId || null);
+  const saveOutcomeUnknownRef = useRef(false);
+  const pendingSaveRef = useRef<Promise<{ id: string; data: Parameters<typeof generateInsuranceInspectionPdf>[0] }> | null>(null);
 
   const workOrders = getWorkOrders();
   const { data: claims = [] } = useInsuranceClaims();
@@ -88,8 +95,15 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
   // reset on open/close
   useEffect(() => {
     if (open && editId) {
-      const saved = insuranceInspectionStore.get(editId);
-      if (saved) {
+      savedCodeRef.current = editId;
+      setSaveBusy(true);
+      setLoadFailed(false);
+      void insuranceInspectionStore.load(editId).then((saved) => {
+        if (!saved) {
+          setLoadFailed(true);
+          toast.error(`تعذّر تحميل التقرير ${editId}`);
+          return;
+        }
         const { remarks: r, sections: s, annotatedImages, photos: savedPhotos, _savedAt, ...rest } = saved as any;
         setMeta(rest);
         setSections(Array.isArray(s) && s.length ? s : cloneSections());
@@ -103,16 +117,28 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
           setAnnotatedMap(map);
         }
         toast.info(`جارٍ تعديل التقرير ${editId}`);
-        return;
-      }
+      }).catch(() => {
+        setLoadFailed(true);
+        toast.error(`تعذّر تحميل التقرير ${editId}`);
+      }).finally(() => setSaveBusy(false));
+      return;
     }
     if (open && !editId) {
+      setLoadFailed(false);
+      savedCodeRef.current = null;
+      requestIdRef.current = crypto.randomUUID();
+      saveOutcomeUnknownRef.current = false;
       void getNextDamageReportNumber().then((reportNo) => {
-        setMeta(m => ({ ...m, reportNo, date: m.date || new Date().toISOString().split("T")[0] }));
+        if (!savedCodeRef.current) {
+          setMeta(m => ({ ...m, reportNo, date: m.date || new Date().toISOString().split("T")[0] }));
+        }
       });
     }
     if (open && preselectOrderId && !linkedOrderId) selectOrder(preselectOrderId);
     if (!open) {
+      savedCodeRef.current = null;
+      saveOutcomeUnknownRef.current = false;
+      pendingSaveRef.current = null;
       setStep(0);
       setLinkedOrderId("");
       setLinkedClaimId("");
@@ -276,91 +302,87 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
   const annotatedImagesAll = Object.values(annotatedMap).filter(Boolean);
 
   async function persistInspection() {
-    // منع التكرار: في حالة الإنشاء (وليس التعديل) إذا وُجد فحص تأمين سابق لنفس اللوحة → نُحدّثه ونعيد استخدام نفس الـ id
-    const existingForPlate = !editId ? findInspectionByPlate(meta.regNo, "insurance") : undefined;
-    const id = existingForPlate?.id || editId || (parseDamageReportSequence(meta.reportNo) ? meta.reportNo : await getNextDamageReportNumber());
-    const isEdit = (!!editId && !!inspectionsStore.getById(id)) || !!existingForPlate;
-    const savedMeta = { ...meta, reportNo: id };
-    setMeta(savedMeta);
-    const recordPayload = {
-      id,
-      workOrder: linkedOrderId || existingForPlate?.workOrder || "—",
-      customer: meta.customer || "—",
-      vehicle: meta.makeModel || meta.regNo || "—",
-      date: meta.date,
-      damageType: `Insurance Inspection — ${meta.insuranceCompany || "—"}`,
-      photos: photos.length + annotatedImagesAll.length,
-      status: "مكتمل",
-      kind: "insurance" as const,
-      plate: meta.regNo,
-    };
-    if (isEdit) {
-      inspectionsStore.update(id, recordPayload);
-    } else {
-      inspectionsStore.add(recordPayload);
-    }
-    // Save the full insurance payload so the report page can rebuild the exact PDF view
-    const result = insuranceInspectionStore.save(id, {
-      ...savedMeta,
-      reportNo: id,
-      remarks,
-      sections,
-      annotatedImages: annotatedImagesAll,
-      photos,
-    });
-    if (result === "failed") {
-      toast.error("تعذّر حفظ التقرير — ذاكرة المتصفح ممتلئة", {
-        description: "احذف بعض التقارير القديمة من قائمة الفحص ثم أعد المحاولة.",
-        duration: 8000,
+    if (pendingSaveRef.current) return pendingSaveRef.current;
+    const task = (async () => {
+      const existingCode = savedCodeRef.current || undefined;
+      const report = { ...meta, remarks, sections, annotatedImages: annotatedImagesAll, photos };
+      let saved;
+      try {
+        saved = await saveInsuranceDamageReport({
+          existingCode,
+          requestId: requestIdRef.current,
+          workOrderNumber: linkedOrderId || undefined,
+          report,
+        });
+        if (!existingCode && saveOutcomeUnknownRef.current) {
+          // A timed-out first request may already have committed an older draft.
+          savedCodeRef.current = saved.id;
+          saved = await saveInsuranceDamageReport({
+            existingCode: saved.id,
+            requestId: requestIdRef.current,
+            workOrderNumber: linkedOrderId || undefined,
+            report,
+          });
+        }
+        saveOutcomeUnknownRef.current = false;
+      } catch (error) {
+        saveOutcomeUnknownRef.current = true;
+        throw error;
+      }
+      savedCodeRef.current = saved.id;
+      setMeta(m => ({ ...m, reportNo: saved.id }));
+      insuranceInspectionStore.prime(saved.id, saved.report);
+      await inspectionsStore.refresh();
+      logActivity({
+        action: existingCode ? "update" : "create",
+        entity: "inspection",
+        entityId: saved.id,
+        label: `Insurance inspection ${meta.regNo} — ${meta.insuranceCompany}`,
+        description: `${meta.claimNo} ${linkedOrderId ? "• linked to " + linkedOrderId : ""}`,
       });
-    } else if (result === "trimmed") {
-      toast.warning("تم حفظ بيانات التقرير بدون الصور", {
-        description: "الصور والمخططات تجاوزت سعة المتصفح. النصوص وبنود الفحص محفوظة كاملة، لكن سيتطلب إعادة رفع الصور.",
-        duration: 8000,
-      });
-    }
-    logActivity({
-      action: isEdit ? "update" : "create",
-      entity: "inspection",
-      entityId: id,
-      label: `Insurance inspection ${meta.regNo} — ${meta.insuranceCompany}`,
-      description: `${meta.claimNo} ${linkedOrderId ? "• linked to " + linkedOrderId : ""}${existingForPlate ? " • merged with existing inspection for same vehicle" : ""}`,
-    });
-    if (existingForPlate) {
-      toast.info(`تم تحديث فحص التأمين الحالي للسيارة ${meta.regNo}`, {
-        description: `لا يمكن إنشاء أكثر من فحص تأمين لنفس السيارة. تم تحديث الفحص القائم (${id}) بدلاً من إنشاء فحص جديد.`,
-        duration: 6000,
-      });
-    }
-    return { result, id, data: { ...savedMeta, reportNo: id, remarks, sections, annotatedImages: annotatedImagesAll, photos } };
+      return { id: saved.id, data: saved.report };
+    })();
+    pendingSaveRef.current = task;
+    try { return await task; }
+    finally { pendingSaveRef.current = null; }
   }
 
 
   async function handleSaveOnly() {
+    if (saveBusy || loadFailed) return;
     if (!meta.claimNo.trim() && !meta.regNo.trim()) {
       toast.error("Claim No. or Reg No. is required");
       return;
     }
-    const saved = await persistInspection();
-    if (saved.result !== "failed") {
+    setSaveBusy(true);
+    try {
+      const saved = await persistInspection();
       toast.success(`Saved report ${saved.id}`);
       onOpenChange(false);
-    }
+    } catch (error) {
+      toast.error(`تعذّر حفظ التقرير: ${(error as Error)?.message || "خطأ غير معروف"}`);
+    } finally { setSaveBusy(false); }
   }
 
 
   async function handleSavePdf() {
+    if (saveBusy || loadFailed) return;
     if (!meta.claimNo.trim() && !meta.regNo.trim()) {
       toast.error("Claim No. or Reg No. is required");
       return;
     }
-    const saved = await persistInspection();
-    generateInsuranceInspectionPdf(saved.data);
-    toast.success(`Generated report ${saved.id}`);
+    setSaveBusy(true);
+    try {
+      const saved = await persistInspection();
+      generateInsuranceInspectionPdf(saved.data);
+      toast.success(`Generated report ${saved.id}`);
+    } catch (error) {
+      toast.error(`تعذّر حفظ التقرير: ${(error as Error)?.message || "خطأ غير معروف"}`);
+    } finally { setSaveBusy(false); }
   }
 
   async function handleDownloadPdf() {
-    if (pdfBusy) return;
+    if (pdfBusy || saveBusy || loadFailed) return;
     if (!meta.claimNo.trim() && !meta.regNo.trim()) {
       toast.error("Claim No. or Reg No. is required");
       return;
@@ -747,14 +769,14 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
           <div className="flex items-center gap-2 flex-wrap">
             {step === STEPS.length - 1 ? (
               <>
-                <Button size="sm" variant="outline" onClick={handleSaveOnly} className="gap-1">
+                <Button size="sm" variant="outline" onClick={handleSaveOnly} disabled={saveBusy || pdfBusy || loadFailed} className="gap-1">
                   💾 حفظ فقط
                 </Button>
-                <Button size="sm" variant="outline" onClick={handleSavePdf} className="gap-1">
+                <Button size="sm" variant="outline" onClick={handleSavePdf} disabled={saveBusy || pdfBusy || loadFailed} className="gap-1">
                   🖨️ طباعة
                 </Button>
-                <Button size="sm" onClick={handleDownloadPdf} disabled={pdfBusy} className="gradient-gold text-primary-foreground gap-1">
-                  <FileText size={14} /> {pdfBusy ? "جارٍ التحضير..." : "تنزيل PDF"}
+                <Button size="sm" onClick={handleDownloadPdf} disabled={pdfBusy || saveBusy || loadFailed} className="gradient-gold text-primary-foreground gap-1">
+                  <FileText size={14} /> {pdfBusy || saveBusy ? "جارٍ التحضير..." : "تنزيل PDF"}
                 </Button>
               </>
             ) : (

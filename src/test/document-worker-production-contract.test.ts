@@ -1,21 +1,35 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { isDocumentEngineEnabled, isDocumentWorkerEnabled } from "@/lib/documentExtraction/config";
-import { DOCUMENT_ENGINE_VERSION } from "@/lib/documentExtraction/types";
+import { DOCUMENT_ENGINE_VERSION, VEHICLE_ENTRY_AUTO_ENGINE_VERSION } from "@/lib/documentExtraction/types";
 import { createDocumentDownloadHandler } from "../../supabase/functions/document-worker-download/handler";
 
 afterEach(() => vi.unstubAllEnvs());
 
 describe("project-bound OCR rollout", () => {
+  it("uses document detection only for vehicle entry and keeps the claim Review path", () => {
+    const form = readFileSync(new URL("../pages/vehicle-entry/VehicleEntryForm.tsx", import.meta.url), "utf8");
+    const button = readFileSync(new URL("../components/ai/AiExtractButton.tsx", import.meta.url), "utf8");
+    const engine = readFileSync(new URL("../lib/documentExtraction/engine.ts", import.meta.url), "utf8");
+    expect(form).toContain('schema="insurance_claim"');
+    expect(form).toContain('expectedDocumentType="auto"');
+    expect(form).toContain("vehicleMakes={vehicleMakes.map((make) => make.name)}");
+    expect(button).toContain('expectedDocumentType === "auto" ? VEHICLE_ENTRY_AUTO_ENGINE_VERSION : undefined');
+    expect(button).toContain('requireWorker: expectedDocumentType === "auto"');
+    expect(engine).toContain("enqueueDocumentProcessing(registered.id, engineVersion)");
+  });
+
   it("keeps the parser revision scoped to an immutable version across queue and RLS", () => {
-    const sql = readFileSync(new URL("../../supabase/migrations/20261020160525_document_insurer_form_coverage.sql", import.meta.url), "utf8");
+    const sql = readFileSync(new URL("../../supabase/migrations/20261021075356_document_vehicle_entry_gate_pass_detection.sql", import.meta.url), "utf8");
     expect(DOCUMENT_ENGINE_VERSION).toBe("1.0.5");
+    expect(VEHICLE_ENTRY_AUTO_ENGINE_VERSION).toBe("1.0.6");
     expect(sql).toContain("document_worker_file_read");
     expect(sql).toContain("document_worker_extraction_update");
     expect(sql).toContain("document_worker_page_insert");
     expect(sql).toContain("document_worker_write_guard()");
     expect(sql).toContain("document_enqueue_processing(p_file_id uuid, p_engine_version text)");
-    expect(sql.match(/'1\.0\.5-worker'/g)?.length).toBeGreaterThanOrEqual(7);
+    expect(sql.match(/'1\.0\.6-worker'/g)?.length).toBeGreaterThanOrEqual(7);
+    expect(sql).toContain("'1.0.5-worker'");
     expect(sql).toContain("'1.0.4-worker'");
     expect(sql).toContain("'1.0.3-worker'");
     expect(sql).not.toMatch(/\b(create|drop|truncate)\s+table\b/i);
@@ -48,7 +62,7 @@ describe("project-bound OCR rollout", () => {
     const lease = "00000000-0000-4000-8000-000000005743";
     const fileId = "00000000-0000-4000-8000-000000005744";
     const sha256 = "a".repeat(64);
-    let engineVersion = `${DOCUMENT_ENGINE_VERSION}-worker`;
+    let engineVersion = `${VEHICLE_ENTRY_AUTO_ENGINE_VERSION}-worker`;
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith("/document_extractions")) return Response.json([{ id: extractionId, tenant_id: tenant,
@@ -70,7 +84,7 @@ describe("project-bound OCR rollout", () => {
     expect(response.headers.get("cache-control")).toContain("no-store");
     engineVersion = "1.0.0-worker";
     expect((await handler(makeRequest("s".repeat(64)))).status).toBe(200);
-    engineVersion = "1.0.6-worker";
+    engineVersion = "1.0.7-worker";
     expect((await handler(makeRequest("s".repeat(64)))).status).toBe(403);
     fetcher.mockClear();
     expect((await handler(makeRequest("s".repeat(64), "00000000-0000-4000-8000-000000005745"))).status).toBe(403);
