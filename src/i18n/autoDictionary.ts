@@ -43,6 +43,13 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "معاينة مؤقتة لنموذج دخول المركبة": "Temporary Vehicle Entry Form Preview",
+  "عرض لمرة واحدة بعد التوقيع؛ ستعود إلى صفحة التوقيع تلقائيًا.": "Shown once after signing; you will return to the signature page automatically.",
+  "تنتهي المعاينة خلال": "Preview closes in",
+  "ثوانٍ": "seconds",
+  "معاينة نموذج دخول المركبة بعد التوقيع": "Vehicle Entry Form Preview After Signing",
+  "تاريخ ووقت التوقيع:": "Signature date and time:",
+  "حُفظ التوقيع، لكن تعذرت المعاينة المؤقتة. وقت التوقيع ظاهر أدناه.": "The signature was saved, but the temporary preview could not open. The signature time is shown below.",
   "قراءة فاتورة الشراء وبنودها": "Read Purchase Invoice and Lines",
   "الاستخراج يملأ مسودة فقط. صفحة فواتير الشراء الحالية لا تزال تعتمد مخزنها المحلي؛ لا يعد هذا ربطًا محاسبيًا سحابيًا للمستند.": "Extraction fills a draft only. This purchase-invoice page still uses local storage; the document is not cloud-linked to an accounting invoice.",
   "المورد المقروء:": "Read supplier:",

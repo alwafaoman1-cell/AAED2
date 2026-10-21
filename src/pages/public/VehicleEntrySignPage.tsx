@@ -5,6 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { VEHICLE_ENTRY_DECLARATION_AR, VEHICLE_ENTRY_DECLARATION_EN } from "@/lib/vehicleEntryService";
+import {
+  buildOneTimeEntryPreviewHtml,
+  canShowOneTimeEntryPreview,
+  type EntrySignatureSubmitResult,
+} from "@/lib/vehicleEntryOneTimePreview";
 import { toast } from "sonner";
 
 interface EntrySignatureData {
@@ -58,6 +63,17 @@ const errorMessage = (error?: string | null) => {
   return "الرابط غير صالح أو تم إيقافه. يرجى التواصل مع الورشة.";
 };
 
+function formatSignatureTime(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("ar-OM", {
+    timeZone: "Asia/Muscat",
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(date);
+}
+
 export default function VehicleEntrySignPage() {
   const { token } = useParams<{ token: string }>();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -72,6 +88,30 @@ export default function VehicleEntrySignPage() {
   const [photos, setPhotos] = useState<EntryPhoto[]>([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [photosUnavailable, setPhotosUnavailable] = useState(false);
+  const [oneTimePreview, setOneTimePreview] = useState<{ html: string; expiresAt: number | null } | null>(null);
+  const [previewSeconds, setPreviewSeconds] = useState(10);
+  const [viewportWidth, setViewportWidth] = useState(() => typeof window === "undefined" ? 816 : window.innerWidth);
+
+  useEffect(() => {
+    if (!oneTimePreview?.expiresAt) return;
+    const updateCountdown = () => {
+      const remaining = Math.max(0, Math.ceil((oneTimePreview.expiresAt! - Date.now()) / 1000));
+      setPreviewSeconds(remaining);
+      if (remaining === 0) setOneTimePreview(null);
+    };
+    const updateWidth = () => setViewportWidth(window.innerWidth);
+    updateCountdown();
+    window.addEventListener("visibilitychange", updateCountdown);
+    window.addEventListener("focus", updateCountdown);
+    window.addEventListener("resize", updateWidth);
+    const interval = window.setInterval(updateCountdown, 200);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("visibilitychange", updateCountdown);
+      window.removeEventListener("focus", updateCountdown);
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, [oneTimePreview]);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -178,20 +218,40 @@ export default function VehicleEntrySignPage() {
 
     setSubmitting(true);
     try {
+      const signatureDataUrl = canvasRef.current.toDataURL("image/png");
       const { data: response, error: requestError } = await supabase.rpc(
         "submit_vehicle_entry_customer_signature" as any,
         {
           p_token: token,
-          p_signature: canvasRef.current.toDataURL("image/png"),
+          p_signature: signatureDataUrl,
           p_signer_name: signerName.trim(),
           p_user_agent: navigator.userAgent,
         } as any,
       );
       if (requestError) throw requestError;
-      const result = response as unknown as { ok?: boolean } | null;
+      const result = response as unknown as EntrySignatureSubmitResult | null;
       if (!result?.ok) throw new Error("تعذر اعتماد التوقيع");
       toast.success("تم اعتماد توقيع استلام المركبة بنجاح");
-      await load();
+      if (result.already_signed || !result.signed_at) {
+        await load();
+      } else {
+        setData((current) => current ? {
+          ...current,
+          signed: true,
+          signer_name: signerName.trim(),
+          signed_at: result.signed_at,
+        } : current);
+        if (canShowOneTimeEntryPreview(result)) {
+          try {
+            setOneTimePreview({
+              html: buildOneTimeEntryPreviewHtml(result.preview_entry, photos, signatureDataUrl),
+              expiresAt: null,
+            });
+          } catch {
+            toast.warning("حُفظ التوقيع، لكن تعذرت المعاينة المؤقتة. وقت التوقيع ظاهر أدناه.");
+          }
+        }
+      }
     } catch (submitError: any) {
       const message = String(submitError?.message || "");
       toast.error(message.includes("expired_link") ? errorMessage("expired_link") : "تعذر حفظ التوقيع. يرجى المحاولة مرة أخرى.");
@@ -199,6 +259,40 @@ export default function VehicleEntrySignPage() {
       setSubmitting(false);
     }
   };
+
+  if (oneTimePreview) {
+    const sheetWidth = 816;
+    const sheetHeight = 1160;
+    const scale = Math.min(1, Math.max(0.3, (viewportWidth - 24) / sheetWidth));
+    return (
+      <main className="min-h-screen bg-slate-100 p-3" dir="rtl" onContextMenu={(event) => event.preventDefault()}>
+        <style>{"@media print{body{display:none!important}}"}</style>
+        <div className="mx-auto max-w-4xl">
+          <header className="sticky top-0 z-10 mb-3 rounded-xl border bg-white p-3 text-center shadow-sm">
+            <ShieldCheck className="mx-auto h-6 w-6 text-primary" />
+            <h1 className="mt-1 text-base font-bold">معاينة مؤقتة لنموذج دخول المركبة</h1>
+            <p className="mt-1 text-sm text-muted-foreground">عرض لمرة واحدة بعد التوقيع؛ ستعود إلى صفحة التوقيع تلقائيًا.</p>
+            <p className="mt-1 text-sm font-semibold" aria-live="polite">تنتهي المعاينة خلال {previewSeconds} ثوانٍ</p>
+          </header>
+          <div className="mx-auto overflow-hidden" style={{ width: sheetWidth * scale, height: sheetHeight * scale }}>
+            <iframe
+              title="معاينة نموذج دخول المركبة بعد التوقيع"
+              srcDoc={oneTimePreview.html}
+              sandbox="allow-same-origin"
+              referrerPolicy="no-referrer"
+              width={sheetWidth}
+              height={sheetHeight}
+              className="origin-top-left border-0 bg-white"
+              style={{ transform: `scale(${scale})`, pointerEvents: "none" }}
+              onLoad={() => setOneTimePreview((current) => current && !current.expiresAt
+                ? { ...current, expiresAt: Date.now() + 10_000 }
+                : current)}
+            />
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (loading) {
     return <div className="min-h-screen grid place-items-center bg-slate-50"><Loader2 className="h-9 w-9 animate-spin text-primary" /></div>;
@@ -303,7 +397,7 @@ export default function VehicleEntrySignPage() {
             <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
             <h2 className="mt-2 text-lg font-bold text-emerald-900">تم اعتماد التوقيع</h2>
             <p className="mt-1 text-sm text-emerald-800">{data.signer_name || "—"}</p>
-            <p className="text-xs text-emerald-700" dir="ltr">{data.signed_at ? new Date(data.signed_at).toLocaleString("en-GB") : ""}</p>
+            <p className="mt-2 text-sm font-semibold text-emerald-900">تاريخ ووقت التوقيع: {formatSignatureTime(data.signed_at)}</p>
           </section>
         ) : (
           <section className="rounded-2xl border bg-white p-5 shadow-sm">
