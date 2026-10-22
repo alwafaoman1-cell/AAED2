@@ -116,14 +116,16 @@ export function postExpense(args: PostExpenseArgs) {
     description: `مصروف ${args.expenseNumber} — ${args.category}${args.description ? ` (${args.description})` : ""}`,
   };
   const current = getJournalForSource("expense", args.expenseId);
-  // Cache hydration and Realtime notifications must not rewrite an unchanged
-  // journal line or allocate a new entry number on every page visit.
-  if (args.amount > 0 && current.length === 1 &&
-      current[0].date === expected.date &&
-      current[0].debitAccount === expected.debitAccount &&
-      current[0].creditAccount === expected.creditAccount &&
-      current[0].amount === expected.amount &&
-      current[0].description === expected.description) return;
+  // Opening a page must not "repair" historical duplicate lines by removing
+  // and recreating a valid one. Concurrent tabs can otherwise keep replacing
+  // each other's entries and produce unrelated cloud-save warnings. Leave
+  // existing duplicates untouched; a real expense edit still replaces them.
+  if (args.amount > 0 && current.length > 0 && current.every((entry) =>
+      entry.date === expected.date &&
+      entry.debitAccount === expected.debitAccount &&
+      entry.creditAccount === expected.creditAccount &&
+      entry.amount === expected.amount &&
+      entry.description === expected.description)) return;
   if (current.length) removeJournalBySource("expense", args.expenseId);
   if (args.amount > 0) addJournalEntry(expected);
 }

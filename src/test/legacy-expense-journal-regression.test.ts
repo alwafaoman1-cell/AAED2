@@ -61,6 +61,38 @@ describe("legacy expense journal reconciliation", () => {
     expect(journal.remove).not.toHaveBeenCalled();
   });
 
+  it("does not rewrite a valid historical entry when the same expense has duplicate lines", () => {
+    postExpense(expense);
+    journal.entries.push({ ...journal.entries[0], id: "JE-legacy-duplicate" });
+    journal.add.mockClear();
+    journal.remove.mockClear();
+
+    postExpense(expense);
+    postExpense(expense);
+
+    expect(journal.entries).toHaveLength(2);
+    expect(journal.add).not.toHaveBeenCalled();
+    expect(journal.remove).not.toHaveBeenCalled();
+
+    postExpense({ ...expense, amount: 30 });
+    expect(journal.entries).toHaveLength(1);
+    expect(journal.entries[0].amount).toBe(30);
+  });
+
+  it("reconciles conflicting duplicate amounts instead of treating one matching line as sufficient", () => {
+    postExpense(expense);
+    journal.entries.push({ ...journal.entries[0], id: "JE-stale-duplicate", amount: 12 });
+    journal.add.mockClear();
+    journal.remove.mockClear();
+
+    postExpense(expense);
+
+    expect(journal.remove).toHaveBeenCalledTimes(1);
+    expect(journal.add).toHaveBeenCalledTimes(1);
+    expect(journal.entries).toHaveLength(1);
+    expect(journal.entries[0].amount).toBe(25);
+  });
+
   it("replaces a changed entry and removes a zeroed entry without creating another", () => {
     postExpense(expense);
     postExpense({ ...expense, amount: 30 });
