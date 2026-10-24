@@ -416,8 +416,8 @@ const App = () => (
               <Route path="/inventory/movements" element={<StockMovements />} />
               <Route path="/inventory/import-catalog" element={<PartsCatalogImport />} />
               <Route path="/inventory/:id" element={<InventoryDetail />} />
-              <Route path="/staff" element={<Staff />} />
-              <Route path="/staff/:id" element={<EmployeeDetail />} />
+              <Route path="/staff" element={<ProtectedRoute roles={["admin", "manager"]}><Staff /></ProtectedRoute>} />
+              <Route path="/staff/:id" element={<ProtectedRoute roles={["admin", "manager"]}><EmployeeDetail /></ProtectedRoute>} />
               <Route path="/compliance" element={<ProtectedRoute roles={["admin", "manager"]}><ComplianceRegisterPage /></ProtectedRoute>} />
               <Route path="/compliance/new" element={<ProtectedRoute roles={["admin", "manager"]}><ComplianceRecordPage /></ProtectedRoute>} />
               <Route path="/compliance/:recordId" element={<ProtectedRoute roles={["admin", "manager"]}><ComplianceRecordPage /></ProtectedRoute>} />

@@ -1,7 +1,14 @@
-// نظام إدارة الموارد البشرية HR — تخزين محلي شامل
+// نظام إدارة الموارد البشرية HR — الحفظ المؤكد في إعدادات المستأجر السحابية
 // عقود، رواتب، سلف، خصومات، إجازات، حضور، مكافآت، مستندات، تقييمات
 
-import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
+import {
+  getCloudSettingsScopeVersion,
+  mutateCloudObjectSetting,
+  readCloudSettingFresh,
+  subscribeCloudSetting,
+  subscribeCloudSettingsScopeChange,
+} from "./cloudSettings";
+import { getCurrentTenantId } from "./cloud/createCloudStore";
 
 export type EmploymentStatus = "active" | "on_leave" | "suspended" | "terminated";
 export type ContractType = "full_time" | "part_time" | "contract" | "freelance";
@@ -146,7 +153,9 @@ export interface EmployeeDocument {
   employeeId: string;
   name: string;
   type: "id" | "passport" | "contract" | "certificate" | "license" | "other";
-  fileUrl?: string;                     // base64 dataUrl للتخزين المحلي
+  fileUrl?: string;                     // Legacy base64 data URL; retained for old records.
+  storagePath?: string;                 // New uploads live in private HR Storage.
+  deletedAt?: string;                   // Retain path until private-object cleanup succeeds.
   fileName?: string;
   fileSize?: number;
   expiryDate?: string;
@@ -188,31 +197,73 @@ interface HRDB {
 const KEY = "alwafa_hr_v1";
 const subs = new Set<() => void>();
 let cache: HRDB | null = null;
+let loadState: "idle" | "loading" | "ready" | "error" = "idle";
 
 function read(): HRDB {
   if (cache) return cache;
   cache = empty();
-  void readCloudSetting<HRDB>(KEY, empty()).then((value) => {
+  loadState = "loading";
+  const scopeVersion = getCloudSettingsScopeVersion();
+  void (async () => {
+    if (!await getCurrentTenantId()) throw new Error("no_tenant");
+    return readCloudSettingFresh<HRDB>(KEY, empty());
+  })().then((value) => {
+    if (scopeVersion !== getCloudSettingsScopeVersion()) return;
     cache = { ...empty(), ...value };
-    subs.forEach((cb) => cb());
-  }).catch(() => undefined);
+    loadState = "ready";
+    notify();
+  }).catch((error) => {
+    if (scopeVersion !== getCloudSettingsScopeVersion()) return;
+    loadState = "error";
+    console.error("[hrStore] cloud read failed", error);
+    notify();
+  });
   return cache!;
 }
 function empty(): HRDB {
   return { employees: [], advances: [], deductions: [], bonuses: [], leaves: [], attendance: [], payslips: [], documents: [], reviews: [] };
 }
-function write(next: HRDB) {
-  cache = next;
+function notify() {
   subs.forEach((cb) => cb());
-  void writeCloudSetting(KEY, next).catch((error) => {
-    console.warn("[hrStore] Supabase write failed", error);
+}
+async function updateHr(mutate: (db: HRDB) => HRDB): Promise<HRDB> {
+  const next = await mutateCloudObjectSetting(KEY, empty(),
+    (value) => mutate({ ...empty(), ...value }), getCloudSettingsScopeVersion());
+  cache = next;
+  loadState = "ready";
+  notify();
+  return next;
+}
+async function saveInCollection<T extends { id: string }>(collection: keyof HRDB, item: T): Promise<T> {
+  await updateHr((db) => {
+    const rows = db[collection] as unknown as T[];
+    return {
+      ...db,
+      [collection]: rows.some((row) => row.id === item.id)
+        ? rows.map((row) => row.id === item.id ? item : row)
+        : [item, ...rows],
+    };
+  });
+  return item;
+}
+async function removeFromCollection(collection: keyof HRDB, id: string): Promise<void> {
+  await updateHr((db) => {
+    const rows = db[collection] as { id: string }[];
+    if (!rows.some((row) => row.id === id)) throw new Error("HR_RECORD_NOT_FOUND");
+    return { ...db, [collection]: rows.filter((row) => row.id !== id) };
   });
 }
 
 if (typeof window !== "undefined") {
   subscribeCloudSetting<HRDB>(KEY, (value) => {
     cache = { ...empty(), ...value };
-    subs.forEach((cb) => cb());
+    loadState = "ready";
+    notify();
+  });
+  subscribeCloudSettingsScopeChange(() => {
+    cache = null;
+    loadState = "idle";
+    notify();
   });
 }
 function uid() {
@@ -223,6 +274,8 @@ function nowIso() { return new Date().toISOString(); }
 
 export const hrStore = {
   subscribe(cb: () => void) { subs.add(cb); return () => subs.delete(cb); },
+  loadState() { read(); return loadState; },
+  retryLoad() { cache = null; loadState = "idle"; read(); notify(); },
 
   // Employees
   listEmployees(): Employee[] {
@@ -237,166 +290,124 @@ export const hrStore = {
     }, 0);
     return `EMP-${String(max + 1).padStart(4, "0")}`;
   },
-  saveEmployee(e: Employee) {
-    const db = read();
-    const idx = db.employees.findIndex((x) => x.id === e.id);
-    const final = { ...e, updatedAt: nowIso() };
-    if (idx >= 0) db.employees[idx] = final; else db.employees.unshift(final);
-    write({ ...db });
-    return final;
+  async saveEmployee(e: Employee): Promise<Employee> {
+    const next = await updateHr((db) => {
+      const idx = db.employees.findIndex((x) => x.id === e.id);
+      if (idx >= 0 && db.employees[idx].updatedAt !== e.updatedAt) {
+        throw new Error("HR_RECORD_CONFLICT");
+      }
+      const previousTime = idx >= 0 ? Date.parse(db.employees[idx].updatedAt) : NaN;
+      const updatedAt = new Date(Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : 0)).toISOString();
+      const final = { ...e, updatedAt };
+      if (idx < 0) {
+        const max = db.employees.reduce((highest, row) => {
+          const n = Number.parseInt((row.employeeNumber || "").replace(/\D/g, ""), 10);
+          return Number.isFinite(n) ? Math.max(highest, n) : highest;
+        }, 0);
+        final.employeeNumber = `EMP-${String(max + 1).padStart(4, "0")}`;
+      }
+      return { ...db, employees: idx >= 0
+        ? db.employees.map((row) => row.id === e.id ? final : row)
+        : [final, ...db.employees] };
+    });
+    return next.employees.find((row) => row.id === e.id)!;
   },
-  removeEmployee(id: string) {
-    const db = read();
-    db.employees = db.employees.map((e) => e.id === id ? { ...e, isDeleted: true } : e);
-    write({ ...db });
+  async removeEmployee(id: string): Promise<void> {
+    await updateHr((db) => {
+      if (!db.employees.some((e) => e.id === id)) throw new Error("HR_RECORD_NOT_FOUND");
+      return { ...db, employees: db.employees.map((e) => e.id === id ? { ...e, isDeleted: true } : e) };
+    });
   },
 
   // Advances
   listAdvances(employeeId?: string) {
     const all = read().advances;
-    return (employeeId ? all.filter((a) => a.employeeId === employeeId) : all)
+    return (employeeId ? all.filter((a) => a.employeeId === employeeId) : [...all])
       .sort((a, b) => b.date.localeCompare(a.date));
   },
-  saveAdvance(a: Advance) {
-    const db = read();
-    const idx = db.advances.findIndex((x) => x.id === a.id);
-    if (idx >= 0) db.advances[idx] = a; else db.advances.unshift(a);
-    write({ ...db });
-    return a;
-  },
-  removeAdvance(id: string) {
-    const db = read();
-    db.advances = db.advances.filter((a) => a.id !== id);
-    write({ ...db });
-  },
+  saveAdvance(a: Advance) { return saveInCollection("advances", a); },
+  removeAdvance(id: string) { return removeFromCollection("advances", id); },
 
   // Deductions
   listDeductions(employeeId?: string) {
     const all = read().deductions;
-    return (employeeId ? all.filter((d) => d.employeeId === employeeId) : all)
+    return (employeeId ? all.filter((d) => d.employeeId === employeeId) : [...all])
       .sort((a, b) => b.date.localeCompare(a.date));
   },
-  saveDeduction(d: Deduction) {
-    const db = read();
-    const idx = db.deductions.findIndex((x) => x.id === d.id);
-    if (idx >= 0) db.deductions[idx] = d; else db.deductions.unshift(d);
-    write({ ...db });
-    return d;
-  },
-  removeDeduction(id: string) {
-    const db = read();
-    db.deductions = db.deductions.filter((d) => d.id !== id);
-    write({ ...db });
-  },
+  saveDeduction(d: Deduction) { return saveInCollection("deductions", d); },
+  removeDeduction(id: string) { return removeFromCollection("deductions", id); },
 
   // Bonuses
   listBonuses(employeeId?: string) {
     const all = read().bonuses;
-    return (employeeId ? all.filter((b) => b.employeeId === employeeId) : all)
+    return (employeeId ? all.filter((b) => b.employeeId === employeeId) : [...all])
       .sort((a, b) => b.date.localeCompare(a.date));
   },
-  saveBonus(b: Bonus) {
-    const db = read();
-    const idx = db.bonuses.findIndex((x) => x.id === b.id);
-    if (idx >= 0) db.bonuses[idx] = b; else db.bonuses.unshift(b);
-    write({ ...db });
-    return b;
-  },
-  removeBonus(id: string) {
-    const db = read();
-    db.bonuses = db.bonuses.filter((b) => b.id !== id);
-    write({ ...db });
-  },
+  saveBonus(b: Bonus) { return saveInCollection("bonuses", b); },
+  removeBonus(id: string) { return removeFromCollection("bonuses", id); },
 
   // Leaves
   listLeaves(employeeId?: string) {
     const all = read().leaves;
-    return (employeeId ? all.filter((l) => l.employeeId === employeeId) : all)
+    return (employeeId ? all.filter((l) => l.employeeId === employeeId) : [...all])
       .sort((a, b) => b.startDate.localeCompare(a.startDate));
   },
-  saveLeave(l: Leave) {
-    const db = read();
-    const idx = db.leaves.findIndex((x) => x.id === l.id);
-    if (idx >= 0) db.leaves[idx] = l; else db.leaves.unshift(l);
-    write({ ...db });
-    return l;
-  },
-  removeLeave(id: string) {
-    const db = read();
-    db.leaves = db.leaves.filter((l) => l.id !== id);
-    write({ ...db });
-  },
+  saveLeave(l: Leave) { return saveInCollection("leaves", l); },
+  removeLeave(id: string) { return removeFromCollection("leaves", id); },
 
   // Attendance
   listAttendance(employeeId?: string, month?: string) {
     let all = read().attendance;
     if (employeeId) all = all.filter((a) => a.employeeId === employeeId);
     if (month) all = all.filter((a) => a.date.startsWith(month));
-    return all.sort((a, b) => b.date.localeCompare(a.date));
+    return [...all].sort((a, b) => b.date.localeCompare(a.date));
   },
-  saveAttendance(a: Attendance) {
-    const db = read();
-    const idx = db.attendance.findIndex((x) => x.id === a.id);
-    if (idx >= 0) db.attendance[idx] = a; else db.attendance.unshift(a);
-    write({ ...db });
-    return a;
-  },
-  removeAttendance(id: string) {
-    const db = read();
-    db.attendance = db.attendance.filter((a) => a.id !== id);
-    write({ ...db });
-  },
+  saveAttendance(a: Attendance) { return saveInCollection("attendance", a); },
+  removeAttendance(id: string) { return removeFromCollection("attendance", id); },
 
   // Payslips
   listPayslips(employeeId?: string) {
     const all = read().payslips;
-    return (employeeId ? all.filter((p) => p.employeeId === employeeId) : all)
+    return (employeeId ? all.filter((p) => p.employeeId === employeeId) : [...all])
       .sort((a, b) => b.month.localeCompare(a.month));
   },
-  savePayslip(p: Payslip) {
-    const db = read();
-    const idx = db.payslips.findIndex((x) => x.id === p.id);
-    if (idx >= 0) db.payslips[idx] = p; else db.payslips.unshift(p);
-    write({ ...db });
-    return p;
-  },
-  removePayslip(id: string) {
-    const db = read();
-    db.payslips = db.payslips.filter((p) => p.id !== id);
-    write({ ...db });
-  },
+  savePayslip(p: Payslip) { return saveInCollection("payslips", p); },
+  removePayslip(id: string) { return removeFromCollection("payslips", id); },
 
   // Documents
   listDocuments(employeeId: string) {
-    return read().documents.filter((d) => d.employeeId === employeeId)
+    return read().documents.filter((d) => d.employeeId === employeeId && !d.deletedAt)
       .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
   },
-  saveDocument(d: EmployeeDocument) {
-    const db = read();
-    const idx = db.documents.findIndex((x) => x.id === d.id);
-    if (idx >= 0) db.documents[idx] = d; else db.documents.unshift(d);
-    write({ ...db });
-    return d;
+  pendingDocumentCleanup(employeeId: string) {
+    return read().documents.filter((d) => d.employeeId === employeeId && !!d.deletedAt && !!d.storagePath);
   },
-  removeDocument(id: string) {
-    const db = read();
-    db.documents = db.documents.filter((d) => d.id !== id);
-    write({ ...db });
+  saveDocument(d: EmployeeDocument) { return saveInCollection("documents", d); },
+  async removeDocument(id: string): Promise<void> {
+    await updateHr((db) => {
+      const document = db.documents.find((row) => row.id === id);
+      if (!document) throw new Error("HR_RECORD_NOT_FOUND");
+      return { ...db, documents: document.storagePath
+        ? db.documents.map((row) => row.id === id ? { ...row, deletedAt: row.deletedAt || nowIso() } : row)
+        : db.documents.filter((row) => row.id !== id) };
+    });
+  },
+  async finishDocumentCleanup(id: string): Promise<void> {
+    await updateHr((db) => {
+      const document = db.documents.find((row) => row.id === id);
+      if (!document) return db;
+      if (!document.deletedAt || !document.storagePath) throw new Error("HR_DOCUMENT_NOT_PENDING_DELETE");
+      return { ...db, documents: db.documents.filter((row) => row.id !== id) };
+    });
   },
 
   // Performance Reviews
   listReviews(employeeId?: string) {
     const all = read().reviews;
-    return (employeeId ? all.filter((r) => r.employeeId === employeeId) : all)
+    return (employeeId ? all.filter((r) => r.employeeId === employeeId) : [...all])
       .sort((a, b) => b.date.localeCompare(a.date));
   },
-  saveReview(r: PerformanceReview) {
-    const db = read();
-    const idx = db.reviews.findIndex((x) => x.id === r.id);
-    if (idx >= 0) db.reviews[idx] = r; else db.reviews.unshift(r);
-    write({ ...db });
-    return r;
-  },
+  saveReview(r: PerformanceReview) { return saveInCollection("reviews", r); },
 
   // Helpers
   uid,

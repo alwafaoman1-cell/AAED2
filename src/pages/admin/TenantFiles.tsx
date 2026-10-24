@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, Eye, File, Link2, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -34,19 +34,26 @@ export default function TenantFiles({ tenantId }: { tenantId?: string }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const allowDelete = canDelete();
+  const loadVersion = useRef(0);
 
-  async function load() {
+  const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
+    setFiles([]);
     try {
-      setFiles(await listTenantFiles(category, tenantId));
+      const rows = await listTenantFiles(category, tenantId);
+      if (version === loadVersion.current) setFiles(rows);
     } catch (error: any) {
-      toast.error(error?.message || "تعذر تحميل الملفات");
+      if (version === loadVersion.current) toast.error(error?.message || "تعذر تحميل الملفات");
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
-  }
+  }, [category, tenantId]);
 
-  useEffect(() => { void load(); }, [category, tenantId]);
+  useEffect(() => {
+    void load();
+    return () => { loadVersion.current += 1; };
+  }, [load]);
 
   const filtered = useMemo(() => files.filter((file) =>
     !search || file.file_name.toLowerCase().includes(search.toLowerCase())

@@ -43,6 +43,12 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "إخفاء الإشعار": "Hide notification",
+  "جارٍ الرفع...": "Uploading...",
+  "تُدار التصنيفات من صفحة واحدة مرتبطة بالسحابة، مع الاسم العربي والإنجليزي والشجرة المحاسبية. لا تُنشأ نسخة ثانية هنا.": "Categories are managed on one cloud-backed page with Arabic and English names and the accounting hierarchy. No second copy is created here.",
+  "فتح إدارة تصنيفات المصروفات": "Open Expense Category Management",
+  "تعذر قراءة النسخ السحابية؛ لا تفترض أن القائمة فارغة.": "Cloud backups could not be read; do not assume the list is empty.",
+  "جارٍ الحفظ…": "Saving…",
   "معاينة مؤقتة لنموذج دخول المركبة": "Temporary Vehicle Entry Form Preview",
   "عرض لمرة واحدة بعد التوقيع؛ ستعود إلى صفحة التوقيع تلقائيًا.": "Shown once after signing; you will return to the signature page automatically.",
   "تنتهي المعاينة خلال": "Preview closes in",

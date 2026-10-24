@@ -9,6 +9,7 @@ import { getActionLabel, getEntityLabel } from "@/lib/auditLogStore";
 import { useOverdueInsuranceAlerts } from "@/hooks/useOverdueInsuranceAlerts";
 import { notificationSound } from "@/lib/notificationSound";
 import { adminNotificationsStore, type AdminNotification } from "@/lib/adminNotificationsStore";
+import { toast } from "sonner";
 
 const ADMIN_TYPE_ICON: Record<string, { I: any; c: string }> = {
   info: { I: Info, c: "text-sky-500" },
@@ -50,10 +51,18 @@ export default function NotificationsBell() {
   }, []);
 
   useEffect(() => {
-    adminNotificationsStore.init().then(() => setAdminItems(adminNotificationsStore.list()));
+    let mounted = true;
+    void adminNotificationsStore.init()
+      .then(() => { if (mounted) setAdminItems(adminNotificationsStore.list()); })
+      .catch((error) => { console.error("[NotificationsBell] load failed", error); });
     const unsub = adminNotificationsStore.subscribe(() => setAdminItems(adminNotificationsStore.list()));
-    return () => { unsub(); };
+    return () => { mounted = false; unsub(); };
   }, []);
+
+  const reportAdminWriteError = (error: unknown) => {
+    console.error("[NotificationsBell] save failed", error);
+    toast.error("تعذّر حفظ حالة الإشعار. أعد المحاولة.");
+  };
 
   void tick;
   const unread = items.filter((n) => !n.read).length;
@@ -191,7 +200,7 @@ export default function NotificationsBell() {
                       <button
                         className="flex-1 text-right"
                         onClick={() => {
-                          adminNotificationsStore.markRead(n.id);
+                          void adminNotificationsStore.markRead(n.id).catch(reportAdminWriteError);
                           if (n.link) navigate(n.link);
                         }}
                       >
@@ -204,7 +213,7 @@ export default function NotificationsBell() {
                           {n.sender_name || "المدير"} — {timeAgo(n.created_at)}
                         </div>
                       </button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => adminNotificationsStore.hideForMe(n.id)} title="إخفاء">
+                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { void adminNotificationsStore.hideForMe(n.id).catch(reportAdminWriteError); }} title="إخفاء" aria-label="إخفاء الإشعار">
                         <X size={14} />
                       </Button>
                     </div>
@@ -215,7 +224,7 @@ export default function NotificationsBell() {
             {adminItems.length > 0 && (
               <div className="flex items-center justify-between p-2 border-t border-border bg-secondary/20">
                 {adminUnread > 0 && (
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => adminNotificationsStore.markAllRead()}>
+                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { void adminNotificationsStore.markAllRead().catch(reportAdminWriteError); }}>
                     <CheckCheck size={14} className="ml-1" /> قراءة الكل
                   </Button>
                 )}

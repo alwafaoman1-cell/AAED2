@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { notifyListeners } from "@/lib/notifyListeners";
 
 const memoryCache = new Map<string, unknown>();
 const memoryCacheMeta = new Map<string, number>();
@@ -321,6 +322,83 @@ export async function mutateCloudArraySetting<T extends { id: string }>(
   throw new Error("STORE_CONCURRENT_UPDATE_RETRY_EXHAUSTED");
 }
 
+/**
+ * Confirm a mutation of an object-valued setting against its latest database
+ * version. A whole-object upsert would lose another user's concurrent edits.
+ * The mutation must be pure because a version conflict may replay it.
+ */
+export async function mutateCloudObjectSetting<T extends object>(
+  key: string,
+  fallback: T,
+  mutate: (current: T) => T,
+  expectedScopeVersion: number,
+): Promise<T> {
+  const assertScope = () => {
+    if (settingsGeneration !== expectedScopeVersion) throw new Error("SESSION_CHANGED_BEFORE_SAVE");
+  };
+  assertScope();
+  const { data: userRow, error: userError } = await supabase.auth.getUser();
+  assertScope();
+  const userId = userRow.user?.id;
+  if (userError || !userId) throw new Error("not_authenticated");
+  const tenantId = await getCurrentTenantId();
+  assertScope();
+  if (!tenantId) throw new Error("no_tenant");
+  ensureTenantScope(tenantId);
+  assertScope();
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    assertScope();
+    const { data: current, error: readError } = await supabase
+      .from("tenant_settings")
+      .select("value,version")
+      .eq("tenant_id", tenantId)
+      .eq("key", key)
+      .maybeSingle();
+    assertScope();
+    if (readError) throw readError;
+    if (current && (typeof current.value !== "object" || current.value === null || Array.isArray(current.value))) {
+      throw new Error("STORE_INVALID_CLOUD_VALUE");
+    }
+    const next = mutate({ ...fallback, ...(current?.value as T | undefined) });
+    if (!next || typeof next !== "object" || Array.isArray(next)) throw new Error("STORE_INVALID_MUTATION");
+
+    let saved: { version: number } | null = null;
+    if (!current) {
+      const { data, error } = await supabase.from("tenant_settings")
+        .insert({ tenant_id: tenantId, key, value: next as never, updated_by: userId })
+        .select("version")
+        .maybeSingle();
+      assertScope();
+      if (error?.code === "23505") continue;
+      if (error) throw error;
+      saved = data;
+    } else {
+      const { data, error } = await supabase.from("tenant_settings")
+        .update({ value: next as never, updated_by: userId })
+        .eq("tenant_id", tenantId)
+        .eq("key", key)
+        .eq("version", current.version)
+        .select("version")
+        .maybeSingle();
+      assertScope();
+      if (error) throw error;
+      if (!data) continue;
+      saved = data;
+    }
+    if (!saved) throw new Error("STORE_SAVE_NOT_CONFIRMED");
+    const cacheKey = scopedKey(key, tenantId);
+    if ((memoryCacheVersions.get(cacheKey) ?? 0) > Number(saved.version || 0)) {
+      return memoryCache.get(cacheKey) as T;
+    }
+    memoryCache.set(cacheKey, next);
+    memoryCacheMeta.set(cacheKey, Date.now());
+    memoryCacheVersions.set(cacheKey, Number(saved.version || 0));
+    return next;
+  }
+  throw new Error("STORE_CONCURRENT_UPDATE_RETRY_EXHAUSTED");
+}
+
 /** Subscribe to live tenant setting changes. */
 export function subscribeCloudSetting<T>(
   key: string,
@@ -345,9 +423,7 @@ export function subscribeCloudSetting<T>(
             memoryCacheMeta.set(cacheKey, Date.now());
             memoryCacheVersions.set(cacheKey, version);
             const listeners = settingListeners.get(row.key);
-            listeners?.forEach((listener) => {
-              try { listener(row.value); } catch {}
-            });
+            if (listeners) notifyListeners(listeners, "cloudSettings", row.value);
           }
         },
       )

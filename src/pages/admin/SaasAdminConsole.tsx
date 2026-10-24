@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, Building2, CheckCircle2, Copy, Database, ExternalLink, FileArchive,
   Globe2, KeyRound, Loader2, LockKeyhole, Mail, MoreHorizontal, Power,
@@ -67,6 +67,11 @@ export default function SaasAdminConsole() {
   const [domains, setDomains] = useState<TenantDomain[]>([]);
   const [selectedTenant, setSelectedTenant] = useState(profile?.tenant_id || "");
   const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
+  const selectedTenantRef = useRef(selectedTenant);
+  const loadedTenantRef = useRef<string | null>(null);
+  const loadVersion = useRef(0);
+  selectedTenantRef.current = selectedTenant;
   const [userDialog, setUserDialog] = useState(false);
   const [tenantDialog, setTenantDialog] = useState(false);
   const [domainDialog, setDomainDialog] = useState(false);
@@ -80,35 +85,53 @@ export default function SaasAdminConsole() {
   const [domainForm, setDomainForm] = useState({ hostname: "", domain_type: "custom" as "custom" | "subdomain" });
   const isPlatformAdmin = !!(profile as any)?.is_platform_admin;
 
-  async function loadUsers(tenantId = selectedTenant) {
+  const loadUsers = useCallback(async (tenantId = selectedTenantRef.current) => {
     const data = await invokeUsers({ action: "list", tenant_id: isPlatformAdmin ? tenantId || undefined : undefined });
-    setUsersList(data.users || []);
-  }
+    if (selectedTenantRef.current === tenantId) setUsersList(data.users || []);
+  }, [isPlatformAdmin]);
 
-  async function loadTenantData(tenantId = selectedTenant) {
+  const loadTenantData = useCallback(async (tenantId = selectedTenantRef.current) => {
     if (!tenantId) return;
     const [featureRows, domainRows] = await Promise.all([listTenantFeatures(tenantId), listDomains(tenantId)]);
-    setFeatures(featureRows);
-    setDomains(domainRows);
-  }
+    if (selectedTenantRef.current === tenantId) {
+      setFeatures(featureRows);
+      setDomains(domainRows);
+    }
+  }, []);
 
-  async function load() {
+  const load = useCallback(async (tenantId = selectedTenantRef.current) => {
+    const requestId = ++loadVersion.current;
+    setInitialized(false);
     setLoading(true);
     try {
       const tenantRows = await listTenants();
+      if (requestId !== loadVersion.current) return;
       setTenants(tenantRows);
-      const initialTenant = selectedTenant || profile?.tenant_id || tenantRows[0]?.id || "";
-      if (initialTenant !== selectedTenant) setSelectedTenant(initialTenant);
+      const initialTenant = tenantId || profile?.tenant_id || tenantRows[0]?.id || "";
+      selectedTenantRef.current = initialTenant;
+      loadedTenantRef.current = initialTenant;
+      setSelectedTenant(initialTenant);
       await Promise.all([loadUsers(initialTenant), loadTenantData(initialTenant)]);
     } catch (error: any) {
-      toast.error(error?.message || "تعذر تحميل لوحة الإدارة");
+      if (requestId === loadVersion.current) toast.error(error?.message || "تعذر تحميل لوحة الإدارة");
     } finally {
-      setLoading(false);
+      if (requestId === loadVersion.current) {
+        setInitialized(true);
+        setLoading(false);
+      }
     }
-  }
+  }, [profile?.tenant_id, loadUsers, loadTenantData]);
 
-  useEffect(() => { if (profile) void load(); }, [profile?.user_id]);
-  useEffect(() => { if (selectedTenant) void Promise.all([loadUsers(), loadTenantData(selectedTenant)]); }, [selectedTenant]);
+  useEffect(() => { if (profile?.user_id) void load(profile.tenant_id); }, [profile?.user_id, profile?.tenant_id, load]);
+  useEffect(() => {
+    if (!initialized || !selectedTenant || loadedTenantRef.current === selectedTenant) return;
+    loadedTenantRef.current = selectedTenant;
+    const requestId = ++loadVersion.current;
+    setLoading(true);
+    void Promise.all([loadUsers(selectedTenant), loadTenantData(selectedTenant)])
+      .catch((error) => { if (requestId === loadVersion.current) toast.error(error?.message || "تعذر تحميل بيانات المنشأة"); })
+      .finally(() => { if (requestId === loadVersion.current) setLoading(false); });
+  }, [selectedTenant, initialized, loadUsers, loadTenantData]);
 
   const featureMap = useMemo(() => new Map(features.map((item) => [item.feature_key, item])), [features]);
   const activeUsers = usersList.filter((user) => user.account_status === "active").length;

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { FEATURE_DEFINITIONS, type FeatureKey, listTenantFeatures } from "@/lib/saasAdmin";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,6 +12,7 @@ interface FeatureContextValue {
 }
 
 const defaults = Object.fromEntries(FEATURE_DEFINITIONS.map(([key]) => [key, true])) as Record<FeatureKey, boolean>;
+const emptySettings: FeatureContextValue["settings"] = {};
 const FeatureContext = createContext<FeatureContextValue>({
   loading: true,
   enabled: defaults,
@@ -22,18 +23,26 @@ const FeatureContext = createContext<FeatureContextValue>({
 
 export function FeatureProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useAuth();
+  const tenantId = profile?.tenant_id || null;
+  const requestVersion = useRef(0);
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState<Record<FeatureKey, boolean>>(defaults);
   const [settings, setSettings] = useState<Partial<Record<FeatureKey, Record<string, unknown>>>>({});
+  const [loadedTenantId, setLoadedTenantId] = useState<string | null>(null);
 
-  async function refresh() {
-    if (!profile?.tenant_id) {
+  const refresh = useCallback(async () => {
+    const requestId = ++requestVersion.current;
+    if (!tenantId) {
+      setEnabled(defaults);
+      setSettings(emptySettings);
+      setLoadedTenantId(null);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const rows = await listTenantFeatures(profile.tenant_id);
+      const rows = await listTenantFeatures(tenantId);
+      if (requestId !== requestVersion.current) return;
       const next = { ...defaults };
       const nextSettings: Partial<Record<FeatureKey, Record<string, unknown>>> = {};
       rows.forEach((row) => {
@@ -42,37 +51,47 @@ export function FeatureProvider({ children }: { children: React.ReactNode }) {
       });
       setEnabled(next);
       setSettings(nextSettings);
+      setLoadedTenantId(tenantId);
     } catch {
+      if (requestId !== requestVersion.current) return;
       // Keep the application usable before the SaaS migration is deployed.
       setEnabled(defaults);
-      setSettings({});
+      setSettings(emptySettings);
+      setLoadedTenantId(tenantId);
     } finally {
-      setLoading(false);
+      if (requestId === requestVersion.current) setLoading(false);
     }
-  }
+  }, [tenantId]);
 
   useEffect(() => {
     void refresh();
-    if (!profile?.tenant_id) return;
+    if (!tenantId) return () => { requestVersion.current += 1; };
     const channel = supabase
-      .channel(`tenant-features:${profile.tenant_id}`)
+      .channel(`tenant-features:${tenantId}`)
       .on("postgres_changes", {
         event: "*",
         schema: "public",
         table: "tenant_features",
-        filter: `tenant_id=eq.${profile.tenant_id}`,
+        filter: `tenant_id=eq.${tenantId}`,
       }, () => void refresh())
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
-  }, [profile?.tenant_id]);
+    return () => {
+      requestVersion.current += 1;
+      void supabase.removeChannel(channel);
+    };
+  }, [tenantId, refresh]);
+
+  // Never expose another workshop's cached feature settings during a switch.
+  const visibleEnabled = loadedTenantId === tenantId ? enabled : defaults;
+  const visibleSettings = loadedTenantId === tenantId ? settings : emptySettings;
 
   const value = useMemo<FeatureContextValue>(() => ({
-    loading,
-    enabled,
-    settings,
-    isEnabled: (key) => enabled[key] !== false,
+    loading: loading || loadedTenantId !== tenantId,
+    enabled: visibleEnabled,
+    settings: visibleSettings,
+    isEnabled: (key) => visibleEnabled[key] !== false,
     refresh,
-  }), [loading, enabled, settings]);
+  }), [loading, loadedTenantId, tenantId, visibleEnabled, visibleSettings, refresh]);
 
   return <FeatureContext.Provider value={value}>{children}</FeatureContext.Provider>;
 }

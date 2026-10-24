@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Database, Download, Upload, Cloud, AlertTriangle, CheckCircle2, Trash2, Loader2, FileJson, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -27,20 +27,39 @@ export default function BackupRestorePage() {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [cloudFiles, setCloudFiles] = useState<CloudFile[]>([]);
+  const [cloudReadError, setCloudReadError] = useState("");
   const [dryRunReport, setDryRunReport] = useState<RestoreDryRunReport | null>(null);
   const [restoreManifest, setRestoreManifest] = useState<BackupManifest | null>(null);
 
   const tenantId = profile?.tenant_id;
+  const cloudLoadVersion = useRef(0);
 
-  async function refreshCloud() {
-    if (!tenantId) return;
+  const refreshCloud = useCallback(async () => {
+    const version = ++cloudLoadVersion.current;
+    setCloudFiles([]);
+    setCloudReadError("");
+    if (!tenantId) { setCloudReadError("تعذر تحديد الورشة الحالية"); return; }
     const { data, error } = await supabase.storage.from("backups").list(tenantId, {
       limit: 100, sortBy: { column: "created_at", order: "desc" },
     });
-    if (error) { console.warn(error); return; }
-    setCloudFiles((data ?? []).filter(f => f.name && !f.name.startsWith(".")) as any);
-  }
-  useEffect(() => { refreshCloud(); }, [tenantId]);
+    if (version !== cloudLoadVersion.current) return;
+    if (error) {
+      console.warn("[backup] cloud list unavailable", error);
+      setCloudReadError("تعذر قراءة النسخ السحابية؛ لا تفترض أن القائمة فارغة.");
+      return;
+    }
+    setCloudFiles((data ?? [])
+      .filter((file) => file.name && !file.name.startsWith("."))
+      .map((file) => ({
+        name: file.name,
+        size: Number(file.metadata?.size || 0),
+        created_at: file.created_at || "",
+      })));
+  }, [tenantId]);
+  useEffect(() => {
+    void refreshCloud();
+    return () => { cloudLoadVersion.current += 1; };
+  }, [refreshCloud]);
 
   async function handleExportJson() {
     setBusy(true); setProgress("");
@@ -219,7 +238,9 @@ export default function BackupRestorePage() {
           <h2 className="font-semibold">النسخ السحابية المتاحة</h2>
           <Badge variant="outline" className="ml-auto">{cloudFiles.length}</Badge>
         </div>
-        {cloudFiles.length === 0 ? (
+        {cloudReadError ? (
+          <p role="alert" className="text-sm text-destructive py-4 text-center">{cloudReadError}</p>
+        ) : cloudFiles.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center">لا توجد نسخ احتياطية سحابية بعد</p>
         ) : (
           <div className="space-y-2">

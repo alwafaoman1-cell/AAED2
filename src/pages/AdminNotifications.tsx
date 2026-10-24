@@ -29,9 +29,12 @@ export default function AdminNotifications() {
   const [items, setItems] = useState<AdminNotification[]>([]);
 
   useEffect(() => {
-    adminNotificationsStore.init().then(() => setItems(adminNotificationsStore.list()));
+    let mounted = true;
+    void adminNotificationsStore.init()
+      .then(() => { if (mounted) setItems(adminNotificationsStore.list()); })
+      .catch((error) => { console.error("[AdminNotifications] load failed", error); toast.error("تعذّر تحميل الإشعارات. أعد فتح الصفحة للمحاولة."); });
     const unsub = adminNotificationsStore.subscribe(() => setItems(adminNotificationsStore.list()));
-    return () => { unsub(); };
+    return () => { mounted = false; unsub(); };
   }, []);
 
   if (profile && profile.role !== "admin" && profile.role !== "manager") {

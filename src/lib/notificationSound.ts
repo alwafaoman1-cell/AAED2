@@ -1,9 +1,11 @@
 // تشغيل صوت قصير للإشعارات عبر WebAudio (بدون الحاجة لملف صوت).
 const KEY = "alwafa_notif_sound_v1";
 const subs = new Set<() => void>();
+let sessionEnabled: boolean | null = null;
 
 export const notificationSound = {
   enabled(): boolean {
+    if (sessionEnabled !== null) return sessionEnabled;
     try {
       const v = localStorage.getItem(KEY);
       return v === null ? true : v === "1";
@@ -12,7 +14,10 @@ export const notificationSound = {
     }
   },
   setEnabled(v: boolean) {
-    try { localStorage.setItem(KEY, v ? "1" : "0"); } catch {}
+    sessionEnabled = v;
+    try { localStorage.setItem(KEY, v ? "1" : "0"); } catch {
+      // A blocked storage API must not undo the user's choice for this session.
+    }
     subs.forEach((f) => f());
   },
   subscribe(cb: () => void) { subs.add(cb); return () => subs.delete(cb); },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { smartBack } from "@/lib/smartBack";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -24,9 +24,24 @@ import {
 } from "@/lib/hrStore";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { printAttendanceMonth, printEmployeeHrExtract, printPayslip, type EmployeeHrReportSection } from "@/lib/employeeHrReports";
+import { downloadHrDocument, removeNewHrDocument, uploadHrDocument } from "@/lib/hrDocumentStorage";
 
 function runHrPrint(task: Promise<void>, isAr: boolean) {
   void task.catch((error) => toast.error((error as Error)?.message || (isAr ? "تعذرت طباعة المستخرج" : "Failed to print extract")));
+}
+
+async function confirmHrWrite(task: Promise<unknown>, success: string, isAr: boolean): Promise<boolean> {
+  try {
+    await task;
+    toast.success(success);
+    return true;
+  } catch (error) {
+    console.error("[HR] cloud write failed", error);
+    toast.error(isAr
+      ? "لم تُحفظ البيانات في السحابة. تحقق من الاتصال والصلاحيات وأعد المحاولة."
+      : "The cloud save failed. Check your connection and permissions, then retry.");
+    return false;
+  }
 }
 
 export default function EmployeeDetail() {
@@ -38,16 +53,35 @@ export default function EmployeeDetail() {
   const [, force] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
+  const editRevision = useRef(0);
 
   useEffect(() => {
     const u = hrStore.subscribe(() => force((x) => x + 1));
     return () => { u(); };
   }, []);
 
-  const employee = useMemo(() => hrStore.getEmployee(id), [id, force]);
+  const loadState = hrStore.loadState();
+  const employee = loadState === "ready" ? hrStore.getEmployee(id) : undefined;
   const [draft, setDraft] = useState<Employee | null>(employee || null);
 
-  useEffect(() => { if (employee) setDraft(employee); }, [employee?.id]);
+  useEffect(() => {
+    setDraft((current) => {
+      if (!employee) return null;
+      return draftDirty && current?.id === employee.id ? current : employee;
+    });
+  }, [employee, draftDirty]);
+
+  if (loadState !== "ready") {
+    return <div className="text-center py-16 space-y-3">
+      <p className="text-muted-foreground">{loadState === "error"
+        ? (isAr ? "تعذر تحميل بيانات الموظف من السحابة." : "Could not load the employee from the cloud.")
+        : (isAr ? "جارٍ تحميل بيانات الموظف…" : "Loading employee…")}</p>
+      {loadState === "error" && <Button onClick={() => hrStore.retryLoad()}>{isAr ? "إعادة المحاولة" : "Retry"}</Button>}
+    </div>;
+  }
 
   if (!employee || !draft) {
     return (
@@ -59,28 +93,62 @@ export default function EmployeeDetail() {
   }
 
   function update<K extends keyof Employee>(k: K, v: Employee[K]) {
+    editRevision.current += 1;
+    setDraftDirty(true);
     setDraft((d) => d ? { ...d, [k]: v } : d);
   }
-  function save() {
+  async function save() {
     if (!draft.name.trim()) { toast.error(isAr ? "الاسم مطلوب" : "Name required"); return; }
-    hrStore.saveEmployee(draft);
-    toast.success(isAr ? "تم الحفظ" : "Saved");
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSaving(true);
+    const revision = editRevision.current;
+    try {
+      const saved = await hrStore.saveEmployee(draft);
+      if (editRevision.current === revision) {
+        setDraft(saved);
+        setDraftDirty(false);
+      }
+      toast.success(isAr ? "تم الحفظ في السحابة" : "Saved to the cloud");
+    } catch (error) {
+      console.error("[EmployeeDetail] employee save failed", error);
+      toast.error((error as Error)?.message === "HR_RECORD_CONFLICT"
+        ? (isAr ? "عدّل شخص آخر سجل الموظف. بقيت تعديلاتك هنا؛ أعد فتح السجل وراجعها قبل الحفظ." : "Another user changed this employee. Your edits remain here; reopen and review the record before saving.")
+        : (isAr ? "تعذر الحفظ في السحابة؛ بقيت تعديلاتك في النموذج." : "Cloud save failed; your edits remain in the form."));
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
   }
   async function avatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     if (f.size > 10 * 1024 * 1024) { toast.error(isAr ? "الحد 10MB" : "Max 10MB"); return; }
-    const { fileToWebpDataUrl } = await import("@/lib/imageToWebp");
-    const dataUrl = await fileToWebpDataUrl(f, { maxDimension: 1024 });
-    const updated = { ...draft, avatarUrl: dataUrl };
-    hrStore.saveEmployee(updated);
-    setDraft(updated);
-    toast.success(isAr ? "تم تحديث الصورة" : "Avatar updated");
-    e.target.value = "";
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSaving(true);
+    try {
+      const { fileToWebpDataUrl } = await import("@/lib/imageToWebp");
+      const dataUrl = await fileToWebpDataUrl(f, { maxDimension: 1024 });
+      const revision = editRevision.current;
+      const saved = await hrStore.saveEmployee({ ...draft, avatarUrl: dataUrl });
+      if (editRevision.current === revision) {
+        setDraft(saved);
+        setDraftDirty(false);
+      }
+      toast.success(isAr ? "تم تحديث الصورة" : "Avatar updated");
+      e.target.value = "";
+    } catch (error) {
+      console.error("[EmployeeDetail] avatar save failed", error);
+      toast.error(isAr ? "تعذر حفظ الصورة في السحابة." : "Failed to save avatar to the cloud.");
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
   }
-  function doDelete() {
-    hrStore.removeEmployee(employee.id);
-    toast.success(isAr ? "تم الحذف" : "Deleted");
-    navigate("/staff");
+  async function doDelete() {
+    if (await confirmHrWrite(hrStore.removeEmployee(employee.id), isAr ? "تم الحذف" : "Deleted", isAr)) {
+      navigate("/staff");
+    }
   }
 
   // Computed
@@ -121,7 +189,7 @@ export default function EmployeeDetail() {
           <Button variant="outline" onClick={() => setConfirmDel(true)} className="text-destructive">
             <Trash2 className="h-4 w-4 me-2" /> {isAr ? "حذف" : "Delete"}
           </Button>
-          <Button onClick={save} className="gap-2"><Save className="h-4 w-4" /> {isAr ? "حفظ" : "Save"}</Button>
+          <Button onClick={save} disabled={saving} className="gap-2"><Save className="h-4 w-4" /> {saving ? (isAr ? "جارٍ الحفظ…" : "Saving…") : (isAr ? "حفظ" : "Save")}</Button>
         </div>
       </div>
 
@@ -371,12 +439,10 @@ function AdvancesTab({ employeeId, isAr }: { employeeId: string; isAr: boolean }
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Advance>(() => emptyAdvance(employeeId));
   function add() { setForm(emptyAdvance(employeeId)); setOpen(true); }
-  function save() {
+  async function save() {
     if (form.amount <= 0) { toast.error(isAr ? "أدخل قيمة" : "Enter amount"); return; }
     const monthly = form.installments > 0 ? form.amount / form.installments : form.amount;
-    hrStore.saveAdvance({ ...form, monthlyDeduction: monthly, remainingAmount: form.amount });
-    toast.success(isAr ? "تمت إضافة السلفة" : "Added");
-    setOpen(false);
+    if (await confirmHrWrite(hrStore.saveAdvance({ ...form, monthlyDeduction: monthly, remainingAmount: form.amount }), isAr ? "تمت إضافة السلفة" : "Added", isAr)) setOpen(false);
   }
   return (
     <div className="space-y-3">
@@ -396,7 +462,7 @@ function AdvancesTab({ employeeId, isAr }: { employeeId: string; isAr: boolean }
               <div className="text-xs text-muted-foreground">{isAr ? "متبقي" : "Remaining"}</div>
               <div className="font-mono font-bold">{a.remainingAmount.toFixed(3)}</div>
             </div>
-            <button onClick={() => { hrStore.removeAdvance(a.id); toast.success(isAr ? "تم الحذف" : "Deleted"); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded">
+            <button onClick={() => { void confirmHrWrite(hrStore.removeAdvance(a.id), isAr ? "تم الحذف" : "Deleted", isAr); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded">
               <Trash2 className="h-4 w-4" />
             </button>
           </div>
@@ -449,8 +515,18 @@ function DeductionsBonusesTab({ employeeId, isAr }: { employeeId: string; isAr: 
   const [dForm, setDForm] = useState<Deduction>(() => ({ id: hrStore.uid(), employeeId, date: new Date().toISOString().slice(0,10), amount: 0, reason: "", type: "violation", createdAt: hrStore.nowIso() }));
   const [bForm, setBForm] = useState<Bonus>(() => ({ id: hrStore.uid(), employeeId, date: new Date().toISOString().slice(0,10), amount: 0, reason: "", type: "performance", createdAt: hrStore.nowIso() }));
 
-  function saveD() { if (dForm.amount <= 0 || !dForm.reason) { toast.error(isAr ? "املأ الحقول" : "Fill fields"); return; } hrStore.saveDeduction(dForm); toast.success(isAr ? "تم" : "Saved"); setOpen(false); setDForm({ ...dForm, id: hrStore.uid(), amount: 0, reason: "" }); }
-  function saveB() { if (bForm.amount <= 0 || !bForm.reason) { toast.error(isAr ? "املأ الحقول" : "Fill fields"); return; } hrStore.saveBonus(bForm); toast.success(isAr ? "تم" : "Saved"); setOpen(false); setBForm({ ...bForm, id: hrStore.uid(), amount: 0, reason: "" }); }
+  async function saveD() {
+    if (dForm.amount <= 0 || !dForm.reason) { toast.error(isAr ? "املأ الحقول" : "Fill fields"); return; }
+    if (await confirmHrWrite(hrStore.saveDeduction(dForm), isAr ? "تم" : "Saved", isAr)) {
+      setOpen(false); setDForm({ ...dForm, id: hrStore.uid(), amount: 0, reason: "" });
+    }
+  }
+  async function saveB() {
+    if (bForm.amount <= 0 || !bForm.reason) { toast.error(isAr ? "املأ الحقول" : "Fill fields"); return; }
+    if (await confirmHrWrite(hrStore.saveBonus(bForm), isAr ? "تم" : "Saved", isAr)) {
+      setOpen(false); setBForm({ ...bForm, id: hrStore.uid(), amount: 0, reason: "" });
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -471,7 +547,7 @@ function DeductionsBonusesTab({ employeeId, isAr }: { employeeId: string; isAr: 
                 <div><div className="font-medium">{d.reason}</div><div className="text-xs text-muted-foreground">{d.date} — {d.type}</div></div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono font-bold text-destructive">-{d.amount.toFixed(3)}</span>
-                  <button onClick={() => hrStore.removeDeduction(d.id)} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
+                  <button onClick={() => { void confirmHrWrite(hrStore.removeDeduction(d.id), isAr ? "تم الحذف" : "Deleted", isAr); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             ))}
@@ -486,7 +562,7 @@ function DeductionsBonusesTab({ employeeId, isAr }: { employeeId: string; isAr: 
                 <div><div className="font-medium">{b.reason}</div><div className="text-xs text-muted-foreground">{b.date} — {b.type}</div></div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono font-bold text-success">+{b.amount.toFixed(3)}</span>
-                  <button onClick={() => hrStore.removeBonus(b.id)} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
+                  <button onClick={() => { void confirmHrWrite(hrStore.removeBonus(b.id), isAr ? "تم الحذف" : "Deleted", isAr); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             ))}
@@ -553,12 +629,12 @@ function PayslipsTab({ employee, isAr }: { employee: Employee; isAr: boolean }) 
   useEffect(() => {
     if (selectedSlip?.paidAt) setPaidAt(selectedSlip.paidAt.slice(0, 10));
   }, [selectedSlip?.id, selectedSlip?.paidAt]);
-  function generate() {
+  async function generate() {
     if (!month) { toast.error(isAr ? "اختر شهر الراتب" : "Select salary month"); return; }
     const allowances = (employee.housingAllowance || 0) + (employee.transportAllowance || 0) + (employee.otherAllowances || 0);
     const summary = hrStore.summary(employee.id, month);
     const net = (employee.baseSalary || 0) + allowances + summary.monthBonuses - summary.monthDeductions - summary.advanceMonthlyRepay;
-    hrStore.savePayslip({
+    const saved = await confirmHrWrite(hrStore.savePayslip({
       id: selectedSlip?.id || hrStore.uid(), employeeId: employee.id, month,
       baseSalary: employee.baseSalary || 0,
       allowances, bonuses: summary.monthBonuses, overtimeAmount: 0,
@@ -566,8 +642,8 @@ function PayslipsTab({ employee, isAr }: { employee: Employee; isAr: boolean }) 
       netSalary: net, paidAt: paidAt || undefined,
       paymentMethod: selectedSlip?.paymentMethod, notes: selectedSlip?.notes,
       createdAt: selectedSlip?.createdAt || hrStore.nowIso(),
-    });
-    toast.success(selectedSlip ? (isAr ? "تم تحديث كشف الراتب وتاريخ الصرف" : "Payslip and payment date updated") : (isAr ? "تم إنشاء كشف الراتب" : "Payslip created"));
+    }), selectedSlip ? (isAr ? "تم تحديث كشف الراتب وتاريخ الصرف" : "Payslip and payment date updated") : (isAr ? "تم إنشاء كشف الراتب" : "Payslip created"), isAr);
+    if (!saved) return;
   }
   return (
     <div className="space-y-3">
@@ -605,12 +681,10 @@ function LeavesTab({ employeeId, isAr }: { employeeId: string; isAr: boolean }) 
   const leaves = hrStore.listLeaves(employeeId);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Leave>(() => emptyLeave(employeeId));
-  function save() {
+  async function save() {
     if (!form.startDate || !form.endDate) { toast.error(isAr ? "حدد التاريخ" : "Set dates"); return; }
     const days = Math.max(1, Math.round((new Date(form.endDate).getTime() - new Date(form.startDate).getTime()) / 86400000) + 1);
-    hrStore.saveLeave({ ...form, days });
-    toast.success(isAr ? "تمت الإضافة" : "Saved");
-    setOpen(false);
+    if (await confirmHrWrite(hrStore.saveLeave({ ...form, days }), isAr ? "تمت الإضافة" : "Saved", isAr)) setOpen(false);
   }
   return (
     <div className="space-y-3">
@@ -627,7 +701,7 @@ function LeavesTab({ employeeId, isAr }: { employeeId: string; isAr: boolean }) 
             </div>
             <div className="flex items-center gap-2">
               <LeaveStatusPill status={l.status} isAr={isAr} />
-              <button onClick={() => hrStore.removeLeave(l.id)} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
+              <button onClick={() => { void confirmHrWrite(hrStore.removeLeave(l.id), isAr ? "تم الحذف" : "Deleted", isAr); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
             </div>
           </div>
         ))}
@@ -696,7 +770,9 @@ function AttendanceTab({ employeeId, isAr }: { employeeId: string; isAr: boolean
   const records = hrStore.listAttendance(employeeId, month);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Attendance>(() => emptyAttendance(employeeId));
-  function save() { hrStore.saveAttendance(form); toast.success(isAr ? "تم" : "Saved"); setOpen(false); }
+  async function save() {
+    if (await confirmHrWrite(hrStore.saveAttendance(form), isAr ? "تم" : "Saved", isAr)) setOpen(false);
+  }
   const totals = {
     present: records.filter((r) => r.status === "present").length,
     absent: records.filter((r) => r.status === "absent").length,
@@ -723,7 +799,7 @@ function AttendanceTab({ employeeId, isAr }: { employeeId: string; isAr: boolean
             </div>
             <div className="flex items-center gap-2">
               <AttStatusPill status={r.status} isAr={isAr} />
-              <button onClick={() => hrStore.removeAttendance(r.id)} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
+              <button onClick={() => { void confirmHrWrite(hrStore.removeAttendance(r.id), isAr ? "تم الحذف" : "Deleted", isAr); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
             </div>
           </div>
         ))}
@@ -780,21 +856,75 @@ function DocumentsTab({ employeeId, isAr }: { employeeId: string; isAr: boolean 
   const [docName, setDocName] = useState("");
   const [docType, setDocType] = useState<EmployeeDocument["type"]>("other");
   const [expiry, setExpiry] = useState("");
+  const [uploading, setUploading] = useState(false);
+  useEffect(() => {
+    const pending = hrStore.pendingDocumentCleanup(employeeId);
+    for (const document of pending) {
+      void removeNewHrDocument(document.storagePath!)
+        .then(() => hrStore.finishDocumentCleanup(document.id))
+        .catch((error) => console.error("[HR] pending document cleanup failed", error));
+    }
+  }, [employeeId]);
   function pick() { fileRef.current?.click(); }
   async function up(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]; if (!f) return;
-    if (f.size > 10 * 1024 * 1024) { toast.error(isAr ? "الحد 10MB" : "Max 10MB"); return; }
-    const { convertImageToWebp, fileToWebpDataUrl } = await import("@/lib/imageToWebp");
-    const optimized = await convertImageToWebp(f);
-    const fileUrl = await fileToWebpDataUrl(f);
-    hrStore.saveDocument({
-      id: hrStore.uid(), employeeId, name: docName || f.name, type: docType,
-      fileUrl, fileName: optimized.name, fileSize: optimized.size,
-      expiryDate: expiry || undefined, uploadedAt: hrStore.nowIso(),
-    });
-    toast.success(isAr ? "تم رفع المستند" : "Uploaded");
-    setDocName(""); setExpiry("");
-    e.target.value = "";
+    const f = e.target.files?.[0]; if (!f || uploading) return;
+    setUploading(true);
+    let storagePath: string | null = null;
+    try {
+      const { convertImageToWebp } = await import("@/lib/imageToWebp");
+      const optimized = await convertImageToWebp(f);
+      storagePath = await uploadHrDocument(employeeId, optimized);
+      await hrStore.saveDocument({
+        id: hrStore.uid(), employeeId, name: docName || f.name, type: docType,
+        storagePath, fileName: f.name, fileSize: optimized.size,
+        expiryDate: expiry || undefined, uploadedAt: hrStore.nowIso(),
+      });
+      storagePath = null;
+      toast.success(isAr ? "تم رفع المستند" : "Uploaded");
+      setDocName(""); setExpiry("");
+      e.target.value = "";
+    } catch (error) {
+      console.error("[HR] document upload failed", error);
+      if (storagePath) {
+        try { await removeNewHrDocument(storagePath); }
+        catch (cleanupError) { console.error("[HR] orphaned upload cleanup failed", cleanupError); }
+      }
+      toast.error(isAr ? "لم يُحفظ المستند. تحقق من الملف والاتصال والصلاحيات ثم أعد المحاولة." : "The document was not saved. Check the file, connection and permissions, then retry.");
+    } finally {
+      setUploading(false);
+    }
+  }
+  async function openDocument(document: EmployeeDocument) {
+    if (document.storagePath) {
+      try { await downloadHrDocument(document.storagePath, document.fileName || document.name); }
+      catch (error) { console.error("[HR] document download failed", error); toast.error(isAr ? "تعذّر تنزيل المستند" : "Failed to download document"); }
+    } else if (document.fileUrl) {
+      const anchor = window.document.createElement("a");
+      anchor.href = document.fileUrl;
+      anchor.download = document.fileName || document.name;
+      anchor.click();
+    }
+  }
+  async function removeDocument(document: EmployeeDocument) {
+    try { await hrStore.removeDocument(document.id); }
+    catch (error) {
+      console.error("[HR] document removal failed", error);
+      toast.error(isAr ? "لم يُحذف السجل من السحابة. أعد المحاولة." : "The cloud record was not removed. Please retry.");
+      return;
+    }
+    if (!document.storagePath) {
+      toast.success(isAr ? "تم الحذف" : "Deleted");
+      return;
+    }
+    try {
+      await removeNewHrDocument(document.storagePath);
+      await hrStore.finishDocumentCleanup(document.id);
+      toast.success(isAr ? "تم الحذف" : "Deleted");
+    }
+    catch (error) {
+      console.error("[HR] private document cleanup is pending", error);
+      toast.warning(isAr ? "أُخفي السجل، لكن تنظيف الملف السحابي ما زال معلقًا وسيُعاد عند فتح الصفحة." : "The record is hidden, but cloud file cleanup is pending and will retry when the page opens.");
+    }
   }
   return (
     <div className="space-y-3">
@@ -814,19 +944,19 @@ function DocumentsTab({ employeeId, isAr }: { employeeId: string; isAr: boolean 
             </SelectContent>
           </Select>
         </div>
-        <Button onClick={pick} className="gap-2"><Plus className="h-4 w-4" /> {isAr ? "رفع ملف" : "Upload"}</Button>
-        <input ref={fileRef} type="file" hidden onChange={up} />
+        <Button onClick={pick} disabled={uploading} className="gap-2"><Plus className="h-4 w-4" /> {uploading ? (isAr ? "جارٍ الرفع..." : "Uploading...") : (isAr ? "رفع ملف" : "Upload")}</Button>
+        <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.doc,.docx" hidden onChange={up} />
         <div className="md:col-span-4"><Label>{isAr ? "تاريخ انتهاء (اختياري)" : "Expiry (optional)"}</Label><Input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} className="w-44" /></div>
       </Card>
       <Card className="divide-y">
         {docs.length === 0 && <div className="text-center py-8 text-muted-foreground text-sm">{isAr ? "لا توجد مستندات" : "No documents"}</div>}
         {docs.map((d) => (
           <div key={d.id} className="p-3 flex items-center justify-between gap-2">
-            <a href={d.fileUrl} download={d.fileName} className="flex-1 hover:underline">
+            <button type="button" onClick={() => { void openDocument(d); }} className="flex-1 text-start hover:underline" disabled={!d.storagePath && !d.fileUrl}>
               <div className="font-medium flex items-center gap-2"><FileText className="h-4 w-4" /> {d.name}</div>
               <div className="text-xs text-muted-foreground">{d.type} {d.expiryDate && `— ${isAr ? "ينتهي" : "Expires"} ${d.expiryDate}`}</div>
-            </a>
-            <button onClick={() => hrStore.removeDocument(d.id)} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
+            </button>
+            <button onClick={() => { void removeDocument(d); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
           </div>
         ))}
       </Card>
@@ -842,11 +972,9 @@ function PerformanceTab({ employeeId, isAr }: { employeeId: string; isAr: boolea
   function calcOverall(r: PerformanceReview["ratings"]) {
     return Math.round(((r.quality + r.speed + r.teamwork + r.discipline + r.initiative) / 5) * 10) / 10;
   }
-  function save() {
+  async function save() {
     const overall = calcOverall(form.ratings);
-    hrStore.saveReview({ ...form, overall });
-    toast.success(isAr ? "تم" : "Saved");
-    setOpen(false);
+    if (await confirmHrWrite(hrStore.saveReview({ ...form, overall }), isAr ? "تم" : "Saved", isAr)) setOpen(false);
   }
   return (
     <div className="space-y-3">

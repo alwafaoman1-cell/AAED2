@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Tags, TrendingDown, TrendingUp, Receipt, Wallet, Plus, Trash2, Edit3,
   Save, X, Camera, Image as ImageIcon, Star,
@@ -13,7 +14,6 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import {
-  expenseCategoriesStore,
   incomeCategoriesStore,
   employeeCashboxesStore,
   voucherSettingsStore,
@@ -35,7 +35,7 @@ interface CategorySectionProps {
   description: string;
   Icon: typeof Tags;
   variant: "expense" | "income";
-  store: typeof expenseCategoriesStore;
+  store: typeof incomeCategoriesStore;
 }
 
 function CategorySection({ title, description, Icon, variant, store }: CategorySectionProps) {
@@ -223,16 +223,25 @@ function VoucherSettingsSection() {
   const settings = voucherSettingsStore.get();
   const { toast } = useToast();
   const [local, setLocal] = useState<VoucherSettings>(settings);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => setLocal(settings), [settings.receiptPrefix, settings.paymentPrefix]);
+  useEffect(() => setLocal(settings), [settings]);
 
   function update<K extends keyof VoucherSettings>(key: K, value: VoucherSettings[K]) {
     setLocal((s) => ({ ...s, [key]: value }));
   }
 
-  function save() {
-    voucherSettingsStore.update(local);
-    toast({ title: "تم حفظ إعدادات السندات" });
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await voucherSettingsStore.updateConfirmed(local);
+      toast({ title: "تم حفظ إعدادات السندات" });
+    } catch (error) {
+      toast({ title: "لم تُحفظ إعدادات السندات في السحابة", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
   }
 
   const samplePayment = `${local.paymentPrefix}-${new Date().getFullYear()}-${String(local.paymentNextNumber).padStart(local.numberPadding, "0")}`;
@@ -368,8 +377,8 @@ function VoucherSettingsSection() {
         </div>
 
         <div className="flex justify-end pt-2 border-t border-border">
-          <Button onClick={save}>
-            <Save size={14} className="ml-1" /> حفظ الإعدادات
+          <Button onClick={() => void save()} disabled={saving}>
+            <Save size={14} className="ml-1" /> {saving ? "جارٍ الحفظ…" : "حفظ الإعدادات"}
           </Button>
         </div>
       </div>
@@ -613,13 +622,11 @@ export default function FinanceSettings() {
         </TabsList>
 
         <TabsContent value="expense-cats">
-          <CategorySection
-            title="تصنيفات المصروفات"
-            description="أنشئ تصنيفات متعددة لتجميع المصروفات وتسهيل التصفية في القوائم والتقارير"
-            Icon={TrendingDown}
-            variant="expense"
-            store={expenseCategoriesStore}
-          />
+          <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+            <h3 className="font-semibold">تصنيفات المصروفات</h3>
+            <p className="text-sm text-muted-foreground">تُدار التصنيفات من صفحة واحدة مرتبطة بالسحابة، مع الاسم العربي والإنجليزي والشجرة المحاسبية. لا تُنشأ نسخة ثانية هنا.</p>
+            <Button asChild><Link to="/accounting/expenses/categories">فتح إدارة تصنيفات المصروفات</Link></Button>
+          </div>
         </TabsContent>
 
         <TabsContent value="income-cats">

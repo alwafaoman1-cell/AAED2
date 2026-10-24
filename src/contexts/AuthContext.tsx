@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const profileRef = useRef<UserProfile | null>(null);
   const sessionGenerationRef = useRef(0);
 
-  function applyProfile(p: UserProfile | null) {
+  const applyProfile = useCallback((p: UserProfile | null) => {
     profileRef.current = p;
     setProfile(p);
     if (p?.tenant_id) {
@@ -63,18 +63,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (p?.tenant_id) {
       import("@/lib/pdfGenerator").then((m) => m.loadTemplateSettingsFromCloud()).catch(() => {});
     }
-  }
+  }, []);
 
-  function isCurrentAuthRequest(uid: string, generation: number, activeRef: () => boolean) {
+  const isCurrentAuthRequest = useCallback((uid: string, generation: number, activeRef: () => boolean) => {
     return activeRef() && currentUserIdRef.current === uid && sessionGenerationRef.current === generation;
-  }
+  }, []);
 
-  function loadProfileWithLateApply(
+  const loadProfileWithLateApply = useCallback((
     uid: string,
     generation: number,
     activeRef: () => boolean,
     options: { forceRefresh?: boolean; session?: Session | null } = {},
-  ) {
+  ) => {
     const profilePromise = (async () => {
       const first = await getCachedAuthProfile(uid, options);
       if (first) return first;
@@ -91,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isCurrentAuthRequest(uid, generation, activeRef)) applyProfile(null);
       });
     return withTimeout(profilePromise, PROFILE_TIMEOUT_MS, "profile load timeout");
-  }
+  }, [applyProfile, isCurrentAuthRequest]);
 
 
   useEffect(() => {
@@ -174,27 +174,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sessionGenerationRef.current += 1;
       sub.subscription.unsubscribe();
     };
-  }, [queryClient]);
+  }, [queryClient, applyProfile, isCurrentAuthRequest, loadProfileWithLateApply]);
 
-  async function signIn(email: string, password: string) {
+  const signIn = useCallback(async (email: string, password: string) => {
     sessionGenerationRef.current += 1;
     clearAllAuthProfileCache();
     clearCloudSettingsCache();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
     return {};
-  }
+  }, []);
 
-  async function signOut() {
+  const signOut = useCallback(async () => {
     sessionGenerationRef.current += 1;
     await supabase.auth.signOut();
     clearAllAuthProfileCache();
     clearCloudSettingsCache();
     setCachedTenantId(null);
     applyProfile(null);
-  }
+  }, [applyProfile]);
 
-  async function refreshProfile() {
+  const refreshProfile = useCallback(async () => {
     if (user) {
       const generation = sessionGenerationRef.current + 1;
       sessionGenerationRef.current = generation;
@@ -205,18 +205,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       if (currentUserIdRef.current === user.id && sessionGenerationRef.current === generation) applyProfile(nextProfile);
     }
-  }
+  }, [user, session, applyProfile]);
 
-  function hasRole(...roles: AppRole[]) {
+  const hasRole = useCallback((...roles: AppRole[]) => {
     if (!profile) return false;
     return roles.includes(profile.role);
-  }
+  }, [profile]);
 
   // Memoise the context value so unrelated re-renders (e.g. theme toggle, route
   // change) don't cascade through every consumer of useAuth().
   const value = useMemo<AuthCtx>(
     () => ({ session, user, profile, loading, signIn, signOut, refreshProfile, hasRole }),
-    [session, user, profile, loading],
+    [session, user, profile, loading, signIn, signOut, refreshProfile, hasRole],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

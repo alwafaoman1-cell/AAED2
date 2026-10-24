@@ -2,186 +2,10 @@ import { createStore } from "./createStore";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
+import { type FinanceCategory } from "./financeExpenseCategoriesStore";
 
-// ===== Categories =====
-export interface FinanceCategory {
-  id: string;
-  name: string;
-  description?: string;
-  color?: string; // hex / tailwind color hint
-  active: boolean;
-  createdAt: string;
-}
-
-export const expenseCategoriesStore = createStore<FinanceCategory>({
-  key: "alwafa_expense_categories_v1",
-  seed: [
-    { id: "EC-1", name: "رواتب الموظفين", description: "الرواتب الشهرية والحوافز", color: "#ef4444", active: true, createdAt: new Date().toISOString() },
-    { id: "EC-2", name: "قطع غيار", description: "مشتريات قطع الغيار من الموردين", color: "#f59e0b", active: true, createdAt: new Date().toISOString() },
-    { id: "EC-3", name: "إيجار وفواتير", description: "إيجار الورشة والكهرباء والماء", color: "#8b5cf6", active: true, createdAt: new Date().toISOString() },
-    { id: "EC-4", name: "صيانة معدات", description: "صيانة الأدوات والآلات", color: "#06b6d4", active: true, createdAt: new Date().toISOString() },
-  ],
-});
-
-// ============================================================
-// ☁️ Cloud sync for expense categories — keeps the SAME categories
-// visible across desktop + supervisor app + any device.
-// ============================================================
-function _replaceAllExpenseCategories(rows: FinanceCategory[]) {
-  (expenseCategoriesStore as any).replaceAll?.(rows);
-}
-
-async function _pullExpenseCategoriesFromCloud(): Promise<void> {
-  try {
-    const tenantId = await getCurrentTenantId();
-    if (!tenantId) return;
-    const { data, error } = await (supabase as any)
-      .from("expense_categories")
-      .select("id,name,description,color,active,created_at")
-      .eq("tenant_id", tenantId);
-    if (error || !data) return;
-
-    const local = expenseCategoriesStore.getAll();
-
-    // First-time seed: cloud empty + local has items → push local to cloud
-    if (data.length === 0 && local.length > 0) {
-      const payload = local.map((c) => ({
-        tenant_id: tenantId,
-        name: c.name,
-        description: c.description ?? null,
-        color: c.color ?? null,
-        active: c.active,
-      }));
-      const { data: inserted } = await (supabase as any)
-        .from("expense_categories").insert(payload).select();
-      if (inserted) {
-        _replaceAllExpenseCategories(inserted.map((r: any) => ({
-          id: r.id, name: r.name,
-          description: r.description ?? undefined,
-          color: r.color ?? undefined,
-          active: !!r.active,
-          createdAt: r.created_at,
-        })));
-      }
-      return;
-    }
-
-    _replaceAllExpenseCategories(data.map((r: any) => ({
-      id: r.id, name: r.name,
-      description: r.description ?? undefined,
-      color: r.color ?? undefined,
-      active: !!r.active,
-      createdAt: r.created_at,
-    })));
-  } catch (e) {
-    console.warn("[expenseCategories] cloud pull failed", e);
-  }
-}
-
-// Mirror local mutations to cloud
-const _origAdd = expenseCategoriesStore.add.bind(expenseCategoriesStore);
-const _origUpdate = expenseCategoriesStore.update.bind(expenseCategoriesStore);
-const _origRemove = expenseCategoriesStore.remove.bind(expenseCategoriesStore);
-
-expenseCategoriesStore.add = (item: FinanceCategory) => {
-  _origAdd(item); // optimistic
-  (async () => {
-    try {
-      const tenantId = await getCurrentTenantId();
-      if (!tenantId) return;
-      const { data, error } = await (supabase as any)
-        .from("expense_categories")
-        .insert({
-          tenant_id: tenantId,
-          name: item.name,
-          description: item.description ?? null,
-          color: item.color ?? null,
-          active: item.active,
-        })
-        .select()
-        .single();
-      if (error || !data) return;
-      // Swap local id with cloud uuid
-      _origUpdate(item.id, { id: data.id, createdAt: data.created_at });
-    } catch (e) {
-      console.warn("[expenseCategories] cloud insert failed", e);
-    }
-  })();
-};
-
-expenseCategoriesStore.update = (id: string, patch: Partial<FinanceCategory>) => {
-  _origUpdate(id, patch);
-  (async () => {
-    try {
-      const tenantId = await getCurrentTenantId();
-      if (!tenantId) return;
-      const cloudPatch: any = {};
-      if (patch.name !== undefined) cloudPatch.name = patch.name;
-      if (patch.description !== undefined) cloudPatch.description = patch.description ?? null;
-      if (patch.color !== undefined) cloudPatch.color = patch.color ?? null;
-      if (patch.active !== undefined) cloudPatch.active = patch.active;
-      if (Object.keys(cloudPatch).length === 0) return;
-      await (supabase as any).from("expense_categories")
-        .update(cloudPatch).eq("id", id).eq("tenant_id", tenantId);
-    } catch (e) {
-      console.warn("[expenseCategories] cloud update failed", e);
-    }
-  })();
-};
-
-expenseCategoriesStore.remove = (id: string) => {
-  const removed = _origRemove(id);
-  (async () => {
-    try {
-      const tenantId = await getCurrentTenantId();
-      if (!tenantId) return;
-      await (supabase as any).from("expense_categories")
-        .delete().eq("id", id).eq("tenant_id", tenantId);
-    } catch (e) {
-      console.warn("[expenseCategories] cloud delete failed", e);
-    }
-  })();
-  return removed;
-};
-
-if (typeof window !== "undefined") {
-  let _ecBootstrapped = false;
-  let _ecFetchTimer: ReturnType<typeof setTimeout> | null = null;
-  function scheduleECFetch(delay = 200) {
-    if (_ecFetchTimer) clearTimeout(_ecFetchTimer);
-    _ecFetchTimer = setTimeout(() => {
-      _ecFetchTimer = null;
-      _pullExpenseCategoriesFromCloud();
-    }, delay);
-  }
-  function startECCloudSync() {
-    if (_ecBootstrapped) return;
-    _ecBootstrapped = true;
-    scheduleECFetch(0);
-    try {
-      supabase
-        .channel(`expense_cats_${Math.random().toString(36).slice(2, 8)}`)
-        .on("postgres_changes",
-          { event: "*", schema: "public", table: "expense_categories" },
-          () => scheduleECFetch(200))
-        .subscribe();
-    } catch (e) {
-      console.warn("[expenseCategories] realtime failed", e);
-    }
-    // Initial fetch + realtime are enough. Avoid tab-focus fetch storms from
-    // this legacy store; users can still force refresh from the top bar.
-  }
-  setTimeout(startECCloudSync, 800);
-
-  let _ecLastUid: string | null = null;
-  supabase.auth.onAuthStateChange((_e, session) => {
-    const uid = session?.user?.id ?? null;
-    if (uid !== _ecLastUid) {
-      _ecLastUid = uid;
-      if (uid) scheduleECFetch(100);
-    }
-  });
-}
+export { expenseCategoriesStore } from "./financeExpenseCategoriesStore";
+export type { FinanceCategory } from "./financeExpenseCategoriesStore";
 
 export const incomeCategoriesStore = createStore<FinanceCategory>({
   key: "alwafa_income_categories_v1",
@@ -259,12 +83,15 @@ const DEFAULT_VOUCHER_SETTINGS: VoucherSettings = {
 
 const voucherListeners = new Set<() => void>();
 let voucherCache: VoucherSettings | null = null;
+let voucherMutationVersion = 0;
 
 function loadVoucherSettings(): VoucherSettings {
   if (voucherCache) return voucherCache;
   voucherCache = { ...DEFAULT_VOUCHER_SETTINGS };
+  const startedAtVersion = voucherMutationVersion;
   void readCloudSetting<VoucherSettings>(VOUCHER_SETTINGS_KEY, DEFAULT_VOUCHER_SETTINGS)
     .then((value) => {
+      if (startedAtVersion !== voucherMutationVersion) return;
       voucherCache = { ...DEFAULT_VOUCHER_SETTINGS, ...value };
       voucherListeners.forEach((cb) => cb());
     })
@@ -291,12 +118,28 @@ export const voucherSettingsStore = {
   get(): VoucherSettings {
     return loadVoucherSettings();
   },
+  async updateConfirmed(patch: Partial<VoucherSettings>): Promise<void> {
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) throw new Error("تعذر تحديد المنشأة الحالية");
+    const next = { ...loadVoucherSettings(), ...patch };
+    const startedAtVersion = voucherMutationVersion;
+    await writeCloudSetting(VOUCHER_SETTINGS_KEY, next);
+    if (await getCurrentTenantId() !== tenantId) {
+      throw new Error("تغيرت المنشأة الحالية أثناء حفظ إعدادات السندات؛ أعد تحميل الصفحة");
+    }
+    if (startedAtVersion !== voucherMutationVersion) return;
+    voucherMutationVersion += 1;
+    voucherCache = next;
+    voucherListeners.forEach((cb) => cb());
+  },
   update(patch: Partial<VoucherSettings>) {
     const current = loadVoucherSettings();
+    voucherMutationVersion += 1;
     voucherCache = { ...current, ...patch };
     persistVoucherSettings();
   },
   reset() {
+    voucherMutationVersion += 1;
     voucherCache = { ...DEFAULT_VOUCHER_SETTINGS };
     persistVoucherSettings();
   },

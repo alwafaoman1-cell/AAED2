@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Search, Users, UserCheck, UserX, Wallet, BadgeDollarSign } from "lucide-react";
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { hrStore, type Employee } from "@/lib/hrStore";
 import StatCard from "@/components/StatCard";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { toast } from "sonner";
 
 export default function EmployeesList() {
   const navigate = useNavigate();
@@ -18,13 +19,16 @@ export default function EmployeesList() {
   const [, force] = useState(0);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
 
   useEffect(() => {
     const u = hrStore.subscribe(() => force((x) => x + 1));
     return () => { u(); };
   }, []);
 
-  const employees = hrStore.listEmployees();
+  const loadState = hrStore.loadState();
+  const employees = loadState === "ready" ? hrStore.listEmployees() : [];
   const filtered = useMemo(() => employees.filter((e) => {
     if (statusFilter !== "all" && e.employmentStatus !== statusFilter) return false;
     if (!q.trim()) return true;
@@ -44,7 +48,10 @@ export default function EmployeesList() {
     payroll: employees.reduce((s, e) => s + (e.baseSalary || 0) + (e.housingAllowance || 0) + (e.transportAllowance || 0) + (e.otherAllowances || 0), 0),
   };
 
-  function newEmployee() {
+  async function newEmployee() {
+    if (creatingRef.current || loadState !== "ready") return;
+    creatingRef.current = true;
+    setCreating(true);
     const e: Employee = {
       id: hrStore.uid(),
       employeeNumber: hrStore.nextEmployeeNumber(),
@@ -55,8 +62,16 @@ export default function EmployeesList() {
       createdAt: hrStore.nowIso(),
       updatedAt: hrStore.nowIso(),
     };
-    hrStore.saveEmployee(e);
-    navigate(`/staff/${e.id}`);
+    try {
+      await hrStore.saveEmployee(e);
+      navigate(`/staff/${e.id}`);
+    } catch (error) {
+      toast.error(isAr ? "لم يُحفظ الموظف في السحابة. تحقق من الاتصال والصلاحيات وأعد المحاولة." : "Employee was not saved to the cloud. Check your connection and permissions, then retry.");
+      console.error("[EmployeesList] employee creation failed", error);
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
+    }
   }
 
   return (
@@ -66,17 +81,17 @@ export default function EmployeesList() {
           <h1 className="text-2xl font-bold">{isAr ? "الفنيون والموظفون" : "Staff & Technicians"}</h1>
           <p className="text-sm text-muted-foreground">{isAr ? "نظام موارد بشرية متكامل" : "Integrated HR system"}</p>
         </div>
-        <Button onClick={newEmployee} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
-          <Plus className="h-4 w-4" /> {isAr ? "موظف جديد" : "New employee"}
+        <Button onClick={newEmployee} disabled={creating || loadState !== "ready"} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
+          <Plus className="h-4 w-4" /> {creating ? (isAr ? "جارٍ الحفظ…" : "Saving…") : (isAr ? "موظف جديد" : "New employee")}
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {loadState === "ready" && <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard title={isAr ? "إجمالي الموظفين" : "Total"} value={stats.total} icon={Users} variant="info" />
         <StatCard title={isAr ? "نشط" : "Active"} value={stats.active} icon={UserCheck} variant="success" />
         <StatCard title={isAr ? "في إجازة" : "On leave"} value={stats.onLeave} icon={UserX} variant="gold" />
         <StatCard title={isAr ? "إجمالي الرواتب" : "Payroll"} value={`${stats.payroll.toFixed(0)} ر.ع`} icon={Wallet} variant="info" />
-      </div>
+      </div>}
 
       <Card className="p-3 flex flex-col md:flex-row gap-2">
         <div className="relative flex-1">
@@ -95,8 +110,13 @@ export default function EmployeesList() {
         </Select>
       </Card>
 
+      {loadState === "error" && <Card className="p-4 text-sm text-destructive flex items-center justify-between gap-3">
+        <span>{isAr ? "تعذر تحميل بيانات الموظفين من السحابة. لن نعرض قائمة فارغة أو نسمح بإنشاء سجل حتى يعود الاتصال." : "Could not load staff from the cloud. Creation is disabled until the connection is restored."}</span>
+        <Button variant="outline" onClick={() => hrStore.retryLoad()}>{isAr ? "إعادة المحاولة" : "Retry"}</Button>
+      </Card>}
+      {loadState === "loading" && <Card className="p-4 text-sm text-muted-foreground">{isAr ? "جارٍ تحميل بيانات الموظفين…" : "Loading staff…"}</Card>}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {filtered.length === 0 && (
+        {loadState === "ready" && filtered.length === 0 && (
           <div className="col-span-full text-center py-12 text-sm text-muted-foreground">
             {isAr ? "لا يوجد موظفون. اضغط (موظف جديد)." : "No employees yet."}
           </div>
