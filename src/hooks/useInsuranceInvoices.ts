@@ -55,6 +55,24 @@ export interface InsuranceInvoiceInsert {
   idempotency_key?: string | null;
 }
 
+const historicalNumberCorrectionMessages: Record<string, string> = {
+  INVOICE_NUMBER_CORRECTION_PERMISSION_DENIED: "تصحيح رقم الفاتورة متاح للمدير فقط.",
+  INVOICE_NUMBER_CHANGED_RELOAD: "تغير رقم الفاتورة في السحابة. أعد فتح الفاتورة قبل التصحيح.",
+  INVOICE_NUMBER_YEAR_OR_FORMAT_INVALID: "صيغة الرقم أو سنة الفاتورة غير صحيحة.",
+  INVOICE_NUMBER_MUST_PRESERVE_LEGACY_SEQUENCE: "يجب أن يبقى تسلسل الرقم القديم نفسه في الصيغة الجديدة.",
+  INVOICE_NUMBER_ALREADY_USED: "رقم الفاتورة مستخدم بالفعل؛ اختر رقمًا غير متعارض.",
+  HISTORICAL_INVOICE_NUMBER_AMBIGUOUS: "الرقم القديم مشترك مع فاتورة أخرى؛ لا يمكن تصحيحه آليًا.",
+  INVOICE_NUMBER_NOT_AN_EARLIER_GAP: "الرقم المطلوب ليس ضمن فجوات التسلسل السابقة.",
+  OFFICIAL_INVOICE_NUMBER_IMMUTABLE: "هذه الفاتورة تحمل رقمًا رسميًا مسجلًا لا يمكن تغييره.",
+  ONLY_PRE_CUTOVER_NUMERIC_INSURANCE_INVOICES: "التصحيح مخصص لفواتير التأمين التاريخية ذات الرقم الرقمي فقط.",
+};
+
+function historicalNumberCorrectionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = Object.keys(historicalNumberCorrectionMessages).find((key) => message.includes(key));
+  return code ? historicalNumberCorrectionMessages[code] : message;
+}
+
 
 export function useInsuranceInvoices() {
   return useQuery({
@@ -156,23 +174,67 @@ export function useUpdateInsuranceInvoice() {
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<InsuranceInvoiceInsert> }) => {
       const payload = updates as any;
-      let { error } = await supabase
+      if (Object.prototype.hasOwnProperty.call(payload, "invoice_number")) {
+        throw new Error("تصحيح رقم الفاتورة يتطلب مسار التصحيح المعتمد، ولا يُحفظ مع التعديلات العادية.");
+      }
+      let { data, error } = await supabase
         .from("insurance_invoices" as any)
         .update(payload)
-        .eq("id", id);
+        .eq("id", id)
+        .select("id")
+        .single();
       if (error && isGeneratedColumnWriteError(error)) {
-        ({ error } = await supabase
+        ({ data, error } = await supabase
           .from("insurance_invoices" as any)
           .update(sanitizeInvoiceGeneratedWritePayload(payload) as any)
-          .eq("id", id));
+          .eq("id", id)
+          .select("id")
+          .single());
       }
       if (error) throw error;
+      if (!data || (data as unknown as { id: string }).id !== id) {
+        throw new Error("لم تؤكد قاعدة البيانات حفظ الفاتورة. أعد فتحها وتحقق قبل المتابعة.");
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
       toast.success("تم تحديث الفاتورة");
     },
     onError: (e: any) => toast.error(e.message),
+  });
+}
+
+export function useCorrectHistoricalInsuranceInvoiceNumber() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, oldNumber, newNumber, reason }: {
+      id: string; oldNumber: string; newNumber: string; reason: string;
+    }) => {
+      const { data, error } = await (supabase as any).rpc(
+        "correct_historical_insurance_invoice_number",
+        {
+          p_invoice_id: id,
+          p_expected_old_number: oldNumber,
+          p_new_number: newNumber,
+          p_reason: reason,
+        },
+      );
+      if (error) throw error;
+      const result = Array.isArray(data) ? data[0] : data;
+      if (result?.invoice_id !== id || result?.invoice_number !== newNumber.trim().toUpperCase()) {
+        throw new Error("لم تؤكد قاعدة البيانات تصحيح رقم الفاتورة. أعد فتحها وتحقق قبل المتابعة.");
+      }
+      return result as { invoice_id: string; invoice_number: string };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reportCenter.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reports.all });
+      toast.success("تم تصحيح رقم الفاتورة وتسجيله في سجل التدقيق");
+    },
+    onError: (e: any) => toast.error(historicalNumberCorrectionError(e)),
   });
 }
 

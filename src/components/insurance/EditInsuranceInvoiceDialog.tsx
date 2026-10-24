@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  useCorrectHistoricalInsuranceInvoiceNumber,
   useUpdateInsuranceInvoice,
   type InsuranceInvoice,
 } from "@/hooks/useInsuranceInvoices";
@@ -37,8 +38,11 @@ interface Props {
 export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange }: Props) {
   const { hasRole, user } = useAuth();
   const update = useUpdateInsuranceInvoice();
+  const correctNumber = useCorrectHistoricalInsuranceInvoiceNumber();
   const [items, setItems] = useState<ItemRow[]>([]);
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [numberChangeReason, setNumberChangeReason] = useState("");
+  const [otherFieldsEdited, setOtherFieldsEdited] = useState(false);
   const [invoiceDate, setInvoiceDate] = useState("");
   const [dateChangeReason, setDateChangeReason] = useState("");
   const [lpo, setLpo] = useState("");
@@ -64,6 +68,8 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
       }]);
     }
     setInvoiceNumber(invoice.invoice_number || "");
+    setNumberChangeReason("");
+    setOtherFieldsEdited(false);
     setInvoiceDate(invoice.invoice_date || invoice.issued_at?.slice(0, 10) || new Date().toISOString().slice(0, 10));
     setDateChangeReason("");
     setLpo(invoice.lpo_number || "");
@@ -78,14 +84,50 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
   const originalInvoiceDate = invoice?.invoice_date || invoice?.issued_at?.slice(0, 10) || "";
   const invoiceDateChanged = !!invoice && invoiceDate !== originalInvoiceDate;
   const canChangeIssuedDate = hasRole("admin");
+  const canCorrectHistoricalNumber = hasRole("admin") && /^\d+$/.test(invoice?.invoice_number || "");
+  const invoiceNumberChanged = !!invoice && invoiceNumber.trim() !== invoice.invoice_number;
 
-  const addRow = () => setItems((prev) => [...prev, { description: "", quantity: 1, unit_price: 0 }]);
-  const removeRow = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i));
-  const updateRow = (i: number, patch: Partial<ItemRow>) =>
+  const addRow = () => {
+    setOtherFieldsEdited(true);
+    setItems((prev) => [...prev, { description: "", quantity: 1, unit_price: 0 }]);
+  };
+  const removeRow = (i: number) => {
+    setOtherFieldsEdited(true);
+    setItems((prev) => prev.filter((_, idx) => idx !== i));
+  };
+  const updateRow = (i: number, patch: Partial<ItemRow>) => {
+    setOtherFieldsEdited(true);
     setItems((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  };
 
   const handleSave = async () => {
     if (!invoice) return;
+    if (invoiceNumberChanged) {
+      if (!canCorrectHistoricalNumber) {
+        toast.error("الرقم الرسمي لا يُعدّل من الفاتورة؛ التصحيح متاح للمدير للرقم التاريخي الرقمي فقط.");
+        return;
+      }
+      if (otherFieldsEdited) {
+        toast.error("صحح الرقم منفصلًا عن بقية التعديلات. احفظ بقية التعديلات أولًا ثم افتح الفاتورة مجددًا.");
+        return;
+      }
+      if (numberChangeReason.trim().length < 4) {
+        toast.error("أدخل سبب تصحيح رقم الفاتورة قبل الحفظ.");
+        return;
+      }
+      try {
+        await correctNumber.mutateAsync({
+          id: invoice.id,
+          oldNumber: invoice.invoice_number,
+          newNumber: invoiceNumber.trim(),
+          reason: numberChangeReason.trim(),
+        });
+        onOpenChange(false);
+      } catch {
+        // The mutation displays the database error; do not show a false success.
+      }
+      return;
+    }
     const cleaned = items.filter((it) => it.description.trim() && (Number(it.quantity) || 0) > 0);
     if (!cleaned.length) {
       toast.error("أضف بنداً واحداً على الأقل");
@@ -119,21 +161,24 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
       toast.error("أدخل سبب تغيير تاريخ إصدار الفاتورة");
       return;
     }
-    await update.mutateAsync({
-      id: invoice.id,
-      updates: {
-        invoice_number: trimmedNumber,
-        invoice_date: invoiceDate,
-        items: cleaned,
-        subtotal,
-        vat,
-        total,
-        lpo_number: lpo.trim() || null,
-        notes: notes.trim() || null,
-        due_date: dueDate || null,
-        status,
-      } as any,
-    });
+    try {
+      await update.mutateAsync({
+        id: invoice.id,
+        updates: {
+          invoice_date: invoiceDate,
+          items: cleaned,
+          subtotal,
+          vat,
+          total,
+          lpo_number: lpo.trim() || null,
+          notes: notes.trim() || null,
+          due_date: dueDate || null,
+          status,
+        } as any,
+      });
+    } catch {
+      return;
+    }
     if (invoiceDateChanged) {
       await supabase.from("claim_audit_logs" as any).insert({
         tenant_id: invoice.tenant_id,
@@ -170,26 +215,30 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
               <Input
                 value={invoiceNumber}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
-                placeholder="00001"
+                placeholder="INV-26-000073"
                 dir="ltr"
                 className="font-mono"
+                readOnly={!canCorrectHistoricalNumber}
               />
+              {canCorrectHistoricalNumber && (
+                <p className="mt-1 text-xs text-muted-foreground">المدير: تصحيح الرقم التاريخي بنفس تسلسله فقط. احفظه منفصلًا عن باقي الحقول.</p>
+              )}
             </div>
             <div>
               <Label className="text-xs">تاريخ إصدار الفاتورة الضريبية</Label>
-              <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+              <Input type="date" value={invoiceDate} onChange={(e) => { setOtherFieldsEdited(true); setInvoiceDate(e.target.value); }} />
             </div>
             <div>
               <Label className="text-xs">رقم أمر الشراء (L.P.O)</Label>
-              <Input value={lpo} onChange={(e) => setLpo(e.target.value)} placeholder="LPO-2025-0001" dir="ltr" />
+              <Input value={lpo} onChange={(e) => { setOtherFieldsEdited(true); setLpo(e.target.value); }} placeholder="LPO-2025-0001" dir="ltr" />
             </div>
             <div>
               <Label className="text-xs">تاريخ الاستحقاق</Label>
-              <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+              <Input type="date" value={dueDate} onChange={(e) => { setOtherFieldsEdited(true); setDueDate(e.target.value); }} />
             </div>
             <div>
               <Label className="text-xs">الحالة</Label>
-              <Select value={status} onValueChange={(v) => setStatus(v as any)}>
+              <Select value={status} onValueChange={(v) => { setOtherFieldsEdited(true); setStatus(v as any); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="issued">صادرة</SelectItem>
@@ -201,12 +250,19 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
               </Select>
             </div>
           </div>
+          {invoiceNumberChanged && canCorrectHistoricalNumber && (
+            <div>
+              <Label className="text-xs">سبب تصحيح رقم الفاتورة (إلزامي لسجل التدقيق)</Label>
+              <Textarea value={numberChangeReason} onChange={(e) => setNumberChangeReason(e.target.value)}
+                placeholder="مثال: تحويل رقم الفاتورة التاريخي إلى التنسيق المعتمد دون تغيير قيمتها" rows={2} />
+            </div>
+          )}
           {invoiceDateChanged && canChangeIssuedDate && (
             <div>
               <Label className="text-xs">سبب تغيير تاريخ الفاتورة</Label>
               <Textarea
                 value={dateChangeReason}
-                onChange={(e) => setDateChangeReason(e.target.value)}
+                onChange={(e) => { setOtherFieldsEdited(true); setDateChangeReason(e.target.value); }}
                 placeholder="سبب محاسبي/إداري واضح"
                 rows={2}
               />
@@ -299,7 +355,7 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
               <Label className="text-xs">ملاحظات (يدوية)</Label>
               <Textarea
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => { setOtherFieldsEdited(true); setNotes(e.target.value); }}
                 placeholder="ملاحظات إضافية تظهر في الفاتورة..."
                 rows={2}
               />
@@ -309,8 +365,8 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
 
         <ResponsiveDialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>إلغاء</Button>
-          <Button onClick={handleSave} disabled={update.isPending}>
-            {update.isPending ? "جارٍ الحفظ..." : "حفظ التعديلات"}
+          <Button onClick={handleSave} disabled={update.isPending || correctNumber.isPending}>
+            {update.isPending || correctNumber.isPending ? "جارٍ الحفظ..." : invoiceNumberChanged ? "تصحيح رقم الفاتورة" : "حفظ التعديلات"}
           </Button>
         </ResponsiveDialogFooter>
     </ResponsiveDialog>
