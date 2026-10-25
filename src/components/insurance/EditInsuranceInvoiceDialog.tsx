@@ -1,5 +1,7 @@
 // محرر فاتورة تأمين قابلة للتعديل. التحصيل يُسجّل حصراً كسند دفعة مستقل.
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   ResponsiveDialog,
   ResponsiveDialogHeader,
@@ -17,9 +19,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
   useCorrectHistoricalInsuranceInvoiceNumber,
+  useCorrectIssuedInsuranceInvoiceNumber,
   useUpdateInsuranceInvoice,
   type InsuranceInvoice,
 } from "@/hooks/useInsuranceInvoices";
+import { useInvoiceNumberCorrectionWindow } from "@/hooks/useInvoiceNumberCorrectionWindow";
+import { isInvoiceNumberCorrectionOpen } from "@/lib/invoiceNumberCorrection";
 
 const VAT_RATE = 0.05;
 
@@ -37,8 +42,12 @@ interface Props {
 
 export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange }: Props) {
   const { hasRole, user } = useAuth();
+  const { i18n } = useTranslation();
+  const isAr = i18n.language === "ar";
   const update = useUpdateInsuranceInvoice();
   const correctNumber = useCorrectHistoricalInsuranceInvoiceNumber();
+  const correctIssuedNumber = useCorrectIssuedInsuranceInvoiceNumber();
+  const correctionWindow = useInvoiceNumberCorrectionWindow(open && !!invoice);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [numberChangeReason, setNumberChangeReason] = useState("");
@@ -84,7 +93,13 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
   const originalInvoiceDate = invoice?.invoice_date || invoice?.issued_at?.slice(0, 10) || "";
   const invoiceDateChanged = !!invoice && invoiceDate !== originalInvoiceDate;
   const canChangeIssuedDate = hasRole("admin");
-  const canCorrectHistoricalNumber = hasRole("admin") && /^\d+$/.test(invoice?.invoice_number || "");
+  const canCorrectHistoricalNumber = hasRole("admin")
+    && /^\d+$/.test(invoice?.invoice_number || "")
+    && isInvoiceNumberCorrectionOpen(correctionWindow.data);
+  const canCorrectIssuedNumber = hasRole("admin")
+    && /^INV-\d{2}-\d{6,}$/.test(invoice?.invoice_number || "")
+    && isInvoiceNumberCorrectionOpen(correctionWindow.data);
+  const canCorrectNumber = canCorrectHistoricalNumber || canCorrectIssuedNumber;
   const invoiceNumberChanged = !!invoice && invoiceNumber.trim() !== invoice.invoice_number;
 
   const addRow = () => {
@@ -103,8 +118,8 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
   const handleSave = async () => {
     if (!invoice) return;
     if (invoiceNumberChanged) {
-      if (!canCorrectHistoricalNumber) {
-        toast.error("الرقم الرسمي لا يُعدّل من الفاتورة؛ التصحيح متاح للمدير للرقم التاريخي الرقمي فقط.");
+      if (!canCorrectNumber) {
+        toast.error(isAr ? "افتح فترة تصحيح الأرقام من الإعدادات أولًا." : "Enable the temporary correction window in Settings first.");
         return;
       }
       if (otherFieldsEdited) {
@@ -116,12 +131,17 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
         return;
       }
       try {
-        await correctNumber.mutateAsync({
+        const correction = {
           id: invoice.id,
           oldNumber: invoice.invoice_number,
           newNumber: invoiceNumber.trim(),
           reason: numberChangeReason.trim(),
-        });
+        };
+        if (canCorrectHistoricalNumber) {
+          await correctNumber.mutateAsync(correction);
+        } else {
+          await correctIssuedNumber.mutateAsync(correction);
+        }
         onOpenChange(false);
       } catch {
         // The mutation displays the database error; do not show a false success.
@@ -218,10 +238,20 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
                 placeholder="INV-26-000073"
                 dir="ltr"
                 className="font-mono"
-                readOnly={!canCorrectHistoricalNumber}
+                readOnly={!canCorrectNumber}
               />
               {canCorrectHistoricalNumber && (
                 <p className="mt-1 text-xs text-muted-foreground">المدير: تصحيح الرقم التاريخي بنفس تسلسله فقط. احفظه منفصلًا عن باقي الحقول.</p>
+              )}
+              {!canCorrectHistoricalNumber && hasRole("admin") && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {canCorrectIssuedNumber
+                    ? (isAr ? "اختر رقمًا سابقًا غير مستخدم من سنة الفاتورة؛ يُحفظ التصحيح وحده." : "Choose an unused earlier number in this invoice year; save the number separately.")
+                    : (isAr ? "تصحيح الرقم الرسمي مغلق." : "Official number correction is closed.")}{" "}
+                  <Link to="/settings/numbering" className="text-primary underline">
+                    {isAr ? "إعدادات التصحيح" : "Correction settings"}
+                  </Link>
+                </p>
               )}
             </div>
             <div>
@@ -250,7 +280,7 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
               </Select>
             </div>
           </div>
-          {invoiceNumberChanged && canCorrectHistoricalNumber && (
+          {invoiceNumberChanged && canCorrectNumber && (
             <div>
               <Label className="text-xs">سبب تصحيح رقم الفاتورة (إلزامي لسجل التدقيق)</Label>
               <Textarea value={numberChangeReason} onChange={(e) => setNumberChangeReason(e.target.value)}
@@ -365,8 +395,8 @@ export default function EditInsuranceInvoiceDialog({ invoice, open, onOpenChange
 
         <ResponsiveDialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>إلغاء</Button>
-          <Button onClick={handleSave} disabled={update.isPending || correctNumber.isPending}>
-            {update.isPending || correctNumber.isPending ? "جارٍ الحفظ..." : invoiceNumberChanged ? "تصحيح رقم الفاتورة" : "حفظ التعديلات"}
+          <Button onClick={handleSave} disabled={update.isPending || correctNumber.isPending || correctIssuedNumber.isPending}>
+            {update.isPending || correctNumber.isPending || correctIssuedNumber.isPending ? "جارٍ الحفظ..." : invoiceNumberChanged ? "تصحيح رقم الفاتورة" : "حفظ التعديلات"}
           </Button>
         </ResponsiveDialogFooter>
     </ResponsiveDialog>

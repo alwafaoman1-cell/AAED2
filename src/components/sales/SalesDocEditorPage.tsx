@@ -13,10 +13,13 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label as ShadLabel } from "@/components/ui/label";
 import { toast } from "sonner";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import { useAuth } from "@/contexts/AuthContext";
+import { useInvoiceNumberCorrectionWindow } from "@/hooks/useInvoiceNumberCorrectionWindow";
+import { invoiceNumberCorrectionError, isInvoiceNumberCorrectionOpen } from "@/lib/invoiceNumberCorrection";
 import { fetchNextNonInvoiceNumber } from "@/lib/salesDocumentQueries";
 import {
   salesStore,
@@ -78,7 +81,11 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   const { i18n } = useTranslation();
   const isAr = i18n.language === "ar";
   const isRtl = i18n.dir() === "rtl";
-  const { profile } = useAuth();
+  const { profile, hasRole } = useAuth();
+  const [numberCorrectionOpen, setNumberCorrectionOpen] = useState(false);
+  const [numberCorrectionValue, setNumberCorrectionValue] = useState("");
+  const [numberCorrectionReason, setNumberCorrectionReason] = useState("");
+  const [correctingNumber, setCorrectingNumber] = useState(false);
 
   const [doc, setDoc] = useState<SalesDoc>(() => {
     if (id) {
@@ -104,6 +111,8 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
     }
     return base;
   });
+  const correctionWindow = useInvoiceNumberCorrectionWindow(type === "invoice" && doc.invoiceStatus === "issued");
+  const canCorrectIssuedNumber = hasRole("admin") && isInvoiceNumberCorrectionOpen(correctionWindow.data);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [vehiclePickerOpen, setVehiclePickerOpen] = useState(false);
@@ -457,6 +466,25 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
   const totals = useMemo(() => calculateTotals(doc.items), [doc.items]);
   const revisingIssued = type === "invoice" && doc.invoiceStatus === "issued";
 
+  const correctNumber = async () => {
+    if (!id || correctingNumber || !canCorrectIssuedNumber) return;
+    setCorrectingNumber(true);
+    try {
+      const number = await salesStore.correctIssuedInvoiceNumber(
+        id, doc.number, numberCorrectionValue.trim(), numberCorrectionReason.trim(),
+      );
+      setNumberCorrectionOpen(false);
+      toast.success(isAr
+        ? `صُحح الرقم إلى ${number} وحُفظ الرقم السابق في التدقيق`
+        : `Corrected to ${number}; the previous number remains in the audit trail`);
+      navigate(detailRoute(id));
+    } catch (error) {
+      toast.error(invoiceNumberCorrectionError(error, isAr));
+    } finally {
+      setCorrectingNumber(false);
+    }
+  };
+
   if (loadingExisting || loadError || loadingNewNumber || newNumberError) {
     return <div className="py-12 text-center text-sm text-muted-foreground">
       {loadingExisting
@@ -517,8 +545,8 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
         <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-4 text-sm dark:bg-amber-950/20">
           <p className="mb-3">
             {isAr
-              ? "يمكن تعديل بيانات ومبالغ فاتورة الكاش الصادرة مع حفظ نسخة تدقيق. رقم الفاتورة الرسمي ووقت إصدارها الأصلي لا يتغيران. لا يُقبل التعديل إذا وُجد قيد محاسبي مرتبط أو أصبح الإجمالي أقل من الدفعات."
-              : "You can correct an issued cash invoice with an audit snapshot. Its official number and original issue timestamp remain unchanged. A linked accounting entry or a total below recorded payments blocks the correction."}
+              ? "يمكن تعديل بيانات ومبالغ فاتورة الكاش الصادرة مع حفظ نسخة تدقيق. رقمها لا يتغير عند حفظ هذه البيانات؛ تصحيح الرقم له إجراء مستقل ومؤقت أدناه. لا يتغير وقت الإصدار الأصلي، ويُمنع تعديل المبالغ عند وجود قيد محاسبي أو إذا أصبح الإجمالي أقل من الدفعات."
+              : "You can correct an issued cash invoice with an audit snapshot. Saving these fields does not change its number; number correction has a separate temporary action below. The original issue time stays unchanged. Linked accounting or a total below payments blocks amount edits."}
           </p>
           <Label htmlFor="issued-invoice-revision-reason">{isAr ? "سبب التعديل *" : "Correction reason *"}</Label>
           <Textarea id="issued-invoice-revision-reason" value={revisionReason}
@@ -540,6 +568,19 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
             placeholder={type === "invoice" ? (isAr ? "اتركه فارغًا للترقيم التلقائي" : "Leave blank for automatic numbering") : "00001"}
             className="font-mono"
           />
+          {revisingIssued && hasRole("admin") && (
+            <div className="mt-2 flex flex-wrap gap-2 items-center">
+              <Button type="button" size="sm" variant="outline" disabled={!canCorrectIssuedNumber}
+                onClick={() => { setNumberCorrectionValue(""); setNumberCorrectionReason(""); setNumberCorrectionOpen(true); }}>
+                {isAr ? "تصحيح رقم الفاتورة الصادرة" : "Correct issued invoice number"}
+              </Button>
+              {!canCorrectIssuedNumber && (
+                <Button type="button" size="sm" variant="link" onClick={() => navigate("/settings/numbering")}>
+                  {isAr ? "فتح التصحيح من الإعدادات" : "Enable in Settings"}
+                </Button>
+              )}
+            </div>
+          )}
           {type === "invoice" && doc.invoiceStatus !== "issued" && (
             <p className="mt-1 text-[11px] text-muted-foreground">
               {isAr
@@ -1020,6 +1061,38 @@ export default function SalesDocEditorPage({ type, title, backRoute, detailRoute
         onPick={applyVehicle}
         ownerFilter={doc.customerName}
       />
+      <Dialog open={numberCorrectionOpen} onOpenChange={(open) => { if (!correctingNumber) setNumberCorrectionOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{isAr ? "تصحيح رقم فاتورة كاش صادرة" : "Correct issued cash invoice number"}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {/^\d+$/.test(doc.number)
+              ? (isAr
+                ? `الرقم الحالي ${doc.number}. الفاتورة التاريخية تحتفظ بنفس تسلسلها؛ غيّر صيغته فقط إلى INV-YY-NNNNNN. احفظ أي تعديلات أخرى أولًا. النسخ الموزعة سابقًا لا تتغير.`
+                : `Current number: ${doc.number}. A historical invoice keeps its sequence; change only its format to INV-YY-NNNNNN. Save other edits first. Previously distributed copies will not change.`)
+              : isAr
+              ? `الرقم الحالي ${doc.number}. اختر رقمًا سابقًا غير مستخدم من سنة الفاتورة. سيُحفظ الرقم وحده؛ احفظ أي تعديلات أخرى قبل المتابعة. النسخ المطبوعة سابقًا لا تتغير.`
+              : `Current number: ${doc.number}. Choose an unused earlier number from the invoice year. Only the number is saved; save other edits first. Previously distributed copies will not change.`}
+          </p>
+          <Label htmlFor="cash-issued-corrected-number">{isAr ? "الرقم الجديد" : "New number"}</Label>
+          <Input id="cash-issued-corrected-number" dir="ltr" className="font-mono"
+            value={numberCorrectionValue} onChange={(event) => setNumberCorrectionValue(event.target.value)}
+            placeholder="INV-26-000073" />
+          <Label htmlFor="cash-issued-correction-reason">{isAr ? "سبب التصحيح" : "Correction reason"}</Label>
+          <Textarea id="cash-issued-correction-reason" maxLength={500}
+            value={numberCorrectionReason} onChange={(event) => setNumberCorrectionReason(event.target.value)} />
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={correctingNumber} onClick={() => setNumberCorrectionOpen(false)}>
+              {isAr ? "إلغاء" : "Cancel"}
+            </Button>
+            <Button type="button" disabled={correctingNumber || numberCorrectionReason.trim().length < 4 || !/^INV-\d{2}-\d{6,12}$/.test(numberCorrectionValue.trim().toUpperCase())}
+              onClick={() => void correctNumber()}>
+              {correctingNumber ? (isAr ? "جارٍ التصحيح..." : "Correcting...") : (isAr ? "تصحيح الرقم" : "Correct number")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

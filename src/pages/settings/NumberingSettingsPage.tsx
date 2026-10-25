@@ -1,14 +1,32 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Hash, RotateCcw, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { smartBack } from "@/lib/smartBack";
 import { numberingStore, DEFAULT_NUMBERING, type NumberSeries, type NumberSeriesConfig } from "@/lib/numberingSettings";
+import { useAuth } from "@/contexts/AuthContext";
+import { useInvoiceNumberCorrectionWindow } from "@/hooks/useInvoiceNumberCorrectionWindow";
+import {
+  invoiceNumberCorrectionError,
+  invoiceNumberCorrectionWindowKey,
+  isInvoiceNumberCorrectionOpen,
+  setInvoiceNumberCorrectionWindow,
+} from "@/lib/invoiceNumberCorrection";
 
 export default function NumberingSettingsPage() {
   const navigate = useNavigate();
+  const { i18n } = useTranslation();
+  const isAr = i18n.language === "ar";
+  const { profile, hasRole } = useAuth();
+  const queryClient = useQueryClient();
+  const correctionWindow = useInvoiceNumberCorrectionWindow();
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [changingCorrectionWindow, setChangingCorrectionWindow] = useState(false);
+  const correctionOpen = isInvoiceNumberCorrectionOpen(correctionWindow.data);
   const [data, setData] = useState<Record<NumberSeries, NumberSeriesConfig>>(numberingStore.get());
 
   useEffect(() => numberingStore.subscribe(() => setData(numberingStore.get())), []);
@@ -34,6 +52,23 @@ export default function NumberingSettingsPage() {
     `${cfg.prefix}-${new Date().getFullYear()}-${String(cfg.startFrom).padStart(cfg.padding, "0")}`;
 
   const series = Object.keys(DEFAULT_NUMBERING) as NumberSeries[];
+
+  const changeCorrectionWindow = async (minutes: 0 | 30) => {
+    if (!profile?.tenant_id || changingCorrectionWindow) return;
+    setChangingCorrectionWindow(true);
+    try {
+      await setInvoiceNumberCorrectionWindow(minutes, correctionReason);
+      await queryClient.invalidateQueries({ queryKey: invoiceNumberCorrectionWindowKey(profile.tenant_id) });
+      setCorrectionReason("");
+      toast.success(minutes
+        ? (isAr ? "فُتح التصحيح لمدة 30 دقيقة فقط" : "Corrections enabled for 30 minutes")
+        : (isAr ? "أُغلق تصحيح الأرقام" : "Invoice number corrections disabled"));
+    } catch (error) {
+      toast.error(invoiceNumberCorrectionError(error, isAr));
+    } finally {
+      setChangingCorrectionWindow(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background p-6 md:p-8">
@@ -117,6 +152,38 @@ export default function NumberingSettingsPage() {
         <div className="text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg p-3">
           💡 ملاحظة: تنطبق هذه الإعدادات على المستندات الجديدة فقط. الأرقام الحالية لن تتغيّر.
         </div>
+        {hasRole("admin") && (
+          <section className="rounded-xl border border-warning/50 bg-card p-4 space-y-3" aria-label={isAr ? "تصحيح أرقام الفواتير الصادرة" : "Issued invoice number corrections"}>
+            <h2 className="font-semibold text-base">{isAr ? "تصحيح مؤقت لأرقام الفواتير الصادرة" : "Temporary issued-invoice number correction"}</h2>
+            <p className="text-sm text-muted-foreground">
+              {isAr
+                ? "يشمل الكاش والتأمين. يفتح للمدير 30 دقيقة ثم يغلق تلقائيًا؛ لا يغيّر عدّاد الفواتير الجديدة. لا يسمح برقم مستخدم، أو فاتورة مؤرشفة أو مرحلة محاسبيًا، ويحتفظ بالرقم القديم في سجل التدقيق."
+                : "Covers cash and insurance invoices. Admin-only for 30 minutes, then closes automatically. New invoice numbering is unchanged. Used numbers, archived invoices and accounting-posted invoices are blocked; old numbers remain in the audit trail."}
+            </p>
+            <p className="text-sm" role="status">
+              {correctionWindow.isLoading
+                ? (isAr ? "جارٍ التحقق من حالة التصحيح..." : "Checking correction status...")
+                : correctionWindow.isError
+                  ? (isAr ? "تعذر التحقق من الحالة؛ التصحيح غير متاح." : "Cannot verify status; correction is unavailable.")
+                  : correctionOpen
+                    ? (isAr ? `مفتوح حتى ${new Date(correctionWindow.data!).toLocaleString("ar-OM")}` : `Open until ${new Date(correctionWindow.data!).toLocaleString("en-GB")}`)
+                    : (isAr ? "مغلق" : "Closed")}
+            </p>
+            <Input value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)}
+              maxLength={500} aria-label={isAr ? "سبب فتح أو إغلاق التصحيح" : "Reason to open or close corrections"}
+              placeholder={isAr ? "سبب فتح أو إغلاق التصحيح — إلزامي" : "Reason to enable or disable — required"} />
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" disabled={changingCorrectionWindow || correctionWindow.isLoading || correctionWindow.isError || correctionOpen || correctionReason.trim().length < 4}
+                onClick={() => void changeCorrectionWindow(30)}>
+                {isAr ? "فتح لمدة 30 دقيقة" : "Enable for 30 minutes"}
+              </Button>
+              <Button type="button" variant="outline" disabled={changingCorrectionWindow || !correctionOpen || correctionReason.trim().length < 4}
+                onClick={() => void changeCorrectionWindow(0)}>
+                {isAr ? "إغلاق الآن" : "Disable now"}
+              </Button>
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

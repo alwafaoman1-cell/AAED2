@@ -4858,6 +4858,44 @@ export type Database = {
           },
         ]
       }
+      invoice_number_correction_access_audit: {
+        Row: {
+          action: string
+          changed_at: string
+          changed_by: string
+          enabled_until: string | null
+          id: string
+          reason: string
+          tenant_id: string
+        }
+        Insert: {
+          action: string
+          changed_at?: string
+          changed_by: string
+          enabled_until?: string | null
+          id?: string
+          reason: string
+          tenant_id: string
+        }
+        Update: {
+          action?: string
+          changed_at?: string
+          changed_by?: string
+          enabled_until?: string | null
+          id?: string
+          reason?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_number_correction_access_audit_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_number_registry: {
         Row: {
           created_at: string
@@ -4941,6 +4979,7 @@ export type Database = {
         Row: {
           activated_at: string
           activated_by: string | null
+          correction_enabled_until: string | null
           created_at: string
           cutover_year: number
           first_invoice_number: string | null
@@ -4956,6 +4995,7 @@ export type Database = {
         Insert: {
           activated_at: string
           activated_by?: string | null
+          correction_enabled_until?: string | null
           created_at?: string
           cutover_year: number
           first_invoice_number?: string | null
@@ -4971,6 +5011,7 @@ export type Database = {
         Update: {
           activated_at?: string
           activated_by?: string | null
+          correction_enabled_until?: string | null
           created_at?: string
           cutover_year?: number
           first_invoice_number?: string | null
@@ -10018,6 +10059,32 @@ export type Database = {
         }
       }
       attach_user_to_staging_tenant: { Args: { _email: string }; Returns: Json }
+      correct_historical_cash_invoice_number: {
+        Args: {
+          p_expected_old_number: string
+          p_invoice_id: string
+          p_new_number: string
+          p_reason: string
+        }
+        Returns: {
+          invoice_id: string
+          invoice_number: string
+        }[]
+      }
+      correct_issued_invoice_number: {
+        Args: {
+          p_expected_old_number: string
+          p_invoice_id: string
+          p_new_number: string
+          p_reason: string
+          p_source_table: string
+        }
+        Returns: {
+          invoice_number: string
+          source_id: string
+          source_table: string
+        }[]
+      }
       create_accounting_journal_entry: {
         Args: {
           p_accounting_date: string
@@ -10739,6 +10806,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_invoice_number_correction_window: {
+        Args: { p_minutes: number; p_reason: string }
+        Returns: string
       }
       submit_customer_feedback: {
         Args: {

@@ -6,6 +6,7 @@ import { createUuid, isUuid } from "@/lib/uuid";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload, stripUndefined } from "@/lib/supabasePayload";
 import { roundMoney, subtractMoney } from "@/lib/money";
+import { correctHistoricalCashInvoiceNumber, correctIssuedInvoiceNumber } from "@/lib/invoiceNumberCorrection";
 
 export type SalesDocType =
   | "invoice"
@@ -714,6 +715,35 @@ export const salesStore = {
     const saved = await upsertSalesCloud(draft);
     write([saved, ...read().filter((item) => item.id !== saved.id && item.id !== draft.id)]);
     return saved;
+  },
+  async correctIssuedInvoiceNumber(id: string, expectedOldNumber: string, newNumber: string, reason: string): Promise<string> {
+    const historical = /^\d{1,12}$/.test(expectedOldNumber);
+    if (!isUuid(id) || (!historical && !/^INV-\d{2}-\d{6,}$/.test(expectedOldNumber))) {
+      throw new Error("INVOICE_NUMBER_CORRECTION_INPUT_REQUIRED");
+    }
+    const number = historical
+      ? await correctHistoricalCashInvoiceNumber({ id, expectedOldNumber, newNumber, reason })
+      : (await correctIssuedInvoiceNumber({
+          sourceTable: "sales_documents", id, expectedOldNumber, newNumber, reason,
+        })).invoice_number;
+    try {
+      const refreshed = await refreshSalesDocumentFromCloud(id);
+      if (refreshed && refreshed.number === number) {
+        write([refreshed, ...read().filter((item) => item.id !== id)]);
+        return number;
+      }
+    } catch (refreshError) {
+      // The RPC already committed atomically; a failed follow-up read is not
+      // evidence that the correction failed. The next page load will retry.
+      console.warn("[salesStore] corrected invoice refresh delayed", refreshError);
+    }
+    const cached = salesStore.get(id);
+    if (cached) {
+      const corrected = { ...cached, number };
+      write([corrected, ...read().filter((item) => item.id !== id)]);
+      return number;
+    }
+    return number;
   },
   async reviseIssuedInvoice(doc: SalesDoc, reason: string): Promise<SalesDoc> {
     if (doc.type !== "invoice" || doc.invoiceStatus !== "issued" || !isUuid(doc.id) || !doc.updatedAt) {

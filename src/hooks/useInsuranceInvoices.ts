@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { isGeneratedColumnWriteError, sanitizeInvoiceGeneratedWritePayload } from "@/lib/supabasePayload";
 import { queryKeys } from "@/lib/queryKeys";
+import { useTranslation } from "react-i18next";
+import { correctIssuedInvoiceNumber, invoiceNumberCorrectionError } from "@/lib/invoiceNumberCorrection";
 
 export interface InsuranceInvoice {
   id: string;
@@ -235,6 +237,30 @@ export function useCorrectHistoricalInsuranceInvoiceNumber() {
       toast.success("تم تصحيح رقم الفاتورة وتسجيله في سجل التدقيق");
     },
     onError: (e: any) => toast.error(historicalNumberCorrectionError(e)),
+  });
+}
+
+export function useCorrectIssuedInsuranceInvoiceNumber() {
+  const qc = useQueryClient();
+  const { i18n } = useTranslation();
+  return useMutation({
+    mutationFn: async ({ id, oldNumber, newNumber, reason }: {
+      id: string; oldNumber: string; newNumber: string; reason: string;
+    }) => correctIssuedInvoiceNumber({
+      sourceTable: "insurance_invoices", id,
+      expectedOldNumber: oldNumber, newNumber, reason,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
+      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
+      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reportCenter.all });
+      qc.invalidateQueries({ queryKey: queryKeys.reports.all });
+      toast.success(i18n.language === "ar"
+        ? "تم تصحيح رقم الفاتورة وتسجيل الرقم السابق في التدقيق"
+        : "Invoice number corrected; the previous number is retained in the audit trail");
+    },
+    onError: (error) => toast.error(invoiceNumberCorrectionError(error, i18n.language === "ar")),
   });
 }
 
