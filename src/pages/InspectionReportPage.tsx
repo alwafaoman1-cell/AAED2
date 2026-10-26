@@ -30,12 +30,12 @@ export default function InspectionReportPage() {
   }, []);
 
   const ins = useMemo(
-    () => inspectionsStore.getAll().find(i => i.id === id),
+    () => { void tick; return inspectionsStore.getAll().find(i => i.id === id); },
     [id, tick]
   );
   const isInsurance = ins?.kind === "insurance";
   const insurancePayload = useMemo(
-    () => (ins && isInsurance ? insuranceInspectionStore.get(ins.id) : undefined),
+    () => { void tick; return ins && isInsurance ? insuranceInspectionStore.get(ins.id) : undefined; },
     [ins, isInsurance, tick]
   );
 

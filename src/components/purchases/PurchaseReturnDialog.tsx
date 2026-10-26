@@ -17,6 +17,8 @@ interface Props {
   invoiceId: string;
 }
 
+const EMPTY_ITEMS: PurchaseInvoiceItem[] = [];
+
 export default function PurchaseReturnDialog({ open, onOpenChange, invoiceId }: Props) {
   const invoice = purchaseInvoicesStore.getById(invoiceId);
   const [returnQty, setReturnQty] = useState<Record<number, number>>({});
@@ -31,7 +33,7 @@ export default function PurchaseReturnDialog({ open, onOpenChange, invoiceId }: 
     }
   }, [open]);
 
-  const items: PurchaseInvoiceItem[] = invoice?.items || [];
+  const items: PurchaseInvoiceItem[] = useMemo(() => invoice?.items || [], [invoice?.items]);
   const total = useMemo(() => {
     return items.reduce((sum, it, i) => {
       const q = returnQty[i] || 0;

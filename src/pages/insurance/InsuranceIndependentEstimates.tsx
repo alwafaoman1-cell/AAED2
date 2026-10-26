@@ -215,7 +215,9 @@ export default function InsuranceIndependentEstimates() {
         await createMut.mutateAsync(form);
       }
       setDialogOpen(false);
-    } catch {}
+    } catch {
+      // The mutation reports the failure; keep the form open with its inputs intact.
+    }
   }
 
   function buildEstimateHtml(e: IndependentEstimate) {

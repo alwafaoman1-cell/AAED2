@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isAccountingSourceEligible, isActiveAccountingRecord } from "@/lib/accounting/accountingEligibility";
 
-const migration = (name: string) => readFileSync(resolve(process.cwd(), "supabase/migrations", name), "utf8");
+const migration = (name: string) => readFileSync(resolve(process.cwd(), "supabase/migrations", name), "utf8").replace(/\r\n/g, "\n");
 const core = migration("20260801100000_accounting_cloud_foundation.sql");
 const security = migration("20260801101000_accounting_cloud_security.sql");
 const eligibility = migration("20260801102000_accounting_source_eligibility.sql");

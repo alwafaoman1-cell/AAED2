@@ -7,17 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { toast } from "sonner";
-
-export interface UplItem {
-  description: string;
-  quantity: number;
-  unit_price: number;
-}
-
-export const DEFAULT_UPL_ITEMS: UplItem[] = [
-  { description: "قطع الغيار / Spare Parts", quantity: 1, unit_price: 0 },
-  { description: "أجرة العمالة / Labour Charges", quantity: 1, unit_price: 0 },
-];
+import { DEFAULT_UPL_ITEMS, type UplItem } from "@/components/insurance/uplItems";
 
 interface Props {
   items: UplItem[];

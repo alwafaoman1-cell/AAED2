@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const page = readFileSync(resolve(process.cwd(), "src/pages/accounting/Receipts.tsx"), "utf8");
 const sales = readFileSync(resolve(process.cwd(), "src/lib/salesStore.ts"), "utf8");
-const auth = readFileSync(resolve(process.cwd(), "src/contexts/AuthContext.tsx"), "utf8");
+const auth = readFileSync(resolve(process.cwd(), "src/contexts/AuthProvider.tsx"), "utf8");
 
 describe("receipt confirmation and session-safe refresh", () => {
   it("requires a database-returned row before success for receipt changes", () => {

@@ -11,12 +11,11 @@ import {
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { useAuth } from "@/contexts/AuthContext";
-import { featureForPath, useFeatures } from "@/contexts/FeatureContext";
+import { featureForPath, useFeatures } from "@/contexts/featureContextState";
 import { canAccessPath } from "@/lib/rbac";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
-import { translateAr } from "@/i18n/autoDictionary";
 import { isAccountingSetupFeatureEnabled } from "@/lib/accounting/accountingSetupAvailability";
 import { isAccountingReportsFeatureEnabled } from "@/lib/accounting/accountingReportsAvailability";
 import { useComplianceAlerts } from "@/hooks/useComplianceAlerts";
@@ -34,11 +33,11 @@ type MenuItem = {
 const menuItems: MenuItem[] = [
   { path: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { path: "/work-orders", labelKey: "nav.workOrders", icon: ClipboardList },
-  { path: "/vehicle-entry", labelKey: "دخول واستلام مركبة", icon: Car },
+  { path: "/vehicle-entry", labelKey: "nav.vehicleEntry", icon: Car },
   { path: "/vehicles", labelKey: "nav.vehicles", icon: Car },
   { path: "/customers", labelKey: "nav.customers", icon: UserSquare },
   { path: "/messages", labelKey: "nav.messages", icon: Bell },
-  { path: "/admin/notifications", labelKey: "إشعارات المدير", icon: Bell, iconClass: "text-red-400" },
+  { path: "/admin/notifications", labelKey: "nav.adminNotifications", icon: Bell, iconClass: "text-red-400" },
   { path: "/inspection", labelKey: "nav.inspection", icon: Search },
   {
     path: "/insurance",
@@ -60,7 +59,7 @@ const menuItems: MenuItem[] = [
       { path: "/sales/recurring", labelKey: "nav.recurringInvoices", icon: History },
     ],
   },
-  { path: "/estimates", labelKey: "التقديرات الموحدة", icon: FileSpreadsheet },
+  { path: "/estimates", labelKey: "nav.estimates", icon: FileSpreadsheet },
   {
     path: "/inventory",
     labelKey: "nav.inventory",
@@ -80,56 +79,57 @@ const menuItems: MenuItem[] = [
     icon: Calculator,
     children: [
       { path: "/accounting/expenses", labelKey: "nav.addExpense", icon: MinusCircle },
+      { path: "/accounting/invoices", labelKey: "nav.unifiedInvoices", icon: FileText },
       { path: "/accounting/receipts", labelKey: "nav.receipts", icon: ReceiptText },
       { path: "/accounting/cashbox/topup", labelKey: "nav.cashboxTopup", icon: Wallet },
-      { path: "/accounting/setup", labelKey: "إعداد المحاسبة", icon: Settings },
-      { path: "/accounting/reports", labelKey: "تقارير المحاسبة", icon: FileBarChart },
-      { path: "/accounting/reports/monthly-vehicle-profitability", labelKey: "التقرير الشهري الشامل", icon: BarChart3 },
+      { path: "/accounting/setup", labelKey: "nav.accountingSetup", icon: Settings },
+      { path: "/accounting/reports", labelKey: "nav.accountingReports", icon: FileBarChart },
+      { path: "/accounting/reports/monthly-vehicle-profitability", labelKey: "nav.monthlyReport", icon: BarChart3 },
     ],
   },
   { path: "/daily-log", labelKey: "nav.dailyLog", icon: FileSpreadsheet },
-  { path: "/import-export", labelKey: "مركز الاستيراد والتصدير", icon: Download, iconClass: "text-emerald-400" },
+  { path: "/import-export", labelKey: "nav.importExport", icon: Download, iconClass: "text-emerald-400" },
   { path: "/tasks", labelKey: "nav.tasks", icon: ClipboardList },
   {
     path: "/apps",
-    labelKey: "التطبيقات 📱",
+    labelKey: "nav.apps",
     icon: Smartphone,
     iconClass: "text-blue-400",
     children: [
-      { path: "/supervisor", labelKey: "تطبيق المشرف", icon: UserCog },
-      { path: "/technician", labelKey: "تطبيق الفني", icon: Wrench },
-      { path: "/accountant", labelKey: "تطبيق المحاسب", icon: FileSpreadsheet },
+      { path: "/supervisor", labelKey: "nav.supervisorApp", icon: UserCog },
+      { path: "/technician", labelKey: "nav.technicianApp", icon: Wrench },
+      { path: "/accountant", labelKey: "nav.accountantApp", icon: FileSpreadsheet },
     ],
   },
   { path: "/reports-center", labelKey: "nav.reports", icon: FileBarChart },
   { path: "/reports-legacy", labelKey: "nav.legacyReports", icon: History },
   { path: "/reports-classic", labelKey: "nav.classicReports", icon: BookOpen },
-  { path: "/compliance", labelKey: "التراخيص والعقود", icon: CalendarClock },
+  { path: "/compliance", labelKey: "nav.compliance", icon: CalendarClock },
   {
     path: "/staff",
-    labelKey: "إدارة الفريق",
+    labelKey: "nav.teamManagement",
     icon: Users,
     children: [
       { path: "/staff", labelKey: "nav.staff", icon: Users },
       { path: "/users", labelKey: "nav.users", icon: UserCog },
-      { path: "/admin/saas", labelKey: "لوحة إدارة SaaS", icon: ServerCog },
-      { path: "/admin/files", labelKey: "مدير ملفات الورشة", icon: FolderLock },
+      { path: "/admin/saas", labelKey: "nav.saasAdmin", icon: ServerCog },
+      { path: "/admin/files", labelKey: "nav.workshopFiles", icon: FolderLock },
     ],
   },
-  { path: "/media-studio", labelKey: "استوديو الوسائط", icon: Palette, iconClass: "text-fuchsia-400" },
+  { path: "/media-studio", labelKey: "nav.mediaStudio", icon: Palette, iconClass: "text-fuchsia-400" },
   {
     path: "/settings",
     labelKey: "nav.settings",
     icon: Settings,
     children: [
-      { path: "/settings/modules", labelKey: "التطبيقات والوحدات", icon: Power },
+      { path: "/settings/modules", labelKey: "nav.modules", icon: Power },
       { path: "/settings/print-templates", labelKey: "nav.printTemplates", icon: Palette },
       { path: "/settings/roles-permissions", labelKey: "nav.rolesPermissions", icon: Shield },
       { path: "/settings/quick-actions", labelKey: "nav.quickActionsSettings", icon: Plus },
       { path: "/settings/audit-log", labelKey: "nav.auditLog", icon: History },
-      { path: "/settings/backup", labelKey: "النسخ الاحتياطي", icon: Database },
-      { path: "/settings/ai-keys", labelKey: "مفاتيح الذكاء الاصطناعي", icon: Key },
-      { path: "/settings/vehicle-stay-alerts", labelKey: "تنبيهات بقاء المركبة", icon: Bell },
+      { path: "/settings/backup", labelKey: "nav.backup", icon: Database },
+      { path: "/settings/ai-keys", labelKey: "nav.aiKeys", icon: Key },
+      { path: "/settings/vehicle-stay-alerts", labelKey: "nav.vehicleStayAlerts", icon: Bell },
       { path: "/settings/trash", labelKey: "nav.trash", icon: Trash2 },
     ],
   },
@@ -145,8 +145,6 @@ export default function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isRtl = i18n.dir() === "rtl";
-  const localizeUiLabel = (label: string) =>
-    i18n.resolvedLanguage?.startsWith("en") ? translateAr(label) : label;
   const { isEnabled } = useFeatures();
   const complianceEnabled = profile?.role === "admin" || profile?.role === "manager";
   const complianceAlerts = useComplianceAlerts(profile?.tenant_id, complianceEnabled);
@@ -242,7 +240,7 @@ export default function AppSidebar() {
             const hasChildren = !!visibleChildren?.length;
             const isOpen = !!openMenus[item.path];
             const childActive = visibleChildren?.some((c) => location.pathname === c.path);
-            const itemLabel = localizeUiLabel(t(item.labelKey));
+            const itemLabel = t(item.labelKey);
 
             return (
               <div key={item.path}>
@@ -305,7 +303,7 @@ export default function AppSidebar() {
                           `}
                         >
                           <child.icon size={14} className="flex-shrink-0" />
-                          <span>{localizeUiLabel(t(child.labelKey))}</span>
+                          <span>{t(child.labelKey)}</span>
                         </Link>
                       );
                     })}

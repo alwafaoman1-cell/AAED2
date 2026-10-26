@@ -182,7 +182,8 @@ export function buildInsuranceInvoiceReportRows(
       total,
       paidAmount,
       settlementDiscountAmount,
-      remainingAmount: Math.max(0, total - paidAmount - settlementDiscountAmount),
+      remainingAmount: invoice.status === "cancelled"
+        ? 0 : Math.max(0, total - paidAmount - settlementDiscountAmount),
       collectionStatus: status,
       collectionStatusLabel: COLLECTION_LABELS[status],
       invoiceStatus: invoice.status,
@@ -195,6 +196,20 @@ export function buildInsuranceInvoiceReportRows(
       notes: invoice.notes || "—",
     };
   });
+}
+
+export function summarizeInsuranceInvoiceRows(rows: InsuranceInvoiceReportRow[]) {
+  // OMR amounts have three decimal places; sum baisa to avoid float drift.
+  const activeRows = rows.filter((row) => row.invoiceStatus !== "cancelled");
+  const baisa = (value: number) => Math.round(value * 1000);
+  const sum = (pick: (row: InsuranceInvoiceReportRow) => number) =>
+    activeRows.reduce((total, row) => total + baisa(pick(row)), 0) / 1000;
+  return {
+    issued: sum((row) => row.total),
+    paid: sum((row) => row.paidAmount),
+    settlementDiscount: sum((row) => row.settlementDiscountAmount),
+    outstanding: sum((row) => row.remainingAmount),
+  };
 }
 
 export function filterAndSortInsuranceInvoiceRows(

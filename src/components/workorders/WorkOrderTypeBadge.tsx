@@ -9,9 +9,10 @@ import {
 interface Props extends WorkOrderTypeSource {
   compact?: boolean;
   className?: string;
+  locale?: "ar" | "en";
 }
 
-export default function WorkOrderTypeBadge({ compact = false, className, ...order }: Props) {
+export default function WorkOrderTypeBadge({ compact = false, className, locale, ...order }: Props) {
   const type = resolveWorkOrderType(order);
   const Icon = type === "insurance" ? Shield : Car;
 
@@ -26,7 +27,7 @@ export default function WorkOrderTypeBadge({ compact = false, className, ...orde
       )}
     >
       <Icon size={compact ? 11 : 13} />
-      {workOrderTypeLabel(type, compact)}
+      {locale === "ar" ? (type === "insurance" ? "تأمين" : "كاش") : locale === "en" ? (type === "insurance" ? "Insurance" : "Cash") : workOrderTypeLabel(type, compact)}
     </span>
   );
 }

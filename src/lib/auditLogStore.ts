@@ -1,6 +1,7 @@
 // نظام سجل النشاط (Audit Log) - يتتبع كل الإجراءات الحساسة في النظام
 import { createStore } from "./createStore";
 import { getCurrentRole } from "./permissions";
+import { notificationsStore } from "./notificationsStore";
 
 export type AuditAction =
   | "create"
@@ -83,8 +84,10 @@ export function logActivity(input: Omit<AuditEntry, "id" | "timestamp" | "actor"
     ...input,
   };
   auditLogStore.add(entry);
-  // إرسال إشعار فوري (تحميل ديناميكي لتفادي الـ circular import)
-  import("./notificationsStore").then(({ notificationsStore }) => {
-    notificationsStore.addFromAudit(entry);
-  }).catch(() => {});
+  // notificationsStore only imports audit types, so this has no runtime cycle.
+  // Keep notification delivery asynchronous and independent of audit writes.
+  queueMicrotask(() => {
+    try { notificationsStore.addFromAudit(entry); }
+    catch (error) { console.warn("[auditLogStore] notification delivery failed", error); }
+  });
 }

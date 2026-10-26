@@ -9,7 +9,7 @@
 
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
-import { buildHtmlWithPageMarginStyle } from "./pdfLayoutSettings";
+import { buildHtmlWithPageMarginStyle, injectPageMarginStyle } from "./pdfLayoutSettings";
 import { preparePagedPdfDocument, waitForPdfAssets } from "./pdfDocumentRenderer";
 
 export interface PdfMargins {
@@ -286,7 +286,6 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
     // Inject unified page margins from /settings/pdf-layout so every export
     // shares the same corners and margins as the print preview.
     try {
-      const { injectPageMarginStyle } = await import("./pdfLayoutSettings");
       injectPageMarginStyle(doc, orientation);
     } catch { /* noop */ }
     preparePagedPdfDocument(doc, orientation);

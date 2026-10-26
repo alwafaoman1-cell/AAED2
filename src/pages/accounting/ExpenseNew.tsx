@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { smartBack } from "@/lib/smartBack";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { openSanitizedPdfWindow, openAndPrintWindow } from "@/lib/safePdfWindow";
@@ -52,12 +52,16 @@ export default function ExpenseNew() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [, force] = useState(0);
+  const expenseRows = useSyncExternalStore(
+    expensesStore.subscribe,
+    expensesStore.getSnapshot,
+    expensesStore.getSnapshot,
+  );
   useEffect(() => {
     const subs = [
       expenseCategoriesStore.subscribe(() => force((n) => n + 1)),
       employeeCashboxesStore.subscribe(() => force((n) => n + 1)),
       voucherSettingsStore.subscribe(() => force((n) => n + 1)),
-      expensesStore.subscribe(() => force((n) => n + 1)),
     ];
     expensesStore.refresh();
     return () => subs.forEach((u) => u());
@@ -320,8 +324,7 @@ export default function ExpenseNew() {
 
   // Filtering + reports
   const filtered = useMemo(() => {
-    const all = expensesStore.getAll();
-    return all.filter((r) => {
+    return expenseRows.filter((r) => {
       if (linkContext.claimId && r.claimId !== linkContext.claimId && r.sourceClaimId !== linkContext.claimId) return false;
       if (linkContext.linkedWorkOrderId && r.linkedWorkOrderId !== linkContext.linkedWorkOrderId && r.sourceWorkOrderId !== linkContext.linkedWorkOrderId) return false;
       if (linkContext.vehicleId && r.vehicleId !== linkContext.vehicleId) return false;
@@ -361,7 +364,7 @@ export default function ExpenseNew() {
       }
       return true;
     });
-  }, [searchTerm, filterCategory, filterCashbox, filterPaymentMethod, filterVehiclePlate, filterWorkOrder, filterClaim, filterBeneficiary, filterAmountMin, filterAmountMax, filterDateFrom, filterDateTo, reportPeriod, reportDate, linkContext, expensesStore.getAll().length]);
+  }, [searchTerm, filterCategory, filterCashbox, filterPaymentMethod, filterVehiclePlate, filterWorkOrder, filterClaim, filterBeneficiary, filterAmountMin, filterAmountMax, filterDateFrom, filterDateTo, reportPeriod, reportDate, linkContext, expenseRows]);
 
   const totals = useMemo(() => {
     const total = filtered.reduce((s, r) => s + r.amount, 0);

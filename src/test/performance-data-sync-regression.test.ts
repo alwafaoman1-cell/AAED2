@@ -7,7 +7,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8"
 describe("performance and data-sync regression", () => {
   it("does not treat auth verification timeout as permission to sign out", () => {
     const helper = read("src/lib/authProfileCache.ts");
-    const context = read("src/contexts/AuthContext.tsx");
+    const context = read("src/contexts/AuthProvider.tsx");
     expect(helper).not.toContain('supabase.auth.signOut as any');
     expect(helper).toContain("if (verificationError) throw verificationError");
     expect(context).toContain('onAuthStateChange((event, sess) => handleAuthState(event, sess))');

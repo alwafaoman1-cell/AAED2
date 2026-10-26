@@ -6,7 +6,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { MessageCircle, Send, Loader2, Copy, ExternalLink, CheckCircle2, User2, Phone } from "lucide-react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/buttonVariants";
 import { ResponsiveDialog, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogDescription } from "@/components/ui/responsive-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";

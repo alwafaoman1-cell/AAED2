@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { BulkActionBar } from "@/components/ui/bulk-action-bar";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
+import { normalizeLegacyImportDate } from "@/lib/legacyImportDate";
 import {
   dailyLogStore,
   emptyRow,
@@ -41,7 +42,7 @@ function parseExcelRow(r: any[], headers: string[]): Partial<DailyLogRow> | null
   };
   const num = (v: any): number => {
     if (v === null || v === undefined || v === "") return 0;
-    const n = Number(String(v).replace(/[^\d.\-]/g, ""));
+    const n = Number(String(v).replace(/[^\d.-]/g, ""));
     return Number.isFinite(n) ? n : 0;
   };
   const bool = (v: any): number => {
@@ -59,12 +60,7 @@ function parseExcelRow(r: any[], headers: string[]): Partial<DailyLogRow> | null
     date = d.toISOString().slice(0, 10);
   } else if (dateRaw) {
     const s = String(dateRaw).trim();
-    const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
-    if (m) {
-      const [, d, mo, y] = m;
-      const yyyy = y.length === 2 ? `20${y}` : y;
-      date = `${yyyy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
-    } else date = s;
+    date = normalizeLegacyImportDate(s);
   }
 
   const customer = String(get("العميل", "Customer") || "").trim();
@@ -98,7 +94,10 @@ export default function DailyLog() {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const toggleRow = (id: string) => setSelected((s) => {
-    const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
+    const n = new Set(s);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    return n;
   });
   const toggleAll = () => setSelected((s) => s.size === rows.length ? new Set() : new Set(rows.map((r) => r.id)));
   const clearSel = () => setSelected(new Set());

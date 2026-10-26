@@ -6,12 +6,9 @@ import {
   Smartphone, Search, Bell, LayoutDashboard,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
-import { getWorkOrders } from "@/lib/workOrdersStore";
-import { vehiclesStore } from "@/lib/vehiclesStore";
-import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { fetchHomeShortcutCounts, type HomeShortcutCounts } from "@/lib/homeShortcutCounts";
 
 interface Tile {
   to: string;
@@ -40,104 +37,40 @@ const TILES: Tile[] = [
   { to: "/settings", labelAr: "الإعدادات", labelEn: "Settings", icon: Settings, accent: "from-neutral-500 to-neutral-700" },
 ];
 
-type BadgeCounts = Record<string, number>;
-
 function useBadgeCounts() {
   const { profile } = useAuth();
-  const [counts, setCounts] = useState<BadgeCounts>({});
+  const tenantId = profile?.tenant_id ?? null;
+  const [snapshot, setSnapshot] = useState<{ tenantId: string; counts: HomeShortcutCounts } | null>(null);
+  const [errorTenant, setErrorTenant] = useState<string | null>(null);
+  const latestRequest = useRef(0);
 
   const fetchCounts = useCallback(async () => {
-    if (!profile?.tenant_id) return;
-    const tenantId = profile.tenant_id;
-    const today = new Date().toISOString().slice(0, 10);
-
-    const results: BadgeCounts = {};
-
-    // Local stores (fast, no network)
+    if (!tenantId) return;
+    const request = ++latestRequest.current;
     try {
-      const wos = getWorkOrders();
-      results.openWorkOrders = wos.filter(
-        (o) => o.status && !["مغلق", "تم التسليم"].includes(o.status)
-      ).length;
-      results.todayWorkOrders = wos.filter(
-        (o) => o.entryDate === today || (o as any).created_at?.startsWith?.(today)
-      ).length;
-    } catch { /* ignore */ }
-
-    try {
-      results.vehicles = vehiclesStore.getAll().filter((v) => !v.archived).length;
-    } catch { /* ignore */ }
-
-    // Cloud counts (parallel)
-    const promises: Promise<void>[] = [];
-
-    // Pending insurance claims
-    promises.push(
-      (async () => {
-        try {
-          const { count, error } = await (supabase as any)
-            .from("insurance_claims")
-            .select("id", { count: "exact", head: true })
-            .eq("tenant_id", tenantId)
-            .in("status", ["pending", "approved", "rejected", "cancelled", "paid"]);
-          if (!error && count !== null && count !== undefined) results.pendingClaims = count;
-        } catch { /* ignore */ }
-      })()
-    );
-
-    // Low stock
-    promises.push(
-      (async () => {
-        try {
-          const { count, error } = await (supabase as any)
-            .from("inventory_items")
-            .select("id", { count: "exact", head: true })
-            .eq("tenant_id", tenantId)
-            .lte("quantity", 10); // fallback if min_stock column missing
-          if (!error && count !== null && count !== undefined) results.lowStock = count;
-        } catch { /* ignore */ }
-      })()
-    );
-
-    // Unpaid invoices
-    promises.push(
-      (async () => {
-        try {
-          const { count, error } = await (supabase as any)
-            .from("sales_invoices")
-            .select("id", { count: "exact", head: true })
-            .eq("tenant_id", tenantId)
-            .not("status", "eq", "paid");
-          if (!error && count !== null && count !== undefined) results.unpaidInvoices = count;
-        } catch { /* ignore */ }
-      })()
-    );
-
-    // Pending inspections
-    promises.push(
-      (async () => {
-        try {
-          const { count, error } = await (supabase as any)
-            .from("job_orders")
-            .select("id", { count: "exact", head: true })
-            .eq("tenant_id", tenantId)
-            .eq("status", "inspection");
-          if (!error && count !== null && count !== undefined) results.pendingInspections = count;
-        } catch { /* ignore */ }
-      })()
-    );
-
-    await Promise.all(promises);
-    setCounts(results);
-  }, [profile?.tenant_id]);
+      const counts = await fetchHomeShortcutCounts(tenantId);
+      if (request !== latestRequest.current) return;
+      setSnapshot({ tenantId, counts });
+      setErrorTenant(null);
+    } catch {
+      if (request !== latestRequest.current) return;
+      // Never present a stale local counter as if it came from the cloud.
+      setSnapshot(null);
+      setErrorTenant(tenantId);
+    }
+  }, [tenantId]);
 
   useEffect(() => {
-    fetchCounts();
+    void fetchCounts();
     const id = setInterval(fetchCounts, 60_000); // refresh every minute
-    return () => clearInterval(id);
+    return () => { clearInterval(id); latestRequest.current += 1; };
   }, [fetchCounts]);
 
-  return counts;
+  return {
+    counts: snapshot?.tenantId === tenantId ? snapshot.counts : null,
+    error: errorTenant === tenantId,
+    retry: fetchCounts,
+  };
 }
 
 export default function HomeShortcuts() {
@@ -146,7 +79,7 @@ export default function HomeShortcuts() {
   const navigate = useNavigate();
   const isAr = i18n.language?.startsWith("ar");
   const [q, setQ] = useState("");
-  const badgeCounts = useBadgeCounts();
+  const { counts: badgeCounts, error: badgeError, retry: retryBadges } = useBadgeCounts();
 
   const filtered = TILES.filter((t) => {
     if (!q.trim()) return true;
@@ -204,11 +137,20 @@ export default function HomeShortcuts() {
           </form>
         </header>
 
+        {badgeError && (
+          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
+            <span>{isAr ? "تعذر تحميل العدادات من السحابة؛ أعد المحاولة." : "Cloud counters could not be loaded; please retry."}</span>
+            <button type="button" className="font-semibold text-primary underline" onClick={retryBadges}>
+              {isAr ? "إعادة المحاولة" : "Retry"}
+            </button>
+          </div>
+        )}
+
         {/* Tile grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 auto-rows-[110px] sm:auto-rows-[130px] gap-3 sm:gap-4">
           {filtered.map((t, i) => {
             const Icon = t.icon;
-            const count = t.badgeQuery ? (badgeCounts[t.badgeQuery] || 0) : 0;
+            const count = t.badgeQuery ? (badgeCounts?.[t.badgeQuery] || 0) : 0;
             return (
               <Link
                 key={t.to}

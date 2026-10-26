@@ -1,9 +1,10 @@
 // ملاحظات العملاء المرسَلة من بوابة QR — قبول / رفض
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Check, X, MessageSquare, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 interface Note {
   id: string;
@@ -18,27 +19,46 @@ interface Props { jobOrderId: string; }
 export default function PortalNotesPending({ jobOrderId }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedJobOrderId, setLoadedJobOrderId] = useState<string | null>(null);
+  const loadVersion = useRef(0);
 
-  async function load() {
-    const { data } = await supabase
-      .from("customer_portal_notes")
-      .select("id, note, customer_name, status, submitted_at")
-      .eq("job_order_id", jobOrderId)
-      .order("submitted_at", { ascending: false })
-      .limit(50);
-    setNotes((data as any) || []);
-  }
+  const load = useCallback(async () => {
+    const requestId = ++loadVersion.current;
+    try {
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("تعذر تحديد المنشأة الحالية");
+      const { data, error } = await supabase
+        .from("customer_portal_notes")
+        .select("id, note, customer_name, status, submitted_at")
+        .eq("tenant_id", tenantId)
+        .eq("job_order_id", jobOrderId)
+        .order("submitted_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      if (requestId !== loadVersion.current) return;
+      setLoadError(null);
+      setNotes((data as Note[]) || []);
+      setLoadedJobOrderId(jobOrderId);
+    } catch (error) {
+      if (requestId !== loadVersion.current) return;
+      setNotes([]);
+      setLoadError(error && typeof error === "object" && "message" in error
+        ? String(error.message) : "تعذر قراءة ملاحظات العملاء");
+      setLoadedJobOrderId(jobOrderId);
+    }
+  }, [jobOrderId]);
 
   useEffect(() => {
-    load();
+    void load();
     const ch = supabase
       .channel(`portal-notes-${jobOrderId}`)
       .on("postgres_changes",
         { event: "*", schema: "public", table: "customer_portal_notes", filter: `job_order_id=eq.${jobOrderId}` },
-        () => load())
+        () => void load())
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [jobOrderId]);
+    return () => { loadVersion.current += 1; void supabase.removeChannel(ch); };
+  }, [jobOrderId, load]);
 
   async function review(id: string, decision: "approved" | "rejected") {
     setBusy(id);
@@ -46,13 +66,15 @@ export default function PortalNotesPending({ jobOrderId }: Props) {
     setBusy(null);
     if (error) { toast.error(error.message); return; }
     toast.success(decision === "approved" ? "تم قبول الملاحظة" : "تم رفض الملاحظة");
-    load();
+    void load();
   }
 
-  const pending = notes.filter((n) => n.status === "pending");
-  const others = notes.filter((n) => n.status !== "pending");
+  const visibleNotes = loadedJobOrderId === jobOrderId ? notes : [];
+  const visibleError = loadedJobOrderId === jobOrderId ? loadError : null;
+  const pending = visibleNotes.filter((n) => n.status === "pending");
+  const others = visibleNotes.filter((n) => n.status !== "pending");
 
-  if (notes.length === 0) return null;
+  if (visibleNotes.length === 0 && !visibleError) return null;
 
   return (
     <div className="bg-card border border-border rounded-xl p-4 space-y-3">
@@ -63,6 +85,10 @@ export default function PortalNotesPending({ jobOrderId }: Props) {
           <span className="text-[10px] bg-warning/20 text-warning px-2 py-0.5 rounded-full">{pending.length} بانتظار الاعتماد</span>
         )}
       </div>
+      {visibleError && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 p-2 text-sm text-destructive">
+        <span>تعذر قراءة ملاحظات العملاء: {visibleError}</span>
+        <Button size="sm" variant="outline" onClick={() => void load()}>إعادة المحاولة</Button>
+      </div>}
 
       {pending.map((n) => (
         <div key={n.id} className="bg-warning/5 border border-warning/30 rounded-lg p-3">

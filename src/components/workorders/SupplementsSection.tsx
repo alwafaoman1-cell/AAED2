@@ -1,5 +1,5 @@
 // قسم الأعمال الإضافية (Supplement) + إرسال رابط موافقة العميل
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Send, Trash2, Loader2, FileEdit, CheckCircle2, XCircle, Clock, PackageCheck, Camera, MessageCircle, Copy, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { normalizePhone } from "@/lib/phoneUtils";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import { canonicalMediaReference, resolveImageReferences } from "@/lib/vehicleMediaUrls";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 interface Supplement {
   id: string;
@@ -41,58 +42,92 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
   const [items, setItems] = useState<Supplement[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [loadedJobOrderId, setLoadedJobOrderId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Partial<Supplement> | null>(null);
   const [sending, setSending] = useState(false);
   const [linkDialog, setLinkDialog] = useState<{ link: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadVersion = useRef(0);
 
-  async function load() {
+  const load = useCallback(async () => {
+    const requestId = ++loadVersion.current;
     if (!isUuid) { setLoading(false); return; }
     setLoading(true);
-    const { data } = await supabase.from("work_order_supplements")
-      .select("*").eq("job_order_id", jobOrderId).order("created_at", { ascending: true });
-    const normalized = ((data as Supplement[]) || []).map((item) => ({
-      ...item,
-      photos: (item.photos || []).map((ref) => canonicalMediaReference(ref, "damage-photos")),
-    }));
-    setItems(normalized);
-    const refs = Array.from(new Set(normalized.flatMap((item) => item.photos)));
-    void resolveImageReferences(refs, "damage-photos").then((urls) => {
-      setPhotoUrls(Object.fromEntries(refs.map((ref, index) => [ref, urls[index]])));
-    });
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, [jobOrderId]);
+    setLoadError(null);
+    try {
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("تعذّر تحديد المنشأة الحالية");
+      const { data, error } = await supabase.from("work_order_supplements")
+        .select("*").eq("tenant_id", tenantId).eq("job_order_id", jobOrderId).order("created_at", { ascending: true });
+      if (error) throw error;
+      if (requestId !== loadVersion.current) return;
+      const normalized = ((data as Supplement[]) || []).map((item) => ({
+        ...item,
+        photos: (item.photos || []).map((ref) => canonicalMediaReference(ref, "damage-photos")),
+      }));
+      setItems(normalized);
+      const refs = Array.from(new Set(normalized.flatMap((item) => item.photos)));
+      if (refs.length) {
+        const urls = await resolveImageReferences(refs, "damage-photos");
+        if (requestId === loadVersion.current) {
+          setPhotoUrls(Object.fromEntries(refs.map((ref, index) => [ref, urls[index]])));
+        }
+      } else {
+        setPhotoUrls({});
+      }
+      setLoadedJobOrderId(jobOrderId);
+    } catch (error) {
+      if (requestId === loadVersion.current) {
+        setItems([]);
+        setLoadedJobOrderId(jobOrderId);
+        setLoadError(error && typeof error === "object" && "message" in error
+          ? String(error.message) : "تعذر قراءة الأعمال الإضافية");
+      }
+    } finally {
+      if (requestId === loadVersion.current) setLoading(false);
+    }
+  }, [isUuid, jobOrderId]);
+  useEffect(() => {
+    void load();
+    return () => { loadVersion.current += 1; };
+  }, [load]);
 
   async function save() {
     if (!editing) return;
     if (!editing.description?.trim()) { toast.error("الوصف مطلوب"); return; }
-    const tenantRes = await supabase.from("profiles").select("tenant_id").maybeSingle();
-    const tenant_id = tenantRes.data?.tenant_id;
+    const tenant_id = await getCurrentTenantId();
     if (!tenant_id) { toast.error("تعذّر تحديد المستأجر"); return; }
 
     if (editing.id) {
-      const { error } = await supabase.from("work_order_supplements").update({
+      const { data, error } = await supabase.from("work_order_supplements").update({
         description: editing.description, quantity: Number(editing.quantity) || 1,
         unit_price: Number(editing.unit_price) || 0, notes: editing.notes || null,
         photos: editing.photos || [],
-      }).eq("id", editing.id);
+      }).eq("id", editing.id).eq("job_order_id", jobOrderId).eq("tenant_id", tenant_id)
+        .select("id").maybeSingle();
       if (error) return toast.error(error.message);
+      if (!data?.id) return toast.error("لم تؤكد قاعدة البيانات تعديل البند؛ أعد تحميل أمر العمل");
     } else {
-      const { error } = await supabase.from("work_order_supplements").insert({
+      const { data, error } = await supabase.from("work_order_supplements").insert({
         tenant_id, job_order_id: jobOrderId,
         description: editing.description, quantity: Number(editing.quantity) || 1,
         unit_price: Number(editing.unit_price) || 0, notes: editing.notes || null,
         photos: editing.photos || [],
-      });
+      }).select("id").maybeSingle();
       if (error) return toast.error(error.message);
+      if (!data?.id) return toast.error("لم تؤكد قاعدة البيانات حفظ البند؛ أعد تحميل أمر العمل");
     }
     setEditing(null); toast.success("تم الحفظ"); load(); onPhotosChanged?.();
   }
 
   async function remove(id: string) {
     if (!confirm("حذف البند؟")) return;
-    const { error } = await supabase.from("work_order_supplements").delete().eq("id", id);
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) { toast.error("تعذّر تحديد المنشأة الحالية"); return; }
+    const { data, error } = await supabase.from("work_order_supplements").delete().eq("id", id)
+      .eq("job_order_id", jobOrderId).eq("tenant_id", tenantId).select("id").maybeSingle();
     if (error) return toast.error(error.message);
+    if (!data?.id) return toast.error("لم تؤكد قاعدة البيانات حذف البند؛ أعد تحميل أمر العمل");
     load(); onPhotosChanged?.();
   }
 
@@ -106,14 +141,18 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
   }
 
   async function markExecuted(id: string) {
-    const { error } = await supabase.from("work_order_supplements").update({ status: "executed" }).eq("id", id);
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) { toast.error("تعذّر تحديد المنشأة الحالية"); return; }
+    const { data, error } = await supabase.from("work_order_supplements").update({ status: "executed" }).eq("id", id)
+      .eq("job_order_id", jobOrderId).eq("tenant_id", tenantId).select("id").maybeSingle();
     if (error) return toast.error(error.message);
+    if (!data?.id) return toast.error("لم تؤكد قاعدة البيانات تنفيذ البند؛ أعد تحميل أمر العمل");
     toast.success("تم وضعه كمنفّذ");
     load();
   }
 
   async function sendApprovalRequest() {
-    const pending = items.filter((i) => i.status === "pending_customer");
+    const pending = visibleItems.filter((i) => i.status === "pending_customer");
     if (pending.length === 0) { toast.error("لا توجد بنود بانتظار الموافقة"); return; }
     if (!customerPhone || !normalizePhone(customerPhone)) {
       if (!confirm("لا يوجد رقم هاتف صحيح للعميل — سيتم توليد الرابط فقط دون إرسال. متابعة؟")) return;
@@ -158,10 +197,14 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
     } finally { setSending(false); }
   }
 
+  const visibleItems = loadedJobOrderId === jobOrderId ? items : [];
+  const visibleError = loadedJobOrderId === jobOrderId ? loadError : null;
+  const isLoading = loading || loadedJobOrderId !== jobOrderId;
+
   if (!isUuid) return null;
 
-  const total = items.reduce((s, i) => s + (i.quantity * i.unit_price), 0);
-  const approvedTotal = items.filter((i) => i.status === "approved" || i.status === "executed")
+  const total = visibleItems.reduce((s, i) => s + (i.quantity * i.unit_price), 0);
+  const approvedTotal = visibleItems.filter((i) => i.status === "approved" || i.status === "executed")
     .reduce((s, i) => s + (i.quantity * i.unit_price), 0);
 
   return (
@@ -169,21 +212,26 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-sm font-semibold flex items-center gap-2">
           <FileEdit size={16} className="text-primary" /> الأعمال الإضافية التي تتطلب موافقة العميل
-          {items.length > 0 && <span className="text-xs text-muted-foreground font-normal">({items.length})</span>}
+          {visibleItems.length > 0 && <span className="text-xs text-muted-foreground font-normal">({visibleItems.length})</span>}
         </h2>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => setEditing({ quantity: 1, unit_price: 0, photos: [] })} className="gap-1">
             <Plus size={14} /> بند جديد
           </Button>
-          <Button size="sm" onClick={sendApprovalRequest} disabled={sending} className="gap-1">
+          <Button size="sm" onClick={sendApprovalRequest} disabled={sending || isLoading || Boolean(visibleError)} className="gap-1">
             {sending ? <Loader2 size={14} className="animate-spin"/> : <Send size={14} />} إرسال للعميل
           </Button>
         </div>
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="text-center text-sm text-muted-foreground py-4"><Loader2 className="inline animate-spin" size={14}/></div>
-      ) : items.length === 0 ? (
+      ) : visibleError ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 p-3 text-sm text-destructive">
+          <span>تعذر قراءة الأعمال الإضافية: {visibleError}</span>
+          <Button size="sm" variant="outline" onClick={() => void load()}>إعادة المحاولة</Button>
+        </div>
+      ) : visibleItems.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-4">لا توجد أعمال إضافية بعد. اضغط "بند جديد" لإضافة أول بند.</p>
       ) : (
         <>
@@ -200,7 +248,7 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
                 </tr>
               </thead>
               <tbody>
-                {items.map((i) => {
+                {visibleItems.map((i) => {
                   const S = STATUS_LABEL[i.status];
                   return (
                     <tr key={i.id} className="border-t border-border hover:bg-muted/20">

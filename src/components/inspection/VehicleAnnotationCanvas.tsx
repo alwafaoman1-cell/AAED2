@@ -46,6 +46,8 @@ export default function VehicleAnnotationCanvas({ imageSrc, onSave, onChange, in
   const [histIdx, setHistIdx] = useState(0);
   const [drawing, setDrawing] = useState<Shape | null>(null);
   const [imgSize, setImgSize] = useState({ w: 800, h: 500 });
+  const [imageReady, setImageReady] = useState(false);
+  const [previewError, setPreviewError] = useState("");
 
   const pushHistory = useCallback((next: Shape[]) => {
     const trimmed = history.slice(0, histIdx + 1);
@@ -57,10 +59,16 @@ export default function VehicleAnnotationCanvas({ imageSrc, onSave, onChange, in
 
   // Load image
   useEffect(() => {
+    let cancelled = false;
+    setImageReady(false);
+    setPreviewError("");
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
+      if (cancelled) return;
       imgRef.current = img;
+      setImageReady(true);
+      setPreviewError("");
       // Fit into max 900x560
       const maxW = 900, maxH = 560;
       const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
@@ -68,12 +76,13 @@ export default function VehicleAnnotationCanvas({ imageSrc, onSave, onChange, in
       requestAnimationFrame(redraw);
     };
     img.onerror = () => {
-      // Fallback: blank white background
+      if (cancelled) return;
       imgRef.current = null;
-      setImgSize({ w: 800, h: 500 });
-      requestAnimationFrame(redraw);
+      setImageReady(false);
+      setPreviewError("تعذر تحميل الصورة الأصلية. لم تُحفظ التعليقات؛ أعد تحميل الصورة قبل المتابعة.");
     };
     img.src = imageSrc;
+    return () => { cancelled = true; img.onload = null; img.onerror = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageSrc]);
 
@@ -149,14 +158,20 @@ export default function VehicleAnnotationCanvas({ imageSrc, onSave, onChange, in
 
   // Auto-emit annotated dataURL whenever shapes change (not while actively drawing)
   useEffect(() => {
-    if (!onChange || drawing) return;
+    if (!onChange || drawing || !imageReady) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const t = setTimeout(() => {
-      try { onChange(canvas.toDataURL("image/png"), shapes); } catch {}
+      try {
+        onChange(canvas.toDataURL("image/png"), shapes);
+        setPreviewError("");
+      } catch (error) {
+        console.warn("[VehicleAnnotationCanvas] preview update failed", error);
+        setPreviewError("تعذر تحديث الرسم في المعاينة. لم تُؤكَّد التعليقات؛ أعد المحاولة.");
+      }
     }, 80);
     return () => clearTimeout(t);
-  }, [shapes, drawing, imgSize, onChange]);
+  }, [shapes, drawing, imgSize, onChange, imageReady]);
 
   const getPos = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = canvasRef.current!;
@@ -245,9 +260,15 @@ export default function VehicleAnnotationCanvas({ imageSrc, onSave, onChange, in
 
   const handleSave = () => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dataUrl = canvas.toDataURL("image/png");
-    onSave(dataUrl, shapes);
+    if (!canvas || !imageReady) return;
+    try {
+      const dataUrl = canvas.toDataURL("image/png");
+      onSave(dataUrl, shapes);
+      setPreviewError("");
+    } catch (error) {
+      console.warn("[VehicleAnnotationCanvas] save preparation failed", error);
+      setPreviewError("تعذر حفظ التعليقات. بقي الرسم ظاهرًا ولم يُؤكَّد حفظه؛ أعد المحاولة.");
+    }
   };
 
   const handleDownload = () => {
@@ -337,8 +358,8 @@ export default function VehicleAnnotationCanvas({ imageSrc, onSave, onChange, in
           <Button size="sm" variant="outline" onClick={handleDownload} className="gap-1 h-8">
             <Download size={14} /> <span className="text-xs">تنزيل</span>
           </Button>
-          <Button size="sm" onClick={handleSave} className="gradient-gold text-primary-foreground gap-1 h-8">
-            حفظ التعليقات
+          <Button size="sm" onClick={handleSave} disabled={!imageReady} className="gradient-gold text-primary-foreground gap-1 h-8">
+            تطبيق التعليقات على مسودة التقرير
           </Button>
         </div>
       </div>
@@ -365,8 +386,10 @@ export default function VehicleAnnotationCanvas({ imageSrc, onSave, onChange, in
         />
       </div>
 
+      {previewError && <p role="alert" className="text-sm text-destructive">{previewError}</p>}
+
       <div className="text-[10px] text-muted-foreground text-center">
-        💡 اختر أداة من الشريط أعلاه ثم ارسم على الصورة. اضغط "حفظ التعليقات" لإرفاقها بتقرير الفحص.
+        اختر أداة وارسم على الصورة، ثم طبّق التعليقات على المسودة. الحفظ السحابي يتم من زر حفظ التقرير.
       </div>
     </div>
   );

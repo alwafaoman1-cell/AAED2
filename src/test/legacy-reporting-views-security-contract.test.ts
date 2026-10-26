@@ -7,7 +7,7 @@ const migrationPath = resolve(
   "supabase/migrations/20260915120000_legacy_reporting_views_security_hardening.sql",
 );
 
-const migration = readFileSync(migrationPath, "utf8").toLowerCase();
+const migration = readFileSync(migrationPath, "utf8").replace(/\r\n/g, "\n").toLowerCase();
 
 const protectedViews = [
   "vehicle_duplicates",

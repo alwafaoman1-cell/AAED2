@@ -27,6 +27,13 @@ describe("work order type rules", () => {
       claimNumber: "CLM-2026-100",
     })).toBe("insurance");
   });
+
+  it("keeps an explicitly cash accident job in the cash channel on the supervisor screen", () => {
+    expect(isInsuranceWorkOrder({ workOrderType: "general_customer" })).toBe(false);
+    const supervisor = readFileSync(resolve(process.cwd(), "src/pages/apps/SupervisorApp.tsx"), "utf8");
+    expect(supervisor).toContain("const IS_INSURANCE = isInsuranceWorkOrder;");
+    expect(supervisor).not.toContain('(o.serviceType || "").trim() === "حادث"');
+  });
 });
 
 describe("work order production contract", () => {

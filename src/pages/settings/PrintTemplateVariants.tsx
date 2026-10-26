@@ -8,7 +8,7 @@ import { getDocTypeMeta } from "@/lib/printTemplates/registry";
 import { usePrintTemplates, useTemplateMutations, type PrintTemplate } from "@/hooks/usePrintTemplates";
 import { defaultSchemaFor } from "@/lib/printTemplates/defaults";
 import type { DocType } from "@/lib/printTemplates/schema";
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import { renderTemplate } from "@/lib/printTemplates/renderer";
@@ -24,24 +24,7 @@ export default function PrintTemplateVariants() {
   const { create, remove, setDefault, duplicate } = useTemplateMutations();
   const [deleting, setDeleting] = useState<PrintTemplate | null>(null);
   const [previewing, setPreviewing] = useState<PrintTemplate | null>(null);
-  const seededRef = useRef(false);
-
   const hasDefault = !!defaultFor(docType as DocType);
-
-  // Auto-seed: create a default system template the first time this doc type is opened
-  useEffect(() => {
-    if (isLoading || !docType || seededRef.current) return;
-    if (templates.length === 0) {
-      seededRef.current = true;
-      create.mutateAsync({
-        doc_type: docType as DocType,
-        name: `قالب ${meta.nameAr} الافتراضي`,
-        description: "تم إنشاؤه تلقائياً — يمكنك تعديله أو حذفه",
-        schema: defaultSchemaFor(docType as DocType),
-        is_default: true,
-      }).catch(() => { seededRef.current = false; });
-    }
-  }, [isLoading, templates.length, docType]);
 
   const handleNew = async (fromSystem = true) => {
     const schema = fromSystem ? defaultSchemaFor(docType as DocType) : { version: 1 as const, page: defaultSchemaFor(docType as DocType).page, blocks: [] };

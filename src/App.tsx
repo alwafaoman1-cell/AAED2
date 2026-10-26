@@ -197,9 +197,10 @@ const GeneralLedgerAccountPage = accountingReportsPage("GeneralLedgerAccountPage
 const VehicleProfitLossDetailPage = accountingReportsPage("VehicleProfitLossDetailPage");
 const MonthlyVehicleProfitabilityPage = lazy(() => import("./pages/accounting/reports/MonthlyVehicleProfitabilityPage"));
 const MonthlyExpensesReportPage = lazy(() => import("./pages/accounting/reports/MonthlyExpensesReportPage"));
+const UnifiedInvoicesTaxPage = lazy(() => import("./pages/accounting/UnifiedInvoicesTaxPage"));
 
 import { setTemplateQueryClient } from "@/lib/printTemplates/resolver";
-import { useAutoTranslate } from "@/i18n/autoTranslate";
+import AutoTranslateBoot from "@/i18n/AutoTranslateBoot";
 import KeyboardShortcuts from "@/components/KeyboardShortcuts";
 import SystemPreferencesBoot from "@/components/SystemPreferencesBoot";
 import UnsavedWorkGuard from "@/components/UnsavedWorkGuard";
@@ -237,11 +238,6 @@ setExpensesQueryClient(queryClient);
 // Do not let browser focus/visibility events trigger implicit app refreshes.
 // Explicit saves and scoped realtime events remain the only refresh paths.
 focusManager.setEventListener(() => () => {});
-
-const AutoTranslateBoot = () => {
-  useAutoTranslate();
-  return null;
-};
 
 const RouteFallback = () => (
   <div role="status" aria-live="polite" className="flex items-center justify-center gap-2 min-h-[40vh] text-muted-foreground text-sm">
@@ -348,6 +344,7 @@ const App = () => (
               <Route path="/accounting/expenses/categories/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseCategoryFormPage /></ProtectedRoute>} />
               <Route path="/accounting/expenses/categories/:categoryId" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseCategoryFormPage /></ProtectedRoute>} />
               <Route path="/accounting/receipts" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Receipts /></ProtectedRoute>} />
+              <Route path="/accounting/invoices" element={<ProtectedRoute roles={["admin","manager","accountant"]}><UnifiedInvoicesTaxPage /></ProtectedRoute>} />
               <Route path="/accounting/cashbox/topup" element={<ProtectedRoute roles={["admin","manager","accountant"]}><CashboxTopup /></ProtectedRoute>} />
               <Route path="/accounting/setup" element={<AccountingSetupRouteGuard permission="accounting.view_journal"><AccountingSetupCenterPage /></AccountingSetupRouteGuard>} />
               <Route path="/accounting/setup/accounts" element={<AccountingSetupRouteGuard permission="accounting.manage_accounts"><AccountsPage /></AccountingSetupRouteGuard>} />

@@ -61,7 +61,7 @@ function drawHeader(
   doc.rect(0, 0, A4_W, 4, "F");
 
   // الشعار
-  let logoRight = A4_W - MARGIN;
+  const logoRight = A4_W - MARGIN;
   if (s.logoUrl) {
     try {
       const fmt = detectFormat(s.logoUrl);

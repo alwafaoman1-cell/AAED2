@@ -77,7 +77,9 @@ function buildHtml(p: LandscapeReportPayload): string {
           ? `<div class="resp">${esc(tpl.responsibleName)}</div>` : ""}
       </div>`;
     }
-  } catch {}
+  } catch {
+    // Optional section rendering must not prevent the remaining PDF pages.
+  }
 
   const kpisHtml = p.kpis?.length
     ? `<div class="kpis">${p.kpis.map(k => `

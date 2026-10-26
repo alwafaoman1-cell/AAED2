@@ -85,7 +85,7 @@ describe("no focus reload and draft loss guard contract", () => {
   });
 
   it("does not treat token refresh or same-user signed-in as app reload triggers", () => {
-    const auth = read("src/contexts/AuthContext.tsx");
+    const auth = read("src/contexts/AuthProvider.tsx");
     const salesStore = read("src/lib/salesStore.ts");
     const expensesStore = read("src/lib/expensesStore.ts");
 

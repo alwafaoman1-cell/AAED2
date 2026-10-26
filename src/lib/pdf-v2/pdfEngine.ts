@@ -138,7 +138,9 @@ export function openPdfV2Window(input: PdfV2BuildInput): Window | null {
   const html = buildPdfV2Html(input);
   const win = window.open("", "_blank", "noopener,noreferrer");
   if (!win) return null;
-  try { (win as any).opener = null; } catch {}
+  try { (win as any).opener = null; } catch {
+    // Some browsers expose opener as read-only; noopener was requested above.
+  }
   win.document.open();
   win.document.write(html);
   win.document.close();
@@ -240,7 +242,9 @@ export async function createPdfV2Blob(input: PdfV2BuildInput): Promise<Blob> {
   pdf.setProperties({ title: meta.title || meta.documentType, creator: "AAED2 PDF v2" });
 
   const isRtl = meta.language !== "en";
-  try { (pdf as any).setR2L?.(isRtl); } catch {}
+  try { (pdf as any).setR2L?.(isRtl); } catch {
+    // Older PDF engines omit this optional direction setting.
+  }
   const left = layout.margins.left;
   const right = layout.widthMm - layout.margins.right;
   const width = right - left;
@@ -435,7 +439,9 @@ export async function openPdfV2Viewer(input: PdfV2BuildInput): Promise<Window | 
   const blob = await createPdfV2Blob(input);
   const url = URL.createObjectURL(blob);
   if (placeholder) {
-    try { (placeholder as any).opener = null; } catch {}
+    try { (placeholder as any).opener = null; } catch {
+      // The placeholder was opened with noopener; continue if assignment is blocked.
+    }
     placeholder.location.replace(withPdfViewerDefaults(url));
     setTimeout(() => URL.revokeObjectURL(url), 120_000);
     return placeholder;

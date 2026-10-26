@@ -80,8 +80,7 @@ export function findByBarcode(barcode: string): Part | undefined {
 }
 
 /** قائمة فريدة من الماركات/التصنيفات */
-export function getInventoryFacets() {
-  const list = inventoryStore.getAll();
+export function getInventoryFacets(list: readonly Part[] = inventoryStore.getAll()) {
   const brands = Array.from(new Set(list.map((p) => p.brand).filter(Boolean))) as string[];
   const categories = Array.from(new Set(list.map((p) => p.category).filter(Boolean))) as string[];
   return { brands, categories };

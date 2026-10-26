@@ -25,6 +25,7 @@ export default function SupplierPaymentDialog({
 }: Props) {
   const suppliers = suppliersStore.getAll();
   const invoices = purchaseInvoicesStore.getAll();
+  const firstSupplierId = suppliers[0]?.id || "";
 
   const [supplierId, setSupplierId] = useState("");
   const [invoiceId, setInvoiceId] = useState("");
@@ -36,7 +37,7 @@ export default function SupplierPaymentDialog({
 
   useEffect(() => {
     if (open) {
-      setSupplierId(prefillSupplierId || suppliers[0]?.id || "");
+      setSupplierId(prefillSupplierId || firstSupplierId);
       setInvoiceId(prefillInvoiceId || "");
       setAmount(0);
       setMethod("نقدي");
@@ -44,7 +45,7 @@ export default function SupplierPaymentDialog({
       setDate(new Date().toISOString().slice(0, 10));
       setNotes("");
     }
-  }, [open, prefillSupplierId, prefillInvoiceId]);
+  }, [open, prefillSupplierId, prefillInvoiceId, firstSupplierId]);
 
   const supplierInvoices = useMemo(
     () => invoices.filter((i) => i.supplierId === supplierId && !i.paid),

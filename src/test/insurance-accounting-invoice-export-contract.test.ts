@@ -4,6 +4,7 @@ import {
   buildInsuranceInvoiceReportRows,
   filterAndSortInsuranceInvoiceRows,
   INSURANCE_INVOICE_REPORT_COLUMNS,
+  summarizeInsuranceInvoiceRows,
 } from "@/lib/insuranceInvoiceReport";
 
 const invoice = (patch: Record<string, unknown> = {}) => ({
@@ -90,6 +91,21 @@ describe("insurance accounting invoice Excel and filters", () => {
     expect(rows.map((row) => row.collectionStatus)).toEqual(["unpaid", "partial", "paid"]);
   });
 
+  it("deducts settlement discount from outstanding and excludes cancelled invoices from KPIs", () => {
+    const rows = buildInsuranceInvoiceReportRows([
+      invoice({ paid_amount: 70, settlement_discount_amount: 35, status: "paid" }),
+      invoice({ id: "cancelled", total: 200, status: "cancelled" }),
+    ], [claim()]);
+    expect(rows[0].remainingAmount).toBe(0);
+    expect(rows[1].remainingAmount).toBe(0);
+    expect(summarizeInsuranceInvoiceRows(rows)).toEqual({
+      issued: 105,
+      paid: 70,
+      settlementDiscount: 35,
+      outstanding: 0,
+    });
+  });
+
   it("applies company, collection, LPO, range and full-text filters before sorting", () => {
     const rows = buildInsuranceInvoiceReportRows([
       invoice(),
@@ -108,7 +124,7 @@ describe("insurance accounting invoice Excel and filters", () => {
   });
 
   it("keeps all business columns selectable and exports the filtered set, not the page", () => {
-    const page = readFileSync("src/pages/insurance/InsuranceAccounting.tsx", "utf8");
+    const page = readFileSync("src/pages/insurance/InsuranceAccounting.tsx", "utf8").replace(/\r\n/g, "\n");
     const keys = INSURANCE_INVOICE_REPORT_COLUMNS.map((column) => column.key);
     expect(keys).toEqual(expect.arrayContaining([
       "claimNumber", "plateNumber", "invoiceDate", "lpoNumber", "subtotal", "vat", "total",

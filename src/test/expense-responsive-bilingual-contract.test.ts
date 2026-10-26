@@ -24,7 +24,7 @@ describe("expense pages responsive bilingual layout", () => {
   ]) {
     it(`${path} switches form direction and collapses to one mobile column`, () => {
       const source = read(path);
-      expect(source).toMatch(/dir=\{isAr\s*\?\s*['\"]rtl['\"]\s*:\s*['\"]ltr['\"]\}/);
+      expect(source).toMatch(/dir=\{isAr\s*\?\s*['"]rtl['"]\s*:\s*['"]ltr['"]\}/);
       expect(source).toMatch(/md:grid-cols-/);
       expect(source).toContain("p-4 md:p-6");
     });

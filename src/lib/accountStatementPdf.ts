@@ -35,7 +35,9 @@ export function getAccountStatementHtml(customer: Customer, ledger: CustomerLedg
       balance,
     }, `Statement ${customer.name}`);
     if (custom) return custom;
-  } catch {}
+  } catch {
+    // Fall back to the built-in statement when a custom template cannot render.
+  }
   const today = formatDateLatin(new Date());
 
   // Customer-related vehicles & orders

@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { hasUnsavedWork, subscribeUnsavedWork } from "@/lib/unsavedWork";
+import { applyExpenseRealtimeChange } from "@/lib/expensesStore";
 
 const RESUME_DELAY_MS = 2_000;
 const STALE_AFTER_HIDDEN_MS = 30_000;
@@ -230,8 +231,7 @@ export function useRealtimeSync() {
             .catch((error) => console.warn("[realtime:job_orders]", error));
         }
         if (table === "expenses") {
-          void import("@/lib/expensesStore")
-            .then(({ applyExpenseRealtimeChange }) => applyExpenseRealtimeChange(payload))
+          void Promise.resolve().then(() => applyExpenseRealtimeChange(payload))
             .catch((error) => console.warn("[realtime:expenses]", error));
           if (realtimeScope.scope === "work_orders_list") {
             void import("@/lib/workOrdersStore")

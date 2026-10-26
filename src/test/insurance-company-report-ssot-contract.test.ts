@@ -52,7 +52,7 @@ describe("insurance company report SSOT", () => {
   });
 
   it("uses the same filtered rows for the button, preview and Excel export", () => {
-    const page = readFileSync("src/pages/insurance/InsuranceCompanyDetail.tsx", "utf8");
+    const page = readFileSync("src/pages/insurance/InsuranceCompanyDetail.tsx", "utf8").replace(/\r\n/g, "\n");
     expect(page).toContain("filterInsuranceCollectionRows(allCollectionRows, reportFilter)");
     expect(page).toContain("new Set(collectionExportRows.map((row) => row.claimId))");
     expect(page).toContain("exportInsuranceCollectionRowsToXlsx(\n        collectionExportRows,");

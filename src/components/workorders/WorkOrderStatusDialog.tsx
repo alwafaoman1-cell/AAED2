@@ -6,8 +6,10 @@ import { Check, ChevronLeft, Camera, Image as ImageIcon, Send, Save, Trash2, Loa
 import { WORK_ORDER_STATUSES, normalizeWorkOrderStatus, updateWorkOrderInCloud, type WorkOrder, type StagePhase, type StagePhoto } from "@/lib/workOrdersStore";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
-import WorkOrderClosingReview, { isClosingStatus } from "@/components/workorders/WorkOrderClosingReview";
+import WorkOrderClosingReview from "@/components/workorders/WorkOrderClosingReview";
+import { isClosingStatus } from "@/components/workorders/workOrderClosingStatus";
 import { buildCustomerPortalUrl, ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
+import { uploadStagePhoto } from "@/lib/workOrderPhotosStorage";
 
 interface Props {
   order: WorkOrder | null;
@@ -112,6 +114,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   const [isSigned, setIsSigned] = useState<boolean>(false);
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
+  const initializedOrderId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!open || !cloudJobOrderId) { setPortalToken(null); setIsSigned(false); return; }
@@ -126,14 +129,18 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   }, [open, cloudJobOrderId]);
 
   useEffect(() => {
-    if (open && order) {
-      const normalizedStatus = normalizeWorkOrderStatus(order.status);
-      setSelected(normalizedStatus);
-      setMessage(defaultMessage(normalizedStatus, order.customer || "", order.id));
-      setPendingPhotos([]);
-      setClosingReview(null);
+    if (!open || !order) {
+      initializedOrderId.current = null;
+      return;
     }
-  }, [open, order?.id]);
+    if (initializedOrderId.current === order.id) return;
+    initializedOrderId.current = order.id;
+    const normalizedStatus = normalizeWorkOrderStatus(order.status);
+    setSelected(normalizedStatus);
+    setMessage(defaultMessage(normalizedStatus, order.customer || "", order.id));
+    setPendingPhotos([]);
+    setClosingReview(null);
+  }, [open, order]);
 
   useEffect(() => {
     if (open && order) {
@@ -156,7 +163,6 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     setUploading(true);
     try {
       const { convertImageToWebp } = await import("@/lib/imageToWebp");
-      const { uploadStagePhoto } = await import("@/lib/workOrderPhotosStorage");
       const phase = getStatusPhase(selected || order!.status);
       const newOnes: StagePhoto[] = [];
       let failed = 0;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Search, Users, UserCheck, UserX, Wallet, BadgeDollarSign } from "lucide-react";
@@ -29,7 +29,7 @@ export default function EmployeesList() {
 
   const loadState = hrStore.loadState();
   const employees = loadState === "ready" ? hrStore.listEmployees() : [];
-  const filtered = useMemo(() => employees.filter((e) => {
+  const filtered = employees.filter((e) => {
     if (statusFilter !== "all" && e.employmentStatus !== statusFilter) return false;
     if (!q.trim()) return true;
     const s = q.toLowerCase();
@@ -39,7 +39,7 @@ export default function EmployeesList() {
       (e.position || "").toLowerCase().includes(s) ||
       (e.phone || "").toLowerCase().includes(s)
     );
-  }), [employees, q, statusFilter]);
+  });
 
   const stats = {
     total: employees.length,

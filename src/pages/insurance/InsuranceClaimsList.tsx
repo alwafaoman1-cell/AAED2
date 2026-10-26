@@ -134,7 +134,10 @@ export default function InsuranceClaimsList() {
   });
   const legacyClaimsQuery = useInsuranceClaims(claimsPageQuery.isError);
   const serverListReady = Boolean(claimsPageQuery.data && !claimsPageQuery.isError);
-  const claims = serverListReady ? claimsPageQuery.data!.rows : (legacyClaimsQuery.data || []);
+  const claims = useMemo(
+    () => serverListReady ? claimsPageQuery.data!.rows : (legacyClaimsQuery.data || []),
+    [serverListReady, claimsPageQuery.data, legacyClaimsQuery.data],
+  );
   const isLoading = claimsPageQuery.isLoading || (claimsPageQuery.isError && legacyClaimsQuery.isLoading);
 
   const companies = useMemo(() => {

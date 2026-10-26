@@ -3,6 +3,7 @@ import type { InsuranceInspectionData } from "./insuranceInspectionPdf";
 import { inspectionsStore } from "./inspectionsStore";
 import { getCurrentTenantId } from "./cloud/createCloudStore";
 import { supabase } from "@/integrations/supabase/client";
+import { notifyListeners } from "@/lib/notifyListeners";
 
 const KEY = "alwafa_insurance_inspections_v1";
 
@@ -15,9 +16,7 @@ let bootstrapped = false;
 const listeners = new Set<Listener>();
 
 function notify() {
-  listeners.forEach((listener) => {
-    try { listener(); } catch {}
-  });
+  notifyListeners(listeners, "insuranceInspectionStore");
 }
 
 function bootstrap() {

@@ -935,7 +935,7 @@ export const salesStore = {
         && !finalDoc.isDeleted
       ) {
         // dynamic import لتجنب الدورات
-        import("./salesAccounting").then(({ postSalesInvoice }) => {
+        void import("./salesAccounting").then(({ postSalesInvoice }) => {
           postSalesInvoice({
             invoiceId: finalDoc.id,
             invoiceNumber: String(finalDoc.number),
@@ -946,9 +946,11 @@ export const salesStore = {
             total: Number(finalDoc.total || 0),
             source: "sales_invoice",
           });
-        });
+        }).catch((error) => console.warn("[salesStore] invoice journal mirror failed", error));
       }
-    } catch {}
+    } catch (error) {
+      console.warn("[salesStore] invoice journal mirror failed", error);
+    }
     return finalDoc;
   },
   async remove(id: string) {
@@ -1037,7 +1039,7 @@ export const salesStore = {
     if (!refreshed) throw new Error("تم تسجيل الدفعة ولكن تعذّر تحديث الفاتورة");
     // ─── ترحيل دفعة العميل في دفتر اليومية ───
     try {
-      import("./salesAccounting").then(({ postCustomerPayment }) => {
+      void import("./salesAccounting").then(({ postCustomerPayment }) => {
         const m = (p.method || "cash").toLowerCase();
         const method =
           m.includes("cash") || m.includes("نقد") ? "cash" :
@@ -1053,8 +1055,10 @@ export const salesStore = {
           method: method as "cash" | "bank_transfer" | "cheque" | "card",
           reference: p.reference,
         });
-      });
-    } catch {}
+      }).catch((error) => console.warn("[salesStore] payment journal mirror failed", error));
+    } catch (error) {
+      console.warn("[salesStore] payment journal mirror failed", error);
+    }
     return refreshed;
   },
   async removePayment(docId: string, paymentId: string) {

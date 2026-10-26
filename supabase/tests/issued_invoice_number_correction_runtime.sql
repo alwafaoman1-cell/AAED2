@@ -7,6 +7,7 @@ select p.user_id, p.tenant_id, c.id as claim_id,
   gen_random_uuid() as cash_id, gen_random_uuid() as insurance_id,
   gen_random_uuid() as historic_id, gen_random_uuid() as historic_claim_id,
   gen_random_uuid() as historic_cash_id,
+  gen_random_uuid() as posted_claim_id, gen_random_uuid() as posted_insurance_id,
   gen_random_uuid() as closed_claim_id, gen_random_uuid() as closed_insurance_id
 from public.profiles p
 join public.insurance_claims c on c.tenant_id = p.tenant_id
@@ -35,6 +36,13 @@ from correction_runtime_context x
 join public.insurance_claims c on c.id = x.claim_id;
 insert into public.insurance_claims
   (id, tenant_id, customer_id, claim_number, insurance_company)
+select x.posted_claim_id, c.tenant_id, c.customer_id,
+  'RUNTIME-POSTED-' || left(x.posted_claim_id::text, 8),
+  c.insurance_company
+from correction_runtime_context x
+join public.insurance_claims c on c.id = x.claim_id;
+insert into public.insurance_claims
+  (id, tenant_id, customer_id, claim_number, insurance_company)
 select x.closed_claim_id, c.tenant_id, c.customer_id,
   'RUNTIME-CLOSED-' || left(x.closed_claim_id::text, 8),
   c.insurance_company
@@ -46,6 +54,14 @@ insert into public.insurance_invoices
    invoice_date, subtotal, vat, total, status, issued_at, created_at)
 select historic_id, tenant_id, historic_claim_id, '00073', 'Runtime insurer',
   '2026-10-25', 50, 2.5, 52.5, 'issued',
+  clock_timestamp() - interval '2 hours',
+  clock_timestamp() - interval '2 hours'
+from correction_runtime_context;
+insert into public.insurance_invoices
+  (id, tenant_id, claim_id, invoice_number, insurance_company_name,
+   invoice_date, subtotal, vat, total, status, issued_at, created_at)
+select posted_insurance_id, tenant_id, posted_claim_id, '00076', 'Runtime insurer',
+  '2026-10-25', 60, 3, 63, 'paid',
   clock_timestamp() - interval '2 hours',
   clock_timestamp() - interval '2 hours'
 from correction_runtime_context;
@@ -107,6 +123,9 @@ declare
   fiscal_id uuid;
   period_id uuid;
   journal_id uuid;
+  posted_journal_id uuid;
+  debit_account_id uuid;
+  credit_account_id uuid;
   closed_fiscal_id uuid;
   closed_period_id uuid;
 begin
@@ -184,6 +203,64 @@ begin
   insert into public.accounting_source_links
     (tenant_id, journal_entry_id, source_type, source_id)
   values (x.tenant_id, journal_id, 'manual_journal', x.cash_id);
+
+  -- Post through the same approve/post RPCs used by the accounting workflow.
+  insert into public.accounting_accounts
+    (tenant_id, code, name_ar, name_en, account_type, normal_balance)
+  values (x.tenant_id, 'RUNTIME-DR-' || left(x.posted_insurance_id::text, 8),
+    'حساب اختبار مدين', 'Runtime debit', 'asset', 'debit')
+  returning id into debit_account_id;
+  insert into public.accounting_accounts
+    (tenant_id, code, name_ar, name_en, account_type, normal_balance)
+  values (x.tenant_id, 'RUNTIME-CR-' || left(x.posted_insurance_id::text, 8),
+    'حساب اختبار دائن', 'Runtime credit', 'revenue', 'credit')
+  returning id into credit_account_id;
+  insert into public.accounting_journal_entries
+    (tenant_id, entry_number, accounting_date, fiscal_year_id,
+     accounting_period_id, reference, source_type, source_identifier)
+  values (x.tenant_id, 'JE-POSTED-' || left(x.posted_insurance_id::text, 8),
+    '2020-01-01', fiscal_id, period_id, '00076',
+    'insurance_invoice', x.posted_insurance_id::text)
+  returning id into posted_journal_id;
+  insert into public.accounting_journal_lines
+    (tenant_id, journal_entry_id, account_id, line_number, debit, credit)
+  values (x.tenant_id, posted_journal_id, debit_account_id, 1, 63, 0),
+    (x.tenant_id, posted_journal_id, credit_account_id, 2, 0, 63);
+  insert into public.accounting_source_links
+    (tenant_id, journal_entry_id, source_type, source_id,
+     source_number_snapshot, is_primary)
+  values (x.tenant_id, posted_journal_id, 'insurance_invoice',
+    x.posted_insurance_id, '00076', true);
+  perform public.approve_accounting_journal_entry(posted_journal_id);
+  perform public.post_accounting_journal_entry(posted_journal_id);
+  begin
+    update public.insurance_invoices i set invoice_number = 'INV-26-000076'
+    where i.id = x.posted_insurance_id;
+    raise exception 'TEST_POSTED_DIRECT_NUMBER_CHANGE_ALLOWED';
+  exception when others then
+    if sqlerrm <> 'INVOICE_NUMBER_CORRECTION_ACCOUNTING_POSTED' then raise; end if;
+  end;
+  select invoice_number into got from public.correct_historical_insurance_invoice_number(
+    x.posted_insurance_id, '00076', 'INV-26-000076',
+    'Preserve posted historical journal reference');
+  if got <> 'INV-26-000076'
+     or (select i.total from public.insurance_invoices i
+         where i.id = x.posted_insurance_id) <> 63
+     or (select l.source_number_snapshot from public.accounting_source_links l
+         where l.journal_entry_id = posted_journal_id) <> '00076'
+     or (select e.reference from public.accounting_journal_entries e
+         where e.id = posted_journal_id) <> '00076'
+     or (select e.status from public.accounting_journal_entries e
+         where e.id = posted_journal_id) <> 'posted'
+     or (select count(*) from public.find_unified_invoice_number('00076')
+         where source_id = x.posted_insurance_id
+           and invoice_number = 'INV-26-000076') <> 1
+     or (select count(*) from public.invoice_number_audit_events a
+         where a.source_id = x.posted_insurance_id
+           and a.event_type = 'renumbered'
+           and a.details->>'old_invoice_number' = '00076') <> 1 then
+    raise exception 'TEST_POSTED_HISTORICAL_FORMAT_CORRECTION_FAILED';
+  end if;
   begin
     perform public.correct_issued_invoice_number('sales_documents', x.cash_id,
       'INV-26-000052', 'INV-26-000053', 'Linked journal must block correction');
@@ -343,4 +420,4 @@ do $$ begin
 end $$;
 
 rollback;
-select 'PASS: cash + insurance + historical cash/insurance, temporary gate, aliases, accounting link, closed period, legacy slot, repeat correction, collision, direct-write guards, PDF snapshot, tenant/admin/anon, counter, audit, terminal idempotency, close; fixtures rolled back' as result;
+select 'PASS: cash + insurance + historical cash/insurance, posted historical format correction with immutable journal snapshot, temporary gate, aliases, accounting link, closed period, legacy slot, repeat correction, collision, direct-write guards, PDF snapshot, tenant/admin/anon, counter, audit, terminal idempotency, close; fixtures rolled back' as result;

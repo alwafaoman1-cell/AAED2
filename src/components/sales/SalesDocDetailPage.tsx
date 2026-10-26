@@ -82,7 +82,10 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
     return () => { u(); };
   }, []);
 
-  const doc = useMemo(() => salesStore.get(id), [id, tick]);
+  const doc = useMemo(() => {
+    void tick; // Store notification invalidates the cached document even when its id is unchanged.
+    return salesStore.get(id);
+  }, [id, tick]);
 
   useEffect(() => {
     let active = true;

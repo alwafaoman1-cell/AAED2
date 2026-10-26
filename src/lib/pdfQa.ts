@@ -40,7 +40,7 @@ const drawToFixedSize = (source: HTMLCanvasElement, w: number, h: number): Image
 };
 
 /** Render the first page of a PDF blob to a canvas (96dpi-ish). */
-const renderPdfFirstPage = async (blob: Blob, scale = 1.2): Promise<HTMLCanvasElement> => {
+const renderPdfFirstPage = async (blob: Blob, scale = 1.2): Promise<{ canvas: HTMLCanvasElement; pages: number }> => {
   const pdfjs: any = await import("pdfjs-dist");
   const buf = await blob.arrayBuffer();
   const doc = await pdfjs.getDocument({ data: buf }).promise;
@@ -50,7 +50,7 @@ const renderPdfFirstPage = async (blob: Blob, scale = 1.2): Promise<HTMLCanvasEl
   c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
   const ctx = c.getContext("2d")!;
   await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  return c;
+  return { canvas: c, pages: doc.numPages };
 };
 
 /**
@@ -65,10 +65,11 @@ export async function comparePrintVsPdf(
   const threshold = opts.threshold ?? 0.92;
   const compareWidth = opts.compareWidth ?? 480;
 
-  const [printCanvas, pdfCanvas] = await Promise.all([
+  const [printCanvas, pdfResult] = await Promise.all([
     html2canvas(printEl, { scale: 1.2, backgroundColor: "#ffffff", useCORS: true, logging: false }),
     renderPdfFirstPage(pdfBlob, 1.2),
   ]);
+  const pdfCanvas = pdfResult.canvas;
 
   const aspect = printCanvas.height / printCanvas.width;
   const w = compareWidth;
@@ -89,7 +90,9 @@ export async function comparePrintVsPdf(
     const pdfjs: any = await import("pdfjs-dist");
     const doc = await pdfjs.getDocument({ data: await pdfBlob.arrayBuffer() }).promise;
     pages = doc.numPages;
-  } catch {}
+  } catch {
+    // Keep the PDF QA result available even when page inspection fails.
+  }
 
   return {
     similarity,
@@ -97,7 +100,7 @@ export async function comparePrintVsPdf(
     printHeight: printCanvas.height,
     pdfWidth: pdfCanvas.width,
     pdfHeight: pdfCanvas.height,
-    pages,
+    pages: pdfResult.pages,
     passed: similarity >= threshold,
     threshold,
   };

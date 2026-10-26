@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { smartBack } from "@/lib/smartBack";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -64,7 +64,8 @@ import { findOrCreateInsuranceCompany, useInsuranceCompany } from "@/hooks/useIn
 import { useCreateInsuranceInvoice } from "@/hooks/useInsuranceInvoices";
 import CancelClaimDialog from "@/components/insurance/CancelClaimDialog";
 import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicker";
-import UplItemsEditor, { DEFAULT_UPL_ITEMS, type UplItem } from "@/components/insurance/UplItemsEditor";
+import UplItemsEditor from "@/components/insurance/UplItemsEditor";
+import { DEFAULT_UPL_ITEMS, type UplItem } from "@/components/insurance/uplItems";
 import ClaimDeliverySection from "@/components/insurance/ClaimDeliverySection";
 import InlineWorkOrderSummary from "@/components/insurance/InlineWorkOrderSummary";
 import { XCircle } from "lucide-react";
@@ -97,6 +98,14 @@ import { buildClaimCopyReference } from "@/lib/claimCopyReference";
 import ClaimEstimateStatusBadge from "@/components/insurance/ClaimEstimateStatusBadge";
 import { markClaimEstimateSent, readClaimEstimateLifecycle } from "@/lib/claimEstimateLifecycle";
 
+
+const DEFAULT_ESTIMATE_TERMS = [
+  "هذا التقدير ساري لمدة 30 يوماً من تاريخ الإصدار.",
+  "الأسعار خاضعة للمراجعة عند اكتشاف أضرار خفية أثناء الفك.",
+  "العمل لا يبدأ إلا بعد الموافقة الخطية من شركة التأمين.",
+  "أي قطع إضافية أو خدمات خارج البنود المُدرجة تُحتسب بشكل منفصل.",
+  "مدة الإصلاح المقدّرة تبدأ من تاريخ توفر القطع المعتمدة.",
+].join("\n");
 
 const insuranceCompanies = [
   "التعاونية", "بوبا", "الراجحي", "ميدغلف", "ملاذ", "وفاء", "سلامة",
@@ -266,14 +275,7 @@ export default function InsuranceClaimDetail() {
   const [ownerSectionOpen, setOwnerSectionOpen] = useState(false);
   const [vehicleSectionOpen, setVehicleSectionOpen] = useState(false);
 
-  // ── شروط/ملاحظات تقدير الإصلاح (محرّرة، تُحفظ محلياً لكل tenant) ──
-  const DEFAULT_ESTIMATE_TERMS = [
-    "هذا التقدير ساري لمدة 30 يوماً من تاريخ الإصدار.",
-    "الأسعار خاضعة للمراجعة عند اكتشاف أضرار خفية أثناء الفك.",
-    "العمل لا يبدأ إلا بعد الموافقة الخطية من شركة التأمين.",
-    "أي قطع إضافية أو خدمات خارج البنود المُدرجة تُحتسب بشكل منفصل.",
-    "مدة الإصلاح المقدّرة تبدأ من تاريخ توفر القطع المعتمدة.",
-  ].join("\n");
+  // ── شروط/ملاحظات تقدير الإصلاح المحفوظة سحابيًا لكل منشأة ──
   const [estimateTerms, setEstimateTerms] = useState<string>(DEFAULT_ESTIMATE_TERMS);
   const estimateTermsHydratedRef = useRef(false);
   useEffect(() => {
@@ -957,14 +959,14 @@ export default function InsuranceClaimDetail() {
     started: workStartedAtRef.current?.value || workStartedAt || "",
   });
 
-  const getLpoValues = () => ({
+  const getLpoValues = useCallback(() => ({
     number: lpoNumberRef.current?.value || lpoNumber || "",
     date: lpoDateRef.current?.value || lpoDate || "",
     amount: lpoAmountRef.current?.value || lpoAmount || "",
     note: lpoNoteRef.current?.value || lpoNote || "",
-  });
+  }), [lpoNumber, lpoDate, lpoAmount, lpoNote]);
 
-  const buildNotesWithLpo = () => {
+  const buildNotesWithLpo = useCallback(() => {
     const lpo = getLpoValues();
     const cleaned = (notes || "")
       .replace(/\[LPO:[^\]]+\]\n?/g, "")
@@ -979,7 +981,7 @@ export default function InsuranceClaimDetail() {
       lpo.note.trim() ? `[LPO_NOTE:${lpo.note.trim()}]` : "",
     ].filter(Boolean);
     return [cleaned, ...lpoTags].filter(Boolean).join("\n") || undefined;
-  };
+  }, [notes, getLpoValues]);
 
   const handleSave = async () => {
     if (!company || !claimNumber) {
@@ -1843,7 +1845,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     claimNumber, status, company, insuranceCo, ownerName, ownerPhone,
     vehicle, vehicleMake, vehicleModel, vehiclePlate, vehicleYear, vehicleColor,
     linkedInspection, neededParts, estimationType, estimatedCost, approvedAmount,
-    rejectionReason, notes, documents, damagePhotos, existing, claimPayments,
+    rejectionReason, notes, documents, damagePhotos, existing, claimPayments, estimateDate,
   ]);
 
   /** يولّد فاتورة تأمين ضريبية رسمية مع QR ZATCA TLV — لا تصدر قبل تسجيل LPO. */
@@ -2091,7 +2093,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     existing, isNew, company, companyId, insuranceEmployeeId, claimNumber, customerId, vehicleId,
     ownerName, ownerPhone, estimatedCost, approvedAmount, vehicleMake, vehicleModel, vehiclePlate,
     vehicleYear, vehicleColor, vehicleVin, estimateDate, workshopArrivalDate, workStartedAt,
-    notes, lpoNumber, lpoDate, lpoAmount, lpoNote,
+    buildNotesWithLpo,
   ]);
 
   useEffect(() => {
@@ -4319,7 +4321,7 @@ function InspectionPickerDialog({ open, onOpenChange, onPick }: PickerProps) {
         i.vehicle.toLowerCase().includes(q) ||
         (i.workOrder || "").toLowerCase().includes(q),
     );
-  }, [search, tick, open]);
+  }, [search, tick]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

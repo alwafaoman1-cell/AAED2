@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { STAGE_LABELS, StagePhase, StagePhoto, WorkOrder, getWorkOrderById, updateWorkOrderInCloud } from "@/lib/workOrdersStore";
 import { toast } from "sonner";
 import PhotoLightbox, { type LightboxPhoto } from "@/components/vehicles/PhotoLightbox";
-import { refreshSignedPhotoUrls } from "@/lib/workOrderPhotosStorage";
+import { refreshSignedPhotoUrls, uploadStagePhoto } from "@/lib/workOrderPhotosStorage";
 
 interface Props {
   orderId: string | null;
@@ -91,7 +91,6 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
       if (!file.type.startsWith("image/")) return;
       tasks.push((async () => {
         const { convertImageToWebp } = await import("@/lib/imageToWebp");
-        const { uploadStagePhoto } = await import("@/lib/workOrderPhotosStorage");
         const optimized = await convertImageToWebp(file);
         const photoId = Math.random().toString(36).slice(2, 9);
         const uploaded = await uploadStagePhoto({ orderId: order!.id, photoId, file: optimized });

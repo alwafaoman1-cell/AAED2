@@ -95,7 +95,9 @@ export default function Reports({ version = "legacy" }: ReportsProps) {
   );
 
   const filters = tabFilters[activeTab] || DEFAULT_FILTERS;
-  const salesRangeKey = `${filters.range.from}|${filters.range.to}`;
+  const rangeFrom = filters.range.from;
+  const rangeTo = filters.range.to;
+  const salesRangeKey = `${rangeFrom}|${rangeTo}`;
   const [loadedSalesRange, setLoadedSalesRange] = useState("");
   const [salesRangeError, setSalesRangeError] = useState(false);
   const [salesRetry, setSalesRetry] = useState(0);
@@ -103,7 +105,7 @@ export default function Reports({ version = "legacy" }: ReportsProps) {
   useEffect(() => {
     let active = true;
     setSalesRangeError(false);
-    void salesStore.refreshRange(filters.range.from || "1900-01-01", filters.range.to || "9999-12-31")
+    void salesStore.refreshRange(rangeFrom || "1900-01-01", rangeTo || "9999-12-31")
       .then(() => {
         if (!active) return;
         setLoadedSalesRange(salesRangeKey);
@@ -115,7 +117,7 @@ export default function Reports({ version = "legacy" }: ReportsProps) {
         setSalesRangeError(true);
       });
     return () => { active = false; };
-  }, [salesRangeKey, salesRetry]);
+  }, [rangeFrom, rangeTo, salesRangeKey, salesRetry]);
   const setFilters = (f: ReportFilters) =>
     setTabFilters({ ...tabFilters, [activeTab]: f });
 
@@ -128,6 +130,7 @@ export default function Reports({ version = "legacy" }: ReportsProps) {
 
   // ===== بناء بيانات التقرير النشط =====
   const activePayload = useMemo<ReportExportPayload | null>(() => {
+    void salesTick; // Rebuild reports after sales-store changes even if filters are unchanged.
     if (!activeReport) return null;
     const def = REPORT_DEFS.find((d) => d.key === activeReport)!;
 

@@ -25,8 +25,8 @@ describe("operational fixes contract", () => {
     const manager = read("src/components/workorders/NeededPartsManager.tsx");
     const dialog = read("src/components/workorders/WorkOrderExpenseDialog.tsx");
     const order = read("src/pages/WorkOrderDetail.tsx");
-    expect(manager).toContain("Convert to Expense");
-    expect(manager).toContain("Converted to Expense");
+    expect(manager).toContain("Convert to expense");
+    expect(manager).toContain("Converted to expense");
     expect(dialog).toContain("requiredPartId");
     expect(dialog).toContain("convertedFromRequiredPart");
     expect(dialog).toContain("spare_part_converted_to_expense");

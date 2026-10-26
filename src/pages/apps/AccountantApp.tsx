@@ -42,6 +42,7 @@ export default function AccountantApp() {
   }, []);
 
   const data = useMemo(() => {
+    void tick; // Local expense and journal store notifications invalidate this summary.
     const d = today();
     const month = d.slice(0, 7);
 

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const migration = readFileSync(
   resolve(process.cwd(), "supabase/migrations/20260915130000_security_definer_execute_grants.sql"),
   "utf8",
-).toLowerCase();
+).replace(/\r\n/g, "\n").toLowerCase();
 
 describe("security definer execute grants", () => {
   it("prevents implicit PUBLIC execution on future functions", () => {

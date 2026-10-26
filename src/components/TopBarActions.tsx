@@ -13,7 +13,9 @@ export function HideAmountsToggle() {
 
   useEffect(() => {
     document.documentElement.classList.toggle("hide-amounts", hidden);
-    try { localStorage.setItem(STORAGE_KEY, hidden ? "1" : "0"); } catch {}
+    try { localStorage.setItem(STORAGE_KEY, hidden ? "1" : "0"); } catch {
+      // Privacy mode may block storage; the in-memory setting still applies.
+    }
   }, [hidden]);
 
   return (

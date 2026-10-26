@@ -85,6 +85,7 @@ export function useUpdateInsuranceEstimate() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.insuranceEstimates.all }),
+    onError: (error: Error) => toast.error(error.message || "فشل تحديث التقدير"),
   });
 }
 

@@ -157,8 +157,8 @@ export default function NumberingSettingsPage() {
             <h2 className="font-semibold text-base">{isAr ? "تصحيح مؤقت لأرقام الفواتير الصادرة" : "Temporary issued-invoice number correction"}</h2>
             <p className="text-sm text-muted-foreground">
               {isAr
-                ? "يشمل الكاش والتأمين. يفتح للمدير 30 دقيقة ثم يغلق تلقائيًا؛ لا يغيّر عدّاد الفواتير الجديدة. لا يسمح برقم مستخدم، أو فاتورة مؤرشفة أو مرحلة محاسبيًا، ويحتفظ بالرقم القديم في سجل التدقيق."
-                : "Covers cash and insurance invoices. Admin-only for 30 minutes, then closes automatically. New invoice numbering is unchanged. Used numbers, archived invoices and accounting-posted invoices are blocked; old numbers remain in the audit trail."}
+                ? "يشمل الكاش والتأمين. يفتح للمدير 30 دقيقة ثم يغلق تلقائيًا ولا يغيّر عدّاد الفواتير الجديدة. يُمنع الرقم المستخدم والفاتورة المؤرشفة. يُستثنى من منع القيد المُرحّل تصحيح صيغة رقم تأمين تاريخي بنفس التسلسل فقط، مع بقاء مرجع القيد القديم وسجل التدقيق."
+                : "Covers cash and insurance invoices. Admin-only for 30 minutes; new invoice numbering is unchanged. Used numbers and archived invoices are blocked. A posted historical insurance invoice may only be reformatted with its original sequence; the journal's old reference and the audit trail remain intact."}
             </p>
             <p className="text-sm" role="status">
               {correctionWindow.isLoading

@@ -59,9 +59,9 @@ export default function VehicleAvatar({
 
   const candidate = useMemo(() => [imageUrl, ...fallbackPhotos].find((url) => !!String(url || "").trim()) || "",
     [imageUrl, fallbackPhotos]);
-  const storageCandidate = candidate.startsWith("/")
+  const storageCandidate = useMemo(() => candidate.startsWith("/")
     ? parseMediaStorageReference(candidate)
-    : parseMediaStorageReference(candidate, "insurance-docs");
+    : parseMediaStorageReference(candidate, "insurance-docs"), [candidate]);
   useEffect(() => {
     if (avatar?.url || !candidate || !storageCandidate) return;
     let cancelled = false;
@@ -69,7 +69,7 @@ export default function VehicleAvatar({
       if (!cancelled) setResolvedFallback({ reference: candidate, url: row.url });
     });
     return () => { cancelled = true; };
-  }, [avatar?.url, candidate, storageCandidate?.bucket, storageCandidate?.path]);
+  }, [avatar?.url, candidate, storageCandidate]);
   const src = avatar?.url || (storageCandidate
     ? (resolvedFallback?.reference === candidate ? resolvedFallback.url : "")
     : candidate);

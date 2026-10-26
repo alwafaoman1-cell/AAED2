@@ -45,6 +45,7 @@ export default function ManagerApp() {
   }, []);
 
   const stats = useMemo(() => {
+    void tick; // Work-order and inventory store notifications invalidate this snapshot.
     const orders = getWorkOrders();
     const d = today();
     const todayOrders = orders.filter((o) => (o.entryDate || "").slice(0, 10) === d);

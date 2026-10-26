@@ -1,8 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { buildPublicUrl } from "@/lib/publicAccessSettingsStore";
-import { useAuth } from "@/contexts/AuthContext";
-import { Search, Download, Eye, Trash2, Pencil, Plus, Filter, Receipt, AlertTriangle, CheckCircle2, FileSpreadsheet, FolderArchive, Wallet, Columns3, ArrowUpDown, RotateCcw } from "lucide-react";
+import { Search, Download, Eye, Pencil, Plus, Filter, Receipt, AlertTriangle, CheckCircle2, FileSpreadsheet, FolderArchive, Wallet, Columns3, ArrowUpDown, RotateCcw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -19,12 +18,7 @@ import StatCard from "@/components/StatCard";
 import PdfPreviewDialog from "@/components/PdfPreviewDialog";
 import ArchivedPdfPreviewDialog from "@/components/ArchivedPdfPreviewDialog";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   useInsuranceInvoices,
-  useDeleteInsuranceInvoice,
   type InsuranceInvoice,
 } from "@/hooks/useInsuranceInvoices";
 import EditInsuranceInvoiceDialog from "@/components/insurance/EditInsuranceInvoiceDialog";
@@ -44,6 +38,7 @@ import {
   exportInsuranceInvoiceRowsToXlsx,
   filterAndSortInsuranceInvoiceRows,
   INSURANCE_INVOICE_REPORT_COLUMNS,
+  summarizeInsuranceInvoiceRows,
   type InsuranceInvoiceReportColumnKey,
   type InsuranceInvoiceSortKey,
 } from "@/lib/insuranceInvoiceReport";
@@ -72,11 +67,9 @@ const DEFAULT_VISIBLE_COLUMNS = Object.fromEntries(
 
 export default function InsuranceAccounting() {
   const [searchParams] = useSearchParams();
-  const { hasRole } = useAuth();
   const { data: invoices, isLoading } = useInsuranceInvoices();
   const { data: claims } = useInsuranceClaims();
   const { data: companiesList } = useInsuranceCompanies();
-  const del = useDeleteInsuranceInvoice();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -100,7 +93,6 @@ export default function InsuranceAccounting() {
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewTitle, setPreviewTitle] = useState("");
   const [showPreview, setShowPreview] = useState(false);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editInvoice, setEditInvoice] = useState<InsuranceInvoice | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
   const openedInvoiceFromRoute = useRef<string | null>(null);
@@ -148,8 +140,6 @@ export default function InsuranceAccounting() {
     })();
     return () => { active = false; };
   }, [claims]);
-
-  const allowDelete = hasRole("admin", "manager");
 
   const openInvoicePayment = (invoice: InsuranceInvoice) => {
     const remaining = Math.max(0, Number(invoice.total || 0) - Number(invoice.paid_amount || 0) - Number(invoice.settlement_discount_amount || 0));
@@ -256,9 +246,8 @@ export default function InsuranceAccounting() {
   }, [page, totalPages]);
 
   // KPIs
-  const totalIssued = filteredRows.reduce((sum, row) => sum + row.total, 0);
-  const totalPaid = filteredRows.reduce((sum, row) => sum + row.paidAmount, 0);
-  const totalOutstanding = totalIssued - totalPaid;
+  const { issued: totalIssued, paid: totalPaid, outstanding: totalOutstanding } =
+    summarizeInsuranceInvoiceRows(filteredRows);
   const aging = filteredRows.reduce(
     (acc, row) => {
       const out = row.remainingAmount;
@@ -598,11 +587,6 @@ export default function InsuranceAccounting() {
                       <Button size="sm" variant="ghost" className="flex-1 h-8 text-xs text-success" onClick={() => openInvoicePayment(inv)}>
                         <Wallet size={14} className="ml-1" /> إضافة دفعة
                       </Button>
-                      {allowDelete && (
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(inv.id)}>
-                          <Trash2 size={14} />
-                        </Button>
-                      )}
                     </div>
                   </div>;
                 })}
@@ -644,11 +628,6 @@ export default function InsuranceAccounting() {
                                   <a href={inv.pdf_url} target="_blank" rel="noopener noreferrer">
                                     <Download size={14} />
                                   </a>
-                                </Button>
-                              )}
-                              {allowDelete && (
-                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteId(inv.id)} title="حذف">
-                                  <Trash2 size={14} />
                                 </Button>
                               )}
                             </div>
@@ -766,26 +745,6 @@ export default function InsuranceAccounting() {
         lockInitialTarget
       />
 
-      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
-        <AlertDialogContent dir="rtl">
-          <AlertDialogHeader>
-            <AlertDialogTitle>حذف الفاتورة</AlertDialogTitle>
-            <AlertDialogDescription>هل أنت متأكد من حذف هذه الفاتورة؟ لا يمكن التراجع عن الإجراء.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row-reverse gap-2">
-            <AlertDialogCancel>إلغاء</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                if (deleteId) del.mutate(deleteId);
-                setDeleteId(null);
-              }}
-            >
-              حذف
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,21 +12,7 @@ import {
   type AppRole,
   type UserProfile,
 } from "@/lib/authProfileCache";
-
-export type { AppRole, UserProfile } from "@/lib/authProfileCache";
-
-interface AuthCtx {
-  session: Session | null;
-  user: User | null;
-  profile: UserProfile | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error?: string }>;
-  signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
-  hasRole: (...roles: AppRole[]) => boolean;
-}
-
-const AuthContext = createContext<AuthCtx | undefined>(undefined);
+import { AuthContext, type AuthCtx } from "@/contexts/authContextState";
 
 const AUTH_BOOT_TIMEOUT_MS = 8_000;
 const PROFILE_TIMEOUT_MS = 12_000;
@@ -220,11 +206,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be inside <AuthProvider>");
-  return ctx;
 }

@@ -721,7 +721,7 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
               onSave={(dataUrl) => {
                 setAnnotatedDataUrl(dataUrl);
                 setAnnotatedMap(prev => ({ ...prev, [currentSourceKey]: dataUrl }));
-                toast.success("Annotations saved");
+                toast.info("أُضيفت التعليقات إلى مسودة التقرير. احفظ التقرير لتأكيدها في السحابة.");
               }}
             />
 

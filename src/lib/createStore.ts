@@ -8,6 +8,7 @@ import {
   writeCloudSetting,
   type CloudArrayMutation,
 } from "./cloudSettings";
+import { toast } from "sonner";
 
 export interface BaseEntity {
   id: string;
@@ -80,7 +81,7 @@ export function createStore<T extends BaseEntity>({ key }: StoreOptions<T>) {
   function reportSaveFailure(error: unknown) {
     console.warn(`[createStore:${key}] Supabase setting write failed`, error);
     if (typeof window !== "undefined") {
-      void import("sonner").then(({ toast }) => {
+      queueMicrotask(() => {
         toast.error("لم تُحفظ البيانات في السحابة. أعد فتح السجل وتحقق قبل المتابعة.");
       });
     }

@@ -458,7 +458,6 @@ export function useDeleteClaim() {
 
       // Keep historical accounting entries out of active operational summaries.
       try {
-        const { removeInsuranceClaimJournal } = await import("@/lib/insuranceAccounting");
         removeInsuranceClaimJournal(id);
       } catch (e: any) { console.warn("[cascade] journal", e?.message); }
 

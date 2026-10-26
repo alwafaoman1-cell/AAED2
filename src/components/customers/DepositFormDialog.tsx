@@ -28,6 +28,13 @@ export default function DepositFormDialog({ open, onOpenChange, customerName, cu
   const cashboxes = employeeCashboxesStore.getAll().filter(c => c.active);
   const defaultCashbox = cashboxes.find(c => c.isDefault) || cashboxes[0];
   const isEdit = !!initial;
+  const initialId = initial?.id;
+  const initialAmount = initial?.amount;
+  const initialScope = initial?.scope;
+  const initialPlate = initial?.plate;
+  const initialPaymentMethod = initial?.paymentMethod;
+  const initialCashboxId = initial?.cashboxId;
+  const initialNotes = initial?.notes;
 
   const [amount, setAmount] = useState<number>(0);
   const [scope, setScope] = useState<DepositScope>(defaultPlate ? "vehicle" : "customer");
@@ -38,22 +45,32 @@ export default function DepositFormDialog({ open, onOpenChange, customerName, cu
   const [previewHtml, setPreviewHtml] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const savingRef = useRef(false);
+  const initializedRecord = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open && initial) {
+    if (!open) {
+      initializedRecord.current = null;
+      return;
+    }
+    const recordKey = initial?.id || "new";
+    if (initializedRecord.current === recordKey) return;
+    initializedRecord.current = recordKey;
+    if (initial) {
       setAmount(initial.amount);
       setScope(initial.scope);
       setPlate(initial.plate || "");
       setPaymentMethod(initial.paymentMethod);
       setCashboxId(initial.cashboxId || defaultCashbox?.id || "");
       setNotes(initial.notes || "");
-    } else if (open && !initial) {
+    } else {
       setAmount(0); setNotes("");
       setScope(defaultPlate ? "vehicle" : "customer");
       setPlate(defaultPlate || "");
+      setPaymentMethod(settings.defaultPaymentMethod);
+      setCashboxId(defaultCashbox?.id || "");
     }
-  }, [open, initial?.id]);
+  }, [open, initial, defaultCashbox?.id, defaultPlate, settings.defaultPaymentMethod]);
 
   async function handleSave(printAfter: boolean) {
     if (savingRef.current) return;

@@ -78,16 +78,17 @@ export default defineConfig(({ mode }) => ({
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
   },
   build: {
-    // Vendor splitting — keeps the initial route chunk small. Heavy libs
-    // (jspdf, html2canvas, recharts) load only when the page that uses them does.
+    // Keep only genuinely shared startup vendors here. Rollup's object-form
+    // manualChunks also pulls in dependencies of each entry: assigning PDF or
+    // Recharts here dragged the preload helper / clsx into those chunks, so
+    // both large libraries were preloaded even on the auth page. Let Vite
+    // split them naturally at their lazy route boundaries instead.
     rollupOptions: {
       output: {
         manualChunks: {
           "react-vendor": ["react", "react-dom", "react-router-dom"],
           "query-vendor": ["@tanstack/react-query"],
           "supabase": ["@supabase/supabase-js"],
-          "pdf": ["jspdf", "jspdf-autotable", "html2canvas"],
-          "charts": ["recharts"],
           "i18n": ["i18next", "react-i18next", "i18next-browser-languagedetector"],
         },
       },

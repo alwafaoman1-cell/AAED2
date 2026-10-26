@@ -2,7 +2,8 @@
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { FeatureProvider, useFeatures } from "@/contexts/FeatureContext";
+import { FeatureProvider } from "@/contexts/FeatureContext";
+import { useFeatures } from "@/contexts/featureContextState";
 
 const mocks = vi.hoisted(() => ({
   tenantId: "tenant-a" as string | null,

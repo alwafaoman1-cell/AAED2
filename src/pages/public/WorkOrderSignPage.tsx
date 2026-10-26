@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -34,19 +34,36 @@ export default function WorkOrderSignPage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const hasInkRef = useRef(false);
+  const loadVersion = useRef(0);
 
-  async function load() {
-    if (!token) return;
+  const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
-    const { data: r, error } = await supabase.rpc("get_work_order_for_sign", { p_token: token });
-    if (error) { setErr(error.message); setLoading(false); return; }
-    const obj: any = r;
-    if (obj?.error) { setErr(obj.error); setLoading(false); return; }
-    setData(obj as SignData);
-    setName(obj?.signer_name || obj?.customer?.name || "");
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, [token]);
+    setData(null);
+    setErr(null);
+    if (!token) {
+      setErr("رابط التوقيع غير صالح");
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data: r, error } = await supabase.rpc("get_work_order_for_sign", { p_token: token });
+      if (version !== loadVersion.current) return;
+      if (error) throw error;
+      const obj: any = r;
+      if (obj?.error) throw new Error(obj.error);
+      setData(obj as SignData);
+      setName(obj?.signer_name || obj?.customer?.name || "");
+    } catch (error) {
+      if (version === loadVersion.current) setErr(error instanceof Error ? error.message : "تعذر تحميل رابط التوقيع");
+    } finally {
+      if (version === loadVersion.current) setLoading(false);
+    }
+  }, [token]);
+  useEffect(() => {
+    void load();
+    return () => { loadVersion.current += 1; };
+  }, [load]);
 
   // --- Signature canvas ---
   function pos(e: PointerEvent | React.PointerEvent, c: HTMLCanvasElement) {
@@ -84,15 +101,18 @@ export default function WorkOrderSignPage() {
     if (!name.trim()) { toast.error("الرجاء كتابة اسم الموقّع"); return; }
     if (!agreed) { toast.error("الرجاء الموافقة على البنود قبل التوقيع"); return; }
     const c = canvasRef.current; if (!c) return;
-    const sig = c.toDataURL("image/png");
     setSubmitting(true);
     try {
+      const sig = c.toDataURL("image/png");
       const ua = navigator.userAgent;
-      const { error } = await supabase.rpc("submit_work_order_signature", {
+      const { data: result, error } = await supabase.rpc("submit_work_order_signature", {
         p_token: token, p_signature: sig, p_signer_name: name.trim(),
         p_ip: null, p_user_agent: ua,
       });
       if (error) throw error;
+      if (!result || typeof result !== "object" || !("ok" in result) || result.ok !== true) {
+        throw new Error("لم يؤكّد الخادم حفظ التوقيع");
+      }
       toast.success("✅ تم استلام توقيعك. شكراً لك!");
       await load();
     } catch (e: any) {

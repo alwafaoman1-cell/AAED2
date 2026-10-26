@@ -84,6 +84,7 @@ export default function ExecutiveDashboard() {
       netProfit: summary.totalRevenueExVat - actualExpenses,
       averageProfitMargin: summary.totalRevenueExVat > 0 ? ((summary.totalRevenueExVat - actualExpenses) / summary.totalRevenueExVat) * 100 : null,
     };
+    void tick; // Explicit refresh and store events invalidate this dashboard snapshot.
     const allRows = buildWorkOrderAccountingRows();
     const qualityIssues = buildDataQualityIssues();
     const recentDelivered = allRows

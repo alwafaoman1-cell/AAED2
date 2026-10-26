@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
@@ -80,6 +80,16 @@ const DEFAULT_EMAIL_STATUS: EmailProviderStatus = {
   smtpStatus: "coming_soon",
 };
 
+async function loadEmailProviderStatus(): Promise<EmailProviderStatus> {
+  const { data: result, error } = await supabase.functions.invoke("save-email-provider", {
+    body: { action: "status" },
+  });
+  if (error || result?.ok === false) {
+    throw new Error(getFunctionErrorMessage(error, result));
+  }
+  return { ...DEFAULT_EMAIL_STATUS, ...(result.status as EmailProviderStatus) };
+}
+
 export default function IntegrationsSettingsPage() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -101,6 +111,8 @@ export default function IntegrationsSettingsPage() {
     meta_whatsapp: EMPTY("meta_whatsapp"),
     gmail: EMPTY("gmail"),
   });
+  const loadVersion = useRef(0);
+  const tenantId = profile?.tenant_id;
 
   const canManageEmailProvider =
     profile?.role === "admin" ||
@@ -108,7 +120,7 @@ export default function IntegrationsSettingsPage() {
     (profile?.role as string | undefined) === "super_admin" ||
     !!(profile as any)?.is_platform_admin;
 
-  async function loadEmailProviderStatus(): Promise<EmailProviderStatus> {
+  const loadEmailProviderStatus = useCallback(async (): Promise<EmailProviderStatus> => {
     const { data: result, error } = await supabase.functions.invoke("save-email-provider", {
       body: { action: "status" },
     });
@@ -116,17 +128,28 @@ export default function IntegrationsSettingsPage() {
       throw new Error(getFunctionErrorMessage(error, result));
     }
     return { ...DEFAULT_EMAIL_STATUS, ...(result.status as EmailProviderStatus) };
-  }
+  }, []);
 
-  async function load() {
+  const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
     setLoadError("");
+    setData({
+      twilio_whatsapp: EMPTY("twilio_whatsapp"),
+      meta_whatsapp: EMPTY("meta_whatsapp"),
+      gmail: EMPTY("gmail"),
+    });
+    setEmailStatus(DEFAULT_EMAIL_STATUS);
+    setEmailForm({ enabled: false, apiKey: "", fromEmail: "", fromName: "", domain: "" });
     try {
+      if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
       const { data: rows, error } = await supabase
         .from("tenant_integrations")
         .select("provider, enabled, config, last_test_at, last_test_status, last_test_error")
+        .eq("tenant_id", tenantId)
         .in("provider", ["twilio_whatsapp", "meta_whatsapp", "gmail"]);
       if (error) throw error;
+      if (version !== loadVersion.current) return;
 
       const next: Record<Provider, IntegrationRow> = {
         twilio_whatsapp: EMPTY("twilio_whatsapp"),
@@ -150,6 +173,7 @@ export default function IntegrationsSettingsPage() {
 
       try {
         const status = await loadEmailProviderStatus();
+        if (version !== loadVersion.current) return;
         setEmailStatus(status);
         setEmailForm({
           enabled: !!status.enabled,
@@ -159,17 +183,22 @@ export default function IntegrationsSettingsPage() {
           domain: status.domain || "",
         });
       } catch (emailError: any) {
-        setEmailStatus(DEFAULT_EMAIL_STATUS);
-        setLoadError(emailError?.message || "تعذر تحميل حالة مزود البريد");
+        if (version === loadVersion.current) {
+          setEmailStatus(DEFAULT_EMAIL_STATUS);
+          setLoadError(emailError?.message || "تعذر تحميل حالة مزود البريد");
+        }
       }
     } catch (error: any) {
-      setLoadError(error?.message || "تعذر تحميل إعدادات التكاملات");
+      if (version === loadVersion.current) setLoadError(error?.message || "تعذر تحميل إعدادات التكاملات");
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
-  }
+  }, [tenantId, loadEmailProviderStatus]);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    return () => { loadVersion.current += 1; };
+  }, [load]);
 
   function update(provider: Provider, patch: Partial<IntegrationRow>) {
     setData((current) => ({ ...current, [provider]: { ...current[provider], ...patch } }));

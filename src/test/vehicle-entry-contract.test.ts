@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = process.cwd();
-const read = (path: string) => readFileSync(join(root, path), "utf8");
+const read = (path: string) => readFileSync(join(root, path), "utf8").replace(/\r\n/g, "\n");
 
 describe("vehicle entry receipt contract", () => {
   it("defines non-destructive vehicle entry migration objects", () => {

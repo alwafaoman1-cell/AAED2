@@ -47,8 +47,13 @@ import QrLabel from "@/components/workorders/QrLabel";
 import { toast } from "sonner";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
+import { isInsuranceWorkOrder } from "@/lib/workOrderType";
 
 const SERVICE_TYPES = ["حادث", "صيانة", "كهرباء", "فحص", "ميكانيكا", "صبغ", "غسيل"] as const;
+const hasInsuranceValue = (value?: string) => !!(value && value.trim() !== "" && value.trim() !== "-");
+const inWorkshop = (order: WorkOrder) => !["تم التسليم", "مغلق"].includes(order.status)
+  && !(order.temporaryInspectionReleaseId && order.vehiclePresenceStatus === "with_customer");
+const IS_INSURANCE = isInsuranceWorkOrder;
 
 export default function SupervisorApp() {
   useRealtimeSync();
@@ -129,26 +134,19 @@ export default function SupervisorApp() {
     () => workOrders.find((o) => o.id === partsOrderId) || null,
     [workOrders, partsOrderId]
   );
-  const IN_WORKSHOP = (o: WorkOrder) => !["تم التسليم", "مغلق"].includes(o.status)
-    && !(o.temporaryInspectionReleaseId && o.vehiclePresenceStatus === "with_customer");
-  // معيار موحّد للتصنيف: يعتبر "تأمين" إذا توفر أي من:
-  // 1) اسم شركة تأمين  2) رقم مطالبة  3) نوع الخدمة = حادث
-  // غير ذلك → ورشة (كاش). نفس المعيار يستخدم في الفلتر والعدّاد والشارة.
-  const hasVal = (v?: string) => !!(v && v.trim() !== "" && v.trim() !== "-");
-  const IS_INSURANCE = (o: WorkOrder) =>
-    hasVal(o.insurance) || hasVal(o.claimNumber) || (o.serviceType || "").trim() === "حادث";
+  // القائمة والعدادات والشارات تستخدم تصنيف أمر العمل المعتمد نفسه.
   const filteredWO = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = workOrders
       .slice()
-      .filter(IN_WORKSHOP)
+      .filter(inWorkshop)
       .sort((a, b) => (b.entryDate || "").localeCompare(a.entryDate || ""));
     if (kpiFilter === "today") {
       list = list.filter((o) => o.entryDate === today);
     } else if (kpiFilter === "insurance") {
-      list = list.filter(IS_INSURANCE);
+      list = list.filter(isInsuranceWorkOrder);
     } else if (kpiFilter === "cash") {
-      list = list.filter((o) => !IS_INSURANCE(o));
+      list = list.filter((o) => !isInsuranceWorkOrder(o));
     }
     // "open" يبقى مكافئاً للوضع الافتراضي (سيارات داخل الورشة).
 
@@ -257,11 +255,10 @@ export default function SupervisorApp() {
   // بحث عن أمر عمل بواسطة رقم اللوحة لربط سند الصرف به
   const [woSearch, setWoSearch] = useState("");
   const [woInsuranceOnly, setWoInsuranceOnly] = useState(false);
-  const isInsuranceWO = (o: WorkOrder) => IS_INSURANCE(o);
   const woMatches = useMemo(() => {
     const q = woSearch.trim().toLowerCase();
     let list = workOrders;
-    if (woInsuranceOnly) list = list.filter(isInsuranceWO);
+    if (woInsuranceOnly) list = list.filter(IS_INSURANCE);
     if (q) {
       list = list.filter(
         (o) =>
@@ -507,7 +504,7 @@ export default function SupervisorApp() {
           >
             <div className="flex items-center gap-1 text-[10px] text-muted-foreground"><ShieldCheck className="h-3 w-3" /> {isAr ? "تأمين" : "Insurance"}</div>
             <p className="text-base font-bold text-sky-600 dark:text-sky-400 mt-0.5">
-              {workOrders.filter(IS_INSURANCE).length}
+              {workOrders.filter(isInsuranceWorkOrder).length}
             </p>
           </Card>
           <Card
@@ -544,7 +541,7 @@ export default function SupervisorApp() {
                 onClick={() => setKpiFilter(null)}
               >
                 {isAr ? "الكل" : "All"}
-                <span className="ms-1 opacity-70">({workOrders.filter(IN_WORKSHOP).length})</span>
+                <span className="ms-1 opacity-70">({workOrders.filter(inWorkshop).length})</span>
               </Button>
               <Button
                 size="sm" variant={kpiFilter === "insurance" ? "default" : "outline"}
@@ -553,7 +550,7 @@ export default function SupervisorApp() {
               >
                 {isAr ? "سيارات التأمين" : "Insurance"}
                 <span className="ms-1 opacity-70">
-                  ({workOrders.filter((o) => IN_WORKSHOP(o) && IS_INSURANCE(o)).length})
+                  ({workOrders.filter((o) => inWorkshop(o) && isInsuranceWorkOrder(o)).length})
                 </span>
               </Button>
               <Button
@@ -563,7 +560,7 @@ export default function SupervisorApp() {
               >
                 {isAr ? "سيارات الورشة (كاش)" : "Workshop (Cash)"}
                 <span className="ms-1 opacity-70">
-                  ({workOrders.filter((o) => IN_WORKSHOP(o) && !IS_INSURANCE(o)).length})
+                  ({workOrders.filter((o) => inWorkshop(o) && !isInsuranceWorkOrder(o)).length})
                 </span>
               </Button>
               {kpiFilter === "today" && (
@@ -615,10 +612,10 @@ export default function SupervisorApp() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono text-[10px] text-primary">{o.id}</span>
                           <Badge variant="outline" className="h-4 px-1 text-[9px]">{o.status}</Badge>
-                          {IS_INSURANCE(o) && (
+                          {isInsuranceWorkOrder(o) && (
                             <Badge className="h-4 px-1 text-[9px] gap-0.5 bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30 hover:bg-sky-500/15">
                               <ShieldCheck className="h-2.5 w-2.5" />
-                              {hasVal(o.insurance) ? o.insurance : (isAr ? "تأمين" : "Insurance")}{hasVal(o.claimNumber) ? ` · ${o.claimNumber}` : ""}
+                              {hasInsuranceValue(o.insurance) ? o.insurance : (isAr ? "تأمين" : "Insurance")}{hasInsuranceValue(o.claimNumber) ? ` · ${o.claimNumber}` : ""}
                             </Badge>
                           )}
                         </div>
@@ -1082,13 +1079,13 @@ export default function SupervisorApp() {
                   {linkedWO ? (
                     <div className="rounded-lg bg-card border border-primary/40 p-2 flex items-center gap-2">
                       <div className="h-8 w-8 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
-                        {isInsuranceWO(linkedWO) ? <ShieldCheck className="h-4 w-4 text-primary" /> : <Car className="h-4 w-4 text-primary" />}
+                        {IS_INSURANCE(linkedWO) ? <ShieldCheck className="h-4 w-4 text-primary" /> : <Car className="h-4 w-4 text-primary" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono text-[10px] text-primary">{linkedWO.id}</span>
                           <Badge variant="outline" className="h-4 px-1 text-[9px]">{linkedWO.status}</Badge>
-                          {isInsuranceWO(linkedWO) && (
+                          {IS_INSURANCE(linkedWO) && (
                             <Badge variant="outline" className="h-4 px-1 text-[9px] gap-0.5 border-primary/40 text-primary">
                               <ShieldCheck className="h-2.5 w-2.5" />
                               {linkedWO.insurance}{linkedWO.claimNumber && linkedWO.claimNumber !== "-" ? ` · ${linkedWO.claimNumber}` : ""}
@@ -1126,7 +1123,7 @@ export default function SupervisorApp() {
                       {woMatches.length > 0 && (
                         <div className="space-y-1 max-h-48 overflow-auto">
                           {woMatches.map((o) => {
-                            const ins = isInsuranceWO(o);
+                            const ins = IS_INSURANCE(o);
                             return (
                               <button
                                 key={o.id}

@@ -524,7 +524,8 @@ export default function MediaStudio() {
   const toggleOne = (it: MediaItem) => {
     const k = keyOf(it);
     const next = new Set(selected);
-    next.has(k) ? next.delete(k) : next.add(k);
+    if (next.has(k)) next.delete(k);
+    else next.add(k);
     setSelected(next);
   };
 

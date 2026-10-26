@@ -146,14 +146,14 @@ async function getLegacyClaimMediaFallback(claimId: string): Promise<ClaimMediaR
 
 export async function getClaimMedia(claimId?: string | null): Promise<ClaimMediaRecord[]> {
   if (!claimId || !isUuid(claimId)) return [];
-  let { data, error } = await supabase
+  const { data: initialData, error } = await supabase
     .from("vehicle_media" as any)
     .select("*")
     .eq("claim_id", claimId)
     .is("deleted_at", null)
     .order("sort_order", { ascending: true })
     .order("uploaded_at", { ascending: false });
-
+  let data = initialData;
   if (error) {
     if (isMissingMediaSchema(error)) {
       const retry = await supabase

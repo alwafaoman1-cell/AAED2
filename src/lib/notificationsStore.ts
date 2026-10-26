@@ -47,7 +47,9 @@ export const notificationsStore = {
     cache.unshift(item);
     if (cache.length > MAX) cache.length = MAX;
     persistSessionOnly();
-    try { notificationSound.play(); } catch {}
+    try { notificationSound.play(); } catch {
+      // Browsers may block autoplay; the visible notification is still shown.
+    }
   },
   markRead(id: string) {
     const item = cache.find((notification) => notification.id === id);

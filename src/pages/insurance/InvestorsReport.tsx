@@ -137,7 +137,7 @@ export default function InvestorsReport() {
 
   // ── Aggregates ──────────────────────────────────────────
   const stats = useMemo(() => {
-    let received = inRange.length;
+    const received = inRange.length;
     let entered = 0, delivered = 0, working = 0, pendingApproval = 0, paid = 0;
     let estTotal = 0, approvedTotal = 0, collectedTotal = 0;
 
@@ -245,14 +245,15 @@ export default function InvestorsReport() {
   }
 
   // Years dropdown
+  const currentYear = new Date().getFullYear();
   const years = useMemo(() => {
-    const ys = new Set<number>([today.getFullYear()]);
+    const ys = new Set<number>([currentYear]);
     for (const c of claims) {
       const d = c.workshop_arrival_date || c.created_at;
       if (d) ys.add(new Date(d).getFullYear());
     }
     return Array.from(ys).sort((a, b) => b - a);
-  }, [claims]);
+  }, [claims, currentYear]);
 
   const allColsSelected = selectedCols.length === ALL_COLUMNS.length;
 

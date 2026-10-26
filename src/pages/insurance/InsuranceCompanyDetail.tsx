@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { smartBack } from "@/lib/smartBack";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowRight, FileDown, DollarSign, Clock, FileText, AlertTriangle, FileSpreadsheet, BookOpen, ClipboardList } from "lucide-react";
@@ -21,7 +21,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { formatDateLatin, formatPlateLatin } from "@/lib/numberUtils";
 import { computeAging, summarizeAging, DEFAULT_BUCKETS, type AgingBasis, type AgingBucket } from "@/lib/insuranceAging";
 import { journalStore } from "@/lib/journalStore";
-import JournalPreview, { entryToPreviewLine } from "@/components/accounting/JournalPreview";
+import JournalPreview from "@/components/accounting/JournalPreview";
+import { entryToPreviewLine } from "@/components/accounting/journalPreviewLine";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import InsuranceEmployeesManager from "@/components/insurance/InsuranceEmployeesManager";
 import { calculateVatExclusive } from "@/lib/money";
@@ -129,12 +130,12 @@ export default function InsuranceCompanyDetail() {
   );
 
   /** الدين الفعلي للمطالبة (شامل VAT) */
-  const claimReceivable = (c: any): number => {
+  const claimReceivable = useCallback((c: any): number => {
     const inv = claimInvoiceMap.get(c.id);
     if (!isInsuranceClaimReceivableEligible(c, Boolean(inv))) return 0;
     if (inv) return Number(inv.total) || 0;
     return calculateVatExclusive(Number(c.approved_amount) || Number(c.estimated_amount) || 0, vatRate).totalIncludingVat;
-  };
+  }, [claimInvoiceMap, vatRate]);
 
   const claimApprovalBreakdown = (c: any) => {
     const inv = claimInvoiceMap.get(c.id);
@@ -196,7 +197,7 @@ export default function InsuranceCompanyDetail() {
       status: c.status === "pending" && claimInvoiceMap.has(c.id) ? "approved" : c.status,
       approved_amount: claimReceivable(c),
     })),
-    [financialClaims, claimInvoiceMap, vatRate],
+    [financialClaims, claimInvoiceMap, claimReceivable],
   );
 
   const agingRows = useMemo(
@@ -219,21 +220,22 @@ export default function InsuranceCompanyDetail() {
   const [periodTo, setPeriodTo] = useState<string>("");
   const [reportFilter, setReportFilter] = useState<InsuranceCollectionReportFilter>("all");
 
-  const inRange = (iso: string) => {
+  const inRange = useCallback((iso: string) => {
     const t = new Date(iso).getTime();
     if (periodFrom && t < new Date(periodFrom).getTime()) return false;
     if (periodTo && t > new Date(periodTo + "T23:59:59").getTime()) return false;
     return true;
-  };
+  }, [periodFrom, periodTo]);
 
   const filteredPayments = useMemo(
     () => financialPayments.filter((p) => inRange(p.payment_date)),
-    [financialPayments, periodFrom, periodTo],
+    [financialPayments, inRange],
   );
 
   // ── القيود المحاسبية للشركة (من journalStore) ──
   const [showJournal, setShowJournal] = useState(false);
   const journalLines = useMemo(() => {
+    void showJournal; // Opening the panel refreshes journal-store derived rows.
     const claimIds = new Set(claims.map((c) => c.id));
     const paymentIds = new Set(accountingPayments.map((p) => p.id));
     return journalStore.getAll()
@@ -245,7 +247,7 @@ export default function InsuranceCompanyDetail() {
       .filter((e) => inRange(e.date))
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(entryToPreviewLine);
-  }, [claims, accountingPayments, periodFrom, periodTo, showJournal]);
+  }, [claims, accountingPayments, inRange, showJournal]);
 
   // ── Preview dialogs ──
   const [statementOpen, setStatementOpen] = useState(false);
@@ -338,7 +340,7 @@ export default function InsuranceCompanyDetail() {
           reference_number: p.reference_number,
         })),
     });
-  }, [company, statementOpen, statementClaims, collectionRowByClaimId, filteredPayments, companyInvoices, claims, vatRate, periodFrom, periodTo]);
+  }, [company, statementOpen, statementClaims, collectionRowByClaimId, filteredPayments, companyInvoices, claims, vatRate, periodFrom, periodTo, inRange]);
 
   const workshopHtml = useMemo(() => {
     if (!company || !workshopOpen) return "";

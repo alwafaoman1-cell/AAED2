@@ -18,7 +18,9 @@ function getCompanyName(): string {
       const s = JSON.parse(raw);
       return s.companyName || "ورشة الوفاء";
     }
-  } catch {}
+  } catch {
+    // Use the workshop fallback name when tenant settings are unavailable.
+  }
   return "ورشة الوفاء";
 }
 

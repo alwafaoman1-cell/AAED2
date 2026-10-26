@@ -46,7 +46,7 @@ describe("work order invoice and payment synchronization", () => {
     expect(detail).toContain("الفواتير والتحصيل الرسمي");
     expect(detail).toContain("إضافة دفعة لهذه الفاتورة");
     expect(detail).toContain("الإيراد الرسمي قبل الضريبة");
-    expect(detail).toContain("الدفعة تُسجل كتحصيل رسمي على الفاتورة نفسها دون مضاعفة الإيراد");
+    expect(detail).toContain("الدفعة تُسجل كتحصيل رسمي دون مضاعفة الإيراد");
     expect(detail).toContain("value={actualRevenue}");
     expect(detail).toContain("value={actualCollected}");
   });

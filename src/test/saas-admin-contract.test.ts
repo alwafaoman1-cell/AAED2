@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { featureForPath } from "@/contexts/FeatureContext";
+import { featureForPath } from "@/contexts/featureContextState";
 
 describe("SaaS feature routing", () => {
   it("maps sensitive modules to tenant feature keys", () => {

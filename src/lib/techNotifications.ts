@@ -27,7 +27,9 @@ function saveSnapshot(s: Record<string, string>) {
 
 function fire(title: string, body: string, tag?: string) {
   if (!canNotify() || Notification.permission !== "granted") return;
-  try { new Notification(title, { body, tag, icon: "/icon-192.png", badge: "/icon-192.png" }); } catch {}
+  try { new Notification(title, { body, tag, icon: "/icon-192.png", badge: "/icon-192.png" }); } catch {
+    // Notification permission can change between the check and construction.
+  }
 }
 
 export function startTechNotifications(getMyName: () => string) {

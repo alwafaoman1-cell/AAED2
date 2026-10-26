@@ -98,7 +98,9 @@ export function getInsuranceStatementHtml(data: StatementData): string {
       totalInvoiced, totalPaid, balance: +(totalInvoiced - totalPaid).toFixed(3),
     }, "Insurance Statement");
     if (custom) return custom;
-  } catch {}
+  } catch {
+    // Continue with the built-in insurance statement if custom rendering fails.
+  }
   const s: PdfTemplateSettings = getTemplateSettings();
 
   // ── Build unified ledger — Single Source of Truth ──

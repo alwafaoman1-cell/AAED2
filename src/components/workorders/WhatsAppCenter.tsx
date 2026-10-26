@@ -27,7 +27,7 @@ import {
   WA_KIND_LABELS,
   type WaMessageLog,
 } from "@/lib/waMessageLogStore";
-import { useFeatures } from "@/contexts/FeatureContext";
+import { useFeatures } from "@/contexts/featureContextState";
 import { toE164 } from "@/lib/phoneUtils";
 import { useSystemPreferences } from "@/lib/systemPreferences";
 import { buildCustomerPortalUrl, buildWorkOrderSignatureUrl } from "@/lib/customerPortalTokens";

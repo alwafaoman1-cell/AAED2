@@ -52,7 +52,9 @@ const newPart = (): PartLine => ({ id: `p-${Date.now()}-${Math.random()}`, name:
 
 export default function BulkExpenseDialog({ open, onOpenChange, onSaved }: Props) {
   const settings = voucherSettingsStore.get();
-  const categories = expenseCategoriesStore.getAll().filter((c) => c.active);
+  const [categoryRows, setCategoryRows] = useState(() => expenseCategoriesStore.getAll());
+  useEffect(() => expenseCategoriesStore.subscribe(() => setCategoryRows(expenseCategoriesStore.getAll())), []);
+  const categories = categoryRows.filter((c) => c.active);
   const cashboxes = employeeCashboxesStore.getAll().filter((c) => c.active);
   const defaultCb = cashboxes.find((c) => c.isDefault) ?? cashboxes[0];
   const allVehicles = vehiclesStore.getAll();

@@ -8,7 +8,7 @@ const read = (file: string) => readFileSync(resolve(root, file), "utf8");
 describe("auth profile cache contract", () => {
   it("centralizes profile caching and in-flight de-duplication outside AuthContext", () => {
     const helper = read("src/lib/authProfileCache.ts");
-    const auth = read("src/contexts/AuthContext.tsx");
+    const auth = read("src/contexts/AuthProvider.tsx");
 
     expect(helper).toContain("const profileCache = new Map");
     expect(helper).toContain("const inFlightProfileRequests = new Map");
@@ -45,7 +45,7 @@ describe("auth profile cache contract", () => {
 
   it("guards stale profile results after logout or user switch", () => {
     const helper = read("src/lib/authProfileCache.ts");
-    const auth = read("src/contexts/AuthContext.tsx");
+    const auth = read("src/contexts/AuthProvider.tsx");
 
     expect(helper).toContain("const isStillCurrent");
     expect(helper).toContain("globalProfileCacheGeneration === requestGlobalGeneration");

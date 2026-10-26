@@ -1,6 +1,6 @@
 import { LockKeyhole } from "lucide-react";
 import { useLocation } from "react-router-dom";
-import { featureForPath, useFeatures } from "@/contexts/FeatureContext";
+import { featureForPath, useFeatures } from "@/contexts/featureContextState";
 
 export default function FeatureGate({ children, feature }: { children: React.ReactNode; feature?: Parameters<ReturnType<typeof useFeatures>["isEnabled"]>[0] }) {
   const location = useLocation();

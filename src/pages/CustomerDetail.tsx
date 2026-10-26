@@ -138,8 +138,8 @@ export default function CustomerDetail() {
     return () => { cancelled = true; };
   }, [id]);
 
-  const allCustomers = useMemo(() => customersStore.getAll(), [tick]);
-  const customer = useMemo(() => (id ? customersStore.getById(id) : undefined), [id, tick]);
+  const allCustomers = useMemo(() => { void tick; return customersStore.getAll(); }, [tick]);
+  const customer = useMemo(() => { void tick; return id ? customersStore.getById(id) : undefined; }, [id, tick]);
   const customerIndex = useMemo(
     () => allCustomers.findIndex((c) => c.id === id),
     [allCustomers, id]
@@ -154,8 +154,9 @@ export default function CustomerDetail() {
   const k = useMemo(() => normalize(customerName), [customerName]);
 
   const legacyOrders = useMemo(
-    () => getWorkOrders().filter((o) => normalize(o.customer) === k)
-      .sort((a, b) => b.entryDate.localeCompare(a.entryDate)),
+    () => { void tick; return getWorkOrders().filter((o) => normalize(o.customer) === k)
+      .sort((a, b) => b.entryDate.localeCompare(a.entryDate));
+    },
     [k, tick]
   );
   const customerOrdersQuery = useQuery({
@@ -216,6 +217,7 @@ export default function CustomerDetail() {
     [orders]
   );
   const stats = useMemo(() => {
+    void tick; // Customer-store updates can change derived visit statistics.
     if (!customer) return { visits: 0, totalSpent: 0, vehiclesCount: 0, pendingInvoices: 0 };
     if (customerOrdersQuery.data || customerVehiclesQuery.data) {
       return {
@@ -229,27 +231,29 @@ export default function CustomerDetail() {
     return customersStore.getStats(customer);
   }, [customer, customerOrdersQuery.data, customerVehiclesQuery.data, orders, vehicles, tick]);
 
-  const depositBalance = useMemo(() => getCustomerDepositBalance(customerName), [customerName, tick]);
+  const depositBalance = useMemo(() => { void tick; return getCustomerDepositBalance(customerName); }, [customerName, tick]);
   const customerDeposits = useMemo(
-    () => depositsStore.getAll().filter((d) => normalize(d.customer) === k).sort((a, b) => b.date.localeCompare(a.date)),
+    () => { void tick; return depositsStore.getAll().filter((d) => normalize(d.customer) === k).sort((a, b) => b.date.localeCompare(a.date)); },
     [k, tick]
   );
 
-  const creditNotes = useMemo(() => getCustomerCreditNotes(customerName), [customerName, tick]);
-  const creditBalance = useMemo(() => getCustomerCreditBalance(customerName), [customerName, tick]);
-  const appointments = useMemo(() => getCustomerAppointments(customerName), [customerName, tick]);
-  const ledger = useMemo(() => getCustomerLedger(customerName), [customerName, tick]);
+  const creditNotes = useMemo(() => { void tick; return getCustomerCreditNotes(customerName); }, [customerName, tick]);
+  const creditBalance = useMemo(() => { void tick; return getCustomerCreditBalance(customerName); }, [customerName, tick]);
+  const appointments = useMemo(() => { void tick; return getCustomerAppointments(customerName); }, [customerName, tick]);
+  const ledger = useMemo(() => { void tick; return getCustomerLedger(customerName); }, [customerName, tick]);
 
   const auditEntries = useMemo(
-    () => auditLogStore.getAll().filter(
+    () => { void tick; return auditLogStore.getAll().filter(
       (a) => (a.label || "").toLowerCase().includes(k) || (a.description || "").toLowerCase().includes(k)
-    ).slice(0, 50),
+    ).slice(0, 50); },
     [k, tick]
   );
 
+  const savedCustomerId = customer?.id;
+  const savedCustomerNotes = customer?.notes;
   useEffect(() => {
-    if (customer) setNotes(customer.notes || "");
-  }, [customer?.id]);
+    if (savedCustomerId) setNotes(savedCustomerNotes || "");
+  }, [savedCustomerId, savedCustomerNotes]);
 
   if (detailLoading) {
     return (

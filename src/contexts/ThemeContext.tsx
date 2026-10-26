@@ -1,15 +1,7 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-
-export type Theme = "light" | "dark" | "system";
-
-type ThemeCtx = {
-  theme: Theme;
-  resolved: "light" | "dark";
-  setTheme: (t: Theme) => void;
-};
+import { useEffect, useState, type ReactNode } from "react";
+import { ThemeContext, type Theme } from "@/contexts/themeContextState";
 
 const STORAGE_KEY = "alwafa_theme_v1";
-const Ctx = createContext<ThemeCtx | null>(null);
 
 function getSystem(): "light" | "dark" {
   if (typeof window === "undefined") return "dark";
@@ -43,7 +35,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyClass(mode);
     try {
       localStorage.setItem(STORAGE_KEY, theme);
-    } catch {}
+    } catch {
+      // Theme stays active for this session if browser storage is unavailable.
+    }
   }, [theme]);
 
   // Listen to system changes when in "system"
@@ -60,14 +54,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   return (
-    <Ctx.Provider value={{ theme, resolved, setTheme: setThemeState }}>
+    <ThemeContext.Provider value={{ theme, resolved, setTheme: setThemeState }}>
       {children}
-    </Ctx.Provider>
+    </ThemeContext.Provider>
   );
-}
-
-export function useTheme() {
-  const v = useContext(Ctx);
-  if (!v) throw new Error("useTheme must be used within ThemeProvider");
-  return v;
 }

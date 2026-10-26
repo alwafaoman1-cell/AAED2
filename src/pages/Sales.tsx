@@ -159,7 +159,9 @@ export default function Sales() {
       setEditorOpen(true);
       // نظف URL
       window.history.replaceState({}, "", "/sales");
-    } catch {}
+    } catch (error) {
+      console.warn("[Sales] invalid invoice prefill link", error);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -229,7 +231,7 @@ export default function Sales() {
   function markAsPaid(doc: DocItem) {
     if (doc.status === "مدفوعة") return;
     let deductedCount = 0;
-    let negativeWarnings: string[] = [];
+    const negativeWarnings: string[] = [];
     doc.data.items.forEach((item) => {
       if (!item.inventoryId) return;
       const part = inventoryStore.getById(item.inventoryId);

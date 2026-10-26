@@ -80,9 +80,9 @@ describe("work order visible save contract", () => {
     expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
   });
 
-  it("keeps the desktop work-order workspace compact without changing the mobile flow", () => {
+  it("keeps the work-order workspace compact without changing its linked components", () => {
     const detail = read("src/pages/WorkOrderDetail.tsx");
-    expect(detail).toContain('grid grid-cols-1 items-start gap-4 lg:grid-cols-2');
+    expect(detail).toContain('grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-2');
     expect(detail).toContain("<NeededPartsManager");
     expect(detail).toContain("<CustomerPortalLink");
     expect(detail).toContain("<SmartCustomerSendBar");

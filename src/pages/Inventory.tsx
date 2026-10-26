@@ -49,7 +49,7 @@ export default function Inventory() {
 
   useEffect(() => inventoryStore.subscribe(() => setParts([...inventoryStore.getAll()])), []);
 
-  const { brands, categories } = useMemo(() => getInventoryFacets(), [parts]);
+  const { brands, categories } = useMemo(() => getInventoryFacets(parts), [parts]);
   const lowStock = parts.filter((p) => p.stock > 0 && p.stock <= p.minStock);
   const outStock = parts.filter((p) => p.stock <= 0);
 

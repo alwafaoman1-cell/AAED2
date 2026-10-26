@@ -20,7 +20,8 @@ import { useInsuranceCompanies, findOrCreateInsuranceCompany } from "@/hooks/use
 import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompanyAutocomplete";
 import InsuranceEmployeeSelect from "@/components/insurance/InsuranceEmployeeSelect";
 import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicker";
-import UplItemsEditor, { DEFAULT_UPL_ITEMS, type UplItem } from "@/components/insurance/UplItemsEditor";
+import UplItemsEditor from "@/components/insurance/UplItemsEditor";
+import { DEFAULT_UPL_ITEMS, type UplItem } from "@/components/insurance/uplItems";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import { linkDocumentFile } from "@/lib/documentExtraction/persistence";
 import AiWriteButton from "@/components/ai/AiWriteButton";

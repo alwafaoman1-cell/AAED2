@@ -13,8 +13,10 @@ import {
   exactDuplicateErrorFromDatabase,
   ExpenseExactDuplicateError,
   ExpensePotentialDuplicateError,
+  sha256Text,
 } from "@/lib/expenses/expenseDuplicateGuard";
 import { queryKeys } from "@/lib/queryKeys";
+import { notifyListeners } from "@/lib/notifyListeners";
 import type { QueryClient } from "@tanstack/react-query";
 
 export type ExpenseAccountingType =
@@ -171,7 +173,7 @@ function invalidateExpenseConsumers() {
   ]);
 }
 
-function notify() { listeners.forEach((l) => { try { l(); } catch {} }); }
+function notify() { notifyListeners(listeners, "expensesStore"); }
 
 function markCacheChanged() {
   cacheRevision += 1;
@@ -412,6 +414,7 @@ async function hydrateFromCloud() {
         cache = Array.from(merged.values()).sort((a, b) => b.date.localeCompare(a.date));
       }
       hydrated = true;
+      markCacheChanged();
       persistLocal();
       notify();
     } catch (e) {
@@ -448,8 +451,8 @@ export async function applyExpenseRealtimeChange(payload: ExpenseRealtimePayload
     } else {
       deletedExpenseIds.delete(rec.id);
       const index = cache.findIndex((expense) => expense.id === rec.id);
-      if (index >= 0) cache[index] = rec;
-      else cache.unshift(rec);
+      if (index >= 0) cache = cache.map((expense) => expense.id === rec.id ? rec : expense);
+      else cache = [rec, ...cache];
     }
   } else if (eventType === "DELETE") {
     const oldId = String(row.id || "").trim();
@@ -472,6 +475,9 @@ export const expensesStore = {
     ensureExpenseStoreSessionWatcher();
     return cache;
   },
+  getSnapshot(): ExpenseRecord[] {
+    return cache;
+  },
   getById(id: string): ExpenseRecord | undefined {
     ensureExpenseStoreSessionWatcher();
     return cache.find((e) => e.id === id);
@@ -487,7 +493,6 @@ export const expensesStore = {
     const tenantId = await getCurrentTenantId();
     if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
     if (item.photo && !item.documentSha256) {
-      const { sha256Text } = await import("@/lib/expenses/expenseDuplicateGuard");
       item.documentSha256 = await sha256Text(item.photo);
     }
     const row = recordToRow(item, tenantId);
@@ -590,7 +595,7 @@ export const expensesStore = {
       throw new Error(duplicateExpenseMessage(error) || error.message || "تعذر تحديث المصروف");
     }
     if (!data?.id) throw new Error("تعذر تأكيد تحديث المصروف في Supabase");
-    cache[idx] = rowToRecord(data);
+    cache = cache.map((expense) => expense.id === id ? rowToRecord(data) : expense);
     deletedExpenseIds.delete(id);
     markCacheChanged();
     persistLocal();
@@ -636,23 +641,52 @@ export const expensesStore = {
     }
     return removed;
   },
-  restore(item: ExpenseRecord) {
+  async restore(item: ExpenseRecord): Promise<ExpenseRecord> {
     ensureExpenseStoreSessionWatcher();
-    if (cache.some((e) => e.id === item.id)) return;
-    deletedExpenseIds.delete(item.id);
-    cache = [item, ...cache];
+    if (!isUuid(item.id)) throw new Error("expense_id غير صالح لاستعادة المصروف");
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
+
+    // A restore must update the existing cloud row, never re-insert a stale
+    // client copy. Re-insertion could recreate a voucher with old financial data.
+    const { data: existing, error: readError } = await supabase
+      .from("expenses")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("id", item.id)
+      .maybeSingle();
+    if (readError) throw new Error(readError.message || "تعذر قراءة المصروف قبل الاستعادة");
+    if (!existing?.id) throw new Error("المصروف غير موجود في Supabase؛ لم تتم الاستعادة");
+
+    let saved = existing;
+    if (existing.deleted_at) {
+      const meta = { ...((existing.meta && typeof existing.meta === "object" && !Array.isArray(existing.meta))
+        ? existing.meta : {}) } as Record<string, unknown>;
+      delete meta.deletedAt;
+      delete meta.deleteReason;
+      const { data, error } = await supabase
+        .from("expenses")
+        .update({ deleted_at: null, meta } as any)
+        .eq("tenant_id", tenantId)
+        .eq("id", item.id)
+        .eq("deleted_at", existing.deleted_at)
+        .select("*")
+        .maybeSingle();
+      if (error) throw new Error(error.message || "تعذر استعادة المصروف في Supabase");
+      if (!data?.id) throw new Error("تغير المصروف أثناء الاستعادة؛ أعد تحميله قبل المحاولة");
+      saved = data;
+    }
+
+    const restored = rowToRecord(saved);
+    if (restored.deletedAt) throw new Error("لم تؤكد قاعدة البيانات استعادة المصروف");
+    if (await getCurrentTenantId() !== tenantId) throw new Error("تغيرت الورشة الحالية أثناء الاستعادة؛ أعد تحميل البيانات");
+    deletedExpenseIds.delete(restored.id);
+    cache = [restored, ...cache.filter((expense) => expense.id !== restored.id)];
     markCacheChanged();
     persistLocal();
     notify();
     invalidateExpenseConsumers();
-    // Best effort re-insert in cloud
-    (async () => {
-      try {
-        const tenantId = await getCurrentTenantId();
-        if (!tenantId) return;
-        await (supabase.from("expenses") as any).upsert(recordToRow(item, tenantId));
-      } catch {}
-    })();
+    return restored;
   },
   subscribe(cb: () => void): () => void {
     ensureExpenseStoreSessionWatcher();

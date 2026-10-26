@@ -57,25 +57,6 @@ export interface InsuranceInvoiceInsert {
   idempotency_key?: string | null;
 }
 
-const historicalNumberCorrectionMessages: Record<string, string> = {
-  INVOICE_NUMBER_CORRECTION_PERMISSION_DENIED: "تصحيح رقم الفاتورة متاح للمدير فقط.",
-  INVOICE_NUMBER_CHANGED_RELOAD: "تغير رقم الفاتورة في السحابة. أعد فتح الفاتورة قبل التصحيح.",
-  INVOICE_NUMBER_YEAR_OR_FORMAT_INVALID: "صيغة الرقم أو سنة الفاتورة غير صحيحة.",
-  INVOICE_NUMBER_MUST_PRESERVE_LEGACY_SEQUENCE: "يجب أن يبقى تسلسل الرقم القديم نفسه في الصيغة الجديدة.",
-  INVOICE_NUMBER_ALREADY_USED: "رقم الفاتورة مستخدم بالفعل؛ اختر رقمًا غير متعارض.",
-  HISTORICAL_INVOICE_NUMBER_AMBIGUOUS: "الرقم القديم مشترك مع فاتورة أخرى؛ لا يمكن تصحيحه آليًا.",
-  INVOICE_NUMBER_NOT_AN_EARLIER_GAP: "الرقم المطلوب ليس ضمن فجوات التسلسل السابقة.",
-  OFFICIAL_INVOICE_NUMBER_IMMUTABLE: "هذه الفاتورة تحمل رقمًا رسميًا مسجلًا لا يمكن تغييره.",
-  ONLY_PRE_CUTOVER_NUMERIC_INSURANCE_INVOICES: "التصحيح مخصص لفواتير التأمين التاريخية ذات الرقم الرقمي فقط.",
-};
-
-function historicalNumberCorrectionError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const code = Object.keys(historicalNumberCorrectionMessages).find((key) => message.includes(key));
-  return code ? historicalNumberCorrectionMessages[code] : message;
-}
-
-
 export function useInsuranceInvoices() {
   return useQuery({
     queryKey: queryKeys.insuranceInvoices.all,
@@ -90,7 +71,6 @@ export function useInsuranceInvoices() {
     },
   });
 }
-
 export function useCreateInsuranceInvoice() {
   const qc = useQueryClient();
   return useMutation({
@@ -208,6 +188,7 @@ export function useUpdateInsuranceInvoice() {
 
 export function useCorrectHistoricalInsuranceInvoiceNumber() {
   const qc = useQueryClient();
+  const { i18n } = useTranslation();
   return useMutation({
     mutationFn: async ({ id, oldNumber, newNumber, reason }: {
       id: string; oldNumber: string; newNumber: string; reason: string;
@@ -236,10 +217,9 @@ export function useCorrectHistoricalInsuranceInvoiceNumber() {
       qc.invalidateQueries({ queryKey: queryKeys.reports.all });
       toast.success("تم تصحيح رقم الفاتورة وتسجيله في سجل التدقيق");
     },
-    onError: (e: any) => toast.error(historicalNumberCorrectionError(e)),
+    onError: (error) => toast.error(invoiceNumberCorrectionError(error, i18n.language === "ar")),
   });
 }
-
 export function useCorrectIssuedInsuranceInvoiceNumber() {
   const qc = useQueryClient();
   const { i18n } = useTranslation();
@@ -261,27 +241,5 @@ export function useCorrectIssuedInsuranceInvoiceNumber() {
         : "Invoice number corrected; the previous number is retained in the audit trail");
     },
     onError: (error) => toast.error(invoiceNumberCorrectionError(error, i18n.language === "ar")),
-  });
-}
-
-export function useDeleteInsuranceInvoice() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("insurance_invoices" as any).delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.insuranceInvoices.all });
-      toast.success("تم حذف الفاتورة");
-    },
-    onError: (e: any) => toast.error(e.message),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.claimPayments.all });
-      qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
-      qc.invalidateQueries({ queryKey: queryKeys.reportCenter.all });
-      qc.invalidateQueries({ queryKey: queryKeys.reports.all });
-      qc.invalidateQueries({ queryKey: ["accounting"] });
-    },
   });
 }

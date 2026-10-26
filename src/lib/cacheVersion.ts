@@ -20,7 +20,6 @@ export function ensureCacheVersion(): void {
       }
       keysToDrop.forEach((k) => localStorage.removeItem(k));
       localStorage.setItem(VERSION_KEY, CURRENT_VERSION);
-      // eslint-disable-next-line no-console
       console.info(`[cache] upgraded ${stored || "(none)"} → ${CURRENT_VERSION}, cleared ${keysToDrop.length} cache keys`);
     }
   } catch {

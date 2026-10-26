@@ -1257,6 +1257,49 @@ export interface InsuranceEstimateData extends AdvancedDocData {
   customTerms?: string;
 }
 
+// Keep estimate legibility changes local to this document: the base styles are
+// shared by invoices, receipts and work orders.
+function getInsuranceEstimateStyles(): string {
+  return `
+    .page.insurance-estimate-page{padding:9mm 12mm!important;color:#17243b}
+    .insurance-estimate-page .header{margin-bottom:6px;padding-bottom:8px}
+    .insurance-estimate-page .company-info img{max-height:42px!important;margin-bottom:4px!important}
+    .insurance-estimate-page .company-info .details{font-size:10px;color:#475569;line-height:1.5}
+    .insurance-estimate-page .doc-badge .label-ar{font-size:12px}
+    .insurance-estimate-page .doc-badge .label-en,
+    .insurance-estimate-page .doc-badge .date{font-size:10px;opacity:1}
+    .insurance-estimate-page .section-title{font-size:14px;margin:8px 0 6px}
+    .insurance-estimate-page .section-title .en{font-size:10.5px;color:#475569;letter-spacing:0.3px}
+    .insurance-estimate-page .info-grid{gap:3px 20px;margin-bottom:6px}
+    .insurance-estimate-page .info-row{font-size:12.5px;padding:3px 0;line-height:1.4}
+    .insurance-estimate-page .info-row .label{font-size:11.5px;color:#334155;min-width:120px}
+    .insurance-estimate-page .info-row .label .en{font-size:9.5px;color:#64748b;line-height:1.2}
+    .insurance-estimate-page table{font-size:13px;margin:8px 0;font-variant-numeric:tabular-nums}
+    .insurance-estimate-page thead th{font-size:11.5px;padding:8px 5px}
+    .insurance-estimate-page thead th .en{font-size:9px;color:#e2e8f0}
+    .insurance-estimate-page tbody td{padding:9px 5px;border-bottom-color:#dbe3eb;color:#17243b}
+    .insurance-estimate-page tbody td[style*="color:"]{color:#334155!important}
+    .insurance-estimate-page .totals-box{width:300px;border-color:#cbd5e1}
+    .insurance-estimate-page .totals-row{font-size:12.5px;padding:8px 13px}
+    .insurance-estimate-page .totals-row .bi .en{font-size:10px;color:#475569}
+    .insurance-estimate-page .totals-row.total{background:#1e3a8a;font-size:15px;min-height:51px}
+    .insurance-estimate-page .totals-row.total .bi .en{color:#fff;opacity:0.95}
+    .insurance-estimate-page .notes-box{font-size:12.5px;color:#1e293b;line-height:1.55;background:#f5f7fa;padding:10px 12px}
+    .insurance-estimate-page .notes-box .label-en{font-size:10px;color:#475569}
+    .insurance-estimate-page .estimate-term{margin-top:4px;display:flex;gap:5px;text-align:start;unicode-bidi:plaintext}
+    .insurance-estimate-page .estimate-term .estimate-bullet{flex:none}
+    .insurance-estimate-page .estimate-signatures{margin-top:18px;display:flex;justify-content:space-between;gap:12px}
+    .insurance-estimate-page .estimate-signer{width:170px;text-align:center;border-top:1px solid #94a3b8;padding-top:6px;font-size:11.5px;color:#334155}
+    .insurance-estimate-page .estimate-signer .en{display:block;font-size:9.5px;color:#64748b;font-family:'Inter',sans-serif}
+    .insurance-estimate-page .pdf-signature-title,
+    .insurance-estimate-page .pdf-stamp-title{font-size:11.5px;color:#1e293b}
+    .insurance-estimate-page .pdf-signature-stamp{margin-top:2mm}
+    .insurance-estimate-page .footer{font-size:8.5px;color:#475569;margin-top:2mm!important;min-height:0!important}
+    .insurance-estimate-page .footer .en{color:#64748b}
+    .insurance-estimate-page .watermark{color:rgba(212,165,55,0.025)}
+  `;
+}
+
 export function getInsuranceEstimateHtml(data: InsuranceEstimateData): string {
   // Claim estimates must not use the editable print-template system. The old
   // default/custom "claim_estimate" template is the deprecated magenta layout
@@ -1282,7 +1325,17 @@ export function getInsuranceEstimateHtml(data: InsuranceEstimateData): string {
     </tr>`;
   }).join('');
 
-  const body = `<div class="page">
+  const termsHtml = data.customTerms
+    ? data.customTerms.split(/\r?\n/).filter(Boolean).map(line =>
+      `<div class="estimate-term" dir="auto"><span class="estimate-bullet">•</span><span>${line}</span></div>`
+    ).join('')
+    : [
+      'هذا التقدير ساري المفعول لمدة 30 يوماً من تاريخ الإصدار. / This estimate is valid for 30 days.',
+      'قد تتغير الأسعار حسب توفر القطع وتاريخ الموافقة. / Prices may change based on parts availability.',
+      'يبدأ العمل بعد اعتماد شركة التأمين رسمياً. / Work commences upon official insurance approval.',
+    ].map(line => `<div class="estimate-term" dir="auto"><span class="estimate-bullet">•</span><span>${line}</span></div>`).join('');
+
+  const body = `<div class="page insurance-estimate-page">
     ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
     ${headerHtml(s, 'تقدير تكلفة إصلاح', 'REPAIR COST ESTIMATE', data.number, data.issueDate, 'background:linear-gradient(135deg,#1e3a8a,#1e40af);')}
 
@@ -1329,25 +1382,21 @@ export function getInsuranceEstimateHtml(data: InsuranceEstimateData): string {
 
     <div class="notes-box">
       <span class="label-en">Estimate Terms</span>
-      <strong>شروط التقدير:</strong><br/>
-      ${data.customTerms
-        ? data.customTerms.split(/\r?\n/).filter(Boolean).map(l => `• ${l}`).join('<br/>')
-        : `• هذا التقدير ساري المفعول لمدة 30 يوماً من تاريخ الإصدار. <span style="color:#999;font-family:'Inter',sans-serif;">/ This estimate is valid for 30 days.</span><br/>
-      • قد تتغير الأسعار حسب توفر القطع وتاريخ الموافقة. <span style="color:#999;font-family:'Inter',sans-serif;">/ Prices may change based on parts availability.</span><br/>
-      • يبدأ العمل بعد اعتماد شركة التأمين رسمياً. <span style="color:#999;font-family:'Inter',sans-serif;">/ Work commences upon official insurance approval.</span>`}
+      <strong>شروط التقدير:</strong>
+      ${termsHtml}
       ${data.notes ? `<br/><br/><strong>ملاحظات إضافية:</strong> ${data.notes}` : ''}
     </div>
 
-    <div style="margin-top:40px;display:flex;justify-content:space-between;">
-      <div style="text-align:center;width:170px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">المُقدِّر / الفاحص<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Estimator</span></div></div>
-      <div style="text-align:center;width:170px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">مدير الورشة<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Workshop Manager</span></div></div>
-      <div style="text-align:center;width:170px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">مندوب شركة التأمين<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Insurance Representative</span></div></div>
+    <div class="estimate-signatures">
+      <div class="estimate-signer">المُقدِّر / الفاحص<span class="en">Estimator</span></div>
+      <div class="estimate-signer">مدير الورشة<span class="en">Workshop Manager</span></div>
+      <div class="estimate-signer">مندوب شركة التأمين<span class="en">Insurance Representative</span></div>
     </div>
 
     ${stampSignatureHtml(s, "quote")}
     ${footerHtml(s)}
   </div>`;
-  return wrapHtml(`Insurance Estimate ${data.number}`, getBaseStyles(s), body);
+  return wrapHtml(`Insurance Estimate ${data.number}`, getBaseStyles(s) + getInsuranceEstimateStyles(), body);
 }
 
 // ===== PAYMENT VOUCHER (سند صرف) =====

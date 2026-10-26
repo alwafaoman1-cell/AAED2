@@ -14,6 +14,7 @@ import {
   type FinanceCategory,
 } from "@/lib/financeSettingsStore";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
+import { normalizeLegacyImportDate } from "@/lib/legacyImportDate";
 
 interface StagedExpense {
   id: string;
@@ -47,13 +48,7 @@ function parseExcelDate(v: any): string {
     return d.toISOString().slice(0, 10);
   }
   const s = String(v).trim();
-  const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
-  if (m) {
-    const [, d, mo, y] = m;
-    const yyyy = y.length === 2 ? `20${y}` : y;
-    return `${yyyy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-  return s;
+  return normalizeLegacyImportDate(s);
 }
 
 function parsePayment(v: any): StagedExpense["paymentMethod"] {
@@ -106,7 +101,7 @@ export default function ExpensesImport() {
       const out: StagedExpense[] = [];
       for (let i = headerIdx + 1; i < data.length; i++) {
         const r = data[i]; if (!r) continue;
-        const amt = Number(String(r[iAmt] ?? "").replace(/[^\d.\-]/g, "")) || 0;
+        const amt = Number(String(r[iAmt] ?? "").replace(/[^\d.-]/g, "")) || 0;
         const catName = String(r[iCat] ?? "").trim();
         if (!amt && !catName) continue;
         const cat = findCategory(catName, cats);

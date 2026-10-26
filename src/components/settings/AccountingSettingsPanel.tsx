@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
 
-export interface AccountingReminderSettings {
+interface AccountingReminderSettings {
   defaultInvoiceDueDays: number;
   enablePaymentReminders: boolean;
   reminderChannels: {
@@ -18,7 +18,7 @@ export interface AccountingReminderSettings {
   reminderFrequencyHours: number;
 }
 
-export const DEFAULT_ACCOUNTING_REMINDER_SETTINGS: AccountingReminderSettings = {
+const DEFAULT_ACCOUNTING_REMINDER_SETTINGS: AccountingReminderSettings = {
   defaultInvoiceDueDays: 7,
   enablePaymentReminders: true,
   reminderChannels: {

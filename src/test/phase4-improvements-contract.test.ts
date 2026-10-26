@@ -82,7 +82,7 @@ describe("phase 4 UI and realtime safety contracts", () => {
   it("turns the work order page into a responsive control center", () => {
     expect(workOrderDetail).toContain('data-testid="work-order-control-center"');
     expect(workOrderDetail).toContain("lg:grid-cols");
-    expect(workOrderDetail).toContain("PDF / طباعة");
+    expect(workOrderDetail).toContain("طباعة / PDF");
   });
 
   it("keeps WhatsApp sending through the Edge Function with preview and recipient selection", () => {

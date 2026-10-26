@@ -97,6 +97,7 @@ const errorMessages: Record<string, [string, string]> = {
   INVOICE_NUMBER_NOT_AN_EARLIER_GAP: ["اختر رقمًا سابقًا غير مستخدم ضمن تسلسل السنة.", "Choose an unused earlier number from the same year's sequence."],
   INVOICE_NUMBER_CORRECTION_INVALID_TARGET: ["الرقم المطلوب غير صالح أو يطابق رقم الفاتورة الحالي.", "The requested number is invalid or unchanged."],
   INVOICE_NUMBER_MUST_PRESERVE_LEGACY_SEQUENCE: ["الفاتورة التاريخية يجب أن تحتفظ بنفس رقم التسلسل عند تحويل صيغتها.", "A historical invoice must keep its original sequence when its format is corrected."],
+  ONLY_PRE_CUTOVER_NUMERIC_INSURANCE_INVOICES: ["يمكن تحويل أرقام فواتير التأمين التاريخية ذات الرقم الرقمي السابق فقط.", "Only historical insurance invoices with pre-cutover numeric numbers can use this correction."],
   HISTORICAL_INVOICE_NUMBER_AMBIGUOUS: ["الرقم القديم مكرر؛ لا يمكن تصحيحه قبل معالجة التكرار رسميًا.", "The old number is ambiguous; resolve the duplicate before correcting it."],
   INVOICE_NUMBER_YEAR_OR_FORMAT_INVALID: ["صيغة الرقم أو سنة الفاتورة غير صحيحة.", "The invoice number format or year is invalid."],
   INVOICE_NUMBER_ALREADY_USED: ["الرقم مستخدم أو محجوز تاريخيًا، ولا يمكن إعادة استعماله.", "This number is used or historically reserved."],
@@ -105,7 +106,16 @@ const errorMessages: Record<string, [string, string]> = {
 };
 
 export function invoiceNumberCorrectionError(error: unknown, isArabic: boolean): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const code = Object.keys(errorMessages).find((key) => message.includes(key));
-  return code ? errorMessages[code][isArabic ? 0 : 1] : message;
+  const payload = error && typeof error === "object" ? error as { message?: unknown; code?: unknown } : null;
+  const message = error instanceof Error ? error.message
+    : typeof error === "string" ? error
+    : typeof payload?.message === "string" ? payload.message : "";
+  const knownCode = Object.keys(errorMessages).find((key) => message.includes(key));
+  if (knownCode) return errorMessages[knownCode][isArabic ? 0 : 1];
+
+  // PostgREST errors are plain objects. Never render their details, hints, or
+  // an object stringification to the user; retain only a safe diagnostic code.
+  const diagnosticCode = typeof payload?.code === "string" && /^[A-Z0-9_]{3,30}$/.test(payload.code)
+    ? ` (${payload.code})` : "";
+  return `${isArabic ? "تعذر تصحيح رقم الفاتورة" : "Unable to correct the invoice number"}${diagnosticCode}`;
 }

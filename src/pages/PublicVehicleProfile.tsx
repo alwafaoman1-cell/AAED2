@@ -31,8 +31,8 @@ export default function PublicVehicleProfile() {
   const [tick, setTick] = useState(0);
   useEffect(() => vehiclesStore.subscribe(() => setTick((t) => t + 1)), []);
 
-  const vehicle = useMemo(() => vehiclesStore.getById(decodedPlate), [decodedPlate, tick]);
-  const allOrders = useMemo<WorkOrder[]>(() => getWorkOrders(), [tick]);
+  const vehicle = useMemo(() => { void tick; return vehiclesStore.getById(decodedPlate); }, [decodedPlate, tick]);
+  const allOrders = useMemo<WorkOrder[]>(() => { void tick; return getWorkOrders(); }, [tick]);
   const orders = useMemo(
     () => allOrders.filter((o) => o.plate === decodedPlate).sort((a, b) => b.entryDate.localeCompare(a.entryDate)),
     [allOrders, decodedPlate],
@@ -45,12 +45,15 @@ export default function PublicVehicleProfile() {
   // ─── Password gate state (must run before any early return) ───
   const [authed, setAuthed] = useState(false);
   const [pwd, setPwd] = useState("");
+  const vehiclePlate = vehicle?.plate;
   useEffect(() => {
-    if (!vehicle) return;
+    if (!vehiclePlate) return;
     try {
-      if (sessionStorage.getItem(sessionKey(vehicle.plate)) === "1") setAuthed(true);
-    } catch {}
-  }, [vehicle?.plate]);
+      if (sessionStorage.getItem(sessionKey(vehiclePlate)) === "1") setAuthed(true);
+    } catch {
+      // Session storage may be disabled; require the password again.
+    }
+  }, [vehiclePlate]);
 
   // Disabled / not found
   if (!vehicle) {
@@ -73,7 +76,9 @@ export default function PublicVehicleProfile() {
     if (!expectedPwd && !masterPwd) { setAuthed(true); return; }
     const entered = normalizePwd(pwd);
     if ((expectedPwd && entered === expectedPwd) || (masterPwd && entered === masterPwd)) {
-      try { sessionStorage.setItem(sessionKey(vehicle.plate), "1"); } catch {}
+      try { sessionStorage.setItem(sessionKey(vehicle.plate), "1"); } catch {
+        // Authentication still applies for this page view when storage is blocked.
+      }
       setAuthed(true);
     } else {
       toast.error("كلمة المرور غير صحيحة");

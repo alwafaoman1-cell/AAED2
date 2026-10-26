@@ -1,6 +1,7 @@
 // مركز إشعارات المدير — يدمج جدول admin_notifications + admin_notification_reads مع Realtime
 import { supabase } from "@/integrations/supabase/client";
 import { notificationSound } from "./notificationSound";
+import { toast } from "sonner";
 
 export type AdminNotifType = "info" | "warning" | "urgent" | "success" | "error";
 
@@ -70,7 +71,6 @@ export const adminNotificationsStore = {
           await reload();
           if (isInsert && (payload.new as any)?.sender_id !== currentUser) {
             notificationSound.play();
-            const { toast } = await import("sonner");
             const n: any = payload.new;
             const typeMap: Record<string, (msg: string, opts?: any) => void> = {
               urgent: (m, o) => toast.error(m, o),

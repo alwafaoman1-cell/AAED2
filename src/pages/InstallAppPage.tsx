@@ -83,7 +83,9 @@ export default function InstallAppPage() {
           text: isAr ? "حمّل تطبيق ورشة السيارات" : "Install our auto workshop app",
           url,
         });
-      } catch {}
+      } catch {
+        // Cancelling the native share sheet should leave the page unchanged.
+      }
     } else {
       copyUrl();
     }

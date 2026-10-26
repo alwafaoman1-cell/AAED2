@@ -10,6 +10,7 @@ import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { normalizePhone } from "@/lib/phoneUtils";
 import { isUuid } from "@/lib/uuid";
 import { displayCustomerCode } from "@/lib/customerCode";
+import { notifyListeners } from "@/lib/notifyListeners";
 
 export type CustomerTag = "vip" | "regular" | "new";
 export type CustomerType = "individual" | "company";
@@ -68,7 +69,7 @@ function normalizeCustomerName(s: string): string {
 }
 
 function notify() {
-  listeners.forEach((l) => { try { l(); } catch {} });
+  notifyListeners(listeners, "customersStore");
 }
 
 function persist() {
