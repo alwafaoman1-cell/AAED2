@@ -46,6 +46,15 @@ beforeEach(() => {
 });
 
 describe("unified invoice and output VAT report", () => {
+  it("provides Arabic and English labels for every invoice table column", () => {
+    const ar = JSON.parse(readFileSync("src/i18n/locales/ar.json", "utf8")).unifiedInvoices;
+    const en = JSON.parse(readFileSync("src/i18n/locales/en.json", "utf8")).unifiedInvoices;
+    for (const key of ["source", "number", "date", "party", "plate", "subtotal", "vat", "total", "collection"]) {
+      expect(ar[key], `Arabic ${key}`).toBeTruthy();
+      expect(en[key], `English ${key}`).toBeTruthy();
+    }
+  });
+
   it("reads only the tenant-scoped security-invoker view and filters source, date, collection, and VAT on the server", async () => {
     await fetchUnifiedInvoicePage({ ...filters, source: "insurance_invoice", from: "2026-07-01", to: "2026-07-31", collection: "partial", vat: "positive" }, 2, 50);
     expect(mock.calls).toContainEqual(["from", "reports_invoice_facts_v1"]);

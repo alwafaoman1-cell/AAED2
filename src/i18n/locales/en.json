@@ -9,6 +9,7 @@
     "from": "From",
     "to": "To",
     "number": "Invoice number",
+    "date": "Invoice date",
     "party": "Customer / insurer",
     "plate": "Plate number",
     "collection": "Collection",
