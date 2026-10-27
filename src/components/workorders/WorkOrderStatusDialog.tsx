@@ -162,16 +162,14 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     if (!files || files.length === 0) return;
     setUploading(true);
     try {
-      const { convertImageToWebp } = await import("@/lib/imageToWebp");
       const phase = getStatusPhase(selected || order!.status);
       const newOnes: StagePhoto[] = [];
       let failed = 0;
       for (const f of Array.from(files).slice(0, 6)) {
         if (!f.type.startsWith("image/")) continue;
         try {
-          const opt = await convertImageToWebp(f);
           const photoId = Math.random().toString(36).slice(2, 9);
-          const uploaded = await uploadStagePhoto({ orderId: order!.id, photoId, file: opt });
+          const uploaded = await uploadStagePhoto({ orderId: order!.id, photoId, file: f });
           if (!uploaded) { failed++; continue; }
           newOnes.push({
             id: photoId, phase, dataUrl: uploaded.url, storagePath: uploaded.path,

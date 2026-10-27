@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { canonicalMediaReference, resolveImageReferences } from "@/lib/vehicleMediaUrls";
+import { optimizeWorkOrderPhoto } from "@/lib/workOrderPhotoOptimization";
 
 type BelongingItem = { key: string; label_ar: string; label_en?: string };
 
@@ -76,8 +77,10 @@ export default function VehicleReceptionSection({ jobOrderId }: Props) {
   async function handlePhotoUpload(file: File) {
     setUploadingPhoto(true);
     try {
-      const path = `reception/${jobOrderId}/${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, "_")}`;
-      const { error } = await supabase.storage.from("damage-photos").upload(path, file, { upsert: false });
+      const optimized = await optimizeWorkOrderPhoto(file);
+      if (!optimized) throw new Error("تعذر ضغط الصورة أو تجاوز حجمها 6 MB بعد الضغط");
+      const path = `reception/${jobOrderId}/${crypto.randomUUID()}.${optimized.extension}`;
+      const { error } = await supabase.storage.from("damage-photos").upload(path, optimized.file, { contentType: optimized.file.type, upsert: false });
       if (error) throw error;
       const [url] = await resolveImageReferences([path], "damage-photos");
       setPhotos((p) => [...p, path]);
@@ -91,6 +94,7 @@ export default function VehicleReceptionSection({ jobOrderId }: Props) {
   }
 
   async function save() {
+    if (uploadingPhoto) return;
     if (!isUuid) { toast.error("هذا الأمر غير مزامن مع السحابة"); return; }
     setSaving(true);
     try {
@@ -119,7 +123,7 @@ export default function VehicleReceptionSection({ jobOrderId }: Props) {
         <h2 className="text-sm font-semibold flex items-center gap-2">
           <Car size={16} className="text-primary" /> فحص واستلام المركبة
         </h2>
-        <Button size="sm" onClick={save} disabled={saving} className="gap-1">
+        <Button size="sm" onClick={save} disabled={saving || uploadingPhoto} className="gap-1">
           {saving ? <Loader2 size={14} className="animate-spin"/> : <Save size={14} />} حفظ بيانات الاستلام
         </Button>
       </div>

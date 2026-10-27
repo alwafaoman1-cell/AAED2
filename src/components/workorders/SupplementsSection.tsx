@@ -13,6 +13,7 @@ import { normalizePhone } from "@/lib/phoneUtils";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import { canonicalMediaReference, resolveImageReferences } from "@/lib/vehicleMediaUrls";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { optimizeWorkOrderPhoto } from "@/lib/workOrderPhotoOptimization";
 
 interface Supplement {
   id: string;
@@ -44,6 +45,7 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
   const [loading, setLoading] = useState(true);
   const [loadedJobOrderId, setLoadedJobOrderId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Partial<Supplement> | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [sending, setSending] = useState(false);
   const [linkDialog, setLinkDialog] = useState<{ link: string } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -93,6 +95,7 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
   }, [load]);
 
   async function save() {
+    if (uploadingPhoto) return;
     if (!editing) return;
     if (!editing.description?.trim()) { toast.error("الوصف مطلوب"); return; }
     const tenant_id = await getCurrentTenantId();
@@ -132,12 +135,22 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
   }
 
   async function uploadPhoto(file: File) {
-    const path = `supplements/${jobOrderId}/${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, "_")}`;
-    const { error } = await supabase.storage.from("damage-photos").upload(path, file);
-    if (error) { toast.error(error.message); return; }
-    const [url] = await resolveImageReferences([path], "damage-photos");
-    setEditing((current) => current ? ({ ...current, photos: [...(current.photos || []), path] }) : current);
-    if (url) setPhotoUrls((current) => ({ ...current, [path]: url }));
+    if (uploadingPhoto) return;
+    setUploadingPhoto(true);
+    try {
+      const optimized = await optimizeWorkOrderPhoto(file);
+      if (!optimized) throw new Error("تعذر ضغط الصورة أو تجاوز حجمها 6 MB بعد الضغط");
+      const path = `supplements/${jobOrderId}/${crypto.randomUUID()}.${optimized.extension}`;
+      const { error } = await supabase.storage.from("damage-photos").upload(path, optimized.file, { contentType: optimized.file.type, upsert: false });
+      if (error) throw error;
+      const [url] = await resolveImageReferences([path], "damage-photos");
+      setEditing((current) => current ? ({ ...current, photos: [...(current.photos || []), path] }) : current);
+      if (url) setPhotoUrls((current) => ({ ...current, [path]: url }));
+    } catch (error: any) {
+      toast.error(error?.message || "تعذر رفع الصورة");
+    } finally {
+      setUploadingPhoto(false);
+    }
   }
 
   async function markExecuted(id: string) {
@@ -308,7 +321,7 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
       )}
 
       {/* Edit dialog */}
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+      <Dialog open={!!editing} onOpenChange={(o) => !o && !uploadingPhoto && setEditing(null)}>
         <DialogContent className="max-w-lg" dir="rtl">
           <DialogHeader><DialogTitle>{editing?.id ? "تعديل بند" : "بند أعمال إضافية"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -330,8 +343,8 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
               <div className="flex items-center justify-between">
                 <Label className="text-xs">صور ({editing?.photos?.length || 0})</Label>
                 <label className="cursor-pointer">
-                  <input hidden type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])}/>
-                  <Button size="sm" variant="outline" className="gap-1" asChild><span><Camera size={13}/> رفع</span></Button>
+                  <input hidden type="file" accept="image/*" disabled={uploadingPhoto} onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])}/>
+                  <Button size="sm" variant="outline" className="gap-1" asChild><span>{uploadingPhoto ? <Loader2 size={13} className="animate-spin" /> : <Camera size={13}/>} رفع</span></Button>
                 </label>
               </div>
               {(editing?.photos || []).length > 0 && (
@@ -344,8 +357,8 @@ export default function SupplementsSection({ jobOrderId, customerName, customerP
             </div>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setEditing(null)}>إلغاء</Button>
-            <Button onClick={save}>حفظ</Button>
+            <Button variant="outline" onClick={() => setEditing(null)} disabled={uploadingPhoto}>إلغاء</Button>
+            <Button onClick={save} disabled={uploadingPhoto}>حفظ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,6 +1,6 @@
 // Storage layer for work-order photos.
-// - Compresses to WebP (via existing imageToWebp helper)
-// - Uploads to private bucket `work-order-photos` under `<tenant>/<orderId>/<photoId>.webp`
+// - Compresses camera photos before upload, preserving a smaller original when appropriate
+// - Uploads once to private bucket `work-order-photos` under `<tenant>/<orderId>/<photoId>.<ext>`
 // - Returns a signed URL (long TTL) stored inside StagePhoto.dataUrl for backward compatibility
 // - Also exposes a background migrator that converts legacy base64 data URLs to storage URLs
 
@@ -8,11 +8,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import type { StagePhoto } from "@/lib/workOrdersStore";
 import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
+import { optimizeWorkOrderPhoto } from "@/lib/workOrderPhotoOptimization";
 
 const BUCKET = "work-order-photos";
 const SIGNED_TTL_SEC = 60 * 60 * 24 * 365; // 1 year — refreshed on each load
 
-/** Upload a compressed WebP for a stage photo. Returns the storage path + signed URL. */
+/** Upload one size-optimized image with a matching extension/content type. */
 export async function uploadStagePhoto(opts: {
   orderId: string;
   photoId: string;
@@ -20,12 +21,15 @@ export async function uploadStagePhoto(opts: {
 }): Promise<{ path: string; url: string } | null> {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return null;
+  const source = opts.file instanceof File ? opts.file : new File([opts.file], "photo", { type: opts.file.type });
+  const optimized = await optimizeWorkOrderPhoto(source);
+  if (!optimized) return null;
   const safeOrderId = opts.orderId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const path = `${tenantId}/${safeOrderId}/${opts.photoId}.webp`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, opts.file, {
-    contentType: "image/webp",
+  const path = `${tenantId}/${safeOrderId}/${opts.photoId}.${optimized.extension}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, optimized.file, {
+    contentType: optimized.file.type,
     cacheControl: "31536000",
-    upsert: true,
+    upsert: false,
   });
   if (error) {
     console.warn("[workOrderPhotosStorage] upload failed", error);

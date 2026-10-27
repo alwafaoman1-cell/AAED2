@@ -28,6 +28,7 @@ import {
   RotateCcw,
   ChevronDown,
   MoreHorizontal,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -259,6 +260,8 @@ export default function WorkOrderDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [photosOpen, setPhotosOpen] = useState(false);
+  const [photoPdfBusy, setPhotoPdfBusy] = useState(false);
+  const [photoPdfProgress, setPhotoPdfProgress] = useState(0);
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [previewExpense, setPreviewExpense] = useState<ExpenseRecord | null>(null);
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
@@ -846,6 +849,35 @@ export default function WorkOrderDetail() {
     setPreviewOpen(true);
   }
 
+  async function handleDownloadPhotosPdf() {
+    if (!order || photoPdfBusy) return;
+    if (!photos.length) {
+      toast.info(label("لا توجد صور لتنزيلها", "There are no photos to download"));
+      return;
+    }
+    setPhotoPdfBusy(true);
+    setPhotoPdfProgress(0);
+    try {
+      const [{ generateWorkOrderPhotosPdf }, { downloadBlob }] = await Promise.all([
+        import("@/lib/workOrderPhotoPdf"),
+        import("@/lib/photoAlbumPdf"),
+      ]);
+      const orderedPhotos = [...photos].sort((a, b) =>
+        PHASES.indexOf(a.phase) - PHASES.indexOf(b.phase) || (a.uploadedAt || "").localeCompare(b.uploadedAt || ""));
+      const blob = await generateWorkOrderPhotosPdf(orderedPhotos, displayNo, (completed) => setPhotoPdfProgress(completed));
+      downloadBlob(blob, `${displayNo}-photos.pdf`);
+      toast.success(label(`تم تجهيز ${photos.length} صورة في ملف PDF`, `${photos.length} photos are ready in one PDF`));
+    } catch (error) {
+      console.error("[work order photos] PDF export failed", error);
+      const failedImage = /PHOTO_PDF_IMAGE_FAILED:(\d+)/.exec(String(error));
+      toast.error(failedImage
+        ? label(`تعذر قراءة الصورة رقم ${failedImage[1]}؛ لم يُنشأ ملف ناقص. أعد فتح الصفحة وحاول مجددًا.`, `Photo ${failedImage[1]} could not be read. No incomplete PDF was downloaded. Reopen the page and retry.`)
+        : label("تعذر تجهيز PDF الصور. لم يُنزّل ملف ناقص.", "Could not prepare the photo PDF. No incomplete file was downloaded."));
+    } finally {
+      setPhotoPdfBusy(false);
+    }
+  }
+
   function handlePrintNeededParts() {
     if (partsNeeded.length === 0) {
       toast.error("لا توجد قطع غيار مطلوبة لهذا الأمر");
@@ -944,7 +976,8 @@ export default function WorkOrderDetail() {
         </div>
       </header>
 
-      <div className="rounded-xl border border-border bg-card p-2 sm:p-3">
+      <div className="rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4">
+        <div className="mb-2 hidden text-xs font-semibold text-muted-foreground lg:block">{label("الإجراءات السريعة", "Quick actions")}</div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <Button size="sm" variant="outline" onClick={() => { statusDirtyRef.current = true; setStatusOpen(true); }} className="min-h-10 gap-1.5">
             <Workflow size={15} /> {label("تغيير الحالة", "Change status")}
@@ -958,13 +991,13 @@ export default function WorkOrderDetail() {
           <Button size="sm" onClick={handlePrintWorkOrder} className="min-h-10 gap-1.5 gradient-gold text-primary-foreground">
             <Printer size={15} /> {label("طباعة / PDF", "Print / PDF")}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setActionsExpanded((value) => !value)} aria-expanded={actionsExpanded} aria-controls="work-order-secondary-actions" className="col-span-2 min-h-10 gap-1.5 sm:ms-auto">
+          <Button size="sm" variant="ghost" onClick={() => setActionsExpanded((value) => !value)} aria-expanded={actionsExpanded} aria-controls="work-order-secondary-actions" className="col-span-2 min-h-10 gap-1.5 sm:ms-auto lg:hidden">
             <MoreHorizontal size={16} /> {label("بقية الإجراءات", "More actions")} <ChevronDown size={14} className={actionsExpanded ? "rotate-180" : ""} />
           </Button>
         </div>
-        <div id="work-order-secondary-actions" className={actionsExpanded ? "mt-3 flex min-w-0 flex-wrap items-center gap-2 border-t border-border pt-3" : "hidden"}>
+        <div id="work-order-secondary-actions" className={`${actionsExpanded ? "flex" : "hidden lg:flex"} mt-3 min-w-0 flex-wrap items-center gap-3 border-t border-border pt-3`}>
           {/* Secondary operations are available on demand without repeating the quick actions. */}
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
             {allowEdit && (
               <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} className="min-h-10 gap-1.5 text-xs">
                 <Edit size={14} className="text-info" /> {label("تعديل", "Edit")}
@@ -978,7 +1011,7 @@ export default function WorkOrderDetail() {
             </Button>
           </div>
 
-          <div className="flex items-center">
+          <div className="flex items-center rounded-lg bg-muted/30 p-2">
             <QuickEmailButton
               ctx={{
                 docType: "work_order",
@@ -1010,7 +1043,7 @@ export default function WorkOrderDetail() {
             </Button>
           )}
           {/* المجموعة 3: الفواتير والطباعة */}
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1250,7 +1283,7 @@ export default function WorkOrderDetail() {
               size="sm"
               variant="outline"
               onClick={() => setDeleteOpen(true)}
-              className="h-9 gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+              className="ms-auto min-h-10 gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
             >
               <Trash2 size={14} /> {label("حذف", "Delete")}
             </Button>
@@ -1395,6 +1428,12 @@ export default function WorkOrderDetail() {
             <ImageIcon size={16} className="text-primary" />
             {label("الصور والمستندات", "Photos and documents")}
           </h2>
+          <Button size="sm" variant="outline" onClick={() => void handleDownloadPhotosPdf()} disabled={!photos.length || photoPdfBusy} className="min-h-10 gap-2">
+            {photoPdfBusy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            {photoPdfBusy
+              ? label(`تجهيز الصور ${photoPdfProgress}/${photos.length}`, `Preparing photos ${photoPdfProgress}/${photos.length}`)
+              : label(`تنزيل جميع الصور PDF (${photos.length})`, `Download all photos PDF (${photos.length})`)}
+          </Button>
         </div>
         <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-3">
           <MediaGroup

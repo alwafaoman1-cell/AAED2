@@ -6,6 +6,8 @@ export interface WebpOptions {
   quality?: number;
   /** أقصى عرض/ارتفاع بالبكسل — افتراضي 2200 */
   maxDimension?: number;
+  /** Re-encode existing WebP images too (useful for large camera uploads). */
+  reencodeWebp?: boolean;
 }
 
 const SKIP_TYPES = new Set(["image/gif", "image/svg+xml", "image/webp"]);
@@ -17,24 +19,24 @@ export async function convertImageToWebp(
 ): Promise<File> {
   try {
     if (!file || !file.type?.startsWith("image/")) return file;
-    if (SKIP_TYPES.has(file.type)) return file;
+    if (SKIP_TYPES.has(file.type) && !(file.type === "image/webp" && opts.reencodeWebp)) return file;
 
     const quality = opts.quality ?? 0.85;
     const maxDim = opts.maxDimension ?? 2200;
 
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result || ""));
-      r.onerror = () => reject(r.error);
-      r.readAsDataURL(file);
-    });
-
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const im = new Image();
-      im.onload = () => resolve(im);
-      im.onerror = () => reject(new Error("image load failed"));
-      im.src = dataUrl;
-    });
+    // Object URLs avoid a second, base64-expanded copy of a large camera file.
+    const objectUrl = URL.createObjectURL(file);
+    let img: HTMLImageElement;
+    try {
+      img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error("image load failed"));
+        im.src = objectUrl;
+      });
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
 
     let w = img.naturalWidth || img.width;
     let h = img.naturalHeight || img.height;
@@ -53,9 +55,9 @@ export async function convertImageToWebp(
     const blob: Blob | null = await new Promise((resolve) =>
       canvas.toBlob((b) => resolve(b), "image/webp", quality),
     );
-    if (!blob) return file;
-    // إن لم يقلّ الحجم، أعد الأصلي (نادراً للصور الصغيرة جداً)
-    if (blob.size >= file.size && file.type === "image/webp") return file;
+    if (!blob || blob.type !== "image/webp") return file;
+    // Never replace a smaller original with a larger encoded copy.
+    if (blob.size >= file.size) return file;
 
     const baseName = (file.name || "image").replace(/\.[^.]+$/, "");
     return new File([blob], `${baseName}.webp`, {

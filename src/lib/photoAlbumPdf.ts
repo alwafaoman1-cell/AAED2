@@ -138,8 +138,8 @@ function drawImageContain(
   const dy = y + (h - drawH) / 2;
   try {
     doc.addImage(img.dataUrl, detectFormat(img.dataUrl), dx, dy, drawW, drawH, undefined, "FAST");
-  } catch (e) {
-    console.warn("addImage failed", e);
+  } catch (error) {
+    throw new Error(`PHOTO_ALBUM_IMAGE_FAILED:${index}: ${String(error)}`);
   }
 
   // رقم تسلسلي أعلى اليسار

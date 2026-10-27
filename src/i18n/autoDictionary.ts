@@ -63,6 +63,8 @@ const CURATED_AR_TO_EN: Record<string, string> = {
   "حذف الخصم": "Delete deduction",
   "إخفاء الإشعار": "Hide notification",
   "جارٍ الرفع...": "Uploading...",
+  "جارٍ ضغط الصور ورفعها إلى السحابة…": "Compressing and uploading photos…",
+  "جارٍ رفع الصور…": "Uploading photos…",
   "تُدار التصنيفات من صفحة واحدة مرتبطة بالسحابة، مع الاسم العربي والإنجليزي والشجرة المحاسبية. لا تُنشأ نسخة ثانية هنا.": "Categories are managed on one cloud-backed page with Arabic and English names and the accounting hierarchy. No second copy is created here.",
   "فتح إدارة تصنيفات المصروفات": "Open Expense Category Management",
   "تعذر قراءة النسخ السحابية؛ لا تفترض أن القائمة فارغة.": "Cloud backups could not be read; do not assume the list is empty.",

@@ -45,6 +45,7 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
   const [caption, setCaption] = useState("");
   const [pending, setPending] = useState<StagePhoto[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [continuousMode, setContinuousMode] = useState(true);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxStart, setLightboxStart] = useState(0);
@@ -78,36 +79,38 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
   const remaining = Math.max(0, MAX_PHOTOS_PER_PHASE - phaseCount);
   const atLimit = remaining === 0;
 
-  function readFiles(files: FileList | null, fromCamera: boolean) {
+  async function readFiles(files: FileList | null, fromCamera: boolean) {
     if (!files || files.length === 0) return;
+    if (uploading) return;
     if (atLimit) {
       toast.error(`تم بلوغ الحد الأقصى ${MAX_PHOTOS_PER_PHASE} صور لهذه المرحلة`);
       return;
     }
     const allowed = Array.from(files).slice(0, remaining);
     const dropped = files.length - allowed.length;
-    const tasks: Promise<StagePhoto | null>[] = [];
-    allowed.forEach((file) => {
-      if (!file.type.startsWith("image/")) return;
-      tasks.push((async () => {
-        const { convertImageToWebp } = await import("@/lib/imageToWebp");
-        const optimized = await convertImageToWebp(file);
+    setUploading(true);
+    const newPhotos: StagePhoto[] = [];
+    let failed = 0;
+    try {
+      // One camera image at a time keeps browser memory and Storage traffic bounded.
+      for (const file of allowed) {
+        if (!file.type.startsWith("image/")) { failed++; continue; }
         const photoId = Math.random().toString(36).slice(2, 9);
-        const uploaded = await uploadStagePhoto({ orderId: order!.id, photoId, file: optimized });
-        if (!uploaded) return null;
-        return {
-          id: photoId,
-          phase: activePhase,
-          dataUrl: uploaded.url,
-          storagePath: uploaded.path,
-          caption: caption.trim() || undefined,
-          uploadedAt: new Date().toISOString(),
-        } satisfies StagePhoto;
-      })());
-    });
-    Promise.allSettled(tasks).then((results) => {
-      const failed = results.filter((result) => result.status === "rejected" || result.value === null).length;
-      const newPhotos = results.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
+        try {
+          const uploaded = await uploadStagePhoto({ orderId: order!.id, photoId, file });
+          if (!uploaded) { failed++; continue; }
+          newPhotos.push({
+            id: photoId,
+            phase: activePhase,
+            dataUrl: uploaded.url,
+            storagePath: uploaded.path,
+            caption: caption.trim() || undefined,
+            uploadedAt: new Date().toISOString(),
+          });
+        } catch {
+          failed++;
+        }
+      }
       if (newPhotos.length) {
         setPending((prev) => [...prev, ...newPhotos]);
         setDirty(true);
@@ -126,7 +129,9 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
           toast.info("اكتمل الحد الأقصى للمرحلة");
         }
       }
-    });
+    } finally {
+      setUploading(false);
+    }
   }
 
   function removePhoto(id: string, isPending: boolean) {
@@ -140,6 +145,7 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
   }
 
   async function handleSave() {
+    if (uploading) return;
     const finalPhotos = [...(order!.photos || []), ...pending];
     const derivedStatus = deriveStatusFromPhotos(finalPhotos);
     const patch: Partial<WorkOrder> = { photos: finalPhotos };
@@ -165,6 +171,10 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
   }
 
   function handleClose() {
+    if (uploading) {
+      toast.info("انتظر حتى يكتمل ضغط الصور ورفعها قبل الإغلاق");
+      return;
+    }
     if (dirty && !confirm("لديك تغييرات غير محفوظة. هل تريد الإغلاق دون حفظ؟")) return;
     onClose();
   }
@@ -236,14 +246,14 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
           <div className="grid grid-cols-2 gap-2">
             <Button
               onClick={() => cameraInput.current?.click()}
-              disabled={atLimit}
+              disabled={atLimit || uploading}
               className="gradient-gold text-primary-foreground gap-1.5 hover:opacity-90 h-10 text-xs sm:text-sm disabled:opacity-50"
             >
               <Camera size={14} /> كاميرا
             </Button>
             <Button
               onClick={() => galleryInput.current?.click()}
-              disabled={atLimit}
+              disabled={atLimit || uploading}
               variant="outline"
               className="gap-1.5 h-10 text-xs sm:text-sm disabled:opacity-50"
             >
@@ -266,6 +276,9 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
               onChange={(e) => { readFiles(e.target.files, false); e.target.value = ""; }}
             />
           </div>
+          <p className="text-xs text-muted-foreground text-center" role="status">
+            {uploading ? "جارٍ ضغط الصور ورفعها إلى السحابة…" : null}
+          </p>
           <p className="text-[10px] sm:text-[11px] text-muted-foreground text-center">
             مرحلة <span className="text-primary font-semibold">{STAGE_LABELS[activePhase].ar}</span> —
             متبقي <span className={`font-bold ${atLimit ? "text-destructive" : "text-primary"}`}>{remaining}</span> من {MAX_PHOTOS_PER_PHASE}
@@ -348,10 +361,10 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
         <div className="flex flex-col sm:flex-row gap-2 pt-3 border-t border-border sticky bottom-0 bg-card -mx-3 sm:mx-0 px-3 sm:px-0 pb-1">
           <Button
             onClick={handleSave}
-            disabled={!dirty}
+            disabled={!dirty || uploading}
             className="gradient-gold text-primary-foreground flex-1 gap-2 hover:opacity-90 disabled:opacity-50 h-11"
           >
-            {dirty ? <><Save size={15} /> حفظ التغييرات</> : <><Check size={15} /> محفوظ</>}
+            {uploading ? "جارٍ رفع الصور…" : dirty ? <><Save size={15} /> حفظ التغييرات</> : <><Check size={15} /> محفوظ</>}
           </Button>
           <Button onClick={handleClose} variant="outline" className="sm:w-auto h-11">
             إغلاق

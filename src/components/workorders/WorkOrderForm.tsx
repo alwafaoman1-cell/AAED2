@@ -24,6 +24,7 @@ import { toE164 } from "@/lib/phoneUtils";
 import { ensureVehicleForCustomer, findExistingVehicle, normalizeVehiclePlate, normalizeVin, type VehicleIdentityMatch } from "@/lib/vehicleIdentity";
 import { isUuid } from "@/lib/uuid";
 import { isSupportedWorkOrderNumber } from "@/lib/workOrderNumber";
+import { uploadStagePhoto } from "@/lib/workOrderPhotosStorage";
 
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
@@ -501,31 +502,22 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
 
   async function uploadReceptionPhotos(orderNumber: string) {
     if (receptionFiles.length === 0) return form.photos || [];
-    const tenantId = await getCurrentTenantId();
-    if (!tenantId) {
-      toast.warning("Work order saved, but image upload failed because tenant was not loaded.");
-      return form.photos || [];
-    }
     const uploaded = [...(form.photos || [])];
     for (const file of receptionFiles) {
-      const safeName = file.name.replace(/[^\w.\-\u0600-\u06FF]+/g, "_");
-      const storagePath = `${tenantId}/${orderNumber}/received/${crypto.randomUUID()}-${safeName}`;
-      const { error: uploadError } = await supabase.storage
-        .from("work-order-photos")
-        .upload(storagePath, file, { contentType: file.type || "image/jpeg", upsert: false });
-      if (uploadError) {
-        console.warn("[WorkOrderForm] reception image upload failed", uploadError);
-        toast.warning("Work order saved, but image upload failed because storage bucket is not configured.");
+      const photoId = crypto.randomUUID();
+      const result = await uploadStagePhoto({ orderId: orderNumber, photoId, file });
+      if (!result) {
+        toast.warning(i18n.resolvedLanguage?.startsWith("en")
+          ? "A reception photo could not be uploaded. Check its format and size, then retry."
+          : "تعذر رفع إحدى صور الاستلام. تحقق من نوعها وحجمها ثم أعد المحاولة.");
         continue;
       }
-      const { resolveImageReferences } = await import("@/lib/vehicleMediaUrls");
-      const [previewUrl] = await resolveImageReferences([storagePath], "work-order-photos");
-      if (!previewUrl) toast.warning("تم رفع الصورة، لكن تعذر إنشاء رابط المعاينة الآن. ستبقى محفوظة في التخزين السحابي.");
+      if (!result.url) toast.warning("تم رفع الصورة، لكن تعذر إنشاء رابط المعاينة الآن. ستبقى محفوظة في التخزين السحابي.");
       uploaded.push({
-        id: crypto.randomUUID(),
+        id: photoId,
         phase: "received",
-        dataUrl: previewUrl || "",
-        storagePath,
+        dataUrl: result.url,
+        storagePath: result.path,
         caption: "صورة استلام المركبة",
         uploadedAt: new Date().toISOString(),
       });

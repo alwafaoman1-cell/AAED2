@@ -1103,6 +1103,18 @@ export default function WorkOrders() {
                   {isColumnVisible("invoiceState") && <td className="py-3 px-4">{invoiceBadgeFor(order)}</td>}
                   {isColumnVisible("cost") && <td title={isArabic ? "سندات الصرف الفعلية المرتبطة شامل الضريبة" : "Actual linked expense vouchers including VAT"} className="py-3 px-4 text-foreground font-medium" style={{ fontFamily: "Inter, sans-serif", direction: "ltr", textAlign: "right" }} data-amount="true">{toEnglishDigits(formatActualWorkOrderCost(order))} OMR</td>}
                   <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                      <div className="hidden items-center gap-1 rounded-lg border border-border bg-muted/25 p-1 lg:flex">
+                        <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={() => navigate(`/work-orders/${encodeURIComponent(order.id)}`)}>
+                          <Eye size={14} /> {isArabic ? "عرض" : "View"}
+                        </Button>
+                        {allowEdit && <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={() => setEditOrder(order)}>
+                          <Edit size={14} /> {isArabic ? "تعديل" : "Edit"}
+                        </Button>}
+                        <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={() => setPhotosOrderId(order.id)}>
+                          <Camera size={14} /> {isArabic ? "صور" : "Photos"}
+                        </Button>
+                      </div>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -1111,17 +1123,17 @@ export default function WorkOrders() {
                           className="h-8 gap-1.5 border-border bg-secondary/30 hover:bg-secondary text-foreground"
                         >
                           <MoreHorizontal size={14} />
-                          <span className="text-xs">الإجراءات</span>
+                          <span className="text-xs">{isArabic ? "المزيد" : "More"}</span>
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-52 bg-card border-border">
-                        <DropdownMenuLabel className="text-xs text-muted-foreground">إجراءات الأمر</DropdownMenuLabel>
+                        <DropdownMenuLabel className="text-xs text-muted-foreground">{isArabic ? "إجراءات الأمر" : "Work order actions"}</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => navigate(`/work-orders/${encodeURIComponent(order.id)}`)} className="gap-2 cursor-pointer">
+                        <DropdownMenuItem onClick={() => navigate(`/work-orders/${encodeURIComponent(order.id)}`)} className="gap-2 cursor-pointer lg:hidden">
                           <Eye size={14} className="text-muted-foreground" /> عرض التفاصيل
                         </DropdownMenuItem>
                         {allowEdit && (
-                          <DropdownMenuItem onClick={() => setEditOrder(order)} className="gap-2 cursor-pointer">
+                          <DropdownMenuItem onClick={() => setEditOrder(order)} className="gap-2 cursor-pointer lg:hidden">
                             <Edit size={14} className="text-info" /> تعديل الأمر
                           </DropdownMenuItem>
                         )}
@@ -1156,7 +1168,7 @@ export default function WorkOrders() {
                           <Receipt size={14} className="text-warning" /> مصروف على هذا الأمر
                         </DropdownMenuItem>
 
-                        <DropdownMenuItem onClick={() => setPhotosOrderId(order.id)} className="gap-2 cursor-pointer">
+                        <DropdownMenuItem onClick={() => setPhotosOrderId(order.id)} className="gap-2 cursor-pointer lg:hidden">
                           <Camera size={14} className="text-primary" /> صور المراحل
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setQrOrder(order)} className="gap-2 cursor-pointer">
@@ -1279,6 +1291,7 @@ export default function WorkOrders() {
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
+                    </div>
                   </td>
                 </tr>
               );})}
