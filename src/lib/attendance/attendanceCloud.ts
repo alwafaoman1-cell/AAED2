@@ -1,7 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { hrStore } from "@/lib/hrStore";
-import type { DevicePunch } from "./attendanceEngine";
+import { isCompletedAttendanceDate, type AttendanceDayReview, type DevicePunch } from "./attendanceEngine";
+import type { Database } from "@/integrations/supabase/types";
+
+export type MonthReview = Database["public"]["Tables"]["hr_attendance_month_reviews"]["Row"];
+export type DayReview = Database["public"]["Tables"]["hr_attendance_day_reviews"]["Row"];
 
 export interface DevicePersonMapping {
   id: string;
@@ -87,4 +91,60 @@ export async function loadEmployeePunches(employeeId: string, month: string): Pr
   return (data ?? []).map((row) => ({ deviceKey: row.device_key, personId: row.person_id,
     personName: "", occurredAt: new Date(row.occurred_at).toLocaleString("sv-SE", { timeZone: "Asia/Muscat", hour12: false }).replace(" ", "T") + "+04:00",
     eventCode: row.event_code }));
+}
+
+function monthEnd(month: string): string {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("ATTENDANCE_INVALID_MONTH");
+  const [year, number] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, number, 1)).toISOString().slice(0, 7);
+}
+
+export async function loadAttendanceReviews(employeeId: string, month: string): Promise<{ monthReview: MonthReview | null; dayReviews: DayReview[] }> {
+  const tenant = await requireTenant();
+  const end = monthEnd(month);
+  const [monthly, daily] = await Promise.all([
+    supabase.from("hr_attendance_month_reviews").select("*").eq("tenant_id", tenant).eq("employee_id", employeeId)
+      .eq("month", `${month}-01`).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(2),
+    supabase.from("hr_attendance_day_reviews").select("*").eq("tenant_id", tenant).eq("employee_id", employeeId)
+      .gte("attendance_date", `${month}-01`).lt("attendance_date", `${end}-01`)
+      .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1001),
+  ]);
+  if (monthly.error || daily.error) throw monthly.error || daily.error;
+  if ((daily.data?.length ?? 0) > 1000) throw new Error("ATTENDANCE_REVIEW_LIMIT_EXCEEDED");
+  return { monthReview: monthly.data?.[0] ?? null, dayReviews: daily.data ?? [] };
+}
+
+async function verifyEmployee(employeeId: string): Promise<string> {
+  if (!hrStore.getEmployee(employeeId) || hrStore.getEmployee(employeeId)?.isDeleted) throw new Error("ATTENDANCE_EMPLOYEE_NOT_FOUND");
+  return requireTenant();
+}
+
+export async function saveMonthReview(employeeId: string, month: string, coverageStart: string, coverageEnd: string, graceMinutes: number, reason: string): Promise<MonthReview> {
+  monthEnd(month);
+  if (!coverageStart.startsWith(month) || !coverageEnd.startsWith(month) || coverageStart > coverageEnd ||
+      !isCompletedAttendanceDate(coverageEnd) || !Number.isInteger(graceMinutes) || graceMinutes < 0 || graceMinutes > 60 || reason.trim().length < 8) {
+    throw new Error("ATTENDANCE_INVALID_COVERAGE");
+  }
+  const tenant = await verifyEmployee(employeeId);
+  const { data, error } = await supabase.from("hr_attendance_month_reviews").insert({ tenant_id: tenant, employee_id: employeeId,
+    month: `${month}-01`, coverage_start: coverageStart, coverage_end: coverageEnd,
+    grace_minutes: graceMinutes, reason: reason.trim() }).select("*").single();
+  if (error || !data) throw error || new Error("ATTENDANCE_REVIEW_NOT_SAVED");
+  return data;
+}
+
+export async function saveDayReview(employeeId: string, date: string, review: AttendanceDayReview, reason: string): Promise<DayReview> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !isCompletedAttendanceDate(date) || reason.trim().length < 8) throw new Error("ATTENDANCE_INVALID_REVIEW");
+  for (const key of ["morning", "afternoon"] as const) {
+    const state = review[`${key}_status`];
+    const input = review[`${key}_in`];
+    const output = review[`${key}_out`];
+    if (state === "present" ? !input || !output || !/^\d{2}:\d{2}$/.test(input) || !/^\d{2}:\d{2}$/.test(output) || output <= input
+      : !!input || !!output) throw new Error("ATTENDANCE_INVALID_REVIEW_TIMES");
+  }
+  const tenant = await verifyEmployee(employeeId);
+  const { data, error } = await supabase.from("hr_attendance_day_reviews").insert({ tenant_id: tenant, employee_id: employeeId,
+    attendance_date: date, ...review, reason: reason.trim() }).select("*").single();
+  if (error || !data) throw error || new Error("ATTENDANCE_REVIEW_NOT_SAVED");
+  return data;
 }

@@ -3829,6 +3829,62 @@ export type Database = {
           },
         ]
       }
+      hr_attendance_day_reviews: {
+        Row: {
+          afternoon_in: string | null
+          afternoon_out: string | null
+          afternoon_status: string
+          attendance_date: string
+          created_at: string
+          created_by: string
+          employee_id: string
+          id: string
+          morning_in: string | null
+          morning_out: string | null
+          morning_status: string
+          reason: string
+          tenant_id: string
+        }
+        Insert: {
+          afternoon_in?: string | null
+          afternoon_out?: string | null
+          afternoon_status: string
+          attendance_date: string
+          created_at?: string
+          created_by?: string
+          employee_id: string
+          id?: string
+          morning_in?: string | null
+          morning_out?: string | null
+          morning_status: string
+          reason: string
+          tenant_id: string
+        }
+        Update: {
+          afternoon_in?: string | null
+          afternoon_out?: string | null
+          afternoon_status?: string
+          attendance_date?: string
+          created_at?: string
+          created_by?: string
+          employee_id?: string
+          id?: string
+          morning_in?: string | null
+          morning_out?: string | null
+          morning_status?: string
+          reason?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_attendance_day_reviews_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hr_attendance_device_people: {
         Row: {
           created_at: string
@@ -3860,6 +3916,53 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "hr_attendance_device_people_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_attendance_month_reviews: {
+        Row: {
+          coverage_end: string
+          coverage_start: string
+          created_at: string
+          created_by: string
+          employee_id: string
+          grace_minutes: number
+          id: string
+          month: string
+          reason: string
+          tenant_id: string
+        }
+        Insert: {
+          coverage_end: string
+          coverage_start: string
+          created_at?: string
+          created_by?: string
+          employee_id: string
+          grace_minutes?: number
+          id?: string
+          month: string
+          reason: string
+          tenant_id: string
+        }
+        Update: {
+          coverage_end?: string
+          coverage_start?: string
+          created_at?: string
+          created_by?: string
+          employee_id?: string
+          grace_minutes?: number
+          id?: string
+          month?: string
+          reason?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_attendance_month_reviews_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"

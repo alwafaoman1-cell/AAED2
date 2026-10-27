@@ -1,6 +1,7 @@
 /** SmartPSS exports local wall-clock time. Oman has a fixed UTC+04:00 offset. */
 export const WORKSHOP_TIME_ZONE = "Asia/Muscat";
 export const WORKSHOP_SHIFT = { morningStart: 8 * 60, morningEnd: 13 * 60, afternoonStart: 16 * 60, afternoonEnd: 21 * 60 } as const;
+export const WORKSHOP_BREAK = { start: WORKSHOP_SHIFT.morningEnd, end: WORKSHOP_SHIFT.afternoonStart } as const;
 
 export interface DevicePunch {
   personId: string;
@@ -66,9 +67,27 @@ const minutes = (stamp: string) => Number(stamp.slice(11, 13)) * 60 + Number(sta
 const overlap = (start: number, end: number, windowStart: number, windowEnd: number) =>
   Math.max(0, Math.min(end, windowEnd) - Math.max(start, windowStart));
 
+export type PeriodStatus = "present" | "absent" | "incomplete" | "excused" | "pending" | "rest";
+export interface AttendancePeriod {
+  status: PeriodStatus;
+  checkIn: string | null;
+  checkOut: string | null;
+  lateMinutes: number;
+  workedMinutes: number;
+  shortfallMinutes: number;
+}
+export interface AttendanceDayReview {
+  morning_status: Exclude<PeriodStatus, "pending" | "rest">;
+  afternoon_status: Exclude<PeriodStatus, "pending" | "rest">;
+  morning_in: string | null;
+  morning_out: string | null;
+  afternoon_in: string | null;
+  afternoon_out: string | null;
+}
+
 export interface AttendanceDay {
   date: string;
-  firstPunch: string;
+  firstPunch: string | null;
   lastPunch: string | null;
   checkout: string | null;
   checkoutEstimated: boolean;
@@ -78,48 +97,79 @@ export interface AttendanceDay {
   lateMinutes: number;
   shortfallMinutes: number;
   punchCount: number;
+  morning: AttendancePeriod;
+  afternoon: AttendancePeriod;
+  breakOut: string | null;
+  breakIn: string | null;
+  reviewed: boolean;
 }
 
-/** A device event is never altered. 21:00 is a display-only estimate, not a biometric event. */
-export function deriveAttendanceDay(punches: DevicePunch[], date: string, now = new Date()): AttendanceDay | null {
+function localToday(now: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: WORKSHOP_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  return { date: `${part("year")}-${part("month")}-${part("day")}`, minute: Number(part("hour")) * 60 + Number(part("minute")) };
+}
+
+export function isCompletedAttendanceDate(date: string, now = new Date()): boolean {
+  const today = localToday(now);
+  return date < today.date || (date === today.date && today.minute >= WORKSHOP_SHIFT.afternoonEnd);
+}
+
+const stampFor = (date: string, clock: string | null) => clock ? `${date}T${clock.slice(0, 5)}:00+04:00` : null;
+const statusFor = (hasEvidence: boolean, complete: boolean, ended: boolean, rest: boolean, covered: boolean): PeriodStatus =>
+  rest ? "rest" : !hasEvidence ? !ended ? "pending" : covered ? "absent" : "incomplete" : complete ? "present" : "incomplete";
+
+function period(status: PeriodStatus, checkIn: string | null, checkOut: string | null, start: number, end: number, graceMinutes: number): AttendancePeriod {
+  const inMinute = checkIn ? minutes(checkIn) : null;
+  const outMinute = checkOut ? minutes(checkOut) : null;
+  const complete = status === "present" && inMinute !== null && outMinute !== null && outMinute > inMinute;
+  const workedMinutes = complete ? overlap(inMinute, outMinute, start, end) : 0;
+  const startDelay = inMinute === null ? 0 : Math.max(0, Math.min(inMinute, end) - start);
+  const lateMinutes = status === "present" || status === "incomplete"
+    ? Math.max(0, startDelay - graceMinutes) : 0;
+  return { status, checkIn, checkOut, workedMinutes, lateMinutes,
+    shortfallMinutes: status === "absent" ? end - start
+      : complete ? Math.max(0, end - start - workedMinutes - Math.min(graceMinutes, startDelay)) : 0 };
+}
+
+/** Raw device punches remain immutable; a reviewed correction is a separate audit record. */
+export function deriveAttendanceDay(punches: DevicePunch[], date: string, now = new Date(), graceMinutes = 0, review?: AttendanceDayReview, covered = false): AttendanceDay | null {
   const dayPunches = punches.filter((row) => row.occurredAt.slice(0, 10) === date)
     .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
-  if (!dayPunches.length) return null;
-  const first = dayPunches[0];
-  const last = dayPunches[dayPunches.length - 1];
-  const nowLocal = new Intl.DateTimeFormat("en-CA", { timeZone: WORKSHOP_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
-  const part = (type: string) => nowLocal.find((item) => item.type === type)?.value ?? "";
-  const currentDate = `${part("year")}-${part("month")}-${part("day")}`;
-  const currentMinute = Number(part("hour")) * 60 + Number(part("minute"));
-  const ended = date < currentDate || (date === currentDate && currentMinute >= WORKSHOP_SHIFT.afternoonEnd);
+  if (!dayPunches.length && !review && !covered) return null;
+  const ended = isCompletedAttendanceDate(date, now);
   const restDay = new Date(`${date}T00:00:00Z`).getUTCDay() === 5;
-
-  const explicitCheckout = [...dayPunches].reverse().find((row) => row.eventCode === 4);
-  const reliableLast = dayPunches.length > 1 && minutes(last.occurredAt) >= 20 * 60 + 30;
-  const estimated = !restDay && !explicitCheckout && !reliableLast && ended && minutes(last.occurredAt) < WORKSHOP_SHIFT.afternoonEnd;
-  const checkout = explicitCheckout?.occurredAt ?? (estimated ? `${date}T21:00:00+04:00` : reliableLast ? last.occurredAt : null);
-  const firstMinute = minutes(first.occurredAt);
-  const endMinute = checkout ? minutes(checkout) : firstMinute;
-  const workedMinutes = checkout
-    ? overlap(firstMinute, endMinute, WORKSHOP_SHIFT.morningStart, WORKSHOP_SHIFT.morningEnd)
-      + overlap(firstMinute, endMinute, WORKSHOP_SHIFT.afternoonStart, WORKSHOP_SHIFT.afternoonEnd)
-    : 0;
-  const hasMorning = dayPunches.some((row) => minutes(row.occurredAt) < WORKSHOP_SHIFT.morningEnd);
-  const afternoonArrival = dayPunches.find((row) => row.eventCode === 3 && minutes(row.occurredAt) >= WORKSHOP_SHIFT.morningEnd);
-  const lateMinutes = restDay ? 0 : (hasMorning ? Math.max(0, Math.min(firstMinute, WORKSHOP_SHIFT.morningEnd) - WORKSHOP_SHIFT.morningStart) : 0)
-    + (afternoonArrival ? Math.max(0, Math.min(minutes(afternoonArrival.occurredAt), WORKSHOP_SHIFT.afternoonEnd) - WORKSHOP_SHIFT.afternoonStart) : 0);
+  // SmartPSS code 0 is generic: use the shift windows and require two distinct
+  // punches before calling a period complete. An evening punch never fills a missing break.
+  const morningRows = dayPunches.filter((row) => minutes(row.occurredAt) < 14 * 60 + 30);
+  const afternoonRows = dayPunches.filter((row) => minutes(row.occurredAt) >= 14 * 60 + 30);
+  const morningIn = morningRows.find((row) => row.eventCode !== 3 && row.eventCode !== 4 && minutes(row.occurredAt) < 11 * 60)?.occurredAt ?? null;
+  const morningOut = [...morningRows].reverse().find((row) =>
+    row.occurredAt !== morningIn && (minutes(row.occurredAt) >= 11 * 60 || row.eventCode === 3 || row.eventCode === 4))?.occurredAt ?? null;
+  const afternoonIn = afternoonRows.find((row) => row.eventCode !== 4 && minutes(row.occurredAt) < 19 * 60)?.occurredAt ?? null;
+  const afternoonOut = [...afternoonRows].reverse().find((row) =>
+    row.occurredAt !== afternoonIn && (minutes(row.occurredAt) >= 19 * 60 || row.eventCode === 4))?.occurredAt ?? null;
+  const morningStatus = review?.morning_status ?? statusFor(morningRows.length > 0, !!(morningIn && morningOut), ended, restDay, covered);
+  const afternoonStatus = review?.afternoon_status ?? statusFor(afternoonRows.length > 0, !!(afternoonIn && afternoonOut), ended, restDay, covered);
+  const morning = period(morningStatus, review ? stampFor(date, review.morning_in) : morningIn,
+    review ? stampFor(date, review.morning_out) : morningOut, WORKSHOP_SHIFT.morningStart, WORKSHOP_SHIFT.morningEnd, graceMinutes);
+  const afternoon = period(afternoonStatus, review ? stampFor(date, review.afternoon_in) : afternoonIn,
+    review ? stampFor(date, review.afternoon_out) : afternoonOut, WORKSHOP_SHIFT.afternoonStart, WORKSHOP_SHIFT.afternoonEnd, graceMinutes);
+  const estimated = !review && !restDay && ended && !!afternoon.checkIn && !afternoon.checkOut;
+  const checkout = afternoon.checkOut ?? (estimated ? `${date}T21:00:00+04:00` : null);
   const reviewReasons: string[] = [];
   if (restDay) reviewReasons.push("friday_rest_day_punch");
   if (estimated) reviewReasons.push("estimated_checkout");
-  if (!checkout) reviewReasons.push("open_day_or_missing_checkout");
-  if (!hasMorning && !restDay) reviewReasons.push("missing_morning");
-  if (dayPunches.length === 1) reviewReasons.push("single_punch");
-  if (firstMinute >= WORKSHOP_SHIFT.morningEnd && !estimated && !restDay) reviewReasons.push("ambiguous_first_punch");
-  if (checkout && endMinute < WORKSHOP_SHIFT.afternoonEnd && !restDay) reviewReasons.push("early_checkout");
+  if (!review && (morningStatus === "incomplete" || afternoonStatus === "incomplete")) reviewReasons.push("incomplete_period");
+  if (!review && (morningStatus === "absent" || afternoonStatus === "absent")) reviewReasons.push("absence_from_device_record");
+  if (!review && !dayPunches.length && covered) reviewReasons.push("no_punch_in_confirmed_coverage");
   return {
-    date, firstPunch: first.occurredAt, lastPunch: last.occurredAt, checkout,
+    date, firstPunch: dayPunches[0]?.occurredAt ?? null, lastPunch: dayPunches.at(-1)?.occurredAt ?? null, checkout,
     checkoutEstimated: estimated, needsReview: reviewReasons.length > 0, reviewReasons,
-    workedMinutes, lateMinutes, shortfallMinutes: restDay ? 0 : checkout ? Math.max(0, 600 - workedMinutes) : 0,
-    punchCount: dayPunches.length,
+    workedMinutes: morning.workedMinutes + afternoon.workedMinutes,
+    lateMinutes: morning.lateMinutes + afternoon.lateMinutes,
+    shortfallMinutes: morning.shortfallMinutes + afternoon.shortfallMinutes,
+    punchCount: dayPunches.length, morning, afternoon,
+    breakOut: morning.checkOut, breakIn: afternoon.checkIn, reviewed: !!review,
   };
 }

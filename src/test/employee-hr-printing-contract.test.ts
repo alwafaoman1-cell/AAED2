@@ -21,7 +21,7 @@ describe("employee HR historical payslip and printing contract", () => {
 
   it("prints a monthly payslip and attendance/absence report", () => {
     expect(page).toContain("printPayslip(employee, p, isAr)");
-    expect(attendancePage).toContain("printAttendanceMonth(employee, month, merged, isAr, unverifiedDates)");
+    expect(attendancePage).toContain("printAttendanceMonth(employee, month, [...printRows, ...manual], isAr, unverifiedDates)");
     expect(attendancePage).toContain("checkoutEstimated");
     expect(reports).toContain("Monthly Attendance & Absence Report");
     expect(reports).toContain("Monthly Payslip");
