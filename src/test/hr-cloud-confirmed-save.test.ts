@@ -12,7 +12,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { auth: { getUser: mocks.getUser, getSession: mocks.getSession }, from: mocks.from },
 }));
 
-type HrData = Record<string, Array<{ id: string; employeeNumber?: string }>>;
+type HrData = Record<string, Array<{ id: string; employeeNumber?: string; [key: string]: unknown }>>;
 const emptyHr = (): HrData => ({
   employees: [], advances: [], deductions: [], bonuses: [], leaves: [],
   attendance: [], payslips: [], documents: [], reviews: [],
@@ -27,6 +27,50 @@ beforeEach(() => {
 });
 
 describe("HR confirmed cloud writes", () => {
+  it("keeps attendance deductions outside payroll until a manager approves", async () => {
+    let row: { value: HrData; version: number } = { value: { ...emptyHr(), employees: [{ id: "employee-1", employeeNumber: "EMP-0014" }] }, version: 1 };
+    mocks.from.mockImplementation(() => ({
+      select: () => {
+        const query: any = { eq: () => query, maybeSingle: async () => ({ data: structuredClone(row), error: null }) };
+        return query;
+      },
+      update: (payload: { value: HrData }) => {
+        let expectedVersion = 0;
+        const query: any = {
+          eq: (column: string, value: number) => { if (column === "version") expectedVersion = value; return query; },
+          select: () => query,
+          maybeSingle: async () => {
+            if (expectedVersion !== row.version) return { data: null, error: null };
+            row = { value: payload.value, version: row.version + 1 };
+            return { data: { version: row.version }, error: null };
+          },
+        };
+        return query;
+      },
+    }));
+    const settings = await import("@/lib/cloudSettings");
+    settings.setCloudSettingsTenantScope("tenant-dev");
+    const { hrStore } = await import("@/lib/hrStore");
+    const proposed = await hrStore.proposeAttendanceDeduction("employee-1", "2026-10", 12.5, "Reviewed late arrival");
+    expect(hrStore.summary("employee-1", "2026-10")).toMatchObject({ monthDeductions: 0, proposedAttendanceDeductions: 12.5 });
+    await expect(hrStore.proposeAttendanceDeduction("employee-1", "2026-10", 10, "Duplicate pending"))
+      .rejects.toThrow("ATTENDANCE_SETTLEMENT_PENDING");
+    await hrStore.decideAttendanceDeduction(proposed.id, "rejected", "manager-1");
+    const revised = await hrStore.proposeAttendanceDeduction("employee-1", "2026-10", 10, "Reviewed revised amount");
+    expect(revised.id).not.toBe(proposed.id);
+    expect(hrStore.listAttendanceSettlements("employee-1", "2026-10")).toHaveLength(2);
+    expect(hrStore.listAttendanceSettlements("employee-1", "2026-10")[1]).toMatchObject({ id: proposed.id, approvalStatus: "rejected" });
+    expect(hrStore.summary("employee-1", "2026-10")).toMatchObject({ monthDeductions: 0, proposedAttendanceDeductions: 10 });
+    await hrStore.decideAttendanceDeduction(revised.id, "approved", "manager-1");
+    expect(hrStore.summary("employee-1", "2026-10")).toMatchObject({ monthDeductions: 10, proposedAttendanceDeductions: 0 });
+    await expect(hrStore.removeDeduction(proposed.id)).rejects.toThrow("ATTENDANCE_SETTLEMENT_IMMUTABLE");
+    const priorMonth = await hrStore.proposeAttendanceDeduction("employee-1", "2026-09", 3, "Late records reviewed later");
+    row.value.payslips.push({ id: "paid-slip", employeeId: "employee-1", month: "2026-09", paidAt: "2026-10-01" });
+    await expect(hrStore.decideAttendanceDeduction(priorMonth.id, "approved", "manager-1"))
+      .rejects.toThrow("ATTENDANCE_PAYSLIP_ALREADY_PAID");
+    expect(hrStore.summary("employee-1", "2026-09")).toMatchObject({ monthDeductions: 0, proposedAttendanceDeductions: 3 });
+  });
+
   it("keeps an employee out of the local list when the database rejects the save", async () => {
     mocks.from.mockImplementation(() => ({
       select: () => {

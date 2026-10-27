@@ -3829,6 +3829,103 @@ export type Database = {
           },
         ]
       }
+      hr_attendance_device_people: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          device_key: string
+          employee_id: string
+          id: string
+          person_id: string
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          device_key: string
+          employee_id: string
+          id?: string
+          person_id: string
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          device_key?: string
+          employee_id?: string
+          id?: string
+          person_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_attendance_device_people_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_attendance_punches: {
+        Row: {
+          device_key: string
+          employee_id: string
+          event_code: number
+          id: string
+          imported_at: string
+          imported_by: string | null
+          occurred_at: string
+          person_id: string
+          source: string
+          tenant_id: string
+        }
+        Insert: {
+          device_key: string
+          employee_id: string
+          event_code: number
+          id?: string
+          imported_at?: string
+          imported_by?: string | null
+          occurred_at: string
+          person_id: string
+          source: string
+          tenant_id: string
+        }
+        Update: {
+          device_key?: string
+          employee_id?: string
+          event_code?: number
+          id?: string
+          imported_at?: string
+          imported_by?: string | null
+          occurred_at?: string
+          person_id?: string
+          source?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_attendance_punches_mapping_fk"
+            columns: ["tenant_id", "device_key", "person_id", "employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_attendance_device_people"
+            referencedColumns: [
+              "tenant_id",
+              "device_key",
+              "person_id",
+              "employee_id",
+            ]
+          },
+          {
+            foreignKeyName: "hr_attendance_punches_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       import_export_operations: {
         Row: {
           created_at: string

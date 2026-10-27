@@ -43,6 +43,17 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "استيراد الحضور": "Import attendance",
+  "تحديث الحركات": "Refresh punches",
+  "حفظ ربط الموظفين": "Save employee mappings",
+  "استيراد الحركات دون تعديل الرواتب": "Import punches without changing payroll",
+  "طباعة كشف الشهر": "Print monthly attendance",
+  "تسجيل يدوي": "Manual entry",
+  "حذف السجل اليدوي": "Delete manual record",
+  "فشل حذف السجل": "Could not delete the record",
+  "اعتماد الخصم": "Approve deduction",
+  "اقتراح فقط": "Propose only",
+  "حذف الخصم": "Delete deduction",
   "إخفاء الإشعار": "Hide notification",
   "جارٍ الرفع...": "Uploading...",
   "تُدار التصنيفات من صفحة واحدة مرتبطة بالسحابة، مع الاسم العربي والإنجليزي والشجرة المحاسبية. لا تُنشأ نسخة ثانية هنا.": "Categories are managed on one cloud-backed page with Arabic and English names and the accounting hierarchy. No second copy is created here.",

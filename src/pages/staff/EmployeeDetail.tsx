@@ -19,12 +19,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { toast } from "sonner";
 import {
   hrStore, type Employee, type Advance, type Deduction, type Bonus, type Leave,
-  type Attendance, type Payslip, type EmployeeDocument, type PerformanceReview,
+  type Payslip, type EmployeeDocument, type PerformanceReview,
   HR_DEPARTMENTS_AR, HR_POSITIONS_AR,
 } from "@/lib/hrStore";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
-import { printAttendanceMonth, printEmployeeHrExtract, printPayslip, type EmployeeHrReportSection } from "@/lib/employeeHrReports";
+import { printEmployeeHrExtract, printPayslip, type EmployeeHrReportSection } from "@/lib/employeeHrReports";
 import { downloadHrDocument, removeNewHrDocument, uploadHrDocument } from "@/lib/hrDocumentStorage";
+import EmployeeAttendanceTab from "./EmployeeAttendanceTab";
 
 function runHrPrint(task: Promise<void>, isAr: boolean) {
   void task.catch((error) => toast.error((error as Error)?.message || (isAr ? "تعذرت طباعة المستخرج" : "Failed to print extract")));
@@ -396,7 +397,7 @@ export default function EmployeeDetail() {
 
         {/* ATTENDANCE */}
         <TabsContent value="attendance" className="mt-4">
-          <AttendanceTab employeeId={employee.id} isAr={isAr} />
+          <EmployeeAttendanceTab employeeId={employee.id} isAr={isAr} />
         </TabsContent>
 
         {/* DOCUMENTS */}
@@ -544,10 +545,10 @@ function DeductionsBonusesTab({ employeeId, isAr }: { employeeId: string; isAr: 
             {deductions.length === 0 && <div className="text-center py-8 text-muted-foreground text-sm">{isAr ? "لا توجد خصومات" : "No deductions"}</div>}
             {deductions.map((d) => (
               <div key={d.id} className="p-3 flex items-center justify-between">
-                <div><div className="font-medium">{d.reason}</div><div className="text-xs text-muted-foreground">{d.date} — {d.type}</div></div>
+                <div><div className="font-medium">{d.reason}</div><div className="text-xs text-muted-foreground">{d.date} — {d.type}{d.source === "attendance" ? ` — ${d.approvalStatus === "approved" ? (isAr ? "معتمد" : "Approved") : d.approvalStatus === "pending" ? (isAr ? "مقترح لا يُخصم" : "Proposed, not deducted") : (isAr ? "مرفوض" : "Rejected")}` : ""}</div></div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono font-bold text-destructive">-{d.amount.toFixed(3)}</span>
-                  <button onClick={() => { void confirmHrWrite(hrStore.removeDeduction(d.id), isAr ? "تم الحذف" : "Deleted", isAr); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
+                  {d.source !== "attendance" && <button aria-label={isAr ? "حذف الخصم" : "Delete deduction"} onClick={() => { void confirmHrWrite(hrStore.removeDeduction(d.id), isAr ? "تم الحذف" : "Deleted", isAr); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>}
                 </div>
               </div>
             ))}
@@ -624,22 +625,32 @@ function DeductionsBonusesTab({ employeeId, isAr }: { employeeId: string; isAr: 
 function PayslipsTab({ employee, isAr }: { employee: Employee; isAr: boolean }) {
   const slips = hrStore.listPayslips(employee.id);
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [paidAt, setPaidAt] = useState("");
+  const [paidAmount, setPaidAmount] = useState("");
   const selectedSlip = slips.find((slip) => slip.month === month);
   useEffect(() => {
-    if (selectedSlip?.paidAt) setPaidAt(selectedSlip.paidAt.slice(0, 10));
-  }, [selectedSlip?.id, selectedSlip?.paidAt]);
+    setPaidAt(selectedSlip?.paidAt?.slice(0, 10) || "");
+    setPaidAmount(selectedSlip?.paidAmount === undefined ? "" : String(selectedSlip.paidAmount));
+  }, [selectedSlip?.id, selectedSlip?.paidAt, selectedSlip?.paidAmount]);
   async function generate() {
     if (!month) { toast.error(isAr ? "اختر شهر الراتب" : "Select salary month"); return; }
     const allowances = (employee.housingAllowance || 0) + (employee.transportAllowance || 0) + (employee.otherAllowances || 0);
     const summary = hrStore.summary(employee.id, month);
-    const net = (employee.baseSalary || 0) + allowances + summary.monthBonuses - summary.monthDeductions - summary.advanceMonthlyRepay;
+    const net = Math.round(((employee.baseSalary || 0) + allowances + summary.monthBonuses - summary.monthDeductions - summary.advanceMonthlyRepay) * 1000) / 1000;
+    const enteredPaid = paidAmount.trim() === "" ? undefined : Number(paidAmount);
+    const confirmedPaid = enteredPaid === undefined ? undefined : Math.round(enteredPaid * 1000) / 1000;
+    if (confirmedPaid !== undefined && (!Number.isFinite(confirmedPaid) || confirmedPaid < 0 || confirmedPaid > Math.max(0, net))) {
+      toast.error(isAr ? "المبلغ المصروف يجب أن يكون بين صفر وصافي الراتب" : "Paid amount must be between zero and net salary");
+      return;
+    }
+    if (confirmedPaid && !paidAt) { toast.error(isAr ? "حدد تاريخ الصرف الفعلي" : "Set actual payment date"); return; }
     const saved = await confirmHrWrite(hrStore.savePayslip({
       id: selectedSlip?.id || hrStore.uid(), employeeId: employee.id, month,
       baseSalary: employee.baseSalary || 0,
       allowances, bonuses: summary.monthBonuses, overtimeAmount: 0,
       deductions: summary.monthDeductions, advanceDeduction: summary.advanceMonthlyRepay,
-      netSalary: net, paidAt: paidAt || undefined,
+      netSalary: net, paidAmount: confirmedPaid,
+      paidAt: confirmedPaid === undefined ? (selectedSlip ? paidAt || undefined : undefined) : confirmedPaid > 0 ? paidAt : undefined,
       paymentMethod: selectedSlip?.paymentMethod, notes: selectedSlip?.notes,
       createdAt: selectedSlip?.createdAt || hrStore.nowIso(),
     }), selectedSlip ? (isAr ? "تم تحديث كشف الراتب وتاريخ الصرف" : "Payslip and payment date updated") : (isAr ? "تم إنشاء كشف الراتب" : "Payslip created"), isAr);
@@ -648,21 +659,26 @@ function PayslipsTab({ employee, isAr }: { employee: Employee; isAr: boolean }) 
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-3 rounded-lg border p-3 md:flex-row md:items-end md:justify-between">
-        <div className="text-sm text-muted-foreground">{isAr ? "كشوف الرواتب الشهرية" : "Monthly payslips"}</div>
-        <div className="grid gap-2 sm:grid-cols-[170px_170px_auto]">
-          <div><Label>{isAr ? "شهر الراتب" : "Salary month"}</Label><Input type="month" value={month} onChange={(e) => { const next = e.target.value; setMonth(next); const existing = slips.find((slip) => slip.month === next); setPaidAt(existing?.paidAt?.slice(0, 10) || `${next}-01`); }} /></div>
-          <div><Label>{isAr ? "تاريخ الصرف" : "Payment date"}</Label><Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></div>
+        <div className="text-sm text-muted-foreground">{isAr ? "كشوف الرواتب الشهرية — التسويات المقترحة لا تدخل الحساب حتى اعتماد المدير" : "Monthly payslips — proposed attendance deductions are excluded until approved"}</div>
+        <div className="grid gap-2 sm:grid-cols-[140px_140px_140px_auto]">
+          <div><Label>{isAr ? "شهر الراتب" : "Salary month"}</Label><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></div>
+          <div><Label>{isAr ? "المدفوع فعليًا" : "Actually paid"}</Label><Input type="number" min="0" step="0.001" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} /></div>
+          <div><Label>{isAr ? "تاريخ الصرف الفعلي" : "Actual payment date"}</Label><Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} /></div>
           <Button size="sm" onClick={generate} className="gap-2 self-end"><Plus className="h-3 w-3" /> {selectedSlip ? (isAr ? "تحديث الكشف" : "Update payslip") : (isAr ? "إنشاء كشف" : "Create payslip")}</Button>
         </div>
       </div>
+      {hrStore.summary(employee.id, month).proposedAttendanceDeductions > 0 && <Card className="p-3 text-sm text-warning">{isAr ? "خصم حضور مقترح غير محتسب" : "Unapproved attendance deduction excluded"}: {hrStore.summary(employee.id, month).proposedAttendanceDeductions.toFixed(3)} {isAr ? "ر.ع" : "OMR"}</Card>}
       <Card className="divide-y">
         {slips.length === 0 && <div className="text-center py-8 text-muted-foreground text-sm">{isAr ? "لا توجد كشوف" : "No payslips"}</div>}
         {slips.map((p) => (
           <div key={p.id} className="p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold">{p.month}</div>
-              <div className="flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">{isAr ? "صرف:" : "Paid:"} {p.paidAt?.slice(0, 10) || "—"}</span><Button size="sm" variant="outline" onClick={() => { setMonth(p.month); setPaidAt(p.paidAt?.slice(0, 10) || `${p.month}-01`); }}><Pencil className="h-3 w-3" />{isAr ? "تعديل" : "Edit"}</Button><Button size="sm" variant="outline" onClick={() => runHrPrint(printPayslip(employee, p, isAr), isAr)}><Printer className="h-3 w-3" />{isAr ? "طباعة" : "Print"}</Button><span className="font-mono font-bold text-lg">{p.netSalary.toFixed(3)} ر.ع</span></div>
+              <div className="flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">{isAr ? "صرف:" : "Paid:"} {p.paidAt?.slice(0, 10) || "—"}</span><Button size="sm" variant="outline" onClick={() => { setMonth(p.month); setPaidAt(p.paidAt?.slice(0, 10) || ""); setPaidAmount(p.paidAmount === undefined ? "" : String(p.paidAmount)); }}><Pencil className="h-3 w-3" />{isAr ? "تعديل" : "Edit"}</Button><Button size="sm" variant="outline" onClick={() => runHrPrint(printPayslip(employee, p, isAr), isAr)}><Printer className="h-3 w-3" />{isAr ? "طباعة" : "Print"}</Button><span className="font-mono font-bold text-lg">{p.netSalary.toFixed(3)} ر.ع</span></div>
             </div>
+            <div className="mb-2 text-sm">{p.paidAmount === undefined && p.paidAt
+              ? (isAr ? "صرف تاريخي: قيمة المدفوع غير موثقة؛ المتبقي يحتاج مراجعة" : "Legacy payment date: paid amount unverified; balance needs review")
+              : `${isAr ? "المدفوع" : "Paid"}: ${(p.paidAmount || 0).toFixed(3)} · ${isAr ? "المتبقي" : "Remaining"}: ${Math.max(0, p.netSalary - (p.paidAmount || 0)).toFixed(3)} ${isAr ? "ر.ع" : "OMR"}`}</div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
               <div className="p-2 bg-muted/30 rounded"><div className="text-muted-foreground">{isAr ? "أساسي" : "Base"}</div><div className="font-mono">{p.baseSalary.toFixed(3)}</div></div>
               <div className="p-2 bg-muted/30 rounded"><div className="text-muted-foreground">{isAr ? "بدلات" : "Allowances"}</div><div className="font-mono">{p.allowances.toFixed(3)}</div></div>
@@ -764,90 +780,6 @@ function LeaveStatusPill({ status, isAr }: { status: string; isAr: boolean }) {
   return <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${x.cls}`}>{isAr ? x.ar : x.en}</span>;
 }
 
-/* ====================== ATTENDANCE ====================== */
-function AttendanceTab({ employeeId, isAr }: { employeeId: string; isAr: boolean }) {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const records = hrStore.listAttendance(employeeId, month);
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<Attendance>(() => emptyAttendance(employeeId));
-  async function save() {
-    if (await confirmHrWrite(hrStore.saveAttendance(form), isAr ? "تم" : "Saved", isAr)) setOpen(false);
-  }
-  const totals = {
-    present: records.filter((r) => r.status === "present").length,
-    absent: records.filter((r) => r.status === "absent").length,
-    late: records.filter((r) => r.status === "late").length,
-  };
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-44" />
-        <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => { const employee = hrStore.getEmployee(employeeId); if (employee) runHrPrint(printAttendanceMonth(employee, month, records, isAr), isAr); }}><Printer className="h-3 w-3" />{isAr ? "طباعة التقرير الشهري" : "Print monthly report"}</Button><Button size="sm" onClick={() => { setForm(emptyAttendance(employeeId)); setOpen(true); }} className="gap-2"><Plus className="h-3 w-3" /> {isAr ? "تسجيل" : "Add"}</Button></div>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <Card className="p-3 text-center"><div className="text-xs text-muted-foreground">{isAr ? "حضور" : "Present"}</div><div className="text-xl font-bold text-success">{totals.present}</div></Card>
-        <Card className="p-3 text-center"><div className="text-xs text-muted-foreground">{isAr ? "تأخير" : "Late"}</div><div className="text-xl font-bold text-warning">{totals.late}</div></Card>
-        <Card className="p-3 text-center"><div className="text-xs text-muted-foreground">{isAr ? "غياب" : "Absent"}</div><div className="text-xl font-bold text-destructive">{totals.absent}</div></Card>
-      </div>
-      <Card className="divide-y">
-        {records.length === 0 && <div className="text-center py-8 text-muted-foreground text-sm">{isAr ? "لا توجد سجلات" : "No records"}</div>}
-        {records.map((r) => (
-          <div key={r.id} className="p-3 flex items-center justify-between">
-            <div>
-              <div className="font-medium">{r.date}</div>
-              <div className="text-xs text-muted-foreground">{r.checkIn || "—"} → {r.checkOut || "—"} {r.hours ? `(${r.hours}h)` : ""}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <AttStatusPill status={r.status} isAr={isAr} />
-              <button onClick={() => { void confirmHrWrite(hrStore.removeAttendance(r.id), isAr ? "تم الحذف" : "Deleted", isAr); }} className="text-destructive p-1.5 hover:bg-destructive/10 rounded"><Trash2 className="h-4 w-4" /></button>
-            </div>
-          </div>
-        ))}
-      </Card>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{isAr ? "تسجيل حضور" : "Add attendance"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>{isAr ? "التاريخ" : "Date"}</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
-            <div className="grid grid-cols-2 gap-2">
-              <div><Label>{isAr ? "حضور" : "Check-in"}</Label><Input type="time" value={form.checkIn || ""} onChange={(e) => setForm({ ...form, checkIn: e.target.value })} /></div>
-              <div><Label>{isAr ? "انصراف" : "Check-out"}</Label><Input type="time" value={form.checkOut || ""} onChange={(e) => setForm({ ...form, checkOut: e.target.value })} /></div>
-            </div>
-            <div><Label>{isAr ? "ساعات" : "Hours"}</Label><Input type="number" step="0.1" value={form.hours || 0} onChange={(e) => setForm({ ...form, hours: Number(e.target.value) })} /></div>
-            <div><Label>{isAr ? "الحالة" : "Status"}</Label>
-              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as any })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="present">{isAr ? "حضور" : "Present"}</SelectItem>
-                  <SelectItem value="late">{isAr ? "تأخير" : "Late"}</SelectItem>
-                  <SelectItem value="absent">{isAr ? "غياب" : "Absent"}</SelectItem>
-                  <SelectItem value="leave">{isAr ? "إجازة" : "Leave"}</SelectItem>
-                  <SelectItem value="holiday">{isAr ? "عطلة" : "Holiday"}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>{isAr ? "إلغاء" : "Cancel"}</Button><Button onClick={save}>{isAr ? "حفظ" : "Save"}</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-function emptyAttendance(employeeId: string): Attendance {
-  return { id: hrStore.uid(), employeeId, date: new Date().toISOString().slice(0, 10), status: "present", createdAt: hrStore.nowIso() };
-}
-function AttStatusPill({ status, isAr }: { status: string; isAr: boolean }) {
-  const m: Record<string, { ar: string; en: string; cls: string }> = {
-    present: { ar: "حضور", en: "Present", cls: "bg-success/15 text-success" },
-    late:    { ar: "تأخير", en: "Late",   cls: "bg-warning/15 text-warning" },
-    absent:  { ar: "غياب", en: "Absent",  cls: "bg-destructive/15 text-destructive" },
-    leave:   { ar: "إجازة", en: "Leave",  cls: "bg-info/15 text-info" },
-    holiday: { ar: "عطلة", en: "Holiday", cls: "bg-muted text-muted-foreground" },
-  };
-  const x = m[status] || m.present;
-  return <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${x.cls}`}>{isAr ? x.ar : x.en}</span>;
-}
 
 /* ====================== DOCUMENTS ====================== */
 function DocumentsTab({ employeeId, isAr }: { employeeId: string; isAr: boolean }) {

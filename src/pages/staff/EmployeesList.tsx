@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Plus, Search, Users, UserCheck, UserX, Wallet, BadgeDollarSign } from "lucide-react";
+import { Plus, Search, Users, UserCheck, UserX, Wallet, BadgeDollarSign, ScanFace } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { hrStore, type Employee } from "@/lib/hrStore";
 import StatCard from "@/components/StatCard";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
+import AttendanceImportPanel from "./AttendanceImportPanel";
 
 export default function EmployeesList() {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ export default function EmployeesList() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [creating, setCreating] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const creatingRef = useRef(false);
 
   useEffect(() => {
@@ -81,10 +83,17 @@ export default function EmployeesList() {
           <h1 className="text-2xl font-bold">{isAr ? "الفنيون والموظفون" : "Staff & Technicians"}</h1>
           <p className="text-sm text-muted-foreground">{isAr ? "نظام موارد بشرية متكامل" : "Integrated HR system"}</p>
         </div>
-        <Button onClick={newEmployee} disabled={creating || loadState !== "ready"} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
-          <Plus className="h-4 w-4" /> {creating ? (isAr ? "جارٍ الحفظ…" : "Saving…") : (isAr ? "موظف جديد" : "New employee")}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={loadState !== "ready"} onClick={() => setShowImport((value) => !value)} className="gap-2">
+            <ScanFace className="h-4 w-4" /> {isAr ? "استيراد الحضور" : "Import attendance"}
+          </Button>
+          <Button onClick={newEmployee} disabled={creating || loadState !== "ready"} className="gap-2 bg-success hover:bg-success/90 text-success-foreground">
+            <Plus className="h-4 w-4" /> {creating ? (isAr ? "جارٍ الحفظ…" : "Saving…") : (isAr ? "موظف جديد" : "New employee")}
+          </Button>
+        </div>
       </div>
+
+      {showImport && loadState === "ready" && <AttendanceImportPanel employees={employees} isAr={isAr} />}
 
       {loadState === "ready" && <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard title={isAr ? "إجمالي الموظفين" : "Total"} value={stats.total} icon={Users} variant="info" />

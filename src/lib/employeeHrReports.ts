@@ -135,6 +135,8 @@ export async function printPayslip(employee: Employee, payslip: Payslip, isAr: b
     { section: payslip.month, field: isAr ? "المكافآت والإضافي" : "Bonuses & Overtime", value: money(Number(payslip.bonuses || 0) + Number(payslip.overtimeAmount || 0)), details: "" },
     { section: payslip.month, field: isAr ? "الخصومات والسلف" : "Deductions & Advances", value: money(Number(payslip.deductions || 0) + Number(payslip.advanceDeduction || 0)), details: "" },
     { section: payslip.month, field: isAr ? "صافي الراتب" : "Net Salary", value: money(payslip.netSalary), details: payslip.notes || "" },
+    { section: payslip.month, field: isAr ? "المدفوع المثبت" : "Verified paid amount", value: payslip.paidAmount === undefined ? "—" : money(payslip.paidAmount), details: payslip.paidAmount === undefined && payslip.paidAt ? (isAr ? "تاريخ صرف تاريخي، المبلغ غير موثق" : "Legacy payment date; amount unverified") : "" },
+    { section: payslip.month, field: isAr ? "المتبقي المثبت" : "Verified balance", value: payslip.paidAmount === undefined && payslip.paidAt ? "—" : money(Math.max(0, payslip.netSalary - (payslip.paidAmount || 0))), details: "" },
   ];
   await printReportRows({
     fileName: `Payslip_${employee.employeeNumber}_${payslip.month}.pdf`, sheetName: "Payslip",
@@ -145,14 +147,18 @@ export async function printPayslip(employee: Employee, payslip: Payslip, isAr: b
   });
 }
 
-export async function printAttendanceMonth(employee: Employee, month: string, records: Attendance[], isAr: boolean) {
+export async function printAttendanceMonth(employee: Employee, month: string, records: Attendance[], isAr: boolean, unverifiedDates: string[] = []) {
   const totals = {
     present: records.filter((item) => item.status === "present").length,
     absent: records.filter((item) => item.status === "absent").length,
     late: records.filter((item) => item.status === "late").length,
     leave: records.filter((item) => item.status === "leave").length,
   };
-  const rows = records.length ? records.map((item) => ({ ...item, status: attendanceStatus(item.status, isAr), checkIn: item.checkIn || "—", checkOut: item.checkOut || "—", hours: Number(item.hours || 0), overtimeHours: Number(item.overtimeHours || 0), notes: item.notes || "" })) : [{ date: "—", status: isAr ? "لا توجد سجلات" : "No records", checkIn: "—", checkOut: "—", hours: 0, overtimeHours: 0, notes: "" }];
+  const rows = [
+    ...records.map((item) => ({ ...item, status: attendanceStatus(item.status, isAr), checkIn: item.checkIn || "—", checkOut: item.checkOut || "—", hours: Number(item.hours || 0), overtimeHours: Number(item.overtimeHours || 0), notes: item.notes || "" })),
+    ...unverifiedDates.map((date) => ({ date, status: isAr ? "غير مؤكد" : "Unverified", checkIn: "—", checkOut: "—", hours: 0, overtimeHours: 0, notes: isAr ? "لا توجد حركة؛ ليس غيابًا مثبتًا" : "No punch; not a confirmed absence" })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+  if (!rows.length) rows.push({ date: "—", status: isAr ? "لا توجد سجلات" : "No records", checkIn: "—", checkOut: "—", hours: 0, overtimeHours: 0, notes: "" });
   await printReportRows({
     fileName: `Attendance_${employee.employeeNumber}_${month}.pdf`, sheetName: "Attendance",
     title: isAr ? "تقرير الحضور والغياب الشهري" : "Monthly Attendance & Absence Report",

@@ -88,6 +88,11 @@ export interface Deduction {
   amount: number;
   reason: string;                      // غياب / تأخير / مخالفة / سلفة
   type: "absence" | "late" | "violation" | "advance_repayment" | "other";
+  source?: "attendance";
+  sourceMonth?: string;
+  approvalStatus?: "pending" | "approved" | "rejected";
+  approvedAt?: string;
+  approvedBy?: string;
   notes?: string;
   createdAt: string;
 }
@@ -142,6 +147,7 @@ export interface Payslip {
   advanceDeduction: number;
   socialInsurance?: number;
   netSalary: number;
+  paidAmount?: number;                 // Optional: legacy paidAt alone is not proof of an amount.
   paidAt?: string;
   paymentMethod?: string;
   notes?: string;
@@ -335,7 +341,50 @@ export const hrStore = {
       .sort((a, b) => b.date.localeCompare(a.date));
   },
   saveDeduction(d: Deduction) { return saveInCollection("deductions", d); },
-  removeDeduction(id: string) { return removeFromCollection("deductions", id); },
+  async removeDeduction(id: string) {
+    await updateHr((db) => {
+      const row = db.deductions.find((item) => item.id === id);
+      if (!row) throw new Error("HR_RECORD_NOT_FOUND");
+      if (row.source === "attendance") throw new Error("ATTENDANCE_SETTLEMENT_IMMUTABLE");
+      return { ...db, deductions: db.deductions.filter((item) => item.id !== id) };
+    });
+  },
+  listAttendanceSettlements(employeeId: string, month?: string) {
+    return read().deductions.filter((row) => row.employeeId === employeeId && row.source === "attendance" && (!month || row.sourceMonth === month));
+  },
+  async proposeAttendanceDeduction(employeeId: string, month: string, amount: number, reason: string, type: "late" | "absence" | "other" = "late") {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !Number.isFinite(amount) || amount <= 0 || !reason.trim()) {
+      throw new Error("ATTENDANCE_INVALID_PROPOSAL");
+    }
+    const roundedAmount = Math.round(amount * 1000) / 1000;
+    if (roundedAmount <= 0) throw new Error("ATTENDANCE_INVALID_PROPOSAL");
+    const next = await updateHr((db) => {
+      if (!db.employees.some((row) => row.id === employeeId && !row.isDeleted)) throw new Error("HR_RECORD_NOT_FOUND");
+      const prior = db.deductions.find((row) => row.employeeId === employeeId && row.source === "attendance" && row.sourceMonth === month && row.approvalStatus !== "rejected");
+      if (prior?.approvalStatus === "approved") throw new Error("ATTENDANCE_SETTLEMENT_ALREADY_APPROVED");
+      if (prior) throw new Error("ATTENDANCE_SETTLEMENT_PENDING");
+      const proposal: Deduction = {
+        id: uid(), employeeId, date: `${month}-01`, amount: roundedAmount,
+        reason: reason.trim(), type, source: "attendance", sourceMonth: month,
+        approvalStatus: "pending", createdAt: nowIso(),
+      };
+      // Rejected decisions remain immutable evidence when a new proposal is submitted.
+      return { ...db, deductions: [proposal, ...db.deductions] };
+    });
+    return next.deductions.find((row) => row.employeeId === employeeId && row.source === "attendance" && row.sourceMonth === month && row.approvalStatus === "pending")!;
+  },
+  async decideAttendanceDeduction(id: string, decision: "approved" | "rejected", approvedBy: string) {
+    if (!approvedBy) throw new Error("ATTENDANCE_APPROVER_REQUIRED");
+    await updateHr((db) => {
+      const row = db.deductions.find((item) => item.id === id && item.source === "attendance");
+      if (!row || row.approvalStatus !== "pending") throw new Error("ATTENDANCE_PROPOSAL_NOT_PENDING");
+      if (decision === "approved" && db.payslips.some((slip) => slip.employeeId === row.employeeId && slip.month === row.sourceMonth && (slip.paidAt || (slip.paidAmount || 0) > 0))) {
+        throw new Error("ATTENDANCE_PAYSLIP_ALREADY_PAID");
+      }
+      return { ...db, deductions: db.deductions.map((item) => item.id === id
+        ? { ...item, approvalStatus: decision, approvedBy, approvedAt: nowIso() } : item) };
+    });
+  },
 
   // Bonuses
   listBonuses(employeeId?: string) {
@@ -422,12 +471,16 @@ export const hrStore = {
     const advMonthly = advs.filter((a) => a.status === "approved" || a.status === "paid")
       .reduce((s, a) => s + (a.monthlyDeduction || 0), 0);
     const totalRemainingAdv = advs.reduce((s, a) => s + (a.remainingAmount || 0), 0);
-    const monthDeductions = dedsM.reduce((s, d) => s + d.amount, 0);
+    const monthDeductions = dedsM.filter((d) => d.approvalStatus === undefined || d.approvalStatus === "approved")
+      .reduce((s, d) => s + d.amount, 0);
+    const proposedAttendanceDeductions = dedsM.filter((d) => d.source === "attendance" && d.approvalStatus === "pending")
+      .reduce((s, d) => s + d.amount, 0);
     const monthBonuses = bonM.reduce((s, b) => s + b.amount, 0);
     return {
       month,
       monthBonuses,
       monthDeductions,
+      proposedAttendanceDeductions,
       advanceMonthlyRepay: advMonthly,
       totalAdvancesOutstanding: totalRemainingAdv,
     };
