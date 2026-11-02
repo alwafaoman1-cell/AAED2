@@ -202,6 +202,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "shortcuts": "Shortcuts",
     "workOrders": "Work Orders",
     "vehicleEntry": "Vehicle Entry & Receipt",
     "adminNotifications": "Manager Notifications",

@@ -11,13 +11,7 @@ import { Loader2, LogIn, Wrench, Mail, RefreshCcw, ShieldAlert } from "lucide-re
 import { toast } from "sonner";
 import { getFunctionErrorMessage } from "@/lib/functionErrors";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
-
-function homeForRole(role?: string | null): string {
-  if (role === "supervisor") return "/supervisor";
-  if (role === "technician") return "/technician";
-  if (role === "accountant") return "/accountant";
-  return "/";
-}
+import { homeForRole } from "@/lib/homeRoute";
 
 function functionErrorCode(error: unknown, data?: any): string {
   return String(data?.code || data?.error || (error as any)?.code || (error as any)?.message || "").trim();

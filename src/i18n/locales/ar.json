@@ -202,6 +202,7 @@
   },
   "nav": {
     "dashboard": "لوحة التحكم",
+    "shortcuts": "الاختصارات",
     "workOrders": "أوامر العمل",
     "vehicleEntry": "دخول واستلام مركبة",
     "adminNotifications": "إشعارات المدير",

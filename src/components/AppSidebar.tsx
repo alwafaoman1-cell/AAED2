@@ -31,9 +31,10 @@ type MenuItem = {
 
 // مرتبة حسب الأولوية: يومي → دوري → مساعد → إعدادات
 const menuItems: MenuItem[] = [
-  { path: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
-  { path: "/work-orders", labelKey: "nav.workOrders", icon: ClipboardList },
   { path: "/vehicle-entry", labelKey: "nav.vehicleEntry", icon: Car },
+  { path: "/home", labelKey: "nav.shortcuts", icon: LayoutDashboard },
+  { path: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
+  { path: "/work-orders", labelKey: "nav.workOrders", icon: ClipboardList },
   { path: "/vehicles", labelKey: "nav.vehicles", icon: Car },
   { path: "/customers", labelKey: "nav.customers", icon: UserSquare },
   { path: "/messages", labelKey: "nav.messages", icon: Bell },

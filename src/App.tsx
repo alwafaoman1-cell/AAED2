@@ -18,12 +18,12 @@ import NotFound from "./pages/NotFound";
 import ReportsLegacyRedirect from "./components/reports/ReportsLegacyRedirect";
 
 import HomeShortcuts from "./pages/HomeShortcuts";
+import { homeForRole } from "@/lib/homeRoute";
 
-// Role-based home redirector: supervisors land on their mobile app, others see the shortcuts home.
+// Keep specialist apps as their landing pages; workshop staff open the visit center.
 function RoleHome() {
   const { profile } = useAuth();
-  if (profile?.role === "supervisor") return <Navigate to="/supervisor" replace />;
-  return <HomeShortcuts />;
+  return <Navigate to={homeForRole(profile?.role)} replace />;
 }
 
 function LegacyPortalRedirect({ param = "token" }: { param?: "id" | "token" | "plate" }) {
@@ -295,6 +295,7 @@ const App = () => (
               }
             >
               <Route path="/" element={<RoleHome />} />
+              <Route path="/home" element={<HomeShortcuts />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/apps" element={<AppsHub />} />
               <Route path="/work-orders" element={<WorkOrders />} />
