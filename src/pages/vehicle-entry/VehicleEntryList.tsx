@@ -182,7 +182,7 @@ export default function VehicleEntryList() {
     <div className="space-y-5" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">{t("vehicleEntry.title")}</h1>
+          <h1 className="text-2xl font-bold text-foreground">{t("vehicleVisit.title")}</h1>
           <p className="text-sm text-muted-foreground">{t("vehicleEntry.subtitle")}</p>
         </div>
         <div className="flex flex-wrap gap-2">

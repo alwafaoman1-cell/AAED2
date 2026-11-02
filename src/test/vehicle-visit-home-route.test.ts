@@ -21,7 +21,7 @@ describe("vehicle visit landing route", () => {
     expect(app).toContain('<Route path="/" element={<RoleHome />} />');
     expect(app).toContain('<Route path="/home" element={<HomeShortcuts />} />');
     expect(app).toContain('<Route path="/dashboard" element={<Dashboard />} />');
-    expect(sidebar).toContain('path: "/vehicle-entry", labelKey: "nav.vehicleEntry"');
+    expect(sidebar).toContain('path: "/vehicle-entry", labelKey: "vehicleVisit.title"');
     expect(sidebar).toContain('path: "/home", labelKey: "nav.shortcuts"');
     expect(sidebar).toContain('path: "/dashboard", labelKey: "nav.dashboard"');
   });
