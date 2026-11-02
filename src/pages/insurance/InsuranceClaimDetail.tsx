@@ -90,6 +90,7 @@ import { displayCustomerCode } from "@/lib/customerCode";
 import { upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
 import { markClean, markDirty } from "@/lib/unsavedWork";
 import { ensureVehicleEntryForClaim, getVehicleEntryByClaimId } from "@/lib/vehicleEntryService";
+import { VehicleVisitBadge } from "@/components/vehicles/VehicleVisitBadge";
 import { buildCancelledClaimVehicleHandoverHtml } from "@/lib/cancelledClaimVehicleHandover";
 import { cancelLatestFinalizedVehicleHandover } from "@/lib/vehicleDeliveryReceipt";
 import ReopenClaimDialog from "@/components/insurance/ReopenClaimDialog";
@@ -2783,6 +2784,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   إلغاء التعديلات
                 </Button>
               )}
+              <VehicleVisitBadge source="claim" id={id} />
               {vehicleEntryByClaimQuery.data ? (
                 <Button
                   variant="outline"

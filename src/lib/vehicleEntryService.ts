@@ -30,6 +30,18 @@ export const VEHICLE_ENTRY_STATUSES: VehicleEntryStatus[] = [
   "Cancelled",
 ];
 
+export function vehicleEntryStatusKey(status: string): string | null {
+  const keys: Record<VehicleEntryStatus, string> = {
+    Draft: "draft",
+    Received: "received",
+    Issued: "issued",
+    "Converted to Claim": "convertedToClaim",
+    "Converted to Work Order": "convertedToWorkOrder",
+    Cancelled: "cancelled",
+  };
+  return Object.prototype.hasOwnProperty.call(keys, status) ? keys[status as VehicleEntryStatus] : null;
+}
+
 export interface VehicleEntryFormState {
   id?: string;
   entry_number?: string;
@@ -45,6 +57,8 @@ export interface VehicleEntryFormState {
   arrival_date: string;
   arrival_time: string;
   vehicle_location: string;
+  // Form-only optimistic guard: a signed release must not be undone by a stale edit tab.
+  vehicle_location_before_edit?: string | null;
   vehicle_location_bay: string;
   arrival_method: string;
   received_by_name: string;
@@ -102,6 +116,7 @@ export interface VehicleEntryFormState {
     notes: string;
   };
   condition: {
+    visit_purpose?: VehicleEntryVisitPurpose;
     flags: string[];
     condition_description: string;
     incident_description: string;
@@ -143,10 +158,65 @@ export interface VehicleEntryDamageMark {
 }
 
 export interface VehicleEntryListFilters {
-  search?: string;
   status?: string;
   from?: string;
   to?: string;
+}
+
+export type VehicleEntryVisitPurpose = "workshop" | "inspection";
+export type VehicleEntryPresence = "in_workshop" | "with_customer" | "needs_review";
+
+export function getVehicleEntryVisitPurpose(row: any): VehicleEntryVisitPurpose | null {
+  const value = row?.vehicle_condition?.visit_purpose;
+  return value === "workshop" || value === "inspection" ? value : null;
+}
+
+/** A paper status is not proof of physical custody. Never silently place conflicting records in either tab. */
+export function getVehicleEntryPresence(row: any): VehicleEntryPresence {
+  const entryLocation = cleanText(row?.vehicle_location);
+  if ((row?.work_order_id && row?.converted_work_order_id && row.work_order_id !== row.converted_work_order_id) ||
+      (row?.insurance_claim_id && row?.converted_claim_id && row.insurance_claim_id !== row.converted_claim_id)) {
+    return "needs_review";
+  }
+  const order = row?.work_order || row?.converted_work_order;
+  const claim = row?.claim || row?.converted_claim;
+  if (((row?.work_order_id || row?.converted_work_order_id) && !order) ||
+      ((row?.insurance_claim_id || row?.converted_claim_id) && !claim)) return "needs_review";
+  const orderPresence = order?.vehicle_presence_status;
+  const claimPresence = claim?.vehicle_presence_status;
+  // Oman uses UTC+04:00. Compare actual instants so a past handover on the
+  // same date (or a UTC timestamp on the previous date) cannot close a new visit.
+  const arrivalDate = String(row?.arrival_date || "").slice(0, 10);
+  const arrivalTime = String(row?.arrival_time || "00:00").slice(0, 5);
+  const arrivalInstant = Date.parse(`${arrivalDate}T${arrivalTime}:00+04:00`);
+  const deliveredSinceArrival = [order?.vehicle_delivered_at, claim?.vehicle_delivered_at, claim?.delivered_at]
+    .filter(Boolean)
+    .some((date) => {
+      const deliveredInstant = Date.parse(String(date));
+      return Number.isFinite(deliveredInstant) && (!Number.isFinite(arrivalInstant) || deliveredInstant >= arrivalInstant);
+    });
+  const linkedInside = orderPresence === "in_workshop" || claimPresence === "in_workshop";
+  const linkedOutside = orderPresence === "with_customer" || claimPresence === "with_customer";
+
+  if (linkedInside && (linkedOutside || deliveredSinceArrival || entryLocation === "مع العميل")) return "needs_review";
+  if (deliveredSinceArrival || entryLocation === "مع العميل") return "with_customer";
+  if (entryLocation === "داخل الورشة" && !linkedOutside) return "in_workshop";
+  return "needs_review";
+}
+
+export function vehicleEntryMatchesSearch(row: any, search: string): boolean {
+  const q = cleanText(search).toLowerCase();
+  if (!q) return true;
+  const vehicle = row?.vehicle || row?.vehicle_snapshot || {};
+  const customer = row?.customer || row?.customer_snapshot || {};
+  return [
+    row?.entry_number, customer.name, customer.phone,
+    vehicle.plate_number, vehicle.plate_letters, vehicle.vin_number || vehicle.vin,
+    vehicle.brand || vehicle.make, vehicle.model,
+    row?.claim?.claim_number || row?.converted_claim?.claim_number,
+    row?.work_order?.order_number || row?.converted_work_order?.order_number,
+    row?.insurance_snapshot?.claim_number, row?.insurance_snapshot?.company_name,
+  ].filter(Boolean).join(" ").toLowerCase().includes(q);
 }
 
 export interface ClaimVehicleEntryInput {
@@ -225,6 +295,7 @@ export function defaultVehicleEntryForm(): VehicleEntryFormState {
       notes: "",
     },
     condition: {
+      visit_purpose: "workshop",
       flags: [],
       condition_description: "",
       incident_description: "",
@@ -335,16 +406,17 @@ export async function searchVehicleEntryVehicles(search: string) {
   return (data as any[]) || [];
 }
 
-export async function listVehicleEntries(filters: VehicleEntryListFilters = {}) {
+export async function listVehicleEntries(filters: VehicleEntryListFilters = {}, page = 0, pageSize = 100) {
   const tenantId = await getCurrentTenantId();
-  if (!tenantId) return [];
+  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   let query = supabase
     .from("vehicle_entries" as any)
-    .select("*,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,plate_letters,plate_country,vin_number,color),insurance_company:insurance_companies(id,name),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number)")
+    .select("*,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,plate_letters,plate_country,vin_number,vin,color),insurance_company:insurance_companies(id,name),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number,status,repair_stage,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,claim_number,status,repair_stage,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number,status,technician_name,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,order_number,status,technician_name,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(100);
+    .order("id", { ascending: false })
+    .range(page * pageSize, (page + 1) * pageSize - 1);
 
   if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
   if (filters.from) query = query.gte("arrival_date", filters.from);
@@ -352,24 +424,7 @@ export async function listVehicleEntries(filters: VehicleEntryListFilters = {}) 
 
   const { data, error } = await query;
   if (error) throw error;
-  const rows = ((data as any[]) || []);
-  const q = cleanText(filters.search).toLowerCase();
-  if (!q) return rows;
-  return rows.filter((row) => {
-    const vehicle = row.vehicle || {};
-    const haystack = [
-      row.entry_number,
-      row.customer?.name,
-      row.customer?.phone,
-      vehicle.plate_number,
-      vehicle.plate_letters,
-      vehicle.brand,
-      vehicle.model,
-      row.insurance_snapshot?.claim_number,
-      row.insurance_snapshot?.company_name,
-    ].filter(Boolean).join(" ").toLowerCase();
-    return haystack.includes(q);
-  });
+  return ((data as any[]) || []);
 }
 
 export async function getVehicleEntry(id: string) {
@@ -377,7 +432,7 @@ export async function getVehicleEntry(id: string) {
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   const { data, error } = await supabase
     .from("vehicle_entries" as any)
-    .select("*,customer:customers(*),vehicle:vehicles(*),insurance_company:insurance_companies(*),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number)")
+    .select("*,customer:customers(*),vehicle:vehicles(*),insurance_company:insurance_companies(*),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number,status,repair_stage,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,claim_number,status,repair_stage,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number,status,technician_name,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,order_number,status,technician_name,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
     .eq("tenant_id", tenantId)
     .eq("id", id)
     .is("deleted_at", null)
@@ -511,6 +566,7 @@ export function formFromVehicleEntry(row: any): VehicleEntryFormState {
     arrival_date: row.arrival_date || base.arrival_date,
     arrival_time: String(row.arrival_time || base.arrival_time).slice(0, 5),
     vehicle_location: row.vehicle_location || "",
+    vehicle_location_before_edit: row.vehicle_location ?? null,
     vehicle_location_bay: row.vehicle_location_bay || "",
     arrival_method: row.arrival_method || "",
     received_by_name: row.received_by_name || "",
@@ -531,7 +587,7 @@ export function formFromVehicleEntry(row: any): VehicleEntryFormState {
     },
     insurance: { ...base.insurance, ...insuranceSnapshot },
     delivered_by: { ...base.delivered_by, ...(row.delivered_by || {}) },
-    condition: { ...base.condition, ...(row.vehicle_condition || {}) },
+    condition: { ...base.condition, ...(row.vehicle_condition || {}), visit_purpose: getVehicleEntryVisitPurpose(row) || undefined },
     contents: { ...base.contents, ...(row.vehicle_contents || {}) },
     damage_marks: ((row.damage_marks as any[]) || []).map((mark) => ({
       id: mark.id,
@@ -595,7 +651,7 @@ function entryPayload(form: VehicleEntryFormState, tenantId: string, entryNumber
     status: form.status,
     arrival_date: form.arrival_date,
     arrival_time: form.arrival_time,
-    vehicle_location: cleanText(form.vehicle_location) || null,
+    vehicle_location: form.id ? cleanText(form.vehicle_location) || null : "داخل الورشة",
     vehicle_location_bay: cleanText(form.vehicle_location_bay) || null,
     arrival_method: cleanText(form.arrival_method) || null,
     received_by_name: cleanText(form.received_by_name) || null,
@@ -634,6 +690,22 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: str
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
 
+  const locationBeforeEdit = form.id
+    ? form.vehicle_location_before_edit === undefined ? cleanText(form.vehicle_location) || null : form.vehicle_location_before_edit
+    : null;
+  if (form.id) {
+    const current = await supabase.from("vehicle_entries" as any)
+      .select("vehicle_location")
+      .eq("tenant_id", tenantId)
+      .eq("id", form.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (current.error) throw current.error;
+    if (!current.data || (current.data as any).vehicle_location !== locationBeforeEdit) {
+      throw new Error("تغير موقع المركبة أثناء فتح النموذج. أعد فتح السجل قبل الحفظ حتى لا يُلغى خروجها أو عودتها.");
+    }
+  }
+
   if (form.status === "Issued") {
     await assertVehicleEntryCanBeIssued(form.id, tenantId);
   }
@@ -664,14 +736,20 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: str
   let saved: any;
 
   if (form.id) {
-    const { data, error } = await supabase
+    let update = supabase
       .from("vehicle_entries" as any)
       .update(payload as any)
       .eq("tenant_id", tenantId)
       .eq("id", form.id)
+      .is("deleted_at", null);
+    update = locationBeforeEdit === null
+      ? update.is("vehicle_location", null)
+      : update.eq("vehicle_location", locationBeforeEdit);
+    const { data, error } = await update
       .select("*")
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw new Error("تغير موقع المركبة أثناء فتح النموذج. أعد فتح السجل قبل الحفظ حتى لا يُلغى خروجها أو عودتها.");
     saved = data;
   } else {
     const { data, error } = await supabase
@@ -1019,6 +1097,7 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
     vehicle_entry_id: entryId,
     work_order_type: entry.insurance_snapshot?.is_insurance_related ? "insurance" : "general_customer",
     status: "received",
+    vehicle_presence_status: "in_workshop",
     service_type: "Vehicle Entry",
     description: `Created from vehicle entry ${entry.entry_number}`,
     notes: entry.notes || null,
@@ -1126,6 +1205,7 @@ export async function convertVehicleEntryToClaim(entryId: string, userId?: strin
     estimated_amount: 0,
     estimation_type: "lump_sum",
     status: "pending",
+    vehicle_presence_status: "in_workshop",
     notes: `Created from vehicle entry ${entry.entry_number}`,
   };
   const { data, error } = await supabase.from("insurance_claims" as any).insert(payload as any).select("id,claim_number").single();

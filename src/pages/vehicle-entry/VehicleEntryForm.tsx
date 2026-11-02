@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { ArrowRight, CarFront, FileScan, ImagePlus, Plus, Save, Trash2, Truck, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,6 +27,7 @@ import {
   searchVehicleEntryCustomers,
   searchVehicleEntryVehicles,
   uploadVehicleEntryFiles,
+  vehicleEntryStatusKey,
   type VehicleEntryDamageMark,
   type VehicleEntryFormState,
 } from "@/lib/vehicleEntryService";
@@ -87,14 +89,17 @@ function Section({ title, desc, children }: { title: string; desc?: string; chil
 
 export default function VehicleEntryForm() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const { t, i18n } = useTranslation();
+  const selectedPurpose = searchParams.get("purpose") === "inspection" ? "inspection" : "workshop";
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user, profile } = useAuth();
   const isEdit = !!id;
-  const [form, setForm] = useState<VehicleEntryFormState>(() => ({
-    ...defaultVehicleEntryForm(),
-    received_by_name: profile?.full_name || "",
-  }));
+  const [form, setForm] = useState<VehicleEntryFormState>(() => {
+    const initial = defaultVehicleEntryForm();
+    return { ...initial, condition: { ...initial.condition, visit_purpose: selectedPurpose }, received_by_name: profile?.full_name || "" };
+  });
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
@@ -478,11 +483,11 @@ export default function VehicleEntryForm() {
   if (detail.error) return <div className="p-8 text-center text-destructive">تعذر تحميل نموذج الدخول: {(detail.error as Error).message}</div>;
 
   return (
-    <div className="space-y-5 pb-10" dir="rtl">
+    <div className="space-y-5 pb-10" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">{isEdit ? "تعديل نموذج دخول مركبة" : "دخول واستلام مركبة"}</h1>
-          <p className="text-sm text-muted-foreground">Vehicle Entry & Receipt</p>
+          <h1 className="text-2xl font-bold">{isEdit ? t("vehicleEntry.editTitle") : t("vehicleEntry.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t(form.condition.visit_purpose === "inspection" ? "vehicleEntry.inspectionPurpose" : form.condition.visit_purpose === "workshop" ? "vehicleEntry.workshopPurpose" : "vehicleEntry.unknownPurpose")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => navigate("/vehicle-entry")} className="gap-2"><ArrowRight size={16} /> رجوع</Button>
@@ -493,6 +498,10 @@ export default function VehicleEntryForm() {
           <Button disabled={saving} onClick={() => handleSave("Issued")} className="gap-2"><Save size={16} /> حفظ وإصدار</Button>
         </div>
       </div>
+
+      {!isEdit && form.condition.visit_purpose === "inspection" && (
+        <Card className="border-info/40 bg-info/5 p-4 text-sm">{t("vehicleEntry.inspectionNextStep")}</Card>
+      )}
 
       <Section title="استخراج البيانات بالذكاء الاصطناعي" desc="لا يتم حفظ أي بيانات تلقائيًا. راجع البيانات ثم طبّقها على النموذج.">
         <AiExtractButton
@@ -543,12 +552,19 @@ export default function VehicleEntryForm() {
             </Select>
           </Field>
           <Field label="الموظف المستلم"><Input value={form.received_by_name} onChange={(e) => patch({ received_by_name: e.target.value })} /></Field>
-          <Field label="موقع المركبة"><Input value={form.vehicle_location} onChange={(e) => patch({ vehicle_location: e.target.value })} /></Field>
-          <Field label="رقم الباي / الساحة"><Input value={form.vehicle_location_bay} onChange={(e) => patch({ vehicle_location_bay: e.target.value })} /></Field>
+          <Field label={t("vehicleEntry.location")}>
+            <Input value={form.vehicle_location === "داخل الورشة" ? t("vehicleEntry.workshopTab") : form.vehicle_location === "مع العميل" ? t("vehicleEntry.customerTab") : form.vehicle_location} readOnly />
+            <p className="text-xs text-muted-foreground">{t("vehicleEntry.locationManaged")}</p>
+          </Field>
+          <Field label="رقم الباي / الساحة"><Input value={form.vehicle_location_bay} disabled={form.vehicle_location !== "داخل الورشة"} onChange={(e) => patch({ vehicle_location_bay: e.target.value })} /></Field>
           <Field label="حالة النموذج">
-            <Select value={form.status} onValueChange={(value) => patch({ status: value as any })}>
+            <Select value={form.status} disabled={form.status === "Converted to Claim" || form.status === "Converted to Work Order"} onValueChange={(value) => patch({ status: value as VehicleEntryFormState["status"] })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{["Draft", "Received", "Issued", "Cancelled"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                {["Draft", "Received", "Issued", "Cancelled"].map((s) => <SelectItem key={s} value={s}>{t(`vehicleEntry.statuses.${vehicleEntryStatusKey(s)}`)}</SelectItem>)}
+                {(form.status === "Converted to Claim" || form.status === "Converted to Work Order") &&
+                  <SelectItem value={form.status}>{t(`vehicleEntry.statuses.${vehicleEntryStatusKey(form.status)}`)}</SelectItem>}
+              </SelectContent>
             </Select>
           </Field>
         </div>

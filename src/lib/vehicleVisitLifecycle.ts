@@ -1,0 +1,243 @@
+import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { getVehicleEntry, getVehicleEntryPresence, listVehicleEntries } from "@/lib/vehicleEntryService";
+import { getPrivateDocumentUrl } from "@/lib/documentExtraction/persistence";
+
+export const VISIT_STAGES = ["arrived", "approved", "in_progress", "ready", "delivered", "cancelled", "needs_review"] as const;
+export type VisitStage = typeof VISIT_STAGES[number];
+export type PersistedVisitStage = Exclude<VisitStage, "needs_review">;
+
+export interface VehicleVisitWorkflow {
+  entry_id: string;
+  tenant_id: string;
+  vehicle_id: string;
+  stage: PersistedVisitStage;
+  revision: number;
+  review_reason: string | null;
+  changed_at: string;
+  changed_by: string | null;
+}
+
+export interface VehicleVisitTransition {
+  id: string;
+  revision: number;
+  from_stage: PersistedVisitStage | null;
+  to_stage: PersistedVisitStage;
+  occurred_at: string;
+  recorded_at: string;
+  recorded_by: string | null;
+  responsible_user_id: string | null;
+  source: string;
+  notes: string | null;
+  reason: string | null;
+  requirements: Record<string, unknown>;
+}
+
+export interface VehicleVisitItem {
+  entry: any;
+  workflow: VehicleVisitWorkflow | null;
+  stage: VisitStage;
+  reviewReason: string | null;
+  hasFinalHandover: boolean;
+}
+
+const PAGE_SIZE = 200;
+const MAX_ENTRIES = 10_000;
+
+function chunk<T>(rows: T[], size = 200): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < rows.length; i += size) result.push(rows.slice(i, i + size));
+  return result;
+}
+
+export function resolveVehicleVisit(entry: any, workflow: VehicleVisitWorkflow | null, hasFinalHandover: boolean, hasSignedTemporaryRelease = false): VehicleVisitItem {
+  const order = entry.work_order || entry.converted_work_order;
+  const claim = entry.claim || entry.converted_claim;
+  const linkedOrder = entry.work_order_id || entry.converted_work_order_id;
+  const linkedClaim = entry.insurance_claim_id || entry.converted_claim_id;
+  let reviewReason = workflow?.review_reason || null;
+  if (!entry.vehicle_id) reviewReason ||= "missing_vehicle";
+  if (linkedOrder && (!order || order.vehicle_id !== entry.vehicle_id)) reviewReason ||= "work_order_link_conflict";
+  if (linkedClaim && (!claim || claim.vehicle_id !== entry.vehicle_id)) reviewReason ||= "claim_link_conflict";
+  if (entry.work_order_id && entry.converted_work_order_id && entry.work_order_id !== entry.converted_work_order_id) reviewReason ||= "work_order_link_conflict";
+  if (entry.insurance_claim_id && entry.converted_claim_id && entry.insurance_claim_id !== entry.converted_claim_id) reviewReason ||= "claim_link_conflict";
+  if (getVehicleEntryPresence(entry) === "needs_review") reviewReason ||= "custody_conflict";
+  const deliveredMarker = Boolean(order?.status === "delivered" || order?.vehicle_delivered_at || claim?.vehicle_delivered_at || claim?.delivered_at);
+  if (deliveredMarker && !hasFinalHandover) reviewReason ||= "delivery_without_signed_handover";
+  if (workflow?.stage === "delivered" && !hasFinalHandover) reviewReason ||= "delivery_without_signed_handover";
+  if (getVehicleEntryPresence(entry) === "with_customer" && !hasFinalHandover && !hasSignedTemporaryRelease
+    && !claim?.cancelled_handover_signed_at) reviewReason ||= "exit_without_signed_release";
+  // A legacy entry with no persisted workflow is a read-only projection. Never
+  // rewrite or advance its history simply because the dashboard was opened.
+  let stage: PersistedVisitStage = workflow?.stage || "arrived";
+  if (!workflow) {
+    if (entry.status === "Cancelled" || ["cancelled", "rejected"].includes(claim?.status)) stage = "cancelled";
+    else if (hasFinalHandover && deliveredMarker) stage = "delivered";
+    else if (["completed", "delivered"].includes(order?.status) || ["ready", "quality_check"].includes(claim?.repair_stage)) stage = "ready";
+    else if (["in_progress", "waiting_parts"].includes(order?.status) || ["repairing", "in_progress"].includes(claim?.repair_stage)) stage = "in_progress";
+    else if (["approved", "paid"].includes(claim?.status)) stage = "approved";
+  }
+  return { entry, workflow, stage: reviewReason ? "needs_review" : stage, reviewReason, hasFinalHandover };
+}
+
+export async function listVehicleVisitCenter(): Promise<VehicleVisitItem[]> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("TENANT_NOT_FOUND");
+  const entries: any[] = [];
+  for (let page = 0; ; page += 1) {
+    const batch = await listVehicleEntries({}, page, PAGE_SIZE);
+    entries.push(...batch);
+    if (entries.length > MAX_ENTRIES) throw new Error("VEHICLE_VISIT_RESULT_LIMIT");
+    if (batch.length < PAGE_SIZE) break;
+  }
+  if (!entries.length) return [];
+  const workflows: VehicleVisitWorkflow[] = [];
+  const handovers: Array<{ vehicle_entry_id: string; work_order_id: string | null }> = [];
+  const releases: Array<{ vehicle_entry_id: string }> = [];
+  for (const ids of chunk(entries.map((entry) => entry.id))) {
+    const [workflowsResult, handoversResult, releasesResult] = await Promise.all([
+      supabase.from("vehicle_visit_workflows" as any).select("entry_id,tenant_id,vehicle_id,stage,revision,review_reason,changed_at,changed_by")
+        .eq("tenant_id", tenantId).in("entry_id", ids),
+      supabase.from("vehicle_handover_records" as any).select("vehicle_entry_id,work_order_id")
+        .eq("tenant_id", tenantId).eq("status", "finalized").in("vehicle_entry_id", ids),
+      supabase.from("vehicle_inspection_releases" as any).select("vehicle_entry_id")
+        .eq("tenant_id", tenantId).eq("status", "signed").is("returned_at", null).in("vehicle_entry_id", ids),
+    ]);
+    if (workflowsResult.error) throw workflowsResult.error;
+    if (handoversResult.error) throw handoversResult.error;
+    if (releasesResult.error) throw releasesResult.error;
+    workflows.push(...((workflowsResult.data || []) as unknown as VehicleVisitWorkflow[]));
+    handovers.push(...((handoversResult.data || []) as unknown as Array<{ vehicle_entry_id: string; work_order_id: string | null }>));
+    releases.push(...((releasesResult.data || []) as unknown as Array<{ vehicle_entry_id: string }>));
+  }
+  const byEntry = new Map(workflows.map((workflow) => [workflow.entry_id, workflow]));
+  const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+  const signedEntries = new Set(handovers.filter((handover) => {
+    const entry = entryById.get(handover.vehicle_entry_id);
+    return Boolean(entry && handover.work_order_id &&
+      [entry.work_order_id, entry.converted_work_order_id].includes(handover.work_order_id));
+  }).map((handover) => handover.vehicle_entry_id));
+  const temporaryEntries = new Set(releases.map((release) => release.vehicle_entry_id));
+  const visits = entries.map((entry) => resolveVehicleVisit(entry, byEntry.get(entry.id) || null, signedEntries.has(entry.id), temporaryEntries.has(entry.id)));
+  // Historical duplicates are shown for manual review, never silently merged.
+  const activeByVehicle = new Map<string, VehicleVisitItem[]>();
+  for (const visit of visits) {
+    if (!visit.entry.vehicle_id || ["cancelled", "delivered"].includes(visit.stage)) continue;
+    const key = String(visit.entry.vehicle_id);
+    activeByVehicle.set(key, [...(activeByVehicle.get(key) || []), visit]);
+  }
+  for (const group of activeByVehicle.values()) {
+    if (group.length < 2) continue;
+    for (const visit of group) {
+      visit.stage = "needs_review";
+      visit.reviewReason ||= "duplicate_open_visit";
+    }
+  }
+  return visits;
+}
+
+export async function getVehicleVisitDetail(entryId: string) {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("TENANT_NOT_FOUND");
+  const entry = await getVehicleEntry(entryId);
+  if (!entry) return null;
+  const [workflowResult, eventsResult, handoversResult, releasesResult] = await Promise.all([
+    supabase.from("vehicle_visit_workflows" as any).select("*").eq("tenant_id", tenantId).eq("entry_id", entryId).maybeSingle(),
+    supabase.from("vehicle_visit_transitions" as any).select("*").eq("tenant_id", tenantId).eq("entry_id", entryId).order("revision", { ascending: false }).limit(500),
+    supabase.from("vehicle_handover_records" as any).select("id,work_order_id,receipt_number,status,delivered_at,finalized_at,cancellation_reason")
+      .eq("tenant_id", tenantId).eq("vehicle_entry_id", entryId).order("created_at", { ascending: false }).limit(30),
+    supabase.from("vehicle_inspection_releases" as any).select("id,release_number,status,released_at,returned_at")
+      .eq("tenant_id", tenantId).eq("vehicle_entry_id", entryId).order("created_at", { ascending: false }).limit(30),
+  ]);
+  if (workflowResult.error) throw workflowResult.error;
+  if (eventsResult.error) throw eventsResult.error;
+  if (handoversResult.error) throw handoversResult.error;
+  if (releasesResult.error) throw releasesResult.error;
+  const handovers = (handoversResult.data || []) as any[];
+  const releases = (releasesResult.data || []) as any[];
+  const order = entry.work_order || entry.converted_work_order;
+  const claim = entry.claim || entry.converted_claim;
+  const item = resolveVehicleVisit(entry, (workflowResult.data as unknown as VehicleVisitWorkflow) || null,
+    handovers.some((row) => row.status === "finalized" && row.work_order_id === order?.id),
+    releases.some((row) => row.status === "signed" && !row.returned_at));
+  const entityIds = [entryId, order?.id, claim?.id].filter(Boolean) as string[];
+  const linked = await Promise.all([
+    supabase.from("document_links" as any).select("id,file_id,entity_type,entity_id")
+      .eq("tenant_id", tenantId).is("removed_at", null).in("entity_id", entityIds).limit(300),
+    order?.id ? supabase.from("expenses" as any).select("id,voucher_number,total,amount,description")
+      .eq("tenant_id", tenantId).eq("work_order_id", order.id).is("deleted_at", null).limit(300) : Promise.resolve({ data: [], error: null }),
+    order?.id ? supabase.from("expenses" as any).select("id,voucher_number,total,amount,description")
+      .eq("tenant_id", tenantId).in("linked_work_order_id", [order.id, order.order_number].filter(Boolean)).is("deleted_at", null).limit(300) : Promise.resolve({ data: [], error: null }),
+    order?.id ? supabase.from("sales_documents" as any).select("id,doc_number,status,total")
+      .eq("tenant_id", tenantId).in("work_order_id", [order.id, order.order_number].filter(Boolean)).eq("doc_type", "invoice").is("deleted_at", null).limit(100) : Promise.resolve({ data: [], error: null }),
+    claim?.id ? supabase.from("insurance_invoices" as any).select("id,invoice_number,status,total")
+      .eq("tenant_id", tenantId).eq("claim_id", claim.id).limit(100) : Promise.resolve({ data: [], error: null }),
+    order?.id || claim?.id ? supabase.from("vehicle_media" as any).select("id,media_type,category")
+      .eq("tenant_id", tenantId).is("deleted_at", null)
+      .or([order?.id && `work_order_id.eq.${order.id}`, claim?.id && `claim_id.eq.${claim.id}`].filter(Boolean).join(","))
+      .limit(300) : Promise.resolve({ data: [], error: null }),
+  ]);
+  for (const result of linked) if (result.error) throw result.error;
+  const documentLinks = (linked[0].data || []) as unknown as Array<{ file_id: string; entity_type: string }>;
+  const fileIds = [...new Set(documentLinks.map((row) => row.file_id))];
+  const filesResult = fileIds.length ? await supabase.from("document_files" as any)
+    .select("id,original_file_name,mime_type")
+    .eq("tenant_id", tenantId).in("id", fileIds).limit(300) : { data: [], error: null };
+  if (filesResult.error) throw filesResult.error;
+  const expenses = [...new Map([...(linked[1].data || []) as any[], ...(linked[2].data || []) as any[]].map((row) => [row.id, row])).values()];
+  return {
+    ...item,
+    transitions: (eventsResult.data || []) as unknown as VehicleVisitTransition[],
+    handovers,
+    releases,
+    documents: documentLinks,
+    documentFiles: filesResult.data || [],
+    expenses,
+    cashInvoices: linked[3].data || [],
+    insuranceInvoices: linked[4].data || [],
+    mediaCount: new Set([...(entry.vehicle_media || []).map((row: any) => row.id), ...((linked[5].data || []) as any[]).map((row) => row.id)]).size,
+  };
+}
+
+export async function listVehicleVisitStaff(): Promise<Array<{ user_id: string; full_name: string | null }>> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("TENANT_NOT_FOUND");
+  const { data, error } = await supabase.from("profiles" as any).select("user_id,full_name")
+    .eq("tenant_id", tenantId).order("full_name").limit(200);
+  if (error) throw error;
+  return (data || []) as unknown as Array<{ user_id: string; full_name: string | null }>;
+}
+
+export async function getVehicleVisitDocumentUrl(fileId: string) {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("TENANT_NOT_FOUND");
+  return getPrivateDocumentUrl(fileId, tenantId);
+}
+
+export async function advanceVehicleVisit(input: {
+  entryId: string;
+  revision: number;
+  stage: PersistedVisitStage;
+  occurredAt: string;
+  notes: string;
+  reason: string;
+  responsibleUserId: string;
+  requirements: Record<string, unknown>;
+}): Promise<VehicleVisitWorkflow> {
+  const { data, error } = await supabase.rpc("advance_vehicle_visit" as any, {
+    p_entry_id: input.entryId,
+    p_expected_revision: input.revision,
+    p_target_stage: input.stage,
+    p_occurred_at: input.occurredAt,
+    p_notes: input.notes || null,
+    p_reason: input.reason || null,
+    p_responsible_user_id: input.responsibleUserId,
+    p_requirements: input.requirements,
+  } as any);
+  if (error) throw error;
+  const row = data as unknown as VehicleVisitWorkflow | null;
+  if (!row || row.entry_id !== input.entryId || row.stage !== input.stage || row.revision !== input.revision + 1) {
+    throw new Error("VEHICLE_VISIT_SAVE_NOT_CONFIRMED");
+  }
+  return row;
+}

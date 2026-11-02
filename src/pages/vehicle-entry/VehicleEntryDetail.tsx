@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ClipboardCheck, Copy, Download, Edit, ExternalLink, FileText, Link2, Loader2, MessageCircle, Printer, RefreshCw, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
+import { ArrowRight, ClipboardCheck, Copy, Download, Edit, ExternalLink, FileText, Link2, Loader2, MessageCircle, Printer, QrCode, RefreshCw, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,11 +14,16 @@ import {
   convertVehicleEntryToClaim,
   createVehicleEntryCustomerSignatureLink,
   createWorkOrderFromVehicleEntry,
+  getVehicleEntryPresence,
+  getVehicleEntryVisitPurpose,
   getVehicleEntry,
   issueVehicleEntry,
   softDeleteVehicleEntryMedia,
+  vehicleEntryStatusKey,
 } from "@/lib/vehicleEntryService";
 import { downloadSanitizedPdf, openAndPrintWindow, openSanitizedPdfWindow } from "@/lib/safePdfWindow";
+import { printVehicleEntrySticker } from "@/lib/vehicleEntrySticker";
+import { VehicleVisitControlPanel } from "./VehicleVisitControlPanel";
 import { toast } from "sonner";
 
 function fmtDateTime(value?: string | null) {
@@ -49,6 +54,7 @@ export default function VehicleEntryDetail() {
   const { i18n, t } = useTranslation();
   const [printing, setPrinting] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [printingSticker, setPrintingSticker] = useState(false);
   const [customerSignatureLink, setCustomerSignatureLink] = useState<string | null>(null);
 
   const detail = useQuery({
@@ -142,6 +148,18 @@ export default function VehicleEntryDetail() {
     }
   }
 
+  async function printSticker() {
+    if (!entry || printingSticker) return;
+    setPrintingSticker(true);
+    try {
+      await printVehicleEntrySticker(entry, i18n.language.startsWith("ar") ? "ar" : "en");
+    } catch (error: any) {
+      toast.error(error?.message || t("vehicleEntry.stickerFailed"));
+    } finally {
+      setPrintingSticker(false);
+    }
+  }
+
   async function copyCustomerSignatureLink() {
     if (!customerSignatureLink) return;
     try {
@@ -186,9 +204,12 @@ export default function VehicleEntryDetail() {
   const media = entry.vehicle_media || [];
   const signatures = entry.vehicle_entry_signatures || [];
   const auditLogs = entry.vehicle_entry_audit_logs || [];
+  const presence = getVehicleEntryPresence(entry);
+  const purpose = getVehicleEntryVisitPurpose(entry);
+  const statusKey = vehicleEntryStatusKey(entry.status);
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto" dir="rtl">
+    <div className="p-6 space-y-5 max-w-7xl mx-auto" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate("/vehicle-entry")}><ArrowRight size={18} /></Button>
@@ -196,7 +217,8 @@ export default function VehicleEntryDetail() {
             <h1 className="text-2xl font-bold">استلام مركبة {entry.entry_number}</h1>
             <p className="text-sm text-muted-foreground">Vehicle Entry & Receipt</p>
           </div>
-          <Badge variant={entry.status === "Issued" ? "default" : "secondary"}>{entry.status}</Badge>
+          <Badge variant={entry.status === "Issued" ? "default" : "secondary"}>{statusKey ? t(`vehicleEntry.statuses.${statusKey}`) : entry.status}</Badge>
+          <Badge variant="outline">{t(presence === "in_workshop" ? "vehicleEntry.workshopTab" : presence === "with_customer" ? "vehicleEntry.customerTab" : "vehicleEntry.reviewLocation")}</Badge>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={previewEntry} className="gap-2"><FileText size={16} /> معاينة</Button>
@@ -205,6 +227,11 @@ export default function VehicleEntryDetail() {
             {downloadingPdf ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
             {t("vehicleEntry.downloadPdf")}
           </Button>
+          {presence === "in_workshop" && (purpose === "workshop" || entry.work_order_id || entry.converted_work_order_id) &&
+            <Button variant="outline" disabled={printingSticker} onClick={() => void printSticker()} className="gap-2">
+              {printingSticker ? <Loader2 size={16} className="animate-spin" /> : <QrCode size={16} />}
+              {t("vehicleEntry.printSticker")}
+            </Button>}
           {entry.status === "Draft" && (
             <Button variant="outline" disabled={issueMutation.isPending} onClick={() => issueMutation.mutate()} className="gap-2">
               <ShieldCheck size={16} /> إصدار
@@ -217,13 +244,20 @@ export default function VehicleEntryDetail() {
         </div>
       </div>
 
+      {presence === "needs_review" && <Card className="border-warning/50 p-4 text-sm text-warning">{t("vehicleEntry.reviewDescription")}</Card>}
+      {purpose === "inspection" && presence === "in_workshop" && <Card className="border-info/40 bg-info/5 p-4 text-sm">{t("vehicleEntry.inspectionNextStep")}</Card>}
+
+      <VehicleVisitControlPanel entryId={entry.id} />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="p-4 space-y-3">
           {cardTitle("بيانات الاستلام", "Receipt Details")}
           <Info label="رقم الاستلام" value={entry.entry_number} />
           <Info label="تاريخ ووقت الوصول" value={fmtDateTime(entry.arrival_at || `${entry.arrival_date}T${String(entry.arrival_time || "00:00").slice(0, 5)}:00`)} />
           <Info label="طريقة الوصول" value={entry.arrival_method} />
-          <Info label="الموقع" value={[entry.vehicle_location || entry.vehicle_location_section, entry.vehicle_location_bay].filter(Boolean).join(" / ") || "—"} />
+          <Info label={t("vehicleEntry.purpose")} value={t(purpose === "inspection" ? "vehicleEntry.inspectionPurpose" : purpose === "workshop" ? "vehicleEntry.workshopPurpose" : "vehicleEntry.unknownPurpose")} />
+          <Info label={t("vehicleEntry.location")} value={t(presence === "in_workshop" ? "vehicleEntry.workshopTab" : presence === "with_customer" ? "vehicleEntry.customerTab" : "vehicleEntry.reviewLocation")} />
+          {presence === "in_workshop" && entry.vehicle_location_bay && <Info label="Bay" value={entry.vehicle_location_bay} />}
         </Card>
         <Card className="p-4 space-y-3">
           {cardTitle("العميل", "Customer")}

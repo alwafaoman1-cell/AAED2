@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { buildVehicleEntryHtml } from "@/lib/vehicleEntryService";
 
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), "utf8").replace(/\r\n/g, "\n");
@@ -92,7 +93,7 @@ describe("vehicle entry receipt contract", () => {
     expect(service).toContain("resolveVehicleMediaUrls");
     expect(read("src/lib/vehicleMediaUrls.ts")).toContain("refreshSignedUrls");
     expect(service).toContain("public_url: null");
-    expect(list).toContain('import * as XLSX from "xlsx"');
+    expect(list).toContain('await import("xlsx")');
     expect(list).toContain("XLSX.writeFile");
     expect(list).not.toContain("exportRowsAsCsv");
   });
@@ -154,8 +155,7 @@ describe("vehicle entry receipt contract", () => {
     expect(detail).toContain("item.url || item.public_url");
   });
 
-  it("renders the entry barcode and the saved declaration into print HTML", async () => {
-    const { buildVehicleEntryHtml } = await import("@/lib/vehicleEntryService");
+  it("renders the entry barcode and the saved declaration into print HTML", () => {
     const html = buildVehicleEntryHtml({
       entry_number: "ENT-2026-00058",
       arrival_date: "2026-08-22",

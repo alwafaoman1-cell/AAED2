@@ -19,9 +19,10 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   customers: ["customers"],
   vehicles: ["vehicles", "customers", "vehicle_360"],
   vehicle_media: ["vehicle_media", "vehicles", "vehicle_360"],
-  vehicle_entries: ["vehicle_entries", "vehicle_360"],
+  vehicle_entries: ["vehicle_entries", "vehicle_visit", "vehicle_360"],
+  vehicle_visit_workflows: ["vehicle_visit", "vehicle_entries", "job_orders", "insurance_claims"],
   vehicle_entry_signatures: ["vehicle_entries", "vehicle_360"],
-  vehicle_handover_records: ["vehicle_handover_records", "vehicle_360"],
+  vehicle_handover_records: ["vehicle_handover_records", "vehicle_visit", "vehicle_360"],
   inventory: ["inventory"],
   job_order_parts: ["job_order_parts", "inventory", "job_orders", "vehicle_360"],
   insurance_companies: ["insurance_companies"],
@@ -57,7 +58,7 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   {
     scope: "work_order_detail",
     test: (path) => /^\/work-orders\/[^/]+/.test(path),
-    tables: ["job_orders", "job_order_parts", "job_order_logs", "insurance_claims", "insurance_invoices", "claim_payments", "sales_documents", "sales_payments", "expenses"],
+    tables: ["job_orders", "job_order_parts", "job_order_logs", "insurance_claims", "insurance_invoices", "claim_payments", "sales_documents", "sales_payments", "expenses", "vehicle_visit_workflows"],
   },
   {
     scope: "work_orders_list",
@@ -82,7 +83,7 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
         !path.startsWith("/insurance/estimates") &&
         !path.startsWith("/insurance/documents")
       ),
-    tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicle_media", "expenses"],
+    tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicle_media", "expenses", "vehicle_visit_workflows"],
   },
   {
     scope: "claims_list",
@@ -90,9 +91,14 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
     tables: ["insurance_claims"],
   },
   {
+    scope: "vehicle_entry_list",
+    test: (path) => path === "/vehicle-entry",
+    tables: ["vehicle_entries", "vehicle_visit_workflows", "vehicle_handover_records", "job_orders", "insurance_claims"],
+  },
+  {
     scope: "vehicle_entry_detail",
     test: (path) => /^\/vehicle-entry\/[^/]+/.test(path) && !path.startsWith("/vehicle-entry/sign/"),
-    tables: ["vehicle_entries", "vehicle_entry_signatures"],
+    tables: ["vehicle_entries", "vehicle_entry_signatures", "vehicle_visit_workflows", "vehicle_handover_records", "job_orders", "insurance_claims", "expenses", "sales_documents", "insurance_invoices"],
   },
   {
     scope: "vehicle_detail",
