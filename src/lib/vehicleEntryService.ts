@@ -230,6 +230,7 @@ export function vehicleEntryMatchesSearch(row: any, search: string): boolean {
 
 export interface ClaimVehicleEntryInput {
   claimId: string;
+  status?: "Draft" | "Received";
   customerId?: string | null;
   vehicleId?: string | null;
   insuranceCompanyId?: string | null;
@@ -526,7 +527,7 @@ export async function ensureVehicleEntryForClaim(input: ClaimVehicleEntryInput, 
   const base = defaultVehicleEntryForm();
   const form: VehicleEntryFormState = {
     ...base,
-    status: "Received",
+    status: input.status || "Received",
     customer_id: input.customerId || null,
     vehicle_id: input.vehicleId || null,
     insurance_company_id: input.insuranceCompanyId || null,

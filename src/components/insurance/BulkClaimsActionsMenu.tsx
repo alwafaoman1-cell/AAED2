@@ -13,7 +13,7 @@ import {
 import {
   MoreHorizontal, Receipt, FileSpreadsheet,
   CheckCircle, DollarSign, Archive, Send, Trash2, Sparkles, Loader2,
-  MessageSquare, Building2, RefreshCw,
+  MessageSquare, Building2, RefreshCw, CarFront,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,6 +31,10 @@ import { useDeleteClaim, type InsuranceClaim } from "@/hooks/useInsuranceClaims"
 import { useQueryClient } from "@tanstack/react-query";
 import Can from "@/components/Can";
 import { queryKeys } from "@/lib/queryKeys";
+import { registerSelectedClaimVehicleEntries, type BulkVehicleEntryReport } from "@/lib/insuranceBulkVehicleEntry";
+import { supabase } from "@/integrations/supabase/client";
+import { useCan } from "@/lib/rbac";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   selected: InsuranceClaim[];
@@ -41,6 +45,8 @@ interface Props {
 
 export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Props) {
   const { profile } = useAuth();
+  const { t, i18n } = useTranslation();
+  const canRegisterEntry = useCan("Insurance/Claims", "Create/Edit", { strict: true });
   const qc = useQueryClient();
   const deleteClaim = useDeleteClaim();
 
@@ -48,6 +54,8 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmInvoice, setConfirmInvoice] = useState<null | "selected" | "delivered_only" | "grouped">(null);
   const [duplicatesOpen, setDuplicatesOpen] = useState<null | ReturnType<typeof bulkDetectDuplicates>>(null);
+  const [confirmVehicleEntry, setConfirmVehicleEntry] = useState(false);
+  const [vehicleEntryReport, setVehicleEntryReport] = useState<BulkVehicleEntryReport | null>(null);
 
   const count = selected.length;
   const deliveredCount = selected.filter((c) => !!(c as any).delivered_at).length;
@@ -100,6 +108,39 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
     selected.forEach((c) => deleteClaim.mutate(c.id));
     setConfirmDelete(false);
     onClear();
+  }
+
+  async function handleRegisterVehicleEntries() {
+    if (busy || !canRegisterEntry || !profile?.tenant_id) return;
+    setBusy(true);
+    try {
+      const { data: auth, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      if (!auth.user?.id) throw new Error(t("insuranceBulkEntry.sessionRequired"));
+      const report = await registerSelectedClaimVehicleEntries(
+        selected.map(({ id, claim_number }) => ({ id, claim_number })),
+        profile.tenant_id,
+        auth.user.id,
+        auth.user.user_metadata?.full_name || auth.user.email || "",
+      );
+      setConfirmVehicleEntry(false);
+      setVehicleEntryReport(report);
+      if (report.created.length) {
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all }),
+          qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all }),
+          qc.invalidateQueries({ queryKey: queryKeys.jobOrders.all }),
+        ]);
+      }
+      if (report.errors.length) toast.error(t("insuranceBulkEntry.partialError", { count: report.errors.length }));
+      else if (report.created.length) toast.success(t("insuranceBulkEntry.success", { count: report.created.length }));
+      else toast.info(t("insuranceBulkEntry.noCreated"));
+      if (report.created.length === selected.length) onClear();
+    } catch (error) {
+      toast.error((error as Error)?.message || t("insuranceBulkEntry.failed"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -189,6 +230,12 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
             </DropdownMenuSubTrigger>
             <DropdownMenuPortal>
               <DropdownMenuSubContent className="w-64">
+                {canRegisterEntry && (
+                  <DropdownMenuItem onClick={() => setConfirmVehicleEntry(true)} className="gap-2">
+                    <CarFront size={14} className="text-primary" /> {t("insuranceBulkEntry.action")}
+                  </DropdownMenuItem>
+                )}
+                {canRegisterEntry && <DropdownMenuSeparator />}
                 <DropdownMenuItem onClick={() => handleStatusChange("approved")} className="gap-2">
                   <CheckCircle size={14} className="text-success" /> اعتماد المحددة
                 </DropdownMenuItem>
@@ -259,6 +306,43 @@ export default function BulkClaimsActionsMenu({ selected, onClear, compact }: Pr
           </Can>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <AlertDialog open={confirmVehicleEntry} onOpenChange={(open) => !busy && setConfirmVehicleEntry(open)}>
+        <AlertDialogContent dir={i18n.dir()}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("insuranceBulkEntry.confirmTitle", { count })}</AlertDialogTitle>
+            <AlertDialogDescription>{t("insuranceBulkEntry.confirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>{t("insuranceBulkEntry.cancel")}</AlertDialogCancel>
+            <Button onClick={handleRegisterVehicleEntries} disabled={busy}>
+              {busy && <Loader2 size={14} className="animate-spin me-2" />}
+              {t("insuranceBulkEntry.confirm")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!vehicleEntryReport} onOpenChange={(open) => !open && setVehicleEntryReport(null)}>
+        <AlertDialogContent dir={i18n.dir()}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("insuranceBulkEntry.resultTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("insuranceBulkEntry.resultSummary", {
+                created: vehicleEntryReport?.created.length || 0,
+                skipped: vehicleEntryReport?.skipped.length || 0,
+                errors: vehicleEntryReport?.errors.length || 0,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-64 overflow-y-auto space-y-1 text-sm">
+            {vehicleEntryReport?.created.map((row) => <p key={row.claimNumber} className="text-success">{row.claimNumber} — {row.entryNumber}</p>)}
+            {vehicleEntryReport?.skipped.map((row) => <p key={row.claimNumber} className="text-warning">{row.claimNumber} — {row.reason}</p>)}
+            {vehicleEntryReport?.errors.map((row) => <p key={row.claimNumber} className="text-destructive">{row.claimNumber} — {row.reason}</p>)}
+          </div>
+          <AlertDialogFooter><AlertDialogAction>{t("insuranceBulkEntry.close")}</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Confirm — Invoice creation */}
       <AlertDialog open={!!confirmInvoice} onOpenChange={(o) => !o && setConfirmInvoice(null)}>

@@ -1,4 +1,30 @@
 {
+  "insuranceBulkEntry": {
+    "action": "Check in selected vehicles",
+    "confirmTitle": "Check in {{count}} vehicles?",
+    "confirmDescription": "I confirm these vehicles have physically arrived at the workshop. A draft entry record will be created for each eligible claim; review its condition, contents and signatures before issuing it. No new claim or work order will be created. Each claim will have a result.",
+    "cancel": "Cancel",
+    "confirm": "Confirm vehicle check-in",
+    "resultTitle": "Bulk check-in result",
+    "resultSummary": "Created {{created}}, skipped {{skipped}}, failed {{errors}}.",
+    "sessionRequired": "Your session has expired. Sign in and try again.",
+    "partialError": "{{count}} claims could not be completed. Review the details.",
+    "success": "{{count}} vehicles checked in and linked successfully.",
+    "noCreated": "No new entry was created. Review the skipped claims.",
+    "failed": "Could not check in the selected vehicles.",
+    "close": "Close",
+    "unavailable": "Claim unavailable for this workshop",
+    "existing": "Already checked in: {{number}}",
+    "activeVisit": "Vehicle is already at the workshop under entry {{number}}; review that visit first",
+    "partialLink": "Entry {{number}} was created, but linking/syncing the claim was incomplete: {{detail}}",
+    "reasons": {
+      "closed": "Claim is cancelled or closed",
+      "delivered": "Vehicle has been delivered",
+      "missingLink": "Customer or vehicle link is missing",
+      "missingIdentity": "Vehicle identity is incomplete",
+      "linked": "Claim already has a linked entry record"
+    }
+  },
   "unifiedInvoices": {
     "title": "All Invoices — Cash and Insurance",
     "subtitle": "Read-only view of two separate invoicing sources. Invoices and journal entries are not changed.",
