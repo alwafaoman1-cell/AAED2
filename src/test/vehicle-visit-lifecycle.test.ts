@@ -100,6 +100,10 @@ describe("vehicle visit stage projection", () => {
     expect(createOrder).toContain('work_order_type: linkedClaimId ? "insurance" : "general_customer"');
     expect(createOrder).toContain('if (getVehicleVisitBillingKind(entry) === "insurance" && !linkedClaimId)');
     expect(createOrder).not.toContain("order_number: orderNumber");
+    expect(createOrder).toContain(".or(safeLinkFilter)");
+    expect(createOrder).toContain("work_order_id.eq.${savedOrderId}");
+    expect(createOrder.slice(createOrder.indexOf("const linkedEntry = await")))
+      .not.toContain('.is("work_order_id", null).is("converted_work_order_id", null)');
   });
   it("enforces one active primary work order per vehicle visit at the database layer", () => {
     const migration = readFileSync(join(process.cwd(),

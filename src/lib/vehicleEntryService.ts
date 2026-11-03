@@ -1108,15 +1108,27 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
   };
   const { data, error } = await supabase.from("job_orders" as any).insert(payload as any).select("id,order_number").single();
   if (error) throw error;
+  // The database now links an explicitly referenced entry in the same order
+  // transaction. Accept that confirmed link as well as the older empty-link
+  // path, but never overwrite a different order under a concurrent request.
+  const savedOrderId = (data as any).id as string;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(savedOrderId))
+    throw new Error(i18n.t("vehicleVisit.workOrderLinkNotConfirmed"));
+  const safeLinkFilter = [
+    `and(work_order_id.is.null,converted_work_order_id.is.null)`,
+    `and(work_order_id.eq.${savedOrderId},converted_work_order_id.is.null)`,
+    `and(work_order_id.is.null,converted_work_order_id.eq.${savedOrderId})`,
+    `and(work_order_id.eq.${savedOrderId},converted_work_order_id.eq.${savedOrderId})`,
+  ].join(",");
   const linkedEntry = await supabase
     .from("vehicle_entries" as any)
-    .update({ status: "Converted to Work Order", work_order_id: (data as any).id, converted_work_order_id: (data as any).id } as any)
+    .update({ status: "Converted to Work Order", work_order_id: savedOrderId, converted_work_order_id: savedOrderId } as any)
     .eq("tenant_id", tenantId)
     .eq("id", entryId)
-    .is("work_order_id", null).is("converted_work_order_id", null)
+    .or(safeLinkFilter)
     .select("id,work_order_id").maybeSingle();
   if (linkedEntry.error) throw linkedEntry.error;
-  if (!linkedEntry.data || (linkedEntry.data as any).work_order_id !== (data as any).id)
+  if (!linkedEntry.data || (linkedEntry.data as any).work_order_id !== savedOrderId)
     throw new Error(i18n.t("vehicleVisit.workOrderLinkNotConfirmed"));
   await insertVehicleEntryAudit({
     tenantId,

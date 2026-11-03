@@ -15,6 +15,9 @@ declare
   v_late_claim uuid := gen_random_uuid();
   v_late_order uuid := gen_random_uuid();
   v_late_entry uuid := gen_random_uuid();
+  v_cash_vehicle uuid := gen_random_uuid();
+  v_cash_entry uuid := gen_random_uuid();
+  v_cash_order uuid := gen_random_uuid();
   v_record public.vehicle_handover_records;
   v_list jsonb;
 begin
@@ -105,6 +108,28 @@ begin
     or (select vehicle_entry_id from public.job_orders where id=v_late_order) is distinct from v_late_entry
     or (select vehicle_presence_status from public.job_orders where id=v_late_order) <> 'in_workshop' then
     raise exception 'entry created after order did not link and synchronize actual custody';
+  end if;
+
+  -- Cash entry conversion passes vehicle_entry_id explicitly. The new
+  -- trigger must accept it and the client can complete its converted fields.
+  insert into public.vehicles(id,tenant_id,customer_id,plate_number,plate_letters,brand,model)
+    values(v_cash_vehicle,v_tenant,v_customer,'TEST-'||substr(v_cash_vehicle::text,1,8),'DV','Test','Cash');
+  insert into public.vehicle_entries(id,tenant_id,entry_number,customer_id,vehicle_id,status,
+    arrival_date,arrival_time,vehicle_location)
+    values(v_cash_entry,v_tenant,'TEST-ENTRY-'||substr(v_cash_entry::text,1,8),v_customer,v_cash_vehicle,
+      'Received',current_date,'10:00','داخل الورشة');
+  insert into public.job_orders(id,tenant_id,vehicle_id,customer_id,order_number,status,
+    vehicle_entry_id,vehicle_presence_status,work_order_type)
+    values(v_cash_order,v_tenant,v_cash_vehicle,v_customer,'TEST-WO-'||substr(v_cash_order::text,1,8),
+      'received',v_cash_entry,'with_customer','general_customer');
+  if (select work_order_id from public.vehicle_entries where id=v_cash_entry) is distinct from v_cash_order
+    or (select vehicle_presence_status from public.job_orders where id=v_cash_order) <> 'in_workshop' then
+    raise exception 'cash order did not inherit the exact physical visit';
+  end if;
+  update public.vehicle_entries set status='Converted to Work Order', converted_work_order_id=v_cash_order
+    where id=v_cash_entry and work_order_id=v_cash_order and converted_work_order_id is null;
+  if (select converted_work_order_id from public.vehicle_entries where id=v_cash_entry) is distinct from v_cash_order then
+    raise exception 'cash entry conversion could not complete after the database link';
   end if;
 end $$;
 rollback;
