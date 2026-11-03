@@ -306,6 +306,22 @@ export async function getLinkedVehicleVisit(source: "claim" | "work_order", id: 
   for (const result of [entryResult, workflowResult, handoverResult, releaseResult]) if (result.error) throw result.error;
   const entry = entryResult.data as any;
   if (!entry) return null;
+  if (source === "claim" && !entry.work_order_id && !entry.converted_work_order_id && entry.vehicle_id) {
+    // Match the center's read-only legacy projection. A claim and its work
+    // order must report the same review stage without silently linking rows.
+    const ordersResult = await supabase.from("job_orders" as any)
+      .select("id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,vehicle_entry_id")
+      .eq("tenant_id", tenantId).eq("claim_id", id).eq("vehicle_id", entry.vehicle_id)
+      .is("deleted_at", null).limit(3);
+    if (ordersResult.error) throw ordersResult.error;
+    const orders = (ordersResult.data || []) as any[];
+    if (orders.length) {
+      entry.__inferredOrderLink = true;
+      if (orders.length === 1 && (!orders[0].vehicle_entry_id || orders[0].vehicle_entry_id === entry.id)) {
+        entry.work_order = orders[0];
+      }
+    }
+  }
   if (inferredOrder) {
     const entryClaimId = entry.insurance_claim_id || entry.converted_claim_id;
     if (entryClaimId !== inferredOrder.claim_id || (inferredOrder.vehicle_entry_id && inferredOrder.vehicle_entry_id !== entry.id)

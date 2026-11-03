@@ -126,7 +126,13 @@ describe("vehicle visit stage projection", () => {
     expect(service).toContain("export async function getLinkedVehicleVisit");
     expect(service).toContain("const visit = resolveVehicleVisit(entry");
     expect(service).toContain("const presence = getVehicleEntryPresence(entry)");
+    expect(service).toContain('source === "claim" && !entry.work_order_id && !entry.converted_work_order_id');
+    expect(service).toContain('entry.__inferredOrderLink = true');
     expect(badge).toContain("getLinkedVehicleVisit(source, id!)");
+    const workOrderDetail = readFileSync(join(process.cwd(), "src/pages/WorkOrderDetail.tsx"), "utf8");
+    expect(workOrderDetail).toContain('<VehicleVisitBadge source="work_order" id={order.cloudId || order.id} />');
+    const routes = readFileSync(join(process.cwd(), "src/App.tsx"), "utf8");
+    expect(routes).toContain('<Route path="/insurance/claims/:id" element={<InsuranceClaimDetail />} />');
     expect(realtime).toContain('insurance_claims: ["insurance_claims", "insurance_invoices", "vehicle_visit"');
     expect(realtime).toContain('job_orders: ["job_orders", "insurance_claims", "vehicle_visit"');
   });

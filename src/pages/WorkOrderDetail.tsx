@@ -940,7 +940,7 @@ export default function WorkOrderDetail() {
               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${workOrderStatusColor(order.status)}`}>
                 {isEnglish ? STATUS_EN[normalizeWorkOrderStatus(order.status)] || order.status : normalizeWorkOrderStatus(order.status)}
               </span>
-              <VehicleVisitBadge source="work_order" id={order.id} />
+              <VehicleVisitBadge source="work_order" id={order.cloudId || order.id} />
             </div>
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
               <h1 className="shrink-0 whitespace-nowrap font-mono text-xl font-bold tracking-tight text-primary sm:text-2xl" dir="ltr">
