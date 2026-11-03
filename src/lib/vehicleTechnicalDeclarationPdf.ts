@@ -9,6 +9,23 @@ function safeHtml(form: VehicleTechnicalDeclarationForm): string {
   });
 }
 
+async function waitForImages(doc: Document): Promise<void> {
+  await Promise.all(Array.from(doc.images, async (image) => {
+    if (!image.getAttribute("src")) throw new Error("تعذر تحميل توقيع التقرير.");
+    if (image.decode) {
+      try { await image.decode(); }
+      catch { throw new Error("تعذر تحميل توقيع التقرير."); }
+      return;
+    }
+    if (image.complete && image.naturalWidth > 0) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("تعذر تحميل توقيع التقرير.")), 8000);
+      image.addEventListener("load", () => { clearTimeout(timer); resolve(); }, { once: true });
+      image.addEventListener("error", () => { clearTimeout(timer); reject(new Error("تعذر تحميل توقيع التقرير.")); }, { once: true });
+    });
+  }));
+}
+
 function assertSingleA4Page(doc: Document): HTMLElement {
   const page = doc.querySelector<HTMLElement>(".page");
   if (!page) throw new Error("Technical declaration page unavailable");
@@ -38,6 +55,7 @@ async function prepareHiddenPage(form: VehicleTechnicalDeclarationForm): Promise
     doc.write(safeHtml(form));
     doc.close();
     await doc.fonts?.ready;
+    await waitForImages(doc);
     return { iframe, page: assertSingleA4Page(doc) };
   } catch (error) {
     iframe.remove();
@@ -66,6 +84,8 @@ export async function printTechnicalDeclaration(form: VehicleTechnicalDeclaratio
   const win = openTechnicalDeclarationPreview(form, target);
   if (!win) return false;
   await win.document.fonts?.ready;
+  await waitForImages(win.document);
+  assertSingleA4Page(win.document);
   win.focus();
   win.print();
   return true;

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildVehicleTechnicalDeclarationHtml, emptyVehicleTechnicalDeclaration,
   initialTechnicalDeclarationForm, normalizeTechnicalDeclarationForm,
-  validateTechnicalDeclarationForm,
+  TECHNICAL_GARAGE_NAME, validateTechnicalDeclarationForm,
 } from "@/lib/vehicleTechnicalDeclaration";
 
 describe("vehicle technical declaration", () => {
@@ -21,7 +21,7 @@ describe("vehicle technical declaration", () => {
     expect(form.date).toBe("");
   });
 
-  it("retains exactly one English A4 sheet with source wording and blank signature/stamp", () => {
+  it("retains exactly one A4 sheet without a workshop stamp", () => {
     const html = buildVehicleTechnicalDeclarationHtml(emptyVehicleTechnicalDeclaration);
     expect(html).toContain("@page{size:A4 portrait;margin:0}");
     expect(html).toContain("width:210mm;height:297mm");
@@ -34,9 +34,13 @@ describe("vehicle technical declaration", () => {
       "Chassis recommend replace", "6. Body&amp;Floor Deformation Observed:",
       "7. Any extra accessories/Modification:", "PPE:",
       "8. Other Observations and Remarks:", "Garage Name", "Authorized Person",
-      "Signature", "Date:", "Stamp",
+      "Signature", "Date:",
     ]) expect(html).toContain(wording);
     expect(html.match(/class="page"/g)).toHaveLength(1);
+    expect(html).toContain(TECHNICAL_GARAGE_NAME);
+    expect(html).not.toContain("<strong>Stamp</strong>");
+    expect(html).toContain(".vehicle-data{color:#b42318");
+    expect(html).toContain(".tick{color:#14532d");
   });
 
   it("renders checked answers and escapes untrusted free text", () => {
@@ -45,9 +49,11 @@ describe("vehicle technical declaration", () => {
       cranking: "yes", engine_oil_level: "no", chassis_status: "deformed",
       chassis_damage_lh: true, claim_number: '<img src=x onerror="alert(1)">',
     });
-    expect(html).toContain("Cranking: &nbsp;&nbsp;&nbsp; Yes [X] / No [ ]");
-    expect(html).toContain("Engine Oil Level: OK [ ] / No [X]");
-    expect(html).toContain("Chassis Status: OK [ ] / Deformed [X]");
+    const tick = '[<span class="tick">✓</span>]';
+    expect(html).toContain(`Cranking: &nbsp;&nbsp;&nbsp; Yes ${tick} / No [ ]`);
+    expect(html).toContain(`Engine Oil Level: OK [ ] / No ${tick}`);
+    expect(html).toContain(`Chassis Status: OK [ ] / Deformed ${tick}`);
+    expect(html).not.toContain("[X]");
     expect(html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
     expect(html).not.toContain('<img src=x onerror="alert(1)">');
   });
@@ -60,6 +66,23 @@ describe("vehicle technical declaration", () => {
       ...emptyVehicleTechnicalDeclaration, other_observations: "x".repeat(241),
     })).toThrow();
     expect(normalizeTechnicalDeclarationForm({ claim_number: "C/7" }).engine_warning).toBe("");
+    expect(normalizeTechnicalDeclarationForm({ garage_name: "Old Garage" }).garage_name).toBe(TECHNICAL_GARAGE_NAME);
+  });
+
+  it("fills the signer from report inputs and never fabricates a signature", () => {
+    const form = initialTechnicalDeclarationForm({}, "Report Creator");
+    expect(form.authorized_person).toBe("Report Creator");
+    expect(form.signer_role).toBe("report_author");
+    expect(form.signature_data_url).toBe("");
+    const signed = { ...form, signature_data_url: "data:image/png;base64,aGVsbG8=" };
+    expect(() => validateTechnicalDeclarationForm(signed)).not.toThrow();
+    const html = buildVehicleTechnicalDeclarationHtml(signed);
+    expect(html).toContain("Report Creator");
+    expect(html).toContain("Report Author");
+    expect(html).toContain('<img src="data:image/png;base64,aGVsbG8="');
+    expect(() => validateTechnicalDeclarationForm({ ...form, signature_data_url: "javascript:alert(1)" })).toThrow("Invalid signature image");
+    expect(() => validateTechnicalDeclarationForm({ ...signed, signer_role: "" })).toThrow();
+    expect(() => validateTechnicalDeclarationForm({ ...form, signature_data_url: "data:image/png;base64," + "a".repeat(9000) })).toThrow();
   });
 
   it("keeps one per entry with tenant RLS and revision-checked updates", () => {

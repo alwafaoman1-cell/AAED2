@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Download, Eye, Loader2, Printer, Save } from "lucide-react";
+import { ArrowRight, Check, Download, Eye, Loader2, Printer, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import ElectronicSignaturePad from "@/components/ElectronicSignaturePad";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -16,8 +18,8 @@ import { queryKeys } from "@/lib/queryKeys";
 import { markClean, markDirty } from "@/lib/unsavedWork";
 import { getVehicleEntry } from "@/lib/vehicleEntryService";
 import {
-  emptyVehicleTechnicalDeclaration, getVehicleTechnicalDeclaration, initialTechnicalDeclarationForm,
-  saveVehicleTechnicalDeclaration, technicalFieldMaxLength, type VehicleTechnicalDeclarationForm,
+  TECHNICAL_GARAGE_NAME, emptyVehicleTechnicalDeclaration, getVehicleTechnicalDeclaration, initialTechnicalDeclarationForm,
+  saveVehicleTechnicalDeclaration, technicalFieldMaxLength, validateTechnicalDeclarationForm, type VehicleTechnicalDeclarationForm,
 } from "@/lib/vehicleTechnicalDeclaration";
 import {
   assertPrintableTechnicalDeclaration, downloadTechnicalDeclarationPdf, openTechnicalDeclarationPreview, printTechnicalDeclaration,
@@ -81,8 +83,7 @@ const sections: Array<{ number: number; ar: string; en: string; fields: Field[] 
 ];
 
 const footerFields: Field[] = [
-  { key: "garage_name", ar: "اسم الورشة", en: "Garage Name", kind: "text" },
-  { key: "authorized_person", ar: "الشخص المخول", en: "Authorized Person", kind: "text" },
+  { key: "authorized_person", ar: "اسم الموقّع", en: "Signer's name", kind: "text" },
   { key: "date", ar: "تاريخ التوقيع", en: "Date", kind: "date" },
 ];
 
@@ -90,6 +91,7 @@ export default function VehicleTechnicalDeclarationPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { profile } = useAuth();
   const { i18n } = useTranslation();
   const isAr = i18n.language.startsWith("ar");
   const label = (ar: string, en: string) => isAr ? ar : en;
@@ -113,11 +115,18 @@ export default function VehicleTechnicalDeclarationPage() {
 
   useEffect(() => {
     if (!id || initializedFor === id || !entryQuery.isSuccess || !documentQuery.isSuccess || !entry) return;
-    setForm(record ? record.form_data : initialTechnicalDeclarationForm(entry));
+    setForm(record ? record.form_data : initialTechnicalDeclarationForm(entry, profile?.full_name || ""));
     setEditingRevision(record?.revision ?? null);
     setDirty(false);
     setInitializedFor(id);
-  }, [id, initializedFor, entryQuery.isSuccess, documentQuery.isSuccess, entry, record]);
+  }, [id, initializedFor, entryQuery.isSuccess, documentQuery.isSuccess, entry, record, profile?.full_name]);
+
+  useEffect(() => {
+    if (initializedFor !== id || record || dirty || !profile?.full_name) return;
+    setForm((current) => current.authorized_person ? current : {
+      ...current, authorized_person: profile.full_name, signer_role: "report_author",
+    });
+  }, [id, initializedFor, record, dirty, profile?.full_name]);
 
   useEffect(() => {
     if (!id) return;
@@ -128,6 +137,7 @@ export default function VehicleTechnicalDeclarationPage() {
 
   const save = useMutation({
     mutationFn: async () => {
+      validateTechnicalDeclarationForm(form);
       await assertPrintableTechnicalDeclaration(form);
       return saveVehicleTechnicalDeclaration(id!, form, editingRevision);
     },
@@ -142,7 +152,23 @@ export default function VehicleTechnicalDeclarationPage() {
   });
 
   function setField(key: FieldKey, value: string | boolean) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === "authorized_person" && value !== current.authorized_person ? { signature_data_url: "" } : {}),
+    }));
+    setDirty(true);
+  }
+
+  function setSignerRole(role: "" | "technician" | "report_author") {
+    if (form.signer_role === role) return;
+    const technicianName = entry?.work_order?.technician_name || entry?.converted_work_order?.technician_name || "";
+    setForm((current) => ({
+      ...current,
+      signer_role: role,
+      authorized_person: role === "report_author" ? profile?.full_name || "" : role === "technician" ? technicianName : "",
+      signature_data_url: "",
+    }));
     setDirty(true);
   }
 
@@ -153,7 +179,7 @@ export default function VehicleTechnicalDeclarationPage() {
     if (field.kind === "checkbox") {
       return <label key={field.key} htmlFor={fieldId} className="flex items-center gap-2 rounded-md border border-border p-3 text-sm">
         <input id={fieldId} type="checkbox" checked={raw === true} disabled={save.isPending}
-          onChange={(event) => setField(field.key, event.target.checked)} className="h-4 w-4" />{title}
+          onChange={(event) => setField(field.key, event.target.checked)} className="h-4 w-4 accent-success" />{title}
       </label>;
     }
     let options: Array<{ value: string; text: string }> = [];
@@ -170,16 +196,20 @@ export default function VehicleTechnicalDeclarationPage() {
       { value: "ok", text: "OK" }, { value: "deformed", text: label("متشوه", "Deformed") },
     ];
     return <div key={field.key} className="space-y-1.5 min-w-0">
-      <label htmlFor={fieldId} className="text-sm font-medium">{title}</label>
-      {options.length > 0 ? <select id={fieldId} value={String(raw)} disabled={save.isPending}
-        onChange={(event) => setField(field.key, event.target.value)}
-        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-        {options.map((option) => <option key={option.value} value={option.value}>{option.text}</option>)}
-      </select> : field.kind === "textarea" ?
+      <label htmlFor={options.length ? undefined : fieldId} id={options.length ? fieldId : undefined} className="text-sm font-medium">{title}</label>
+      {options.length > 0 ? <div role="group" aria-labelledby={fieldId} className="flex flex-wrap gap-2">
+        {options.map((option) => <Button key={option.value} type="button" size="sm" variant="outline"
+          aria-pressed={String(raw) === option.value} disabled={save.isPending}
+          className={String(raw) === option.value ? "border-success bg-success/10 text-success hover:bg-success/15" : ""}
+          onClick={() => setField(field.key, option.value)}>
+          {String(raw) === option.value && option.value !== "" && <Check size={14} className="me-1" />}{option.text}
+        </Button>)}
+      </div> : field.kind === "textarea" ?
         <Textarea id={fieldId} value={String(raw)} maxLength={technicalFieldMaxLength(field.key)} rows={3} disabled={save.isPending}
           onChange={(event) => setField(field.key, event.target.value)} /> :
         <Input id={fieldId} type={field.kind === "date" ? "date" : "text"} dir={field.kind === "date" ? "ltr" : undefined}
           value={String(raw)} maxLength={technicalFieldMaxLength(field.key)} disabled={save.isPending}
+          className={identityFields.some((identity) => identity.key === field.key && identity.kind === "text") ? "font-semibold text-destructive" : undefined}
           onChange={(event) => setField(field.key, event.target.value)} />}
     </div>;
   }
@@ -248,8 +278,8 @@ export default function VehicleTechnicalDeclarationPage() {
       </div>
     </header>
     <p className="text-sm text-muted-foreground">{label(
-      "نموذج إضافي مرتبط بهذا الدخول فقط. حقول الفحص غير محددة افتراضيًا؛ احفظ قبل المعاينة أو الطباعة. التوقيع والختم متروكان للورقة المطبوعة.",
-      "An additional form for this entry only. Inspection choices are blank by default; save before preview or printing. Signature and stamp remain on paper.",
+      "نموذج إضافي مرتبط بهذا الدخول فقط. حقول الفحص غير محددة افتراضيًا؛ احفظ قبل المعاينة أو الطباعة. لا يُدرج توقيع إلا بعد التقاطه من الموقّع.",
+      "An additional form for this entry only. Inspection choices are blank by default; save before preview or printing. A signature appears only after the signer provides it.",
     )}</p>
     <Card className="p-4 md:p-5 space-y-4">
       <h2 className="font-semibold">{label("بيانات المركبة والمطالبة", "Vehicle & Claim Details")}</h2>
@@ -263,8 +293,38 @@ export default function VehicleTechnicalDeclarationPage() {
     </div>
     <Card className="p-4 md:p-5 space-y-4">
       <h2 className="font-semibold">{label("بيانات الاعتماد والطباعة", "Workshop & Print Details")}</h2>
-      <div className="grid gap-4 sm:grid-cols-3">{footerFields.map(renderField)}</div>
-      <p className="text-sm text-muted-foreground">{label("التوقيع والختم لا يُفترضان إلكترونيًا؛ تظهر لهما مساحة فارغة في الورقة.", "Signature and stamp are not assumed electronic; the sheet leaves blank space for both.")}</p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="space-y-1.5"><label htmlFor="technical-garage-name" className="text-sm font-medium">{label("اسم الورشة", "Garage Name")}</label>
+          <Input id="technical-garage-name" value={TECHNICAL_GARAGE_NAME} readOnly className="bg-muted font-semibold" /></div>
+        {footerFields.map(renderField)}
+      </div>
+      <div className="space-y-2">
+        <p id="technical-signer-role" className="text-sm font-medium">{label("صفة الموقّع", "Signer role")}</p>
+        <div role="group" aria-labelledby="technical-signer-role" className="flex flex-wrap gap-2">
+          {([
+            ["report_author", label("منشئ التقرير", "Report author")],
+            ["technician", label("الفني", "Technician")],
+            ["", label("غير محدد", "Not selected")],
+          ] as const).map(([role, title]) => <Button key={role} type="button" size="sm" variant="outline"
+            aria-pressed={form.signer_role === role} disabled={save.isPending}
+            className={form.signer_role === role ? "border-success bg-success/10 text-success hover:bg-success/15" : ""}
+            onClick={() => setSignerRole(role)}>{form.signer_role === role && role && <Check size={14} className="me-1" />}{title}</Button>)}
+        </div>
+      </div>
+      <ElectronicSignaturePad value={form.signature_data_url} compactOutput disabled={save.isPending}
+        title={label("توقيع الموقّع على التقرير", "Report signer's signature")}
+        description={label("يوقّع الشخص المذكور أعلاه بنفسه؛ لا يُنشئ النظام توقيعًا تلقائيًا.", "The named person signs here; the system never creates a signature automatically.")}
+        clearLabel={label("مسح التوقيع", "Clear signature")}
+        savedLabel={label("التوقيع جاهز للحفظ مع النموذج.", "Signature is ready to save with the form.")}
+        emptyLabel={label("يمكن تركه فارغًا للتوقيع على الورقة المطبوعة.", "Leave blank if the paper will be signed by hand.")}
+        onChange={(value) => {
+          if (value.length > 9000) {
+            setField("signature_data_url", "");
+            toast.error(label("التوقيع كبير جدًا؛ امسحه وأعده بخط أبسط.", "Signature image is too large; clear and redraw it more simply."));
+            return;
+          }
+          setField("signature_data_url", value);
+        }} />
     </Card>
     <AlertDialog open={leaveOpen} onOpenChange={setLeaveOpen}>
       <AlertDialogContent dir={isAr ? "rtl" : "ltr"}><AlertDialogHeader>

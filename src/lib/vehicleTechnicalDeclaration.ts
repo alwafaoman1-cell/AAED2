@@ -1,6 +1,9 @@
 export type TechnicalChoice = "" | "yes" | "no";
 export type TechnicalOilChoice = "" | "ok" | "no";
 export type TechnicalChassisChoice = "" | "ok" | "deformed";
+export type TechnicalSignerRole = "" | "technician" | "report_author";
+
+export const TECHNICAL_GARAGE_NAME = "المركز التخصصي لصيانة السيارات";
 
 export interface VehicleTechnicalDeclarationForm {
   claim_number: string;
@@ -36,6 +39,8 @@ export interface VehicleTechnicalDeclarationForm {
   other_observations: string;
   garage_name: string;
   authorized_person: string;
+  signer_role: TechnicalSignerRole;
+  signature_data_url: string;
   date: string;
 }
 
@@ -61,7 +66,8 @@ export const emptyVehicleTechnicalDeclaration: VehicleTechnicalDeclarationForm =
   chassis_replace_lh: false, chassis_replace_rh: false, chassis_notes: "",
   floor_deformation: "", body_deformation: "", body_floor_details: "",
   accessories_modification: "", ppe: "", accessories_details: "",
-  other_observations: "", garage_name: "", authorized_person: "", date: "",
+  other_observations: "", garage_name: TECHNICAL_GARAGE_NAME,
+  authorized_person: "", signer_role: "", signature_data_url: "", date: "",
 };
 
 const choiceKeys = [
@@ -76,7 +82,7 @@ const fieldLengths: Partial<Record<keyof VehicleTechnicalDeclarationForm, number
   engine_other_remarks: 24, gear_other_remarks: 24, warning_other: 24,
   previous_improper_details: 110, chassis_notes: 38, body_floor_details: 38,
   accessories_details: 80, other_observations: 240,
-  garage_name: 55, authorized_person: 40, date: 10,
+  garage_name: 55, authorized_person: 70, signature_data_url: 9000, date: 10,
 };
 
 export function technicalFieldMaxLength(key: keyof VehicleTechnicalDeclarationForm): number {
@@ -91,10 +97,12 @@ export function normalizeTechnicalDeclarationForm(value: Partial<VehicleTechnica
     if (typeof result[key] === "boolean") (result as Record<string, unknown>)[key] = raw === true;
     else (result as Record<string, unknown>)[key] = typeof raw === "string" ? raw : "";
   }
+  // Previously saved forms may have an empty or outdated workshop name; normalize the view only.
+  result.garage_name = TECHNICAL_GARAGE_NAME;
   return result;
 }
 
-export function initialTechnicalDeclarationForm(entry: any, garageName = ""): VehicleTechnicalDeclarationForm {
+export function initialTechnicalDeclarationForm(entry: any, reportAuthorName = ""): VehicleTechnicalDeclarationForm {
   const vehicle = entry?.vehicle || entry?.vehicle_snapshot || {};
   const snapshot = entry?.vehicle_snapshot || {};
   const insurance = entry?.insurance_snapshot || {};
@@ -107,7 +115,8 @@ export function initialTechnicalDeclarationForm(entry: any, garageName = ""): Ve
     claim_number: String(entry?.claim?.claim_number || entry?.converted_claim?.claim_number || insurance.claim_number || ""),
     registration_number: plate,
     make_model: [vehicle.brand || vehicle.make || snapshot.brand || snapshot.make, vehicle.model || snapshot.model].filter(Boolean).join(" "),
-    garage_name: garageName,
+    authorized_person: reportAuthorName,
+    signer_role: reportAuthorName ? "report_author" : "",
   };
 }
 
@@ -117,6 +126,14 @@ export function validateTechnicalDeclarationForm(form: VehicleTechnicalDeclarati
   }
   if (!["", "ok", "no"].includes(form.engine_oil_level)) throw new Error("Invalid engine oil level");
   if (!["", "ok", "deformed"].includes(form.chassis_status)) throw new Error("Invalid chassis status");
+  if (!["", "technician", "report_author"].includes(form.signer_role)) throw new Error("Invalid signer role");
+  if (form.garage_name !== TECHNICAL_GARAGE_NAME) throw new Error("Invalid workshop name");
+  if (form.signature_data_url && !/^data:image\/(?:webp|jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(form.signature_data_url)) {
+    throw new Error("Invalid signature image");
+  }
+  if (form.signature_data_url && (!form.authorized_person.trim() || !form.signer_role)) {
+    throw new Error("أدخل اسم الموقّع وصفته قبل حفظ توقيعه.");
+  }
   for (const key of booleanKeys) {
     if (typeof form[key] !== "boolean") throw new Error(`Invalid checkbox: ${key}`);
   }
@@ -133,6 +150,9 @@ export function validateTechnicalDeclarationForm(form: VehicleTechnicalDeclarati
     }
   }
   if (form.date && !/^\d{4}-\d{2}-\d{2}$/.test(form.date)) throw new Error("Invalid date");
+  if (new TextEncoder().encode(JSON.stringify(form)).length > 15000) {
+    throw new Error("النموذج أكبر من الحد المسموح للحفظ؛ اختصر النص أو أعد التوقيع.");
+  }
 }
 
 export async function getVehicleTechnicalDeclaration(entryId: string): Promise<VehicleTechnicalDeclarationRecord | null> {
@@ -194,7 +214,9 @@ function line(value: unknown, className = ""): string {
   return `<span class="write-line ${className}">${escapeHtml(value) || "&nbsp;"}</span>`;
 }
 
-function marked(selected: boolean): string { return selected ? "[X]" : "[ ]"; }
+function marked(selected: boolean): string {
+  return selected ? '[<span class="tick">✓</span>]' : "[ ]";
+}
 function yesNo(value: TechnicalChoice): string {
   return `Yes ${marked(value === "yes")} / No ${marked(value === "no")}`;
 }
@@ -220,6 +242,10 @@ export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDecla
   .top .short{min-width:25mm}
   .top .right-line{width:40mm}
   .write-line{display:inline-block;border-bottom:1px solid #777;min-height:4.2mm;vertical-align:baseline;white-space:pre-wrap;overflow-wrap:anywhere}
+  .vehicle-data{color:#b42318;font-weight:bold}
+  .tick{color:#14532d;font-family:Arial,sans-serif;font-weight:900}
+  .garage-name{font-family:Arial,"Noto Naskh Arabic",sans-serif;direction:rtl;text-align:right;font-weight:bold}
+  .signer-role{display:block;margin-top:1mm;font:8pt Arial,sans-serif;color:#555}
   .top-rule{margin:8mm 0 5mm}
   .grid{display:grid;grid-template-columns:1.15fr .85fr;column-gap:10mm;row-gap:5mm}
   .section{min-width:0;break-inside:avoid}
@@ -236,16 +262,16 @@ export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDecla
   .footer-row{display:grid;grid-template-columns:62mm 8mm 1fr;align-items:end;margin-bottom:8mm}
   .footer-row .write-line{width:58mm}
   .sign-row{display:flex;gap:4mm;align-items:end;margin-top:18mm}
-  .sign-row .write-line{width:55mm}
+  .signature-box{display:inline-flex;align-items:end;justify-content:center;width:55mm;height:14mm;border-bottom:1px solid #777}
+  .signature-box img{display:block;max-width:55mm;max-height:13mm;object-fit:contain}
   .sign-row .date-line{width:55mm}
   .date-label{margin-left:8mm}
-  .stamp{margin-top:6mm}
   @media screen{body{background:#e9e9e9}.page{box-shadow:0 2px 10px #999}}
   @media print{html,body{background:#fff}.page{box-shadow:none;margin:0;break-after:page}}
   </style></head><body><div class="page">
     <h1>VEHICLE TECHNICAL DECLARATION</h1><div class="rule"></div>
-    <div class="top"><div>Claim Number: ${line(form.claim_number)}</div><div>Registration Number: ${line(form.registration_number,"right-line")}</div>
-      <div>Make &amp; Model: ${line(form.make_model)}</div><div>Non GCC Vehicle: ${yesNo(form.non_gcc_vehicle)} Towing : ${yesNo(form.towing)}</div></div>
+    <div class="top"><div>Claim Number: ${line(form.claim_number,"vehicle-data")}</div><div>Registration Number: ${line(form.registration_number,"right-line vehicle-data")}</div>
+      <div>Make &amp; Model: ${line(form.make_model,"vehicle-data")}</div><div>Non GCC Vehicle: ${yesNo(form.non_gcc_vehicle)} Towing : ${yesNo(form.towing)}</div></div>
     <div class="rule top-rule"></div>
     <div class="grid">
       <section class="section"><div class="heading">1. Engine Status:</div>
@@ -280,9 +306,8 @@ export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDecla
         <div class="remarks">${bulletLines(form.other_observations,3)}</div></section>
     </div>
     <div class="rule signature-rule"></div>
-    <div class="footer-row"><strong>Garage Name</strong><span>:</span>${line(form.garage_name)}</div>
-    <div class="footer-row"><strong>Authorized Person</strong><span>:</span>${line(form.authorized_person)}</div>
-    <div class="sign-row"><strong>Signature</strong><span>:</span>${line("")}<span class="date-label">Date:</span>${line(form.date,"date-line")}</div>
-    <div class="stamp"><strong>Stamp</strong></div>
+    <div class="footer-row"><strong>Garage Name</strong><span>:</span>${line(TECHNICAL_GARAGE_NAME,"garage-name")}</div>
+    <div class="footer-row"><div><strong>Authorized Person</strong>${form.signer_role ? `<small class="signer-role">${form.signer_role === "technician" ? "Technician" : "Report Author"}</small>` : ""}</div><span>:</span>${line(form.authorized_person)}</div>
+    <div class="sign-row"><strong>Signature</strong><span>:</span><span class="signature-box">${form.signature_data_url ? `<img src="${escapeHtml(form.signature_data_url)}" alt="Authorized person signature" />` : ""}</span><span class="date-label">Date:</span>${line(form.date,"date-line")}</div>
   </div></body></html>`;
 }

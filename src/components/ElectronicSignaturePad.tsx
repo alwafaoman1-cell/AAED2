@@ -8,6 +8,10 @@ interface ElectronicSignaturePadProps {
   title?: string;
   description?: string;
   disabled?: boolean;
+  compactOutput?: boolean;
+  clearLabel?: string;
+  savedLabel?: string;
+  emptyLabel?: string;
 }
 
 export default function ElectronicSignaturePad({
@@ -16,6 +20,10 @@ export default function ElectronicSignaturePad({
   title = "التوقيع الإلكتروني",
   description = "وقّع داخل المربع باستخدام الإصبع أو الفأرة.",
   disabled = false,
+  compactOutput = false,
+  clearLabel = "مسح التوقيع",
+  savedLabel = "تم التقاط التوقيع وسيُحفظ عند تجهيز الورقة.",
+  emptyLabel = "التوقيع مطلوب قبل تجهيز ورقة التسليم.",
 }: ElectronicSignaturePadProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
@@ -68,7 +76,22 @@ export default function ElectronicSignaturePad({
     const canvas = canvasRef.current;
     if (!drawingRef.current || !canvas || disabled) return;
     drawingRef.current = false;
-    onChange(canvas.toDataURL("image/png"));
+    if (!compactOutput) {
+      onChange(canvas.toDataURL("image/png"));
+      return;
+    }
+    const compact = document.createElement("canvas");
+    compact.width = 480;
+    compact.height = 120;
+    const context = compact.getContext("2d");
+    if (!context) return;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, compact.width, compact.height);
+    context.drawImage(canvas, 0, 0, compact.width, compact.height);
+    const webp = compact.toDataURL("image/webp", 0.65);
+    onChange(webp.startsWith("data:image/webp;") && webp.length <= 8500
+      ? webp
+      : compact.toDataURL("image/jpeg", 0.55));
   };
 
   const clear = () => {
@@ -86,7 +109,7 @@ export default function ElectronicSignaturePad({
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={clear} disabled={disabled || !value}>
-          <Trash2 size={14} /> مسح التوقيع
+          <Trash2 size={14} /> {clearLabel}
         </Button>
       </div>
       <canvas
@@ -101,7 +124,7 @@ export default function ElectronicSignaturePad({
         aria-label={title}
         className="h-36 w-full touch-none rounded-md border border-dashed border-slate-400 bg-white"
       />
-      <p className="text-[11px] text-muted-foreground">{value ? "تم التقاط التوقيع وسيُحفظ عند تجهيز الورقة." : "التوقيع مطلوب قبل تجهيز ورقة التسليم."}</p>
+      <p className="text-xs text-muted-foreground">{value ? savedLabel : emptyLabel}</p>
     </div>
   );
 }
