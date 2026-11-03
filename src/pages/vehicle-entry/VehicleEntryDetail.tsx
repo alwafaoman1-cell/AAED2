@@ -78,6 +78,8 @@ export default function VehicleEntryDetail() {
     mutationFn: () => createWorkOrderFromVehicleEntry(id!, user?.id),
     onSuccess: (result: any) => {
       qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.detail(id) });
+      qc.invalidateQueries({ queryKey: ["vehicle_visit", "detail", id] });
+      qc.invalidateQueries({ queryKey: ["vehicle_visit", "center"] });
       toast.success(result.existing ? "يوجد أمر عمل مرتبط مسبقًا" : "تم إنشاء أمر العمل");
       if (result.order_number || result.work_order_id) navigate(`/work-orders/${encodeURIComponent(result.order_number || result.work_order_id)}`);
     },
@@ -88,6 +90,8 @@ export default function VehicleEntryDetail() {
     mutationFn: () => convertVehicleEntryToClaim(id!, user?.id),
     onSuccess: (result: any) => {
       qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.detail(id) });
+      qc.invalidateQueries({ queryKey: ["vehicle_visit", "detail", id] });
+      qc.invalidateQueries({ queryKey: ["vehicle_visit", "center"] });
       toast.success(result.existing ? "توجد مطالبة مرتبطة مسبقًا" : "تم إنشاء المطالبة");
       if (result.claim_id) navigate(`/insurance/${result.claim_id}`);
     },

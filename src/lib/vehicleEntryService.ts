@@ -166,6 +166,15 @@ export interface VehicleEntryListFilters {
 export type VehicleEntryVisitPurpose = "workshop" | "inspection";
 export type VehicleEntryPresence = "in_workshop" | "with_customer" | "needs_review";
 
+export function getVehicleVisitBillingKind(entry: any): "insurance" | "cash" {
+  const snapshot = entry?.insurance_snapshot || {};
+  const order = entry?.work_order || entry?.converted_work_order;
+  return entry?.insurance_claim_id || entry?.converted_claim_id || entry?.insurance_company_id
+    || String(snapshot.claim_number || "").trim() || String(snapshot.company_name || "").trim()
+    || order?.work_order_type === "insurance"
+    ? "insurance" : "cash";
+}
+
 export function getVehicleEntryVisitPurpose(row: any): VehicleEntryVisitPurpose | null {
   const value = row?.vehicle_condition?.visit_purpose;
   return value === "workshop" || value === "inspection" ? value : null;
@@ -411,7 +420,7 @@ export async function listVehicleEntries(filters: VehicleEntryListFilters = {}, 
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   let query = supabase
     .from("vehicle_entries" as any)
-    .select("*,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,plate_letters,plate_country,vin_number,vin,color),insurance_company:insurance_companies(id,name),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number,status,repair_stage,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,claim_number,status,repair_stage,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number,status,technician_name,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,order_number,status,technician_name,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
+    .select("*,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,plate_letters,plate_country,vin_number,vin,color),insurance_company:insurance_companies(id,name),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
@@ -432,7 +441,7 @@ export async function getVehicleEntry(id: string) {
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   const { data, error } = await supabase
     .from("vehicle_entries" as any)
-    .select("*,customer:customers(*),vehicle:vehicles(*),insurance_company:insurance_companies(*),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number,status,repair_stage,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,claim_number,status,repair_stage,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number,status,technician_name,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,order_number,status,technician_name,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
+    .select("*,customer:customers(*),vehicle:vehicles(*),insurance_company:insurance_companies(*),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
     .eq("tenant_id", tenantId)
     .eq("id", id)
     .is("deleted_at", null)
@@ -1027,75 +1036,81 @@ export async function saveVehicleEntrySignature(args: {
   return data;
 }
 
-async function allocateWorkOrderNumber(tenantId: string) {
-  const year = new Date().getFullYear().toString();
-  const { data, error } = await supabase
-    .from("job_orders" as any)
-    .select("order_number")
-    .eq("tenant_id", tenantId)
-    .ilike("order_number", `WO-${year}-%`)
-    .limit(10000);
-  if (error) throw error;
-  let max = 0;
-  for (const row of ((data as any[]) || [])) {
-    const match = String(row.order_number || "").match(/^WO-(\d{4})-(\d+)$/i);
-    if (match?.[1] === year) max = Math.max(max, Number(match[2]) || 0);
-  }
-  return `WO-${year}-${String(max + 1).padStart(4, "0")}`;
-}
-
 export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: string | null) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   const entry = await getVehicleEntry(entryId);
   if (!entry) throw new Error("نموذج الدخول غير موجود");
   if (!entry.customer_id || !entry.vehicle_id) throw new Error("يجب ربط العميل والمركبة قبل إنشاء أمر العمل");
+  const linkedClaimId = entry.insurance_claim_id || entry.converted_claim_id;
+  if (getVehicleVisitBillingKind(entry) === "insurance" && !linkedClaimId) {
+    throw new Error(i18n.t("vehicleVisit.insuranceClaimFirst"));
+  }
+  const assertOrderChannel = (order: any) => {
+    if (!order || (linkedClaimId
+      ? order.work_order_type !== "insurance" || order.claim_id !== linkedClaimId
+      : order.work_order_type === "insurance")) {
+      throw new Error(i18n.t("vehicleVisit.work_order_channel_conflict"));
+    }
+  };
   if (entry.work_order_id || entry.converted_work_order_id) {
-    return { existing: true, work_order_id: entry.work_order_id || entry.converted_work_order_id, order_number: entry.work_order?.order_number || null };
+    assertOrderChannel(entry.work_order || entry.converted_work_order);
+    return { existing: true, work_order_id: entry.work_order_id || entry.converted_work_order_id, order_number: (entry.work_order || entry.converted_work_order)?.order_number || null };
   }
   const existing = await supabase
     .from("job_orders" as any)
-    .select("id,order_number")
+    .select("id,order_number,work_order_type,claim_id")
     .eq("tenant_id", tenantId)
     .eq("vehicle_entry_id", entryId)
     .is("deleted_at", null)
     .maybeSingle();
   if (existing.error) throw existing.error;
   if ((existing.data as any)?.id) {
-    await supabase.from("vehicle_entries" as any).update({ work_order_id: (existing.data as any).id, converted_work_order_id: (existing.data as any).id } as any).eq("tenant_id", tenantId).eq("id", entryId);
+    assertOrderChannel(existing.data);
+    const linked = await supabase.from("vehicle_entries" as any)
+      .update({ work_order_id: (existing.data as any).id, converted_work_order_id: (existing.data as any).id } as any)
+      .eq("tenant_id", tenantId).eq("id", entryId)
+      .is("work_order_id", null).is("converted_work_order_id", null)
+      .select("id,work_order_id").maybeSingle();
+    if (linked.error) throw linked.error;
+    if (!linked.data || (linked.data as any).work_order_id !== (existing.data as any).id)
+      throw new Error(i18n.t("vehicleVisit.workOrderLinkNotConfirmed"));
     return { existing: true, work_order_id: (existing.data as any).id, order_number: (existing.data as any).order_number };
   }
 
-  const linkedClaimId = entry.insurance_claim_id || entry.converted_claim_id;
   if (linkedClaimId) {
     const claimOrder = await findPrimaryClaimWorkOrder(tenantId, linkedClaimId);
     if (claimOrder) {
       if (claimOrder.vehicle_id !== entry.vehicle_id) throw new Error(i18n.t("claimWorkOrder.vehicleMismatch"));
+      const { data: channelOrder, error: channelError } = await supabase.from("job_orders" as any)
+        .select("id,work_order_type,claim_id").eq("tenant_id", tenantId).eq("id", claimOrder.id).single();
+      if (channelError) throw channelError;
+      assertOrderChannel(channelOrder);
       const { data: linkedEntry, error: linkError } = await supabase
         .from("vehicle_entries" as any)
         .update({ status: "Converted to Work Order", work_order_id: claimOrder.id, converted_work_order_id: claimOrder.id } as any)
         .eq("tenant_id", tenantId)
         .eq("id", entryId)
-        .select("id")
+        .is("work_order_id", null).is("converted_work_order_id", null)
+        .select("id,work_order_id")
         .maybeSingle();
       if (linkError) throw linkError;
-      if (!(linkedEntry as any)?.id) throw new Error(i18n.t("claimWorkOrder.claimMissing"));
+      if (!(linkedEntry as any)?.id || (linkedEntry as any).work_order_id !== claimOrder.id)
+        throw new Error(i18n.t("vehicleVisit.workOrderLinkNotConfirmed"));
       return { existing: true, work_order_id: claimOrder.id, order_number: claimOrder.order_number };
     }
   }
 
-  const orderNumber = await allocateWorkOrderNumber(tenantId);
   const vehicle = entry.vehicle || entry.vehicle_snapshot || {};
   const customer = entry.customer || entry.customer_snapshot || {};
   const arrivalAt = `${entry.arrival_date}T${String(entry.arrival_time || "00:00").slice(0, 5)}:00`;
   const payload = {
     tenant_id: tenantId,
-    order_number: orderNumber,
     customer_id: entry.customer_id,
     vehicle_id: entry.vehicle_id,
     claim_id: entry.insurance_claim_id || entry.converted_claim_id || null,
     vehicle_entry_id: entryId,
-    work_order_type: entry.insurance_snapshot?.is_insurance_related ? "insurance" : "general_customer",
+    work_order_type: linkedClaimId ? "insurance" : "general_customer",
     status: "received",
     vehicle_presence_status: "in_workshop",
     service_type: "Vehicle Entry",
@@ -1118,11 +1133,16 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
   };
   const { data, error } = await supabase.from("job_orders" as any).insert(payload as any).select("id,order_number").single();
   if (error) throw error;
-  await supabase
+  const linkedEntry = await supabase
     .from("vehicle_entries" as any)
     .update({ status: "Converted to Work Order", work_order_id: (data as any).id, converted_work_order_id: (data as any).id } as any)
     .eq("tenant_id", tenantId)
-    .eq("id", entryId);
+    .eq("id", entryId)
+    .is("work_order_id", null).is("converted_work_order_id", null)
+    .select("id,work_order_id").maybeSingle();
+  if (linkedEntry.error) throw linkedEntry.error;
+  if (!linkedEntry.data || (linkedEntry.data as any).work_order_id !== (data as any).id)
+    throw new Error(i18n.t("vehicleVisit.workOrderLinkNotConfirmed"));
   await insertVehicleEntryAudit({
     tenantId,
     vehicleEntryId: entryId,

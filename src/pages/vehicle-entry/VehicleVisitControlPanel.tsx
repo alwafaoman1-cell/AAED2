@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { queryKeys } from "@/lib/queryKeys";
-import { advanceVehicleVisit, getVehicleVisitDetail, getVehicleVisitDocumentUrl, listVehicleVisitStaff, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
+import { advanceVehicleVisit, getVehicleVisitBillingKind, getVehicleVisitDetail, getVehicleVisitDocumentUrl, listVehicleVisitStaff, reconcileVehicleVisitCustody, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
 
 const ORDER: PersistedVisitStage[] = ["arrived", "approved", "in_progress", "ready", "delivered"];
 function localDateTime() {
@@ -32,13 +32,17 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
   const [requirements, setRequirements] = useState("");
   const [responsible, setResponsible] = useState(user?.id || "");
   const [customerApproved, setCustomerApproved] = useState(false);
+  const [custodyOpen, setCustodyOpen] = useState(false);
+  const [custodyReason, setCustodyReason] = useState("");
+  const [physicallyChecked, setPhysicallyChecked] = useState(false);
 
-  const detail = useQuery({ queryKey: ["vehicle_visit", "detail", entryId], queryFn: () => getVehicleVisitDetail(entryId), staleTime: 30_000 });
+  const detail = useQuery({ queryKey: ["vehicle_visit", "detail", entryId], queryFn: () => getVehicleVisitDetail(entryId), staleTime: 5_000, refetchOnWindowFocus: "always" });
   const staff = useQuery({ queryKey: ["vehicle_visit", "staff"], queryFn: listVehicleVisitStaff, staleTime: 300_000 });
   const visit = detail.data;
   const entry = visit?.entry;
   const claim = entry?.claim || entry?.converted_claim;
   const order = entry?.work_order || entry?.converted_work_order;
+  const billingKind = getVehicleVisitBillingKind(entry);
   // Older, consistent visits remain read-only until an explicit user action;
   // the RPC then creates their first workflow event transactionally.
   const current = visit?.workflow?.stage || (visit?.stage !== "needs_review" ? visit?.stage : undefined);
@@ -48,6 +52,37 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     : current ? ORDER[ORDER.indexOf(current) - 1] : undefined;
   const canManage = hasRole("admin", "manager");
   const canAdvance = !visit?.reviewReason && Boolean(current) && current !== "cancelled" && current !== "delivered";
+  const nextBlocker = next === "approved" && !hasRole("admin", "manager", "insurance") ? "approvalPermissionRequired"
+    : next === "in_progress" && !hasRole("admin", "manager", "supervisor", "technician") ? "workPermissionRequired"
+    : (next === "ready" || next === "delivered") && !hasRole("admin", "manager", "supervisor") ? "completionPermissionRequired"
+    : next === "approved" && billingKind === "insurance" && !["approved", "paid"].includes(claim?.status)
+    ? "claimApprovalRequired"
+    : next === "approved" && billingKind === "cash" && !order ? "cashWorkOrderRequired"
+    : next === "in_progress" && !order ? "workOrderRequired"
+    : next === "in_progress" && billingKind === "insurance" && !["approved", "paid"].includes(claim?.status) ? "claimApprovalRequired"
+    : next === "in_progress" && (entry?.vehicle_location !== "داخل الورشة"
+      || order?.vehicle_presence_status === "with_customer" || claim?.vehicle_presence_status === "with_customer") ? "workshopPresenceRequired"
+    : next === "in_progress" && order && !["received", "inspection", "waiting_parts", "in_progress"].includes(order.status) ? "workOrderStatusInvalid"
+    : next === "ready" && order?.status !== "completed" ? "finishWorkFirst"
+    : next === "delivered" && (!visit?.hasFinalHandover || order?.status !== "delivered" || !order?.vehicle_delivered_at) ? "signedHandoverRequired"
+    : null;
+  const prerequisiteHref = nextBlocker === "claimApprovalRequired" && claim?.id ? `/insurance/${claim.id}`
+    : ["cashWorkOrderRequired", "workOrderRequired", "workshopPresenceRequired"].includes(nextBlocker || "") ? `/vehicle-entry/${entryId}`
+    : ["workOrderStatusInvalid", "finishWorkFirst"].includes(nextBlocker || "") && order?.order_number
+      ? `/work-orders/${encodeURIComponent(order.order_number)}` : null;
+  const cancelBlocker = claim && !["cancelled", "rejected"].includes(claim.status)
+    ? "cancelClaimFirst" : order && order.status !== "delivered" ? "closeWorkOrderFirst" : null;
+  const canReconcileCustody = canManage && visit?.reviewReason === "custody_conflict"
+    && entry?.vehicle_location === "داخل الورشة" && !visit.hasFinalHandover
+    && !["cancelled", "rejected"].includes(claim?.status)
+    && !claim?.vehicle_delivered_at && !claim?.delivered_at
+    && order?.status !== "delivered" && !order?.vehicle_delivered_at
+    && !(visit.releases || []).some((release: any) => release.status === "signed" && !release.returned_at);
+
+  const displayError = (error: Error) => {
+    const code = error.message?.match(/VEHICLE_VISIT_[A-Z_]+/)?.[0];
+    return code ? t(`vehicleVisit.errors.${code}`, { defaultValue: error.message }) : error.message || t("vehicleVisit.saveFailed");
+  };
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -78,7 +113,29 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
       setNotes(""); setReason(""); setRequirements(""); setCustomerApproved(false);
       toast.success(t("vehicleVisit.saved"));
     },
-    onError: (error: Error) => toast.error(error.message || t("vehicleVisit.saveFailed")),
+    onError: (error: Error) => {
+      void qc.invalidateQueries({ queryKey: ["vehicle_visit", "detail", entryId] });
+      void qc.invalidateQueries({ queryKey: ["vehicle_visit", "center"] });
+      toast.error(displayError(error));
+    },
+  });
+
+  const custodyMutation = useMutation({
+    mutationFn: async () => {
+      if (!physicallyChecked || custodyReason.trim().length < 8) throw new Error("VEHICLE_VISIT_REASON_REQUIRED");
+      await reconcileVehicleVisitCustody(entryId, custodyReason);
+      const confirmed = await getVehicleVisitDetail(entryId);
+      if (!confirmed || confirmed.reviewReason === "custody_conflict") throw new Error("VEHICLE_VISIT_SAVE_NOT_CONFIRMED");
+      return confirmed;
+    },
+    onSuccess: (confirmed) => {
+      qc.setQueryData(["vehicle_visit", "detail", entryId], confirmed);
+      void qc.invalidateQueries({ queryKey: ["vehicle_visit", "center"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
+      setCustodyOpen(false); setCustodyReason(""); setPhysicallyChecked(false);
+      toast.success(t("vehicleVisit.custodySaved"));
+    },
+    onError: (error: Error) => toast.error(displayError(error)),
   });
 
   async function openDocument(fileId: string) {
@@ -98,6 +155,9 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
   if (detail.isError || !visit) return <Card className="p-4 text-sm text-destructive">{t("vehicleEntry.loadError")}: {(detail.error as Error)?.message}</Card>;
 
   const stageLabel = (stage: VisitStage | null | undefined) => stage ? t(`vehicleVisit.${stage}`) : "—";
+  const presenceLabel = (presence: string | null | undefined) => presence === "داخل الورشة" || presence === "in_workshop"
+    ? t("vehicleEntry.workshopTab") : presence === "مع العميل" || presence === "with_customer"
+      ? t("vehicleEntry.customerTab") : presence || "—";
   const refs = [
     { label: t("vehicleVisit.entry"), value: entry.entry_number, href: `/vehicle-entry/${entryId}` },
     { label: t("vehicleVisit.claim"), value: claim?.claim_number, href: claim?.id ? `/insurance/${claim.id}` : "" },
@@ -118,7 +178,9 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
       </div>
       <Badge variant={visit.stage === "needs_review" ? "destructive" : "secondary"}>{stageLabel(visit.stage)}</Badge>
     </div>
+    <p className="text-sm text-muted-foreground">{t(billingKind === "insurance" ? "vehicleVisit.insuranceFlow" : "vehicleVisit.cashFlow")}</p>
     {visit.reviewReason && <div className="flex items-start gap-2 rounded-lg border border-warning/50 bg-warning/5 p-3 text-sm text-warning"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />{t(`vehicleVisit.${visit.reviewReason}`, { defaultValue: visit.reviewReason })}</div>}
+    {canReconcileCustody && <Button variant="outline" onClick={() => setCustodyOpen(true)}>{t("vehicleVisit.reviewCustody")}</Button>}
     <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
       {refs.map((ref) => <div key={ref.label} className="min-w-0 rounded-lg border border-border p-3">
         <div className="text-xs text-muted-foreground">{ref.label}</div>
@@ -139,11 +201,15 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
         </div>
       </details>}
     <div className="flex flex-wrap gap-2">
-      {canAdvance && next && <Button variant="outline" onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(next); }}><ArrowRight className="me-2 h-4 w-4" />{t("vehicleVisit.next")}: {stageLabel(next)}</Button>}
+      {canAdvance && next && <Button variant="outline" disabled={Boolean(nextBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(next); }}><ArrowRight className="me-2 h-4 w-4" />{t("vehicleVisit.next")}: {stageLabel(next)}</Button>}
       {canManage && current && previous && <Button variant="outline" onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
-      {canManage && current !== "cancelled" && current !== "delivered" && current && <Button variant="outline" onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget("cancelled"); }}>{t("vehicleVisit.cancel")}</Button>}
+      {canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && current &&
+        <Button variant="outline" disabled={Boolean(cancelBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget("cancelled"); }}>{t("vehicleVisit.cancel")}</Button>}
       {next === "delivered" && !visit.hasFinalHandover && order?.order_number && <Link className="text-sm text-primary underline" to={`/work-orders/${encodeURIComponent(order.order_number)}/delivery`}>{t("vehicleVisit.signedHandoverRequired")}</Link>}
     </div>
+    {canAdvance && nextBlocker && <p role="status" className="text-sm text-warning">{t(`vehicleVisit.${nextBlocker}`)}{prerequisiteHref && <> <Link to={prerequisiteHref} className="font-semibold underline">{t("vehicleVisit.openPrerequisite")}</Link></>}</p>}
+    {canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && cancelBlocker &&
+      <p className="text-sm text-muted-foreground">{t(`vehicleVisit.${cancelBlocker}`)}</p>}
     {visit.reviewReason && <p className="text-sm text-muted-foreground">{t("vehicleVisit.reviewBlocked")}</p>}
     <details className="rounded-lg border border-border p-3">
       <summary className="cursor-pointer font-semibold">{t("vehicleVisit.history")} ({visit.transitions.length})</summary>
@@ -169,14 +235,29 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
           </label>
           <label className="block text-sm">{t("vehicleVisit.notes")}<Textarea value={notes} maxLength={2000} onChange={(event) => setNotes(event.target.value)} /></label>
           <label className="block text-sm">{t("vehicleVisit.requirements")}<Textarea value={requirements} maxLength={2000} onChange={(event) => setRequirements(event.target.value)} /></label>
-          {target === "approved" && !claim && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={customerApproved} onChange={(event) => setCustomerApproved(event.target.checked)} />{t("vehicleVisit.customerApproved")}</label>}
+          {target === "approved" && billingKind === "cash" && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={customerApproved} onChange={(event) => setCustomerApproved(event.target.checked)} />{t("vehicleVisit.customerApproved")}</label>}
           {(target === "cancelled" || (current && target && ORDER.indexOf(target) < ORDER.indexOf(current))) && <label className="block text-sm">{t("vehicleVisit.reason")}<Textarea required value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} /></label>}
           {target === "ready" && order?.status !== "completed" && <p className="text-sm text-warning">{t("vehicleVisit.finishWorkFirst")}</p>}
           {target === "delivered" && !visit.hasFinalHandover && <p className="text-sm text-warning">{t("vehicleVisit.signedHandoverRequired")}</p>}
-          <Button type="submit" disabled={mutation.isPending || !responsible || !occurredAt || (target === "approved" && !claim && !customerApproved) || (target === "delivered" && !visit.hasFinalHandover)}>
+          <Button type="submit" disabled={mutation.isPending || !responsible || !occurredAt || (target === "approved" && billingKind === "cash" && !customerApproved) || (target === "delivered" && !visit.hasFinalHandover)}>
             {mutation.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}{t("vehicleVisit.save")}
           </Button>
         </form>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={custodyOpen} onOpenChange={(open) => { if (!custodyMutation.isPending) setCustodyOpen(open); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>{t("vehicleVisit.reviewCustody")}</DialogTitle><DialogDescription>{t("vehicleVisit.reviewCustodyDescription")}</DialogDescription></DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p>{t("vehicleVisit.entryLocation")}: {presenceLabel(entry.vehicle_location)}</p>
+          {claim && <p>{t("vehicleVisit.claim")}: {presenceLabel(claim.vehicle_presence_status)}</p>}
+          {order && <p>{t("vehicleVisit.workOrder")}: {presenceLabel(order.vehicle_presence_status)}</p>}
+          <label className="flex items-center gap-2"><input type="checkbox" checked={physicallyChecked} onChange={(event) => setPhysicallyChecked(event.target.checked)} />{t("vehicleVisit.physicallyChecked")}</label>
+          <label className="block">{t("vehicleVisit.reason")}<Textarea required minLength={8} maxLength={1000} value={custodyReason} onChange={(event) => setCustodyReason(event.target.value)} /></label>
+          <Button type="button" disabled={custodyMutation.isPending || !physicallyChecked || custodyReason.trim().length < 8} onClick={() => custodyMutation.mutate()}>
+            {custodyMutation.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}{t("vehicleVisit.confirmCustody")}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   </Card>;

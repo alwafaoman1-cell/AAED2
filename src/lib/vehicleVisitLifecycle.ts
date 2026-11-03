@@ -1,11 +1,13 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
-import { getVehicleEntry, getVehicleEntryPresence, listVehicleEntries } from "@/lib/vehicleEntryService";
+import { getVehicleEntry, getVehicleEntryPresence, getVehicleVisitBillingKind, listVehicleEntries } from "@/lib/vehicleEntryService";
 import { getPrivateDocumentUrl } from "@/lib/documentExtraction/persistence";
 
 export const VISIT_STAGES = ["arrived", "approved", "in_progress", "ready", "delivered", "cancelled", "needs_review"] as const;
 export type VisitStage = typeof VISIT_STAGES[number];
 export type PersistedVisitStage = Exclude<VisitStage, "needs_review">;
+
+export { getVehicleVisitBillingKind } from "@/lib/vehicleEntryService";
 
 export interface VehicleVisitWorkflow {
   entry_id: string;
@@ -59,11 +61,17 @@ export function resolveVehicleVisit(entry: any, workflow: VehicleVisitWorkflow |
   if (!entry.vehicle_id) reviewReason ||= "missing_vehicle";
   if (linkedOrder && (!order || order.vehicle_id !== entry.vehicle_id)) reviewReason ||= "work_order_link_conflict";
   if (linkedClaim && (!claim || claim.vehicle_id !== entry.vehicle_id)) reviewReason ||= "claim_link_conflict";
+  if (order && ((linkedClaim && (order.work_order_type !== "insurance" || order.claim_id !== linkedClaim))
+    || (!linkedClaim && order.work_order_type === "insurance"))) reviewReason ||= "work_order_channel_conflict";
+  if (getVehicleVisitBillingKind(entry) === "insurance" && !linkedClaim) reviewReason ||= "insurance_claim_required";
+  if ((entry.status === "Cancelled" || ["cancelled", "rejected"].includes(claim?.status))
+    && order && order.status !== "delivered") reviewReason ||= "cancelled_with_active_work_order";
   if (entry.work_order_id && entry.converted_work_order_id && entry.work_order_id !== entry.converted_work_order_id) reviewReason ||= "work_order_link_conflict";
   if (entry.insurance_claim_id && entry.converted_claim_id && entry.insurance_claim_id !== entry.converted_claim_id) reviewReason ||= "claim_link_conflict";
   if (getVehicleEntryPresence(entry) === "needs_review") reviewReason ||= "custody_conflict";
   const deliveredMarker = Boolean(order?.status === "delivered" || order?.vehicle_delivered_at || claim?.vehicle_delivered_at || claim?.delivered_at);
-  if (deliveredMarker && !hasFinalHandover) reviewReason ||= "delivery_without_signed_handover";
+  if (deliveredMarker && !hasFinalHandover && (!reviewReason || reviewReason === "custody_conflict"))
+    reviewReason = "delivery_without_signed_handover";
   if (workflow?.stage === "delivered" && !hasFinalHandover) reviewReason ||= "delivery_without_signed_handover";
   if (getVehicleEntryPresence(entry) === "with_customer" && !hasFinalHandover && !hasSignedTemporaryRelease
     && !claim?.cancelled_handover_signed_at) reviewReason ||= "exit_without_signed_release";
@@ -73,9 +81,11 @@ export function resolveVehicleVisit(entry: any, workflow: VehicleVisitWorkflow |
   if (!workflow) {
     if (entry.status === "Cancelled" || ["cancelled", "rejected"].includes(claim?.status)) stage = "cancelled";
     else if (hasFinalHandover && deliveredMarker) stage = "delivered";
-    else if (["completed", "delivered"].includes(order?.status) || ["ready", "quality_check"].includes(claim?.repair_stage)) stage = "ready";
-    else if (["in_progress", "waiting_parts"].includes(order?.status) || ["repairing", "in_progress"].includes(claim?.repair_stage)) stage = "in_progress";
-    else if (["approved", "paid"].includes(claim?.status)) stage = "approved";
+    else if (["completed", "delivered"].includes(order?.status) || order?.work_completed_at
+      || claim?.work_completed_at || ["ready", "quality_check", "delivered"].includes(claim?.repair_stage)) stage = "ready";
+    else if (["in_progress", "waiting_parts"].includes(order?.status) || order?.work_started_at
+      || claim?.work_started_at || ["repairing", "in_progress"].includes(claim?.repair_stage)) stage = "in_progress";
+    else if (["approved", "paid"].includes(claim?.status) || claim?.approved_at || claim?.insurance_approved_at) stage = "approved";
   }
   return { entry, workflow, stage: reviewReason ? "needs_review" : stage, reviewReason, hasFinalHandover };
 }
@@ -240,4 +250,12 @@ export async function advanceVehicleVisit(input: {
     throw new Error("VEHICLE_VISIT_SAVE_NOT_CONFIRMED");
   }
   return row;
+}
+
+export async function reconcileVehicleVisitCustody(entryId: string, reason: string): Promise<void> {
+  const { error } = await supabase.rpc("reconcile_vehicle_visit_custody" as any, {
+    p_entry_id: entryId,
+    p_reason: reason.trim(),
+  } as any);
+  if (error) throw error;
 }
