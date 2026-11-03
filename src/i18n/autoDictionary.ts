@@ -43,6 +43,9 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "الإقرار الفني للمركبة": "Vehicle Technical Declaration",
+  "العودة إلى دخول المركبة": "Back to Vehicle Entry",
+  "حفظ النموذج": "Save Declaration",
   "استيراد الحضور": "Import attendance",
   "تحديث الحركات": "Refresh punches",
   "حفظ ربط الموظفين": "Save employee mappings",

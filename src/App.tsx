@@ -122,6 +122,7 @@ const VehicleEntryList = lazy(() => import("./pages/vehicle-entry/VehicleEntryLi
 const VehicleEntryForm = lazy(() => import("./pages/vehicle-entry/VehicleEntryForm"));
 const VehicleEntryDetail = lazy(() => import("./pages/vehicle-entry/VehicleEntryDetail"));
 const VehicleInspectionReleasePage = lazy(() => import("./pages/vehicle-entry/VehicleInspectionReleasePage"));
+const VehicleTechnicalDeclarationPage = lazy(() => import("./pages/vehicle-entry/VehicleTechnicalDeclarationPage"));
 const ExecutiveDashboard = lazy(() => import("./pages/dashboard/ExecutiveDashboard"));
 const PrintTemplates = lazy(() => import("./pages/settings/PrintTemplates"));
 const PrintTemplateVariants = lazy(() => import("./pages/settings/PrintTemplateVariants"));
@@ -337,6 +338,7 @@ const App = () => (
               <Route path="/vehicle-entry/:id" element={<VehicleEntryDetail />} />
               <Route path="/vehicle-entry/:id/edit" element={<VehicleEntryForm />} />
               <Route path="/vehicle-entry/:id/inspection-release" element={<ProtectedRoute roles={["admin","manager","insurance","supervisor"]}><VehicleInspectionReleasePage /></ProtectedRoute>} />
+              <Route path="/vehicle-entry/:id/technical-declaration" element={<ProtectedRoute roles={["admin","manager","insurance","supervisor","technician"]}><VehicleTechnicalDeclarationPage /></ProtectedRoute>} />
               <Route path="/accounting" element={<ProtectedRoute roles={["admin","manager","accountant"]}><Accounting /></ProtectedRoute>} />
               <Route path="/accounting/expenses" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpensesManagementPage /></ProtectedRoute>} />
               <Route path="/accounting/expenses/new" element={<ProtectedRoute roles={["admin","manager","accountant"]}><ExpenseFormPage /></ProtectedRoute>} />
