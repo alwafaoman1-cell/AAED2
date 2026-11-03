@@ -6,7 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import VehicleEntryList from "@/pages/vehicle-entry/VehicleEntryList";
 import i18n from "@/i18n";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), rearPhotos: vi.fn() }));
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ profile: { tenant_id: "tenant-test" } }) }));
+vi.mock("@/lib/vehicleRearThumbnails", () => ({ getEntryRearThumbnailUrls: mocks.rearPhotos }));
 vi.mock("@/lib/vehicleVisitLifecycle", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/vehicleVisitLifecycle")>();
   return { ...real, listVehicleVisitCenter: mocks.list };
@@ -34,6 +36,8 @@ function renderList() {
 beforeEach(async () => {
   await i18n.changeLanguage("ar");
   mocks.list.mockReset();
+  mocks.rearPhotos.mockReset();
+  mocks.rearPhotos.mockResolvedValue({});
   mocks.list.mockResolvedValue([
     { entry: { id: "inside", entry_number: "ENT-2026-0001", arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Draft", vehicle_condition: { visit_purpose: "inspection" } }, stage: "arrived" },
     { entry: { id: "outside", entry_number: "ENT-2026-0002", arrival_date: "2026-10-20", vehicle_location: "مع العميل", status: "Issued" }, stage: "arrived" },
@@ -43,6 +47,15 @@ beforeEach(async () => {
 });
 
 describe("vehicle entry list visit workflow", () => {
+  it("shows the same saved rear-view thumbnail beside the vehicle in list and stage views", async () => {
+    mocks.rearPhotos.mockResolvedValue({ inside: "https://example.test/rear.webp" });
+    renderList();
+    expect(await screen.findByAltText(/صورة الواجهة الخلفية للمركبة/)).toHaveAttribute("src", "https://example.test/rear.webp");
+    expect(mocks.rearPhotos).toHaveBeenCalledWith("tenant-test", ["inside"]);
+    fireEvent.click(screen.getByRole("button", { name: "مراحل" }));
+    expect(await screen.findByAltText(/صورة الواجهة الخلفية للمركبة/)).toHaveAttribute("src", "https://example.test/rear.webp");
+  });
+
   it("separates custody tabs, translates statuses, and exposes contradictory records", async () => {
     renderList();
     expect(await screen.findByText("ENT-2026-0001")).toBeTruthy();

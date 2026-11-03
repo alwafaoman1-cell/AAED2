@@ -26,9 +26,13 @@ interface VehicleAvatarProps {
   claimId?: string | null;
   workOrderId?: string | null;
   imageUrl?: string | null;
+  /** A list-specific image (for example, the rear view) shown without changing the saved avatar. */
+  preferredImageUrl?: string | null;
   fallbackPhotos?: Array<string | null | undefined>;
   label?: string;
+  ariaLabel?: string;
   size?: VehicleAvatarSize;
+  shape?: "circle" | "square";
   className?: string;
   canEdit?: boolean;
   deferAvatarFetch?: boolean;
@@ -40,14 +44,18 @@ export default function VehicleAvatar({
   claimId,
   workOrderId,
   imageUrl,
+  preferredImageUrl,
   fallbackPhotos = [],
   label = "Vehicle",
+  ariaLabel,
   size = "md",
+  shape = "circle",
   className = "",
   canEdit = true,
   deferAvatarFetch = size === "sm",
 }: VehicleAvatarProps) {
-  const [failed, setFailed] = useState(false);
+  const [preferredFailed, setPreferredFailed] = useState(false);
+  const [fallbackFailed, setFallbackFailed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resolvedFallback, setResolvedFallback] = useState<{ reference: string; url: string } | null>(null);
@@ -70,17 +78,28 @@ export default function VehicleAvatar({
     });
     return () => { cancelled = true; };
   }, [avatar?.url, candidate, storageCandidate]);
-  const src = avatar?.url || (storageCandidate
+  const fallbackSrc = avatar?.url || (storageCandidate
     ? (resolvedFallback?.reference === candidate ? resolvedFallback.url : "")
     : candidate);
-
-  const activeSrc = src && !failed ? src : "";
+  const preferredSrc = String(preferredImageUrl || "").trim();
+  const activeSrc = preferredSrc && !preferredFailed
+    ? preferredSrc
+    : fallbackSrc && !fallbackFailed ? fallbackSrc : "";
+  const shapeClass = shape === "square" ? "rounded-md" : "rounded-full";
   const editable = canEdit && !!vehicleId;
   const busy = uploadAvatar.isPending || deleteAvatar.isPending;
 
   useEffect(() => {
-    setFailed(false);
-  }, [src]);
+    setPreferredFailed(false);
+  }, [preferredSrc]);
+  useEffect(() => {
+    setFallbackFailed(false);
+  }, [fallbackSrc]);
+
+  const handleImageError = () => {
+    if (activeSrc === preferredSrc) setPreferredFailed(true);
+    else setFallbackFailed(true);
+  };
 
   const openDialog = () => setDialogOpen(true);
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -106,14 +125,16 @@ export default function VehicleAvatar({
     await uploadAvatar.mutateAsync({ vehicleId, tenantId, claimId, workOrderId, file });
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
-    setFailed(false);
+    setPreferredFailed(false);
+    setFallbackFailed(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleDelete = async () => {
     if (!vehicleId) return;
     await deleteAvatar.mutateAsync(vehicleId);
-    setFailed(false);
+    setPreferredFailed(false);
+    setFallbackFailed(false);
   };
 
   const avatarBody = activeSrc ? (
@@ -122,12 +143,12 @@ export default function VehicleAvatar({
       alt={label}
       loading="lazy"
       decoding="async"
-      onError={() => setFailed(true)}
-      className={`${SIZE_CLASS[size]} shrink-0 rounded-full border border-border bg-muted object-cover shadow-sm transition-transform duration-150 group-hover:scale-105 ${className}`}
+      onError={handleImageError}
+      className={`${SIZE_CLASS[size]} shrink-0 ${shapeClass} border border-border bg-muted object-cover shadow-sm transition-transform duration-150 group-hover:scale-105 ${className}`}
     />
   ) : (
     <div
-      className={`${SIZE_CLASS[size]} shrink-0 rounded-full border border-border bg-muted/70 text-muted-foreground shadow-sm flex items-center justify-center transition-transform duration-150 group-hover:scale-105 ${className}`}
+      className={`${SIZE_CLASS[size]} shrink-0 ${shapeClass} border border-border bg-muted/70 text-muted-foreground shadow-sm flex items-center justify-center transition-transform duration-150 group-hover:scale-105 ${className}`}
     >
       {isLoading ? <Camera size={ICON_SIZE[size]} className="animate-pulse opacity-70" /> : <Car size={ICON_SIZE[size]} />}
     </div>
@@ -139,11 +160,11 @@ export default function VehicleAvatar({
         <HoverCardTrigger asChild>
           <button
             type="button"
-            aria-label={`View or change vehicle avatar: ${label}`}
+            aria-label={ariaLabel || `View or change vehicle avatar: ${label}`}
             title="View or change vehicle avatar"
             onClick={openDialog}
             onKeyDown={onKeyDown}
-            className="group relative inline-flex shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+            className={`group relative inline-flex shrink-0 ${shapeClass} outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`}
           >
             {avatarBody}
             {editable && (
@@ -174,8 +195,8 @@ export default function VehicleAvatar({
           </DialogHeader>
           <div className="space-y-4">
             <div className="flex items-center justify-center rounded-xl border bg-muted/30 p-3">
-              {previewUrl || activeSrc ? (
-                <img src={previewUrl || activeSrc} alt={label} className="max-h-72 w-full rounded-lg object-contain" />
+              {previewUrl || fallbackSrc || activeSrc ? (
+                <img src={previewUrl || fallbackSrc || activeSrc} alt={label} className="max-h-72 w-full rounded-lg object-contain" />
               ) : (
                 <div className="flex h-56 w-full flex-col items-center justify-center gap-2 rounded-lg bg-muted text-muted-foreground">
                   <Car size={54} />

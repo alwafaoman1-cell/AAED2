@@ -2205,6 +2205,8 @@ export interface VehicleDeliveryReceiptData {
   declarationEn?: string;
   deliveryPhotoUrls?: string[];
   signatureDataUrl?: string;
+  signatureMethod?: "electronic" | "paper";
+  paperSignatureConfirmed?: boolean;
   idPhotoDataUrl?: string;
 }
 

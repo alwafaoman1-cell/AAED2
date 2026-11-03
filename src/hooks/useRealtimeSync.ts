@@ -10,9 +10,9 @@ const RESUME_DELAY_MS = 2_000;
 const STALE_AFTER_HIDDEN_MS = 30_000;
 
 const TABLES_TO_KEYS: Record<string, string[]> = {
-  insurance_claims: ["insurance_claims", "insurance_invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
+  insurance_claims: ["insurance_claims", "insurance_invoices", "vehicle_visit", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
   insurance_invoices: ["insurance_invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
-  job_orders: ["job_orders", "insurance_claims", "invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
+  job_orders: ["job_orders", "insurance_claims", "vehicle_visit", "invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
   invoices: ["invoices"],
   claim_payments: ["claim_payments", "insurance_claims", "work_order_financials", "vehicle_360", "accounting_receipts_page", "monthly-vehicle-profitability"],
   accounting_receipts: ["accounting_receipts_page"],
@@ -22,7 +22,7 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   vehicle_entries: ["vehicle_entries", "vehicle_visit", "vehicle_360"],
   vehicle_visit_workflows: ["vehicle_visit", "vehicle_entries", "job_orders", "insurance_claims"],
   vehicle_entry_signatures: ["vehicle_entries", "vehicle_360"],
-  vehicle_handover_records: ["vehicle_handover_records", "vehicle_visit", "vehicle_360"],
+  vehicle_handover_records: ["vehicle_handover_records", "vehicle_visit", "job_orders", "insurance_claims", "vehicle_360"],
   inventory: ["inventory"],
   job_order_parts: ["job_order_parts", "inventory", "job_orders", "vehicle_360"],
   insurance_companies: ["insurance_companies"],
@@ -83,12 +83,12 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
         !path.startsWith("/insurance/estimates") &&
         !path.startsWith("/insurance/documents")
       ),
-    tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicle_media", "expenses", "vehicle_visit_workflows"],
+    tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicle_media", "expenses", "job_orders", "vehicle_visit_workflows"],
   },
   {
     scope: "claims_list",
     test: (path) => path === "/insurance/claims" || path.startsWith("/insurance/pipeline"),
-    tables: ["insurance_claims"],
+    tables: ["insurance_claims", "vehicle_visit_workflows"],
   },
   {
     scope: "vehicle_entry_list",

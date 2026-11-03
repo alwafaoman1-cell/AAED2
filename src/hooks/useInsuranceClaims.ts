@@ -69,6 +69,8 @@ export interface InsuranceClaim {
   work_completed_at: string | null;
   delivered_at: string | null;
   vehicle_presence_status?: string | null;
+  /** Server projection from the linked vehicle visit; never a persisted claim field. */
+  list_vehicle_location?: string | null;
   temporary_inspection_release_id?: string | null;
   // joined
   customer?: { name: string; phone: string | null; customer_code?: string | null };

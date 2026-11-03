@@ -357,6 +357,7 @@ export default function VehicleEntryDetail() {
 
       <Card className="p-4 space-y-3">
         {cardTitle("الإقرار والتوقيعات", "Declaration & Signatures")}
+        <p className="mb-3 text-sm text-muted-foreground">{t("vehicleEntry.paperSignatureOption")}</p>
         <p className="text-sm leading-7 text-muted-foreground">{entry.declaration_ar || "—"}</p>
         {entry.declaration_en && <p className="text-sm leading-7 text-muted-foreground" dir="ltr">{entry.declaration_en}</p>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-center">

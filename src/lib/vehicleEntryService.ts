@@ -680,22 +680,6 @@ function entryPayload(form: VehicleEntryFormState, tenantId: string, entryNumber
   };
 }
 
-async function assertVehicleEntryCanBeIssued(entryId: string | null | undefined, tenantId: string) {
-  if (!entryId) {
-    throw new Error("Cannot issue a vehicle entry before saving it as a draft and capturing both required signatures.");
-  }
-  const { data: signatures, error: signaturesError } = await supabase
-    .from("vehicle_entry_signatures" as any)
-    .select("signature_role")
-    .eq("tenant_id", tenantId)
-    .eq("vehicle_entry_id", entryId);
-  if (signaturesError) throw signaturesError;
-  const roles = new Set(((signatures as any[]) || []).map((signature) => signature.signature_role));
-  if (!roles.has("delivered_by") || !roles.has("receiver")) {
-    throw new Error("Cannot issue the vehicle entry before saving both the delivered-by signature and the receiver signature.");
-  }
-}
-
 export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: string | null) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
@@ -714,10 +698,6 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: str
     if (!current.data || (current.data as any).vehicle_location !== locationBeforeEdit) {
       throw new Error("تغير موقع المركبة أثناء فتح النموذج. أعد فتح السجل قبل الحفظ حتى لا يُلغى خروجها أو عودتها.");
     }
-  }
-
-  if (form.status === "Issued") {
-    await assertVehicleEntryCanBeIssued(form.id, tenantId);
   }
 
   const phoneChange = customerPhoneEdit(form);
@@ -831,21 +811,15 @@ export async function cancelVehicleEntry(id: string) {
 export async function issueVehicleEntry(id: string, userId?: string | null) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
-  const { data: signatures, error: signaturesError } = await supabase
-    .from("vehicle_entry_signatures" as any)
-    .select("signature_role")
-    .eq("tenant_id", tenantId)
-    .eq("vehicle_entry_id", id);
-  if (signaturesError) throw signaturesError;
-  const roles = new Set(((signatures as any[]) || []).map((signature) => signature.signature_role));
-  if (!roles.has("delivered_by") || !roles.has("receiver")) {
-    throw new Error("لا يمكن إصدار نموذج دخول المركبة قبل حفظ توقيع مسلّم المركبة وتوقيع موظف الاستلام");
-  }
+  // Issuing the intake document must not require an electronic signature:
+  // the customer may sign the printed original. A missing signature is never
+  // represented as a stored electronic signature.
   const { data, error } = await supabase
     .from("vehicle_entries" as any)
     .update({ status: "Issued", issued_at: new Date().toISOString(), issued_by: userId || null } as any)
     .eq("tenant_id", tenantId)
     .eq("id", id)
+    .is("deleted_at", null)
     .select("*")
     .single();
   if (error) throw error;

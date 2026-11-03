@@ -5,7 +5,8 @@ export type ClaimVehicleLocation =
   | "in_workshop"
   | "delivered"
   | "paid_archive"
-  | "cancelled";
+  | "cancelled"
+  | "needs_review";
 
 export const claimVehicleLocationLabels: Record<ClaimVehicleLocation, string> = {
   with_customer: "مع العميل",
@@ -13,9 +14,12 @@ export const claimVehicleLocationLabels: Record<ClaimVehicleLocation, string> = 
   delivered: "تم التسليم",
   paid_archive: "أرشيف المدفوع",
   cancelled: "ملغاة / مرفوضة",
+  needs_review: "تحتاج مراجعة",
 };
 
 export function getClaimVehicleLocation(claim: InsuranceClaim): ClaimVehicleLocation {
+  const projected = claim.list_vehicle_location;
+  if (projected && projected in claimVehicleLocationLabels) return projected as ClaimVehicleLocation;
   if (claim.status === "paid") return "paid_archive";
   if (claim.status === "cancelled" || claim.status === "rejected") return "cancelled";
   if (claim.delivered_at) return "delivered";
@@ -43,5 +47,7 @@ export function claimVehicleLocationClass(location: ClaimVehicleLocation): strin
       return "bg-violet-500/15 text-violet-700 border-violet-500/30 dark:text-violet-300";
     case "cancelled":
       return "bg-muted text-muted-foreground border-border";
+    case "needs_review":
+      return "bg-warning/15 text-warning border-warning/30";
   }
 }

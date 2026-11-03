@@ -10,11 +10,15 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getVehicleEntryPresence, getVehicleEntryVisitPurpose, vehicleEntryMatchesSearch, vehicleEntryStatusKey, VEHICLE_ENTRY_STATUSES, type VehicleEntryPresence } from "@/lib/vehicleEntryService";
 import { listVehicleVisitCenter, VISIT_STAGES, type VisitStage } from "@/lib/vehicleVisitLifecycle";
+import { getEntryRearThumbnailUrls } from "@/lib/vehicleRearThumbnails";
+import { VehicleRearThumbnail } from "@/components/vehicles/VehicleRearThumbnail";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 export default function VehicleEntryList() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [params, setParams] = useSearchParams();
   const activeTab = params.get("location") === "with_customer" ? "with_customer" : "in_workshop";
   const [search, setSearch] = useState("");
@@ -31,7 +35,7 @@ export default function VehicleEntryList() {
   const [minDays, setMinDays] = useState("");
   const { data, isLoading, error } = useQuery({
     queryKey: ["vehicle_visit", "center"], queryFn: listVehicleVisitCenter,
-    staleTime: 30_000, refetchOnWindowFocus: true,
+    staleTime: 15_000, refetchOnWindowFocus: true, refetchInterval: 60_000,
   });
 
   const loadedRows = useMemo(() => (data || []).map((visit) => ({ ...visit.entry, _visitStage: visit.stage, _reviewReason: visit.reviewReason })), [data]);
@@ -52,6 +56,17 @@ export default function VehicleEntryList() {
     return groups;
   }, [matchingRows]);
   const rows = stageFilter === "all" ? rowsByPresence[activeTab] : matchingRows.filter((row) => row._visitStage === stageFilter);
+  const photoEntryIds = [...new Set([
+    ...rows.map((row) => row.id),
+    ...(showReview && stageFilter === "all" ? rowsByPresence.needs_review.map((row) => row.id) : []),
+  ])];
+  const rearPhotos = useQuery({
+    queryKey: ["vehicle_media", "entry_rear_thumbnails", profile?.tenant_id || "", photoEntryIds.join("|")],
+    queryFn: () => getEntryRearThumbnailUrls(profile!.tenant_id, photoEntryIds),
+    enabled: !!profile?.tenant_id && photoEntryIds.length > 0,
+    staleTime: 2 * 60 * 1000,
+  });
+  const rearPhotoByEntry = rearPhotos.data || {};
   const statusLabel = (value: string) => {
     const key = vehicleEntryStatusKey(value);
     return key ? t(`vehicleEntry.statuses.${key}`) : value;
@@ -130,8 +145,13 @@ export default function VehicleEntryList() {
           const customer = row.customer || row.customer_snapshot || {};
           return <Link key={row.id} to={`/vehicle-entry/${row.id}`} className="block rounded-lg border border-border bg-card p-3 hover:border-primary/50">
             <div className="flex justify-between gap-2"><strong className="font-mono text-primary">{row.entry_number}</strong><span className="text-xs text-muted-foreground" dir="ltr">{row.arrival_date}</span></div>
-            <div className="mt-2 font-semibold" dir="auto">{[vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ") || "—"}</div>
-            <div className="truncate text-sm" dir="auto">{[vehicle.brand || vehicle.make, vehicle.model].filter(Boolean).join(" ")} · {customer.name || "—"}</div>
+            <div className="mt-2 flex items-center gap-2">
+              <VehicleRearThumbnail url={rearPhotoByEntry[row.id]} alt={t("vehicleEntry.rearPhoto", { vehicle: [vehicle.brand || vehicle.make, vehicle.model].filter(Boolean).join(" ") || row.entry_number })} />
+              <div className="min-w-0">
+                <div className="font-semibold" dir="auto">{[vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ") || "—"}</div>
+                <div className="truncate text-sm" dir="auto">{[vehicle.brand || vehicle.make, vehicle.model].filter(Boolean).join(" ")} · {customer.name || "—"}</div>
+              </div>
+            </div>
             <div className="mt-2 text-xs text-muted-foreground">{row.work_order?.order_number || row.converted_work_order?.order_number || row.claim?.claim_number || row.converted_claim?.claim_number || purposeLabel(row)}</div>
           </Link>;
         })}</div>
@@ -158,8 +178,13 @@ export default function VehicleEntryList() {
                   <td className="p-3 font-mono font-semibold text-primary"><Link to={`/vehicle-entry/${row.id}`}>{row.entry_number}</Link></td>
                   <td className="p-3 whitespace-nowrap" dir="ltr">{row.arrival_date} {String(row.arrival_time || "").slice(0, 5)}</td>
                   <td className="p-3">
-                    <div className="font-semibold" dir="auto">{[vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ") || "—"}</div>
-                    <div className="text-xs text-muted-foreground" dir="auto">{[vehicle.brand || vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(" ")}</div>
+                    <div className="flex items-center gap-2">
+                      <VehicleRearThumbnail url={rearPhotoByEntry[row.id]} alt={t("vehicleEntry.rearPhoto", { vehicle: [vehicle.brand || vehicle.make, vehicle.model].filter(Boolean).join(" ") || row.entry_number })} />
+                      <div className="min-w-0">
+                        <div className="font-semibold" dir="auto">{[vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ") || "—"}</div>
+                        <div className="text-xs text-muted-foreground" dir="auto">{[vehicle.brand || vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(" ")}</div>
+                      </div>
+                    </div>
                   </td>
                   <td className="p-3" dir="auto">{customer.name || "—"}<div className="text-xs text-muted-foreground" dir="ltr">{customer.phone || ""}</div></td>
                   <td className="p-3" dir="auto">{row.insurance_snapshot?.company_name || row.insurance_company?.name || "—"}</td>

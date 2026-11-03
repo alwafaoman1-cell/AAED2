@@ -178,19 +178,17 @@ describe("vehicle entry receipt contract", () => {
     expect(html).toContain("Saved custom declaration");
   });
 
-  it("does not issue a vehicle entry before both required signatures are saved", () => {
+  it("allows issuing an intake form for paper signing without inventing electronic signatures", () => {
     const service = read("src/lib/vehicleEntryService.ts");
     const saveStart = service.indexOf("export async function saveVehicleEntry");
     const saveBody = service.slice(saveStart, service.indexOf("async function saveDamageMarks"));
-    expect(saveBody).toContain('form.status === "Issued"');
-    expect(saveBody).toContain("assertVehicleEntryCanBeIssued(form.id, tenantId)");
     const issueStart = service.indexOf("export async function issueVehicleEntry");
     const issueBody = service.slice(issueStart, service.indexOf("async function insertVehicleEntryAudit"));
-    expect(service).toContain("async function assertVehicleEntryCanBeIssued");
-    expect(issueBody).toContain("vehicle_entry_signatures");
-    expect(issueBody).toContain('roles.has("delivered_by")');
-    expect(issueBody).toContain('roles.has("receiver")');
-    expect(issueBody).toContain("لا يمكن إصدار نموذج دخول المركبة");
+    expect(saveBody).not.toContain("assertVehicleEntryCanBeIssued");
+    expect(issueBody).not.toContain("vehicle_entry_signatures");
+    expect(issueBody).toContain('status: "Issued"');
+    expect(issueBody).toContain('.is("deleted_at", null)');
+    expect(read("src/pages/vehicle-entry/VehicleEntryForm.tsx")).toContain('t("vehicleEntry.paperSignatureOption")');
   });
 
   it("supports a secure one-time customer signature page backed by the canonical entry signature", () => {

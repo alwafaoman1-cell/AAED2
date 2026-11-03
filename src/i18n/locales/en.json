@@ -1,4 +1,8 @@
 {
+  "insuranceClaims": {
+    "rearThumbnailView": "View the vehicle rear photo: {{vehicle}}",
+    "rearThumbnailAction": "View or change the vehicle photo: {{vehicle}}"
+  },
   "insuranceBulkEntry": {
     "action": "Check in selected vehicles",
     "confirmTitle": "Check in {{count}} vehicles?",
@@ -458,6 +462,7 @@
     "title": "Vehicle Entry & Receipt",
     "editTitle": "Edit vehicle entry",
     "subtitle": "Vehicle visits and actual workshop custody",
+    "rearPhoto": "Rear view of vehicle: {{vehicle}}",
     "new": "Record vehicle arrival",
     "choosePurpose": "Purpose of visit",
     "choosePurposeDescription": "Choose why the vehicle is arriving. It remains in the workshop until an actual handover is recorded.",
@@ -469,6 +474,8 @@
     "workshopTab": "In workshop",
     "customerTab": "With customer",
     "reviewLocation": "Location needs review",
+    "signatureOptionsTitle": "Electronic signatures (optional)",
+    "paperSignatureOption": "You can issue and print this form without an electronic signature. The customer may sign the printed copy; no electronic signature is recorded unless it was actually captured.",
     "reviewDescription": "Location sources conflict or are missing. These records were not silently put in either tab; open each and verify the handover and actual location.",
     "statusFilter": "Document status",
     "allStatuses": "All statuses",
@@ -516,6 +523,15 @@
     "pdfSourceMissing": "Could not refresh the vehicle entry from the cloud. Reopen the record and try again.",
     "pdfDownloadFailed": "Could not prepare the PDF. Please try again."
   },
+  "vehicleDelivery": {
+    "signatureMethod": "Recipient signature method",
+    "electronic": "Electronic signature",
+    "paper": "Sign the printed original",
+    "paperInstructions": "Print the form first. Finalize delivery only after the recipient actually signs the paper original and it is retained in the workshop file. The recipient ID and workshop representative are required.",
+    "paperAttestation": "I confirm the recipient signed the paper original and the workshop retains it.",
+    "paperConfirmationRequired": "Before paper handover: confirm the actual signature and enter the recipient ID and workshop representative.",
+    "electronicSignatureRequired": "Sign electronically or choose the paper-signature route after printing."
+  },
   "vehicleVisit": {
     "title": "Vehicle lifecycle control",
     "subtitle": "One visit, from arrival to signed handover",
@@ -526,6 +542,8 @@
     "delivered": "Delivered vehicles",
     "cancelled": "Cancelled vehicles",
     "needs_review": "Needs review",
+    "locationUnavailable": "Current location could not be loaded; retry",
+    "noLinkedEntry": "No vehicle entry is linked to this visit yet",
     "allStages": "All stages",
     "list": "List",
     "kanban": "Stages",

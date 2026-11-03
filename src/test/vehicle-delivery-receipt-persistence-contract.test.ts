@@ -38,6 +38,20 @@ describe("vehicle delivery receipt persistence contract", () => {
     expect(migration).not.toContain("delete from public.vehicle_handover_records");
   });
 
+  it("permits an attested paper original but never manufactures an electronic signature", () => {
+    const migration = read("supabase/migrations/20261103084741_vehicle_visit_arrival_and_paper_handover.sql");
+    const service = read("src/lib/vehicleDeliveryReceipt.ts");
+    const dialog = read("src/components/workorders/VehicleDeliveryReceiptDialog.tsx");
+    expect(migration).toContain("VEHICLE_HANDOVER_PAPER_EVIDENCE_REQUIRED");
+    expect(migration).toContain("snapshot_json->>'paperSignatureConfirmed'");
+    expect(migration).toContain("recipient_id_number");
+    expect(migration).toContain("workshop_representative");
+    expect(migration).toContain("finalized_by = auth.uid()");
+    expect(service).toContain('draft.signatureMethod === "paper" ? null : draft.signatureDataUrl || null');
+    expect(dialog).toContain('signatureMethod === "paper" && (!paperSignatureConfirmed');
+    expect(dialog).toContain('t("vehicleDelivery.paperAttestation")');
+  });
+
   it("removes direct delete and sequence write privileges from application roles", () => {
     const hardening = read("supabase/migrations/20260829103000_vehicle_handover_privilege_hardening.sql");
 

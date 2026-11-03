@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { getClaimVehicleLocation } from "@/lib/claimVehicleLocation";
+import type { InsuranceClaim } from "@/hooks/useInsuranceClaims";
 
 const root = process.cwd();
 const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
@@ -33,5 +35,20 @@ describe("insurance claims server pagination contract", () => {
     expect(page).toContain("queryKeys.insuranceClaims.operationalList");
     expect(page).toContain("refetchOnWindowFocus: false");
     expect(page).toContain("claimsPageQuery.isError");
+  });
+
+  it("projects physical custody from the exact visit without treating paid as a location", () => {
+    const sql = read("supabase/migrations/20261103091538_insurance_claim_list_visit_custody.sql");
+    expect(sql).toContain("e.id = c.vehicle_entry_id or e.insurance_claim_id = c.id or e.converted_claim_id = c.id");
+    expect(sql).toContain("visit.linked_count > 1 or visit.vehicle_conflict");
+    expect(sql).toContain("when visit.entry_location = 'داخل الورشة'");
+    expect(sql).toContain("and c.vehicle_presence_status = 'in_workshop'");
+    expect(sql).toContain("p_delivery = 'paid_archive' and b.status::text = 'paid'");
+    expect(sql).toContain("or b.list_vehicle_location = p_delivery");
+    expect(sql).toContain("security invoker");
+    expect(sql).not.toMatch(/update public\.(insurance_claims|vehicle_entries|job_orders)/i);
+    const paid = { status: "paid", list_vehicle_location: "in_workshop" } as InsuranceClaim;
+    expect(getClaimVehicleLocation(paid)).toBe("in_workshop");
+    expect(getClaimVehicleLocation({ ...paid, list_vehicle_location: "needs_review" })).toBe("needs_review");
   });
 });

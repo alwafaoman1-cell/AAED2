@@ -30,6 +30,8 @@ import {
 } from "@/lib/claimVehicleLocation";
 import { TablePaginationControls } from "@/components/ui/table-pagination-controls";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
+import { getClaimRearThumbnailUrls } from "@/lib/vehicleRearThumbnails";
+import { useTranslation } from "react-i18next";
 import { useInsuranceEmployees } from "@/hooks/useInsuranceEmployees";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
@@ -62,6 +64,7 @@ export default function InsuranceClaimsList() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useAuth();
+  const { t } = useTranslation();
   const { data: insuranceEmployees = [] } = useInsuranceEmployees(null);
   const deleteClaim = useDeleteClaim();
 
@@ -213,6 +216,21 @@ export default function InsuranceClaimsList() {
     () => serverListReady ? sorted : sorted.slice((page - 1) * pageSize, page * pageSize),
     [sorted, page, pageSize, serverListReady],
   );
+  const photoTargets = useMemo(() => paginated
+    .filter((claim) => !!claim.vehicle_id)
+    .map((claim) => ({
+      id: claim.id,
+      vehicle_id: claim.vehicle_id,
+      vehicle_entry_id: (claim as InsuranceClaim & { vehicle_entry_id?: string | null }).vehicle_entry_id,
+    })), [paginated]);
+  const photoKey = photoTargets.map((claim) => `${claim.id}:${claim.vehicle_id}:${claim.vehicle_entry_id || ""}`).join("|");
+  const rearPhotosQuery = useQuery({
+    queryKey: ["vehicle_media", "claim_rear_thumbnails", profile?.tenant_id || "", photoKey],
+    queryFn: () => getClaimRearThumbnailUrls(profile!.tenant_id, photoTargets),
+    enabled: !!profile?.tenant_id && photoTargets.length > 0,
+    staleTime: 2 * 60 * 1000,
+  });
+  const rearPhotoByClaim = rearPhotosQuery.data || {};
 
   useEffect(() => {
     setPage(1);
@@ -428,6 +446,7 @@ export default function InsuranceClaimsList() {
               <SelectItem value="with_customer">مع العميل</SelectItem>
               <SelectItem value="in_workshop">وصلت إلى الورشة</SelectItem>
               <SelectItem value="delivered">تم التسليم</SelectItem>
+              <SelectItem value="needs_review">تحتاج مراجعة</SelectItem>
               <SelectItem value="paid_archive">أرشيف المدفوع</SelectItem>
               <SelectItem value="cancelled">ملغاة / مرفوضة</SelectItem>
               <SelectItem value="all">جميع المطالبات</SelectItem>
@@ -469,31 +488,45 @@ export default function InsuranceClaimsList() {
                 const StatusIcon = statusIcons[c.status] || Clock;
                 const location = getClaimVehicleLocation(c);
                 const isDeliveredMobile = location === "delivered";
+                const vehicleLabel = `${(c as any).vehicle_make || c.vehicle?.brand || ""} ${(c as any).vehicle_model || c.vehicle?.model || ""}`.trim() || c.claim_number;
                 return (
-                  <button key={c.id} onClick={() => navigate(`/insurance/${c.id}`)} className={`w-full p-3 text-right transition ${isDeliveredMobile ? "bg-emerald-50/70 hover:bg-emerald-100/70 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 border-r-4 border-r-emerald-500" : "hover:bg-secondary/40"}`}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="font-mono text-xs text-primary" dir="ltr">{toEnglishDigits(c.claim_number)}</span>
-                      {isDeliveredMobile ? (
-                        <Badge className="bg-emerald-500 hover:bg-emerald-500 text-white border border-emerald-600 text-[10px] gap-1">
-                          <CheckCircle size={10} /> تم التسليم
+                  <div key={c.id} className={`flex items-center gap-3 p-3 transition ${isDeliveredMobile ? "bg-emerald-50/70 hover:bg-emerald-100/70 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 border-s-4 border-s-emerald-500" : "hover:bg-secondary/40"}`}>
+                    <VehicleAvatar
+                      size="sm"
+                      shape="square"
+                      vehicleId={c.vehicle_id}
+                      preferredImageUrl={rearPhotoByClaim[c.id]}
+                      imageUrl={c.vehicle?.vehicle_thumbnail_url || c.vehicle?.vehicle_cover_image_url}
+                      fallbackPhotos={c.damage_photos}
+                      label={vehicleLabel}
+                      ariaLabel={t("insuranceClaims.rearThumbnailView", { vehicle: vehicleLabel })}
+                      canEdit={false}
+                    />
+                    <button type="button" onClick={() => navigate(`/insurance/${c.id}`)} className="min-w-0 flex-1 text-start">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="font-mono text-xs text-primary truncate" dir="ltr">{toEnglishDigits(c.claim_number)}</span>
+                        {isDeliveredMobile ? (
+                          <Badge className="bg-emerald-500 hover:bg-emerald-500 text-white border border-emerald-600 text-[10px] gap-1">
+                            <CheckCircle size={10} /> تم التسليم
+                          </Badge>
+                        ) : (
+                          <Badge className={`${statusColors[c.status]} border text-[10px] gap-1`}>
+                            <StatusIcon size={10} /> {statusLabels[c.status]}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-sm font-medium">{c.insurance_company}</div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {(c as any).vehicle_make} {(c as any).vehicle_model} — {formatPlateLatin((c as any).vehicle_plate || "")}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <span className="text-xs font-mono" dir="ltr" data-amount="true">{toEnglishDigits(Number(c.estimated_amount).toLocaleString("en-US"))} OMR</span>
+                        <Badge className={`${claimVehicleLocationClass(location)} border text-[10px] gap-1`}>
+                          <AlertTriangle size={10} /> {claimVehicleLocationLabels[location]}
                         </Badge>
-                      ) : (
-                        <Badge className={`${statusColors[c.status]} border text-[10px] gap-1`}>
-                          <StatusIcon size={10} /> {statusLabels[c.status]}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="text-sm font-medium">{c.insurance_company}</div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {(c as any).vehicle_make} {(c as any).vehicle_model} — {formatPlateLatin((c as any).vehicle_plate || "")}
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-1.5">
-                      <span className="text-xs font-mono" dir="ltr" data-amount="true">{toEnglishDigits(Number(c.estimated_amount).toLocaleString("en-US"))} OMR</span>
-                      <Badge className={`${claimVehicleLocationClass(location)} border text-[10px] gap-1`}>
-                        <AlertTriangle size={10} /> {claimVehicleLocationLabels[location]}
-                      </Badge>
-                    </div>
-                  </button>
+                      </div>
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -528,7 +561,7 @@ export default function InsuranceClaimsList() {
                     const stop = (e: React.MouseEvent) => e.stopPropagation();
                     const location = getClaimVehicleLocation(c);
                     const isDelivered = location === "delivered";
-                    const noArrival = location === "with_customer";
+                    const noArrival = location === "with_customer" && !c.workshop_arrival_date && !(c as any).vehicle_entry_id;
                     return (
                       <tr
                         key={c.id}
@@ -544,22 +577,29 @@ export default function InsuranceClaimsList() {
                         <td className="p-3" onClick={stop}><Checkbox checked={bulk.isSelected(c.id)} onCheckedChange={() => bulk.toggle(c.id)} /></td>
                         {visibleCols.number && (
                           <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <VehicleAvatar
-                                size="sm"
-                                vehicleId={c.vehicle_id}
-                                imageUrl={c.vehicle?.vehicle_thumbnail_url || c.vehicle?.vehicle_cover_image_url}
-                                fallbackPhotos={c.damage_photos}
-                                label={`${make} ${model}`.trim() || plate || c.claim_number}
-                              />
-                              <span className="font-mono text-xs text-primary" dir="ltr">{toEnglishDigits(c.claim_number)}</span>
-                            </div>
+                            <span className="font-mono text-xs text-primary" dir="ltr">{toEnglishDigits(c.claim_number)}</span>
                           </td>
                         )}
                         {visibleCols.vehicle && (
                           <td className="py-3 px-4">
-                            <div className="font-medium">{`${make} ${model}`.trim() || "—"}</div>
-                            {plate && <div className="text-[11px] mt-0.5 inline-block px-2 py-0.5 rounded bg-secondary border border-border font-mono" dir="ltr">{formatPlateLatin(plate)}</div>}
+                            <div className="flex items-center gap-2">
+                              <span onClick={stop}>
+                                <VehicleAvatar
+                                  size="sm"
+                                  shape="square"
+                                  vehicleId={c.vehicle_id}
+                                  preferredImageUrl={rearPhotoByClaim[c.id]}
+                                  imageUrl={c.vehicle?.vehicle_thumbnail_url || c.vehicle?.vehicle_cover_image_url}
+                                  fallbackPhotos={c.damage_photos}
+                                  label={`${make} ${model}`.trim() || plate || c.claim_number}
+                                  ariaLabel={t("insuranceClaims.rearThumbnailAction", { vehicle: `${make} ${model}`.trim() || plate || c.claim_number })}
+                                />
+                              </span>
+                              <div className="min-w-0">
+                                <div className="font-medium">{`${make} ${model}`.trim() || "—"}</div>
+                                {plate && <div className="text-[11px] mt-0.5 inline-block px-2 py-0.5 rounded bg-secondary border border-border font-mono" dir="ltr">{formatPlateLatin(plate)}</div>}
+                              </div>
+                            </div>
                           </td>
                         )}
                         {visibleCols.customer && <td className="py-3 px-4 text-xs text-muted-foreground">{c.customer?.name || "-"}</td>}

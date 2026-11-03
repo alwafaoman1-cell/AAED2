@@ -13,6 +13,7 @@ export type VehicleHandoverRecipientType =
   | "insurance_representative";
 
 export type VehicleHandoverStatus = "draft" | "finalized" | "cancelled";
+export type VehicleHandoverSignatureMethod = "electronic" | "paper";
 
 export interface VehicleDeliveryReceiptDraft {
   recordId?: string | null;
@@ -37,6 +38,8 @@ export interface VehicleDeliveryReceiptDraft {
   declarationEn?: string | null;
   deliveryPhotoUrls?: string[] | null;
   signatureDataUrl?: string | null;
+  signatureMethod?: VehicleHandoverSignatureMethod;
+  paperSignatureConfirmed?: boolean;
   idPhotoDataUrl?: string | null;
   finalizedAt?: string | null;
   cancellationReason?: string | null;
@@ -75,6 +78,7 @@ function isMissingHandoverTable(error: unknown): boolean {
 }
 
 function rowToDraft(row: any): VehicleDeliveryReceiptDraft {
+  const snapshot = row.snapshot_json && typeof row.snapshot_json === "object" ? row.snapshot_json : {};
   return {
     recordId: row.id,
     receiptNumber: row.receipt_number,
@@ -97,6 +101,8 @@ function rowToDraft(row: any): VehicleDeliveryReceiptDraft {
     declarationEn: row.declaration_en,
     deliveryPhotoUrls: Array.isArray(row.delivery_photo_paths) ? row.delivery_photo_paths : [],
     signatureDataUrl: row.signature_data_url,
+    signatureMethod: snapshot.signatureMethod === "paper" ? "paper" : "electronic",
+    paperSignatureConfirmed: snapshot.paperSignatureConfirmed === true,
     idPhotoDataUrl: row.receiver_id_photo_url,
     finalizedAt: row.finalized_at,
     cancellationReason: row.cancellation_reason,
@@ -207,7 +213,7 @@ export async function saveVehicleDeliveryReceiptDraft(
     declaration_ar: draft.declarationAr || DEFAULT_HANDOVER_DECLARATION_AR,
     declaration_en: draft.declarationEn || DEFAULT_HANDOVER_DECLARATION_EN,
     delivery_photo_paths: draft.deliveryPhotoUrls || [],
-    signature_data_url: draft.signatureDataUrl || null,
+    signature_data_url: draft.signatureMethod === "paper" ? null : draft.signatureDataUrl || null,
     receiver_id_photo_url: draft.idPhotoDataUrl || null,
     snapshot_json: draft as any,
     updated_by: authData.user?.id || null,
@@ -347,6 +353,8 @@ export function buildDeliveryReceiptData(order: WorkOrder, draft: VehicleDeliver
     declarationEn: draft.declarationEn || DEFAULT_HANDOVER_DECLARATION_EN,
     deliveryPhotoUrls: draft.deliveryPhotoUrls || undefined,
     signatureDataUrl: draft.signatureDataUrl || undefined,
+    signatureMethod: draft.signatureMethod || "electronic",
+    paperSignatureConfirmed: draft.paperSignatureConfirmed === true,
     idPhotoDataUrl: draft.idPhotoDataUrl || undefined,
   };
 }

@@ -849,7 +849,7 @@ export default function VehicleEntryForm() {
         </div>
       </Section>
 
-      <Section title="التوقيعات / Signatures" desc="التوقيع يحفظ كسجل مستقل داخل vehicle_entry_signatures ولا يظهر كزر شكلي.">
+      <Section title={t("vehicleEntry.signatureOptionsTitle")} desc={t("vehicleEntry.paperSignatureOption")}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SignaturePad title="توقيع مسلّم المركبة" disabled={!form.id} onSave={(dataUrl) => void handleSignature("delivered_by", dataUrl)} />
           <SignaturePad title="توقيع موظف الاستلام" disabled={!form.id} onSave={(dataUrl) => void handleSignature("receiver", dataUrl)} />

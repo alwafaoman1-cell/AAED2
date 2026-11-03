@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, type ElementType } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Printer, FileSignature, Trash2, Eraser, FileCheck2, Save, Loader2, CheckCircle2, LockKeyhole } from "lucide-react";
 import { ResponsiveDialog, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogFooter } from "@/components/ui/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +24,7 @@ import {
   saveVehicleDeliveryReceiptDraft,
   type VehicleDeliveryReceiptDraft,
   type VehicleHandoverRecipientType,
+  type VehicleHandoverSignatureMethod,
 } from "@/lib/vehicleDeliveryReceipt";
 import { syncWorkOrderInvoiceFromExpenses, isInsuranceWorkOrder } from "@/lib/workOrderInvoiceSync";
 import { salesStore } from "@/lib/salesStore";
@@ -42,6 +45,7 @@ interface Props {
 
 export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order, deliveryDraft, onFinalized, presentation = "dialog" }: Props) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [date, setDate] = useState(() => getDeliveredDateInputValue(deliveryDraft?.date));
   const [recordId, setRecordId] = useState<string | null>(deliveryDraft?.recordId || null);
   const [receiptNumber, setReceiptNumber] = useState<string | null>(deliveryDraft?.receiptNumber || null);
@@ -65,6 +69,8 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
   const [deliveryPhotoUrls, setDeliveryPhotoUrls] = useState<string[]>(deliveryDraft?.deliveryPhotoUrls || []);
   const [idPhoto, setIdPhoto] = useState<string | null>(deliveryDraft?.idPhotoDataUrl || null);
   const [signature, setSignature] = useState<string | null>(deliveryDraft?.signatureDataUrl || null);
+  const [signatureMethod, setSignatureMethod] = useState<VehicleHandoverSignatureMethod>(deliveryDraft?.signatureMethod || "electronic");
+  const [paperSignatureConfirmed, setPaperSignatureConfirmed] = useState(deliveryDraft?.paperSignatureConfirmed === true);
 
   const [pdfOpen, setPdfOpen] = useState(false);
   const [html, setHtml] = useState("");
@@ -98,6 +104,8 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
     setDeliveryPhotoUrls(draft?.deliveryPhotoUrls || []);
     setIdPhoto(draft?.idPhotoDataUrl || null);
     setSignature(draft?.signatureDataUrl || null);
+    setSignatureMethod(draft?.signatureMethod || "electronic");
+    setPaperSignatureConfirmed(draft?.paperSignatureConfirmed === true);
   }
 
   useEffect(() => {
@@ -220,6 +228,8 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
       declarationEn,
       deliveryPhotoUrls,
       signatureDataUrl: signature,
+      signatureMethod,
+      paperSignatureConfirmed,
       idPhotoDataUrl: idPhoto,
     }));
   }
@@ -247,6 +257,8 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
       declarationEn,
       deliveryPhotoUrls,
       signatureDataUrl: signature,
+      signatureMethod,
+      paperSignatureConfirmed,
       idPhotoDataUrl: idPhoto,
     };
   }
@@ -278,8 +290,12 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
       toast.error("اسم المستلم مطلوب قبل اعتماد التسليم");
       return;
     }
-    if (!signature) {
-      toast.error("توقيع المستلم مطلوب قبل اعتماد التسليم");
+    if (signatureMethod === "electronic" && !signature) {
+      toast.error(t("vehicleDelivery.electronicSignatureRequired"));
+      return;
+    }
+    if (signatureMethod === "paper" && (!paperSignatureConfirmed || !receiverIdNumber.trim() || !workshopRepresentative.trim())) {
+      toast.error(t("vehicleDelivery.paperConfirmationRequired"));
       return;
     }
     setFinalizing(true);
@@ -480,8 +496,30 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
               )}
             </div>
 
-            {/* Signature pad */}
-            <div>
+            <div className="space-y-3 rounded-lg border border-border p-3">
+              <Label>{t("vehicleDelivery.signatureMethod")}</Label>
+              <Select disabled={isReadOnly} value={signatureMethod} onValueChange={(value) => {
+                setSignatureMethod(value as VehicleHandoverSignatureMethod);
+                setPaperSignatureConfirmed(false);
+                if (value === "paper") setSignature(null);
+              }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="electronic">{t("vehicleDelivery.electronic")}</SelectItem>
+                  <SelectItem value="paper">{t("vehicleDelivery.paper")}</SelectItem>
+                </SelectContent>
+              </Select>
+              {signatureMethod === "paper" && <>
+                <p className="text-sm text-muted-foreground">{t("vehicleDelivery.paperInstructions")}</p>
+                <label className="flex items-start gap-2 text-sm">
+                  <Checkbox disabled={isReadOnly} checked={paperSignatureConfirmed} onCheckedChange={(checked) => setPaperSignatureConfirmed(checked === true)} />
+                  <span>{t("vehicleDelivery.paperAttestation")}</span>
+                </label>
+              </>}
+            </div>
+
+            {/* The digital pad is optional when the customer signs the printed original. */}
+            {signatureMethod === "electronic" && <div>
               <div className="flex items-center justify-between mb-1">
                 <Label className="text-xs">توقيع المستلم</Label>
                 <Button disabled={isReadOnly} type="button" variant="ghost" size="sm" onClick={clearSig} className="h-7 gap-1">
@@ -501,7 +539,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
                 style={{ height: 140 }}
               />
               <p className="text-[10px] text-muted-foreground mt-1">ارسم التوقيع بالإصبع أو الفأرة</p>
-            </div>
+            </div>}
           </div>
 
           <FooterComponent className={cn("flex flex-col gap-2 sm:flex-row", standalone && "sticky bottom-0 z-10 border-t border-border bg-card/95 px-5 py-4 backdrop-blur")}>

@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
-import { getVehicleEntry, getVehicleEntryPresence, getVehicleVisitBillingKind, listVehicleEntries } from "@/lib/vehicleEntryService";
+import { getVehicleEntry, getVehicleEntryPresence, getVehicleVisitBillingKind, listVehicleEntries, type VehicleEntryPresence } from "@/lib/vehicleEntryService";
 import { getPrivateDocumentUrl } from "@/lib/documentExtraction/persistence";
 
 export const VISIT_STAGES = ["arrived", "approved", "in_progress", "ready", "delivered", "cancelled", "needs_review"] as const;
@@ -207,6 +207,45 @@ export async function getVehicleVisitDetail(entryId: string) {
     insuranceInvoices: linked[4].data || [],
     mediaCount: new Set([...(entry.vehicle_media || []).map((row: any) => row.id), ...((linked[5].data || []) as any[]).map((row) => row.id)]).size,
   };
+}
+
+/** The same visit/custody resolver used by the center, scoped to a claim or work order. */
+export async function getLinkedVehicleVisit(source: "claim" | "work_order", id: string): Promise<{
+  entryId: string | null;
+  number: string | null;
+  stage: VisitStage | null;
+  presence: VehicleEntryPresence | null;
+} | null> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("TENANT_NOT_FOUND");
+  const fields = source === "claim" ? ["insurance_claim_id", "converted_claim_id"] : ["work_order_id", "converted_work_order_id"];
+  const linked = await supabase.from("vehicle_entries" as any).select("id")
+    .eq("tenant_id", tenantId).is("deleted_at", null)
+    .or(fields.map((field) => `${field}.eq.${id}`).join(",")).limit(2);
+  if (linked.error) throw linked.error;
+  if (!linked.data?.length) return null;
+  if (linked.data.length > 1) return { entryId: null, number: null, stage: "needs_review", presence: "needs_review" };
+  const entryId = (linked.data[0] as any).id as string;
+  const [entryResult, workflowResult, handoverResult, releaseResult] = await Promise.all([
+    supabase.from("vehicle_entries" as any).select(
+      "id,entry_number,arrival_date,arrival_time,vehicle_id,vehicle_location,status,insurance_company_id,insurance_snapshot,insurance_claim_id,converted_claim_id,work_order_id,converted_work_order_id,claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,vehicle_id,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,vehicle_id,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,vehicle_id,status,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,vehicle_id,status,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at)"
+    ).eq("tenant_id", tenantId).eq("id", entryId).is("deleted_at", null).maybeSingle(),
+    supabase.from("vehicle_visit_workflows" as any).select("entry_id,tenant_id,vehicle_id,stage,revision,review_reason,changed_at,changed_by")
+      .eq("tenant_id", tenantId).eq("entry_id", entryId).maybeSingle(),
+    supabase.from("vehicle_handover_records" as any).select("work_order_id")
+      .eq("tenant_id", tenantId).eq("vehicle_entry_id", entryId).eq("status", "finalized").limit(2),
+    supabase.from("vehicle_inspection_releases" as any).select("id")
+      .eq("tenant_id", tenantId).eq("vehicle_entry_id", entryId).eq("status", "signed").is("returned_at", null).limit(1),
+  ]);
+  for (const result of [entryResult, workflowResult, handoverResult, releaseResult]) if (result.error) throw result.error;
+  const entry = entryResult.data as any;
+  if (!entry) return null;
+  const order = entry.work_order || entry.converted_work_order;
+  const finalized = ((handoverResult.data || []) as any[]).some((row) => row.work_order_id === order?.id);
+  const visit = resolveVehicleVisit(entry, workflowResult.data as unknown as VehicleVisitWorkflow | null,
+    finalized, Boolean(releaseResult.data?.length));
+  const presence = getVehicleEntryPresence(entry);
+  return { entryId, number: entry.entry_number, stage: visit.stage, presence };
 }
 
 export async function listVehicleVisitStaff(): Promise<Array<{ user_id: string; full_name: string | null }>> {

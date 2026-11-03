@@ -104,4 +104,15 @@ describe("vehicle visit stage projection", () => {
     expect(source).toContain('.eq("tenant_id", tenantId)');
     expect(source).not.toContain("localStorage");
   });
+  it("reads claim/order badges from the same custody and stage resolver as the visit center", () => {
+    const service = readFileSync(join(process.cwd(), "src/lib/vehicleVisitLifecycle.ts"), "utf8");
+    const badge = readFileSync(join(process.cwd(), "src/components/vehicles/VehicleVisitBadge.tsx"), "utf8");
+    const realtime = readFileSync(join(process.cwd(), "src/hooks/useRealtimeSync.ts"), "utf8");
+    expect(service).toContain("export async function getLinkedVehicleVisit");
+    expect(service).toContain("const visit = resolveVehicleVisit(entry");
+    expect(service).toContain("const presence = getVehicleEntryPresence(entry)");
+    expect(badge).toContain("getLinkedVehicleVisit(source, id!)");
+    expect(realtime).toContain('insurance_claims: ["insurance_claims", "insurance_invoices", "vehicle_visit"');
+    expect(realtime).toContain('job_orders: ["job_orders", "insurance_claims", "vehicle_visit"');
+  });
 });
