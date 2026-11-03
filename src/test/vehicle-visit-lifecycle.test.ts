@@ -31,6 +31,17 @@ describe("vehicle visit stage projection", () => {
     expect(resolveVehicleVisit({ ...base, work_order_id: "other", work_order: { vehicle_id: "different" } }, workflow("in_progress"), false).stage).toBe("needs_review");
     expect(resolveVehicleVisit(base, workflow("in_progress", "source_regressed"), false).stage).toBe("needs_review");
   });
+  it("shows an order inferred from the same claim and vehicle as needing link review, not as a confirmed visit", () => {
+    const inferred = { ...base, insurance_claim_id: "claim-1", claim: {
+      id: "claim-1", vehicle_id: vehicle, status: "approved", vehicle_presence_status: "in_workshop",
+    }, work_order: {
+      id: "order-1", vehicle_id: vehicle, claim_id: "claim-1", work_order_type: "insurance",
+      status: "received", vehicle_presence_status: "in_workshop",
+    }, __inferredOrderLink: true };
+    expect(resolveVehicleVisit(inferred, workflow("approved"), false)).toMatchObject({
+      stage: "needs_review", reviewReason: "work_order_link_conflict",
+    });
+  });
   it("keeps historical entries as a read-only source projection", () => {
     expect(resolveVehicleVisit({ ...base, claim: { status: "approved" } }, null, false).stage).toBe("approved");
     expect(resolveVehicleVisit({ ...base, work_order: { status: "completed" } }, null, false).stage).toBe("ready");
@@ -114,5 +125,14 @@ describe("vehicle visit stage projection", () => {
     expect(badge).toContain("getLinkedVehicleVisit(source, id!)");
     expect(realtime).toContain('insurance_claims: ["insurance_claims", "insurance_invoices", "vehicle_visit"');
     expect(realtime).toContain('job_orders: ["job_orders", "insurance_claims", "vehicle_visit"');
+  });
+  it("links future claim orders transactionally in both creation orders, without backfilling old visits", () => {
+    const migration = readFileSync(join(process.cwd(),
+      "supabase/migrations/20261103094500_vehicle_visit_future_claim_order_link.sql"), "utf8");
+    expect(migration).toContain("before insert on public.job_orders");
+    expect(migration).toContain("after insert on public.job_orders");
+    expect(migration).toContain("before insert on public.vehicle_entries");
+    expect(migration).toContain("after insert on public.vehicle_entries");
+    expect(migration).not.toMatch(/update public\.vehicle_entries\s+set/i);
   });
 });

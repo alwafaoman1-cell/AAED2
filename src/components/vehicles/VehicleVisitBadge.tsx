@@ -20,7 +20,9 @@ export function VehicleVisitBadge({ source, id }: { source: "claim" | "work_orde
   const custody = presence === "in_workshop" ? t("vehicleEntry.workshopTab")
     : presence === "with_customer" ? t("vehicleEntry.customerTab")
     : t("vehicleEntry.reviewLocation");
-  const label = [number, stage ? t(`vehicleVisit.${stage}`) : t("vehicleVisit.legacyUnrecorded"), custody].filter(Boolean).join(" · ");
+  const label = stage === "needs_review"
+    ? [number, t("vehicleEntry.reviewLocation")].filter(Boolean).join(" · ")
+    : [number, stage ? t(`vehicleVisit.${stage}`) : t("vehicleVisit.legacyUnrecorded"), custody].filter(Boolean).join(" · ");
   return entryId
     ? <Link className="inline-flex rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10" to={`/vehicle-entry/${entryId}`}>{label}</Link>
     : <span className="inline-flex rounded-full border border-warning/40 bg-warning/5 px-2 py-1 text-xs font-semibold text-warning">{t("vehicleVisit.needs_review")}</span>;
