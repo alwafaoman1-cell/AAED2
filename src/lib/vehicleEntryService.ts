@@ -511,13 +511,35 @@ export async function getVehicleEntryByClaimId(claimId: string) {
     .from("vehicle_entries" as any)
     .select("id,entry_number,status,arrival_date,arrival_time,vehicle_location,vehicle_location_bay,insurance_claim_id,work_order_id,vehicle_id,customer_id,created_at")
     .eq("tenant_id", tenantId)
-    .eq("insurance_claim_id", claimId)
+    .or(`insurance_claim_id.eq.${claimId},converted_claim_id.eq.${claimId}`)
     .is("deleted_at", null)
     .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .limit(2);
   if (error) throw error;
-  return (data as any) || null;
+  if ((data || []).length > 1) throw new Error("VEHICLE_ENTRY_DUPLICATE_CLAIM_REVIEW_REQUIRED");
+  if (data?.[0]) return data[0] as any;
+
+  // Older records can be linked from the claim only. Check that explicit
+  // backlink before creating another receipt for the same physical visit.
+  const claimResult = await supabase.from("insurance_claims" as any)
+    .select("id,vehicle_id,vehicle_entry_id")
+    .eq("tenant_id", tenantId).eq("id", claimId).is("deleted_at", null).maybeSingle();
+  if (claimResult.error) throw claimResult.error;
+  const claim = claimResult.data as any;
+  if (!claim?.vehicle_entry_id) return null;
+  if (!claim.vehicle_id) throw new Error("VEHICLE_ENTRY_CLAIM_BACKLINK_REVIEW_REQUIRED");
+  const entryResult = await supabase.from("vehicle_entries" as any)
+    .select("id,entry_number,status,arrival_date,arrival_time,vehicle_location,vehicle_location_bay,insurance_claim_id,converted_claim_id,work_order_id,vehicle_id,customer_id,created_at")
+    .eq("tenant_id", tenantId).eq("id", claim.vehicle_entry_id)
+    .is("deleted_at", null).maybeSingle();
+  if (entryResult.error) throw entryResult.error;
+  const entry = entryResult.data as any;
+  if (!entry || entry.vehicle_id !== claim.vehicle_id
+    || (entry.insurance_claim_id && entry.insurance_claim_id !== claimId)
+    || (entry.converted_claim_id && entry.converted_claim_id !== claimId)) {
+    throw new Error("VEHICLE_ENTRY_CLAIM_BACKLINK_REVIEW_REQUIRED");
+  }
+  return entry;
 }
 
 export async function ensureVehicleEntryForClaim(input: ClaimVehicleEntryInput, userId?: string | null) {

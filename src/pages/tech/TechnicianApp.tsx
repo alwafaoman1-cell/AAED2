@@ -26,6 +26,9 @@ import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import { requestNotifyPermission, startTechNotifications, canNotify } from "@/lib/techNotifications";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
+import { isWorkOrderInWorkshop } from "@/lib/workOrderPresence";
+import { useStaffWorkOrderSync } from "@/hooks/useStaffWorkOrderSync";
 import {
   getActiveClock, clockIn, clockOut, subscribeTechStore, listNotes, addNote, deleteNote, getTodayLogs,
 } from "@/lib/techClockStore";
@@ -48,6 +51,8 @@ const ACTIVE_STATUSES = new Set([
 type Tab = "mine" | "all" | "done";
 
 export default function TechnicianApp() {
+  useRealtimeSync();
+  useStaffWorkOrderSync();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const isAr = i18n.language?.startsWith("ar");
@@ -101,7 +106,7 @@ export default function TechnicianApp() {
     if (isTechnicianOnly) list = list.filter((o) => myName && (o.technician || "").trim() === myName);
     if (tab === "mine" && myName) list = list.filter((o) => (o.technician || "").trim() === myName);
     if (tab === "done") list = list.filter((o) => o.status === "تم التسليم" || o.status === "مغلق" || o.status === "جاهز للتسليم");
-    else list = list.filter((o) => ACTIVE_STATUSES.has(o.status) || tab === "all");
+    else list = list.filter((o) => (ACTIVE_STATUSES.has(o.status) && isWorkOrderInWorkshop(o)) || tab === "all");
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((o) =>
@@ -114,8 +119,8 @@ export default function TechnicianApp() {
 
   const counts = useMemo(() => {
     const scopedOrders = isTechnicianOnly ? orders.filter((o) => myName && (o.technician || "").trim() === myName) : orders;
-    const mine = orders.filter((o) => myName && (o.technician || "").trim() === myName && ACTIVE_STATUSES.has(o.status)).length;
-    const all = scopedOrders.filter((o) => ACTIVE_STATUSES.has(o.status)).length;
+    const mine = orders.filter((o) => myName && (o.technician || "").trim() === myName && ACTIVE_STATUSES.has(o.status) && isWorkOrderInWorkshop(o)).length;
+    const all = scopedOrders.filter((o) => ACTIVE_STATUSES.has(o.status) && isWorkOrderInWorkshop(o)).length;
     const done = scopedOrders.filter((o) => o.status === "تم التسليم" || o.status === "مغلق" || o.status === "جاهز للتسليم").length;
     return { mine, all, done };
   }, [orders, myName, isTechnicianOnly]);

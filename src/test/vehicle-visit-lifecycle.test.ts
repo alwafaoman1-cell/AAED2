@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getVehicleVisitBillingKind, resolveVehicleVisit, type VehicleVisitWorkflow } from "@/lib/vehicleVisitLifecycle";
+import { deriveClaimOnlyStage, getVehicleVisitBillingKind, projectClaimWithoutEntry, resolveVehicleVisit, type VehicleVisitWorkflow } from "@/lib/vehicleVisitLifecycle";
+import { getVehicleEntryPresence } from "@/lib/vehicleEntryService";
 
 const vehicle = "vehicle-1";
 const base = { id: "entry-1", vehicle_id: vehicle, arrival_date: "2026-10-20", arrival_time: "08:00", vehicle_location: "داخل الورشة", status: "Received" };
@@ -12,6 +13,57 @@ const workflow = (stage: VehicleVisitWorkflow["stage"], review_reason: string | 
 });
 
 describe("vehicle visit stage projection", () => {
+  it("uses claim registration as the operational entry date without inventing a signed receipt", () => {
+    const card = projectClaimWithoutEntry({
+      id: "claim-1", claim_number: "C/2026/1", status: "pending", vehicle_id: vehicle,
+      vehicle_presence_status: "with_customer", workshop_arrival_date: null,
+      created_at: "2026-10-20T21:30:00Z",
+    }, null);
+    expect(card.entry._claimOnly).toBe(true);
+    expect(card.entry.entry_number).toBe("");
+    expect(card.entry.arrival_date).toBe("2026-10-21");
+    expect(card.entry.arrival_time).toBe("01:30");
+    expect(card.entry._arrivalSource).toBe("claim_registration");
+    expect(card.stage).toBe("arrived");
+    expect(card.reviewReason).toBe("claim_without_entry");
+    expect(getVehicleEntryPresence(card.entry)).toBe("with_customer");
+  });
+  it("prefers a recorded arrival and does not mistake the accident date for entry", () => {
+    const card = projectClaimWithoutEntry({
+      id: "claim-1", vehicle_id: vehicle, status: "approved", vehicle_presence_status: "in_workshop",
+      workshop_arrival_date: "2026-07-01T20:30:00Z", created_at: "2026-09-01T10:00:00Z",
+      incident_date: "2026-06-01T00:00:00Z",
+    }, null);
+    expect(card.entry.arrival_date).toBe("2026-07-02");
+    expect(card.entry._arrivalSource).toBe("workshop_arrival_date");
+    expect(card.stage).toBe("approved");
+  });
+  it("sorts cancelled, delivered, and active claim-only visits by evidence, not payment alone", () => {
+    const claim = { id: "claim-1", vehicle_id: vehicle, status: "approved", vehicle_presence_status: "in_workshop" };
+    const order = { claim_id: claim.id, vehicle_id: vehicle, work_order_type: "insurance", status: "in_progress" };
+    expect(deriveClaimOnlyStage({ ...claim, status: "cancelled" }, null)).toBe("cancelled");
+    expect(deriveClaimOnlyStage(claim, order)).toBe("in_progress");
+    expect(deriveClaimOnlyStage({ ...claim, status: "paid" }, null)).toBe("approved");
+    expect(deriveClaimOnlyStage({ ...claim, vehicle_presence_status: "with_customer", delivered_at: "2026-10-21T10:00:00Z" }, { ...order, status: "delivered" })).toBe("delivered");
+    expect(deriveClaimOnlyStage({ ...claim, status: "cancelled" }, order)).toBe("needs_review");
+    expect(deriveClaimOnlyStage(claim, { ...order, vehicle_id: "other" })).toBe("needs_review");
+    expect(deriveClaimOnlyStage({ ...claim, vehicle_presence_status: "with_customer" }, order)).toBe("needs_review");
+  });
+  it("looks for both original and converted claim links before creating an entry", () => {
+    const source = readFileSync(join(process.cwd(), "src/lib/vehicleEntryService.ts"), "utf8");
+    const lookup = source.slice(source.indexOf("export async function getVehicleEntryByClaimId"),
+      source.indexOf("export async function ensureVehicleEntryForClaim"));
+    expect(lookup).toContain("converted_claim_id.eq.");
+    expect(lookup).toContain('eq("id", claim.vehicle_entry_id)');
+    expect(lookup).toContain('entry.vehicle_id !== claim.vehicle_id');
+    expect(lookup).toContain('VEHICLE_ENTRY_CLAIM_BACKLINK_REVIEW_REQUIRED');
+  });
+  it("quarantines a claim backlink that was never saved on the entry", () => {
+    const projected = resolveVehicleVisit({ ...base, claim: {
+      id: "claim-1", vehicle_id: vehicle, status: "approved", vehicle_presence_status: "in_workshop",
+    }, __inferredClaimLink: true }, null, false);
+    expect(projected).toMatchObject({ stage: "needs_review", reviewReason: "claim_link_conflict" });
+  });
   it("preserves the persisted stage of a healthy visit", () => {
     expect(resolveVehicleVisit(base, workflow("approved"), false).stage).toBe("approved");
   });
@@ -69,6 +121,36 @@ describe("vehicle visit stage projection", () => {
     });
     const reconciled = { ...conflicting, claim: { ...conflicting.claim, vehicle_presence_status: "in_workshop" } };
     expect(resolveVehicleVisit(reconciled, null, false).stage).toBe("approved");
+  });
+  it("shows a historical work milestone while retaining the blocking custody review", () => {
+    const conflicting = { ...base, insurance_claim_id: "claim-1", claim: {
+      id: "claim-1", vehicle_id: vehicle, status: "approved", vehicle_presence_status: "with_customer",
+    }, work_order_id: "order-1", work_order: {
+      id: "order-1", vehicle_id: vehicle, claim_id: "claim-1", work_order_type: "insurance",
+      status: "in_progress", vehicle_presence_status: "with_customer",
+    } };
+    expect(resolveVehicleVisit(conflicting, workflow("in_progress"), false)).toMatchObject({
+      stage: "needs_review", operationalStage: "in_progress", reviewReason: "custody_conflict",
+    });
+    const delivered = { ...conflicting, work_order: {
+      ...conflicting.work_order, status: "delivered", vehicle_delivered_at: "2026-10-22T10:00:00Z",
+    } };
+    expect(resolveVehicleVisit(delivered, workflow("ready"), false)).toMatchObject({
+      stage: "needs_review", operationalStage: "delivered",
+    });
+    expect(resolveVehicleVisit({ ...conflicting, claim: { ...conflicting.claim, status: "cancelled" } },
+      workflow("in_progress"), false)).toMatchObject({
+      stage: "needs_review", operationalStage: "cancelled", reviewReason: "cancelled_with_active_work_order",
+    });
+  });
+  it("does not treat a delivery timestamp from before this entry as delivery of this visit", () => {
+    const row = { ...base, insurance_claim_id: "claim-1", claim: {
+      id: "claim-1", vehicle_id: vehicle, status: "approved", vehicle_presence_status: "with_customer",
+      delivered_at: "2026-10-18T12:00:00Z",
+    } };
+    expect(resolveVehicleVisit(row, null, false)).toMatchObject({
+      stage: "needs_review", operationalStage: "needs_review", reviewReason: "custody_conflict",
+    });
   });
   it("quarantines a cash work order linked to an insurance claim", () => {
     const mismatched = { ...base, insurance_claim_id: "claim-1", claim: {

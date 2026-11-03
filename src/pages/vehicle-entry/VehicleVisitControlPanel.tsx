@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { queryKeys } from "@/lib/queryKeys";
-import { advanceVehicleVisit, getVehicleVisitBillingKind, getVehicleVisitDetail, getVehicleVisitDocumentUrl, listVehicleVisitStaff, reconcileVehicleVisitCustody, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
+import { advanceVehicleVisit, getVehicleVisitBillingKind, getVehicleVisitDetail, getVehicleVisitDocumentUrl, getVehicleVisitNextBlocker, listVehicleVisitStaff, reconcileVehicleVisitCustody, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
 
 const ORDER: PersistedVisitStage[] = ["arrived", "approved", "in_progress", "ready", "delivered"];
 function localDateTime() {
@@ -52,20 +52,7 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     : current ? ORDER[ORDER.indexOf(current) - 1] : undefined;
   const canManage = hasRole("admin", "manager");
   const canAdvance = !visit?.reviewReason && Boolean(current) && current !== "cancelled" && current !== "delivered";
-  const nextBlocker = next === "approved" && !hasRole("admin", "manager", "insurance") ? "approvalPermissionRequired"
-    : next === "in_progress" && !hasRole("admin", "manager", "supervisor", "technician") ? "workPermissionRequired"
-    : (next === "ready" || next === "delivered") && !hasRole("admin", "manager", "supervisor") ? "completionPermissionRequired"
-    : next === "approved" && billingKind === "insurance" && !["approved", "paid"].includes(claim?.status)
-    ? "claimApprovalRequired"
-    : next === "approved" && billingKind === "cash" && !order ? "cashWorkOrderRequired"
-    : next === "in_progress" && !order ? "workOrderRequired"
-    : next === "in_progress" && billingKind === "insurance" && !["approved", "paid"].includes(claim?.status) ? "claimApprovalRequired"
-    : next === "in_progress" && (entry?.vehicle_location !== "داخل الورشة"
-      || order?.vehicle_presence_status === "with_customer" || claim?.vehicle_presence_status === "with_customer") ? "workshopPresenceRequired"
-    : next === "in_progress" && order && !["received", "inspection", "waiting_parts", "in_progress"].includes(order.status) ? "workOrderStatusInvalid"
-    : next === "ready" && order?.status !== "completed" ? "finishWorkFirst"
-    : next === "delivered" && (!visit?.hasFinalHandover || order?.status !== "delivered" || !order?.vehicle_delivered_at) ? "signedHandoverRequired"
-    : null;
+  const nextBlocker = getVehicleVisitNextBlocker(next, entry, hasRole, Boolean(visit?.hasFinalHandover));
   const prerequisiteHref = nextBlocker === "claimApprovalRequired" && claim?.id ? `/insurance/${claim.id}`
     : ["cashWorkOrderRequired", "workOrderRequired", "workshopPresenceRequired"].includes(nextBlocker || "") ? `/vehicle-entry/${entryId}`
     : ["workOrderStatusInvalid", "finishWorkFirst"].includes(nextBlocker || "") && order?.order_number
@@ -176,7 +163,10 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
         <h2 className="flex items-center gap-2 text-lg font-bold"><ClipboardList className="h-5 w-5" />{t("vehicleVisit.operationalFile")}</h2>
         <p className="text-sm text-muted-foreground">{t("vehicleVisit.subtitle")}</p>
       </div>
-      <Badge variant={visit.stage === "needs_review" ? "destructive" : "secondary"}>{stageLabel(visit.stage)}</Badge>
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="secondary">{stageLabel(visit.operationalStage)}</Badge>
+        {visit.reviewReason && <Badge variant="destructive">{stageLabel("needs_review")}</Badge>}
+      </div>
     </div>
     <p className="text-sm text-muted-foreground">{t(billingKind === "insurance" ? "vehicleVisit.insuranceFlow" : "vehicleVisit.cashFlow")}</p>
     {visit.reviewReason && <div className="flex items-start gap-2 rounded-lg border border-warning/50 bg-warning/5 p-3 text-sm text-warning"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />{t(`vehicleVisit.${visit.reviewReason}`, { defaultValue: visit.reviewReason })}</div>}

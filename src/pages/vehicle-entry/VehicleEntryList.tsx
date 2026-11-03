@@ -12,13 +12,16 @@ import { getVehicleEntryPresence, getVehicleEntryVisitPurpose, vehicleEntryMatch
 import { listVehicleVisitCenter, VISIT_STAGES, type VisitStage } from "@/lib/vehicleVisitLifecycle";
 import { getEntryRearThumbnailUrls } from "@/lib/vehicleRearThumbnails";
 import { VehicleRearThumbnail } from "@/components/vehicles/VehicleRearThumbnail";
+import { VehicleVisitQuickActionDialog } from "./VehicleVisitQuickActionDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export default function VehicleEntryList() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const isMobile = useIsMobile();
   const [params, setParams] = useSearchParams();
   const activeTab = params.get("location") === "with_customer" ? "with_customer" : "in_workshop";
   const [search, setSearch] = useState("");
@@ -33,12 +36,15 @@ export default function VehicleEntryList() {
   const [technician, setTechnician] = useState("all");
   const [location, setLocation] = useState("all");
   const [minDays, setMinDays] = useState("");
+  const [quickActionRow, setQuickActionRow] = useState<any | null>(null);
   const { data, isLoading, error } = useQuery({
     queryKey: ["vehicle_visit", "center"], queryFn: listVehicleVisitCenter,
     staleTime: 15_000, refetchOnWindowFocus: true, refetchInterval: 60_000,
   });
 
-  const loadedRows = useMemo(() => (data || []).map((visit) => ({ ...visit.entry, _visitStage: visit.stage, _reviewReason: visit.reviewReason })), [data]);
+  const loadedRows = useMemo(() => (data || []).map((visit) => ({
+    ...visit.entry, _visitStage: visit.operationalStage, _reviewReason: visit.reviewReason,
+  })), [data]);
   const technicians = useMemo(() => [...new Set(loadedRows.map((row) => row.work_order?.technician_name || row.converted_work_order?.technician_name).filter(Boolean))].sort(), [loadedRows]);
   const matchingRows = useMemo(() => loadedRows.filter((row) => {
     const days = Math.max(0, Math.floor((Date.now() - Date.parse(`${row.arrival_date}T00:00:00+04:00`)) / 86_400_000));
@@ -52,13 +58,13 @@ export default function VehicleEntryList() {
   const stageCounts = useMemo(() => Object.fromEntries(VISIT_STAGES.map((stage) => [stage, matchingRows.filter((row) => row._visitStage === stage).length])) as Record<VisitStage, number>, [matchingRows]);
   const rowsByPresence = useMemo(() => {
     const groups: Record<VehicleEntryPresence, any[]> = { in_workshop: [], with_customer: [], needs_review: [] };
-    matchingRows.forEach((row) => groups[row._visitStage === "needs_review" ? "needs_review" : getVehicleEntryPresence(row)].push(row));
+    matchingRows.forEach((row) => groups[row._reviewReason && !row._claimOnly ? "needs_review" : getVehicleEntryPresence(row)].push(row));
     return groups;
   }, [matchingRows]);
   const rows = stageFilter === "all" ? rowsByPresence[activeTab] : matchingRows.filter((row) => row._visitStage === stageFilter);
   const photoEntryIds = [...new Set([
-    ...rows.map((row) => row.id),
-    ...(showReview && stageFilter === "all" ? rowsByPresence.needs_review.map((row) => row.id) : []),
+    ...rows.filter((row) => !row._claimOnly).map((row) => row.id),
+    ...(showReview && stageFilter === "all" ? rowsByPresence.needs_review.filter((row) => !row._claimOnly).map((row) => row.id) : []),
   ])];
   const rearPhotos = useQuery({
     queryKey: ["vehicle_media", "entry_rear_thumbnails", profile?.tenant_id || "", photoEntryIds.join("|")],
@@ -72,6 +78,7 @@ export default function VehicleEntryList() {
     return key ? t(`vehicleEntry.statuses.${key}`) : value;
   };
   const purposeLabel = (row: any) => {
+    if (row._claimOnly) return t("vehicleVisit.claim");
     const purpose = getVehicleEntryVisitPurpose(row);
     return t(purpose === "inspection" ? "vehicleEntry.inspectionPurpose" : purpose === "workshop" ? "vehicleEntry.workshopPurpose" : "vehicleEntry.unknownPurpose");
   };
@@ -96,17 +103,18 @@ export default function VehicleEntryList() {
       const exportMatches = rows;
       const XLSX = await import("xlsx");
       const header = [
-        t("vehicleEntry.entryNumber"), t("vehicleEntry.arrival"), t("vehicleEntry.plate"),
+        t("vehicleEntry.entryNumber"), t("vehicleVisit.recordType"), t("vehicleEntry.arrival"), t("vehicleEntry.plate"),
         t("vehicleEntry.vehicle"), t("vehicleEntry.customer"), t("vehicleEntry.phone"),
         t("vehicleEntry.insurance"), t("vehicleEntry.deliveredBy"), t("vehicleEntry.location"),
         t("vehicleEntry.purpose"), t("vehicleEntry.status"), t("unifiedInvoices.claim"),
-        t("vehicleEntry.workOrder"), t("vehicleEntry.issuedAt"), t("vehicleVisit.stage"), t("vehicleVisit.technician"), "VIN",
+        t("vehicleEntry.workOrder"), t("vehicleEntry.issuedAt"), t("vehicleVisit.stage"), t("vehicleVisit.technician"), t("vehicleEntry.reviewLocation"), "VIN",
       ];
       const exportRows = exportMatches.map((row) => {
         const vehicle = row.vehicle || row.vehicle_snapshot || {};
         const customer = row.customer || row.customer_snapshot || {};
         return [
           row.entry_number,
+          t(row._claimOnly ? "vehicleVisit.claimOnlyCard" : "vehicleVisit.entry"),
           [row.arrival_date, String(row.arrival_time || "").slice(0, 5)].filter(Boolean).join(" "),
           [vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" "),
           [vehicle.brand || vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(" "),
@@ -114,10 +122,11 @@ export default function VehicleEntryList() {
           row.insurance_snapshot?.company_name || row.insurance_company?.name || "",
           row.delivered_by?.full_name || "",
           t(getVehicleEntryPresence(row) === "in_workshop" ? "vehicleEntry.workshopTab" : getVehicleEntryPresence(row) === "with_customer" ? "vehicleEntry.customerTab" : "vehicleEntry.reviewLocation"),
-          purposeLabel(row), statusLabel(row.status),
+          purposeLabel(row), row._claimOnly ? t(`vehicleVisit.claimStatus.${row.status}`, { defaultValue: row.status }) : statusLabel(row.status),
           row.claim?.claim_number || row.converted_claim?.claim_number || row.insurance_snapshot?.claim_number || "",
           row.work_order?.order_number || row.converted_work_order?.order_number || "", row.issued_at || "",
           t(`vehicleVisit.${row._visitStage}`), row.work_order?.technician_name || row.converted_work_order?.technician_name || "",
+          row._reviewReason ? t(`vehicleVisit.${row._reviewReason}`, { defaultValue: row._reviewReason }) : "",
           vehicle.vin_number || vehicle.vin || "",
         ].map((cell) => typeof cell === "string" && /^[=+@-]/.test(cell.trimStart()) ? `'${cell}` : cell);
       });
@@ -143,8 +152,10 @@ export default function VehicleEntryList() {
         <div className="space-y-2">{displayRows.filter((row) => row._visitStage === stage).map((row) => {
           const vehicle = row.vehicle || row.vehicle_snapshot || {};
           const customer = row.customer || row.customer_snapshot || {};
-          return <Link key={row.id} to={`/vehicle-entry/${row.id}`} className="block rounded-lg border border-border bg-card p-3 hover:border-primary/50">
-            <div className="flex justify-between gap-2"><strong className="font-mono text-primary">{row.entry_number}</strong><span className="text-xs text-muted-foreground" dir="ltr">{row.arrival_date}</span></div>
+          return <div key={row.id} className="rounded-lg border border-border bg-card p-3 hover:border-primary/50">
+            <div className="flex justify-between gap-2"><Link to={row._claimOnly ? `/insurance/${row.claim.id}` : `/vehicle-entry/${row.id}`} className="font-mono font-semibold text-primary hover:underline">{row.entry_number || row.claim?.claim_number || t("vehicleVisit.claimOnlyCard")}</Link><span className="text-xs text-muted-foreground" dir="ltr">{row.arrival_date || "—"}</span></div>
+            {row._claimOnly && <div className="mt-1 text-xs text-warning">{t("vehicleVisit.claimOnlyCard")}{row._arrivalSource === "claim_registration" ? ` · ${t("vehicleVisit.arrivalFromClaimRegistration")}` : ""}</div>}
+            {row._reviewReason && !row._claimOnly && <div className="mt-1 text-xs text-warning" role="status">{t(`vehicleVisit.${row._reviewReason}`, { defaultValue: row._reviewReason })}</div>}
             <div className="mt-2 flex items-center gap-2">
               <VehicleRearThumbnail url={rearPhotoByEntry[row.id]} alt={t("vehicleEntry.rearPhoto", { vehicle: [vehicle.brand || vehicle.make, vehicle.model].filter(Boolean).join(" ") || row.entry_number })} />
               <div className="min-w-0">
@@ -153,10 +164,46 @@ export default function VehicleEntryList() {
               </div>
             </div>
             <div className="mt-2 text-xs text-muted-foreground">{row.work_order?.order_number || row.converted_work_order?.order_number || row.claim?.claim_number || row.converted_claim?.claim_number || purposeLabel(row)}</div>
-          </Link>;
+            <Button className="mt-2 w-full" variant="outline" size="sm" onClick={() => setQuickActionRow(row)}>{t("vehicleVisit.quickAction")}</Button>
+          </div>;
         })}</div>
       </section>)}</div>;
     }
+    if (isMobile) return <div className="grid gap-3 p-3">{displayRows.map((row) => {
+      const vehicle = row.vehicle || row.vehicle_snapshot || {};
+      const customer = row.customer || row.customer_snapshot || {};
+      const presence = getVehicleEntryPresence(row);
+      const recordUrl = row._claimOnly ? `/insurance/${row.claim.id}` : `/vehicle-entry/${row.id}`;
+      return <article key={row.id} className="min-w-0 rounded-xl border border-border bg-card p-3 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <Link to={recordUrl} className="break-all font-mono font-semibold text-primary hover:underline">{row.entry_number || row.claim?.claim_number || t("vehicleVisit.claimOnlyCard")}</Link>
+          <span className="text-xs text-muted-foreground" dir="ltr">{row.arrival_date || "—"} {String(row.arrival_time || "").slice(0, 5)}</span>
+        </div>
+        {row._arrivalSource === "claim_registration" && <p className="text-xs text-warning">{t("vehicleVisit.arrivalFromClaimRegistration")}</p>}
+        <div className="mt-3 flex items-center gap-3">
+          <VehicleRearThumbnail url={rearPhotoByEntry[row.id]} alt={t("vehicleEntry.rearPhoto", { vehicle: [vehicle.brand || vehicle.make, vehicle.model].filter(Boolean).join(" ") || row.entry_number })} />
+          <div className="min-w-0"><div className="font-semibold" dir="auto">{[vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ") || "—"}</div>
+            <div className="truncate text-sm text-muted-foreground" dir="auto">{[vehicle.brand || vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(" ") || "—"}</div></div>
+        </div>
+        <p className="mt-2 truncate text-sm" dir="auto">{customer.name || "—"}</p>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full bg-primary/10 px-2 py-1 text-primary">{t(`vehicleVisit.${row._visitStage}`)}</span>
+          <span className="rounded-full bg-muted px-2 py-1">{t(presence === "in_workshop" ? "vehicleEntry.workshopTab" : presence === "with_customer" ? "vehicleEntry.customerTab" : "vehicleEntry.reviewLocation")}</span>
+          <span className="rounded-full bg-muted px-2 py-1">{row._claimOnly ? t(`vehicleVisit.claimStatus.${row.status}`, { defaultValue: row.status }) : statusLabel(row.status)}</span>
+        </div>
+        {row._reviewReason && <p role="status" className="mt-2 text-xs text-warning">{t(`vehicleVisit.${row._reviewReason}`, { defaultValue: row._reviewReason })}</p>}
+        <details className="mt-2 rounded-lg border border-border p-2 text-xs"><summary className="cursor-pointer font-medium">{t("vehicleVisit.operationalFile")}</summary>
+          <div className="mt-2 grid grid-cols-2 gap-2 text-muted-foreground">
+            <span>{t("vehicleEntry.insurance")}: {row.insurance_snapshot?.company_name || row.insurance_company?.name || "—"}</span>
+            <span>{t("vehicleEntry.deliveredBy")}: {row.delivered_by?.full_name || "—"}</span>
+            <span>{t("vehicleEntry.purpose")}: {purposeLabel(row)}</span>
+            <span>{t("vehicleVisit.technician")}: {row.work_order?.technician_name || row.converted_work_order?.technician_name || "—"}</span>
+            <span className="col-span-2">{t("vehicleEntry.workOrder")}: {row.work_order?.order_number || row.converted_work_order?.order_number || "—"}</span>
+          </div>
+        </details>
+        <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => setQuickActionRow(row)}>{t("vehicleVisit.quickAction")}</Button>
+      </article>;
+    })}</div>;
     return (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -166,6 +213,7 @@ export default function VehicleEntryList() {
                 <th key={key} className="p-3">{t(`vehicleEntry.${key}`)}</th>)}
               <th className="p-3">{t("vehicleVisit.stage")}</th>
               <th className="p-3">{t("vehicleVisit.technician")}</th>
+              <th className="p-3">{t("vehicleVisit.quickAction")}</th>
             </tr>
           </thead>
           <tbody>
@@ -175,8 +223,8 @@ export default function VehicleEntryList() {
               const presence = getVehicleEntryPresence(row);
               return (
                 <tr key={row.id} className="border-t border-border hover:bg-muted/30">
-                  <td className="p-3 font-mono font-semibold text-primary"><Link to={`/vehicle-entry/${row.id}`}>{row.entry_number}</Link></td>
-                  <td className="p-3 whitespace-nowrap" dir="ltr">{row.arrival_date} {String(row.arrival_time || "").slice(0, 5)}</td>
+                  <td className="p-3 font-mono font-semibold text-primary"><Link to={row._claimOnly ? `/insurance/${row.claim.id}` : `/vehicle-entry/${row.id}`}>{row.entry_number || row.claim?.claim_number || t("vehicleVisit.claimOnlyCard")}</Link>{row._claimOnly && <div className="text-xs font-normal text-warning">{t("vehicleVisit.claimOnlyCard")}</div>}</td>
+                  <td className="p-3 whitespace-nowrap" dir="ltr">{row.arrival_date || "—"} {String(row.arrival_time || "").slice(0, 5)}{row._arrivalSource === "claim_registration" && <div className="text-xs text-warning" dir="auto">{t("vehicleVisit.arrivalFromClaimRegistration")}</div>}</td>
                   <td className="p-3">
                     <div className="flex items-center gap-2">
                       <VehicleRearThumbnail url={rearPhotoByEntry[row.id]} alt={t("vehicleEntry.rearPhoto", { vehicle: [vehicle.brand || vehicle.make, vehicle.model].filter(Boolean).join(" ") || row.entry_number })} />
@@ -191,9 +239,10 @@ export default function VehicleEntryList() {
                   <td className="p-3" dir="auto">{row.delivered_by?.full_name || "—"}</td>
                   <td className="p-3">{presence === "needs_review" ? t("vehicleEntry.reviewLocation") : t(presence === "in_workshop" ? "vehicleEntry.workshopTab" : "vehicleEntry.customerTab")}</td>
                   <td className="p-3">{purposeLabel(row)}</td>
-                  <td className="p-3"><span className="rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">{statusLabel(row.status)}</span></td>
-                  <td className="p-3">{t(`vehicleVisit.${row._visitStage}`)}</td>
+                  <td className="p-3"><span className="rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">{row._claimOnly ? t(`vehicleVisit.claimStatus.${row.status}`, { defaultValue: row.status }) : statusLabel(row.status)}</span></td>
+                  <td className="p-3">{t(`vehicleVisit.${row._visitStage}`)}{row._reviewReason && !row._claimOnly && <div className="max-w-44 text-xs text-warning" role="status">{t(`vehicleVisit.${row._reviewReason}`, { defaultValue: row._reviewReason })}</div>}</td>
                   <td className="p-3">{row.work_order?.technician_name || row.converted_work_order?.technician_name || "—"}</td>
+                  <td className="p-3"><Button size="sm" variant="outline" onClick={() => setQuickActionRow(row)}>{t("vehicleVisit.quickAction")}</Button></td>
                 </tr>
               );
             })}
@@ -205,6 +254,7 @@ export default function VehicleEntryList() {
 
   return (
     <div className="space-y-5" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
+      <VehicleVisitQuickActionDialog row={quickActionRow} open={Boolean(quickActionRow)} onOpenChange={(open) => { if (!open) setQuickActionRow(null); }} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">{t("vehicleVisit.title")}</h1>
@@ -256,6 +306,8 @@ export default function VehicleEntryList() {
             <SelectContent>
               <SelectItem value="all">{t("vehicleEntry.allStatuses")}</SelectItem>
               {VEHICLE_ENTRY_STATUSES.map((s) => <SelectItem key={s} value={s}>{statusLabel(s)}</SelectItem>)}
+              {(["pending", "approved", "paid", "cancelled", "rejected"] as const).map((s) =>
+                <SelectItem key={`claim-${s}`} value={s}>{t(`vehicleVisit.claimStatus.${s}`)}</SelectItem>)}
             </SelectContent>
           </Select>
           <Input type="date" aria-label={t("unifiedInvoices.from")} value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -304,7 +356,7 @@ export default function VehicleEntryList() {
         </Card>
       )}
 
-      {!error && !isLoading && <p className="text-sm text-muted-foreground">{t("vehicleVisit.loadedCount", { count: matchingRows.length })}</p>}
+      {!error && !isLoading && <p className="text-sm text-muted-foreground">{t("vehicleVisit.centerCounts", { entries: matchingRows.filter((row) => !row._claimOnly).length, claims: matchingRows.filter((row) => row._claimOnly).length })}</p>}
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <CarFront size={14} />

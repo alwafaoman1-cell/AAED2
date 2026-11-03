@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { smartBack } from "@/lib/smartBack";
-import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
@@ -13,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -155,8 +157,11 @@ async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
 }
 
 export default function InsuranceClaimDetail() {
+  const { t } = useTranslation();
+  const { hasRole } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isNew = !id || id === "new";
 
   const { data: existing, isLoading } = useClaim(isNew ? undefined : id);
@@ -211,9 +216,7 @@ export default function InsuranceClaimDetail() {
   const [workshopArrivalDate, setWorkshopArrivalDate] = useState<string>("");
   const [workStartedAt, setWorkStartedAt] = useState<string>("");
   const [workCompletedAt, setWorkCompletedAt] = useState<string>("");
-  const estimateDateRef = useRef<HTMLInputElement>(null);
-  const workshopArrivalDateRef = useRef<HTMLInputElement>(null);
-  const workStartedAtRef = useRef<HTMLInputElement>(null);
+  const approvalShortcutHandled = useRef<string | null>(null);
   const lpoNumberRef = useRef<HTMLInputElement>(null);
   const lpoDateRef = useRef<HTMLInputElement>(null);
   const lpoAmountRef = useRef<HTMLInputElement>(null);
@@ -250,6 +253,8 @@ export default function InsuranceClaimDetail() {
   const [cancelledHandoverAcknowledged, setCancelledHandoverAcknowledged] = useState(false);
   const [savingCancelledHandover, setSavingCancelledHandover] = useState(false);
   const [registeringVehicleEntry, setRegisteringVehicleEntry] = useState(false);
+  const [confirmArrivalOpen, setConfirmArrivalOpen] = useState(false);
+  const [confirmedActualArrival, setConfirmedActualArrival] = useState(false);
   const [showUndoDeliveryDialog, setShowUndoDeliveryDialog] = useState(false);
   const [undoDeliveryReason, setUndoDeliveryReason] = useState("");
   const [undoingDelivery, setUndoingDelivery] = useState(false);
@@ -258,9 +263,6 @@ export default function InsuranceClaimDetail() {
   const [taxInvoiceHtml, setTaxInvoiceHtml] = useState<string>("");
   const [taxInvoiceNumber, setTaxInvoiceNumber] = useState<string>("");
   const [showSendEmail, setShowSendEmail] = useState(false);
-  const [stageDialog, setStageDialog] = useState<{ key: string; label: string } | null>(null);
-  const [stageDate, setStageDate] = useState<string>(dateOnly(new Date().toISOString()));
-  const [stageNote, setStageNote] = useState("");
 
   const findMediaByUrl = (url: string) =>
     claimMedia.find((item) => [item.url, item.public_url, item.storage_path].filter(Boolean).includes(url));
@@ -271,7 +273,6 @@ export default function InsuranceClaimDetail() {
     queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
     queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
   };
-  const [savingStage, setSavingStage] = useState(false);
   const [insuranceSectionOpen, setInsuranceSectionOpen] = useState(false);
   const [ownerSectionOpen, setOwnerSectionOpen] = useState(false);
   const [vehicleSectionOpen, setVehicleSectionOpen] = useState(false);
@@ -894,6 +895,13 @@ export default function InsuranceClaimDetail() {
         },
       }, auth.user?.id || null);
 
+      if (!result.created) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
+        toast.info(`المركبة مسجلة مسبقًا برقم ${result.entry.entry_number}؛ لم نُغيّر تاريخ الدخول أو موقعها`);
+        navigate(`/vehicle-entry/${result.entry.id}`);
+        return;
+      }
+
       const arrivalDate = String(result.entry.arrival_date || new Date().toISOString().slice(0, 10));
       const arrivalTime = String(result.entry.arrival_time || "00:00").slice(0, 5);
       const receivedAt = new Date(`${arrivalDate}T${arrivalTime}:00`).toISOString();
@@ -953,12 +961,6 @@ export default function InsuranceClaimDetail() {
     setWorkCompletedAt(dateOnly(verified.work_completed_at));
     if (verified.estimate_date) setEstimateDate(dateOnly(verified.estimate_date));
   };
-
-  const getWorkflowDateValues = () => ({
-    estimate: estimateDateRef.current?.value || estimateDate || "",
-    arrival: workshopArrivalDateRef.current?.value || workshopArrivalDate || "",
-    started: workStartedAtRef.current?.value || workStartedAt || "",
-  });
 
   const getLpoValues = useCallback(() => ({
     number: lpoNumberRef.current?.value || lpoNumber || "",
@@ -1078,15 +1080,13 @@ export default function InsuranceClaimDetail() {
       });
     } else {
       try {
-        const workflowDates = getWorkflowDateValues();
+        // Physical custody and repair dates are owned by the vehicle visit
+        // workflow. Saving unrelated claim details must never write stale dates
+        // back over a more recent arrival, release, or delivery.
+        const { workshop_arrival_date: _arrival, work_started_at: _started, ...claimDetails } = payload;
         const verified = await updateClaim.mutateAsync({
           id: id!,
-          updates: {
-            ...payload,
-            estimate_date: workflowDates.estimate || null,
-            workshop_arrival_date: workflowDates.arrival || null,
-            work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
-          },
+          updates: claimDetails,
         });
         let verifiedClaim: any = verified;
         const lpo = getLpoValues();
@@ -1114,15 +1114,9 @@ export default function InsuranceClaimDetail() {
           claimId: id,
           tenantId: (payload as any).tenant_id,
           workOrderId: (verifiedClaim as any)?.job_order_id || linkedWorkOrderId || null,
-          patch: {
-            vehicle_received_at: workflowDates.arrival || null,
-            work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
-          },
         }).catch((error) => console.warn("[claim operational sync] skipped", error));
         await writeClaimAudit("claim_details_saved", {
-          workshop_arrival_date: workflowDates.arrival || null,
-          estimate_date: workflowDates.estimate || null,
-          work_started_at: workflowDates.started || null,
+          estimate_date: claimDetails.estimate_date || null,
         });
       } catch (e: any) {
         toast.error(e?.message || "فشل حفظ المطالبة");
@@ -1140,7 +1134,7 @@ export default function InsuranceClaimDetail() {
   // عند الموافقة: trigger في DB ينشئ أمر العمل تلقائياً ويربطه بـ auto_job_order_id.
   // بعدها: (1) نزامن بيانات السيارة المُدخلة في المطالبة على سجل vehicles
   // (2) لا ننتقل تلقائياً — نترك المستخدم يختار "عرض هنا" أو "فتح في الصفحة" أو "متابعة للتسليم".
-  const openApproveDialog = () => {
+  const openApproveDialog = useCallback(() => {
     if (!id || isNew) {
       toast.error("احفظ المطالبة أولاً");
       return;
@@ -1151,7 +1145,28 @@ export default function InsuranceClaimDetail() {
       if (fallback) setApprovedAmount(fallback.toFixed(3));
     }
     setShowApproveDialog(true);
-  };
+  }, [id, isNew, approvedAmount, estimatedCost]);
+
+  // The center's green shortcut opens this exact approval dialog. It never
+  // writes claim status directly or bypasses vehicle/amount validation.
+  const requestedVisitAction = searchParams.get("visitAction");
+  useEffect(() => {
+    if (!requestedVisitAction) { approvalShortcutHandled.current = null; return; }
+    if (!["approve", "arrival", "undoDelivery"].includes(requestedVisitAction) || !existing || isNew
+      || claimNumber !== existing.claim_number) return;
+    const shortcutKey = `${id}:${requestedVisitAction}`;
+    if (approvalShortcutHandled.current === shortcutKey) return;
+    approvalShortcutHandled.current = shortcutKey;
+    const next = new URLSearchParams(searchParams);
+    next.delete("visitAction");
+    setSearchParams(next, { replace: true });
+    if (requestedVisitAction === "approve" && existing.status === "pending") openApproveDialog();
+    if (requestedVisitAction === "undoDelivery" && existing.delivered_at && hasRole("admin", "manager")) setShowUndoDeliveryDialog(true);
+    if (requestedVisitAction === "arrival") {
+      toast.info(t("vehicleVisit.confirmPhysicalArrival"));
+      requestAnimationFrame(() => document.getElementById("claim-record-vehicle-arrival")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+    }
+  }, [requestedVisitAction, existing, isNew, id, claimNumber, searchParams, setSearchParams, openApproveDialog, t, hasRole]);
 
   const handleApprove = async () => {
     if (!id || isNew) {
@@ -1412,95 +1427,6 @@ export default function InsuranceClaimDetail() {
     navigate(`/work-orders/${savedOrder.id}`);
   };
 
-  const openStageDialog = (step: { key: string; label: string }) => {
-    if (isNew || !id) {
-      toast.error("احفظ المطالبة أولاً قبل تغيير المرحلة");
-      return;
-    }
-    if (step.key === "delivered") {
-      toast.info("اعتماد التسليم يتم من قسم تسليم المركبة عبر نموذج الخروج وتوقيع المستلم");
-      return;
-    }
-    setStageDialog({ key: step.key, label: step.label });
-    setStageDate(dateOnly(new Date().toISOString()));
-    setStageNote("");
-  };
-
-  const handleConfirmStageChange = async () => {
-    if (!stageDialog || !id || isNew) return;
-    if (stageDialog.key === "delivered") {
-      toast.error("لا يمكن اعتماد التسليم من شريط المراحل. استخدم نموذج خروج وتسليم المركبة.");
-      setStageDialog(null);
-      return;
-    }
-    const changedAt = stageDate || dateOnly(new Date().toISOString());
-    const updates: Record<string, any> = {};
-
-    if (stageDialog.key === "arrived") {
-      updates.workshop_arrival_date = changedAt;
-    } else if (stageDialog.key === "repairing") {
-      updates.work_started_at = new Date(changedAt).toISOString();
-    } else if (stageDialog.key === "ready") {
-      updates.work_completed_at = new Date(changedAt).toISOString();
-    } else if (stageDialog.key === "delivered") {
-      updates.delivered_at = new Date(changedAt).toISOString();
-    } else {
-      toast.info("هذه المرحلة تُدار من الإجراء الخاص بها، وليس من شريط المراحل.");
-      return;
-    }
-
-    setSavingStage(true);
-    try {
-      const { data: verified, error } = await supabase
-        .from("insurance_claims" as any)
-        .update(updates)
-        .eq("id", id)
-        .select("id,status,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,delivered_at,updated_at")
-        .single();
-      if (error) throw error;
-
-      hydrateFromVerifiedClaim(verified);
-      const unifiedStagePatch: Record<string, any> = {};
-      if (stageDialog.key === "arrived") {
-        unifiedStagePatch.vehicle_received_at = changedAt;
-        unifiedStagePatch.operational_status = "received";
-        unifiedStagePatch.vehicle_presence_status = "in_workshop";
-      } else if (stageDialog.key === "repairing") {
-        unifiedStagePatch.work_started_at = new Date(changedAt).toISOString();
-        unifiedStagePatch.operational_status = "in_progress";
-        unifiedStagePatch.repair_stage = "repairing";
-      } else if (stageDialog.key === "ready") {
-        unifiedStagePatch.work_completed_at = new Date(changedAt).toISOString();
-        unifiedStagePatch.operational_status = "ready";
-        unifiedStagePatch.repair_stage = "ready";
-      } else if (stageDialog.key === "delivered") {
-        unifiedStagePatch.vehicle_delivered_at = new Date(changedAt).toISOString();
-        unifiedStagePatch.operational_status = "delivered";
-        unifiedStagePatch.vehicle_presence_status = "with_customer";
-        unifiedStagePatch.repair_stage = "delivered";
-      }
-      await syncClaimOperationalFile({
-        claimId: id,
-        workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
-        patch: unifiedStagePatch,
-      }).catch((syncError) => console.warn("[claim stage operational sync] skipped", syncError));
-      await writeClaimAudit("claim_vehicle_stage_changed", {
-        to_stage: stageDialog.key,
-        to_label: stageDialog.label,
-        changed_at: changedAt,
-        note: stageNote.trim() || null,
-        updates,
-      });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(id) });
-      setStageDialog(null);
-      toast.success("تم حفظ مرحلة المركبة والتأكد منها");
-    } catch (e: any) {
-      toast.error(e?.message || "فشل حفظ مرحلة المركبة");
-    } finally {
-      setSavingStage(false);
-    }
-  };
 
   // ── PDF ──
   // ── Inspection report PDF (uses the linked inspection + claim's photos) ──
@@ -2453,7 +2379,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   const isClosedClaim = status === "cancelled" || status === "rejected";
   const isDeliveredClaim = !!(existing as any)?.delivered_at;
   const isReadyForDelivery = !!workCompletedAt && !isDeliveredClaim && !isClosedClaim;
-  const isRepairingClaim = !!workStartedAt && !workCompletedAt && status === "approved";
   const isAwaitingApproval = !isNew && status === "pending";
   const insuranceFinancialStatus = isDeliveredClaim
     ? paymentRemaining <= 0 && paidTotal > 0
@@ -2467,60 +2392,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             : "Delivered - Invoice Issued"
     : "";
   const isApprovedClaim = status === "approved";
-  const vehiclePresence =
-    isDeliveredClaim
-      ? "with_customer_delivered"
-      : workshopArrivalDate
-        ? "in_workshop"
-        : "with_customer_not_arrived";
-  const vehiclePresenceMeta: Record<typeof vehiclePresence, { label: string; hint: string; cls: string }> = {
-    with_customer_not_arrived: {
-      label: "مع العميل / لم تصل",
-      hint: "لا يوجد تاريخ وصول للورشة؛ لذلك تعتبر المركبة مع العميل.",
-      cls: "border-amber-300 bg-amber-50 text-amber-700",
-    },
-    in_workshop: {
-      label: "داخل الورشة",
-      hint: "تم تسجيل تاريخ وصول المركبة للورشة ولم يتم تسجيل التسليم.",
-      cls: "border-emerald-300 bg-emerald-50 text-emerald-700",
-    },
-    with_customer_delivered: {
-      label: "مع العميل / تم التسليم",
-      hint: "تم تسجيل تسليم المركبة للعميل.",
-      cls: "border-sky-300 bg-sky-50 text-sky-700",
-    },
-  };
-  const currentVehicleStepIndex = isClosedClaim
-    ? 8
-    : isDeliveredClaim
-      ? 7
-      : isReadyForDelivery
-        ? 6
-        : isRepairingClaim
-          ? 5
-          : isApprovedClaim
-            ? 4
-            : isAwaitingApproval
-              ? 3
-              : workshopArrivalDate
-                ? 1
-                : 0;
-  const vehicleProgress = [
-    { key: "not_arrived", label: "مع العميل / لم تصل", icon: "👤", date: workshopArrivalDate ? null : (existing as any)?.created_at, editable: false },
-    { key: "arrived", label: "وصلت الورشة", icon: "🏁", date: workshopArrivalDate, editable: true },
-    { key: "inspection", label: "بانتظار الفحص", icon: "🔍", date: estimateDate, editable: false },
-    { key: "approval_wait", label: "بانتظار موافقة التأمين", icon: "⏳", date: estimateDate, editable: false },
-    { key: "approved", label: "تمت الموافقة", icon: "✅", date: dateOnly((existing as any)?.approved_at), editable: false },
-    { key: "repairing", label: "تحت الإصلاح", icon: "🛠️", date: workStartedAt, editable: true },
-    { key: "ready", label: "جاهزة للتسليم", icon: "📦", date: workCompletedAt, editable: true },
-    { key: "delivered", label: "تم التسليم", icon: "🚗", date: dateOnly((existing as any)?.delivered_at), editable: true },
-    { key: "customer", label: "مع العميل", icon: "👤", date: dateOnly((existing as any)?.paid_at), editable: false },
-    { key: "cancelled", label: "ملغاة / مرفوضة", icon: "⛔", date: dateOnly((existing as any)?.updated_at), editable: false },
-  ].map((step, index) => ({
-    ...step,
-    index,
-    state: index < currentVehicleStepIndex ? "completed" : index === currentVehicleStepIndex ? "current" : "upcoming",
-  }));
   const auditActionLabels: Record<string, string> = {
     claim_details_saved: "تم حفظ بيانات المطالبة",
     claim_workflow_dates_updated: "تم تحديث تواريخ سير العملية",
@@ -2749,10 +2620,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   </div>
                 </div>
                 <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="text-[11px] text-muted-foreground">موقع المركبة</div>
-                  <div className="text-xs font-semibold truncate">{vehiclePresenceMeta[vehiclePresence].label}</div>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
                   <div className="text-[11px] text-muted-foreground">اللوحة</div>
                   <div className="font-mono text-xs truncate" dir="ltr">{vehicle?.plate_number || vehiclePlate || "—"}</div>
                 </div>
@@ -2796,15 +2663,17 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 </Button>
               ) : (
                 <Button
+                  id="claim-record-vehicle-arrival"
                   variant="outline"
                   size="sm"
-                  onClick={handleRegisterVehicleEntry}
-                  disabled={registeringVehicleEntry || vehicleEntryByClaimQuery.isLoading || status === "cancelled"}
+                  onClick={() => { setConfirmedActualArrival(false); setConfirmArrivalOpen(true); }}
+                  disabled={registeringVehicleEntry || vehicleEntryByClaimQuery.isLoading || vehicleEntryByClaimQuery.isError || status === "cancelled"}
                   className="gap-1.5"
                 >
                   <Car size={14} /> {registeringVehicleEntry ? "جارٍ تسجيل الدخول..." : "تسجيل دخول المركبة"}
                 </Button>
               )}
+              {vehicleEntryByClaimQuery.isError && <span role="alert" className="text-sm text-destructive">{t("vehicleVisit.entryLinkReview")}</span>}
               {status === "cancelled" && (
                 <Button variant="outline" size="sm" onClick={() => setShowCancelledHandover(true)} className="gap-1.5 border-red-300 text-red-700">
                   <FileText size={14} /> ورقة تسليم المطالبة الملغاة
@@ -2813,16 +2682,6 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               {isAwaitingApproval && (
                 <Button size="sm" onClick={openApproveDialog} disabled={updateStatus.isPending} className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground">
                   <CheckCircle2 size={14} /> اعتماد المطالبة
-                </Button>
-              )}
-              {isApprovedClaim && (
-                <Button variant="outline" size="sm" onClick={() => openStageDialog({ key: "repairing", label: "تحت الإصلاح" })} className="gap-1.5">
-                  <Wrench size={14} /> بدء العمل
-                </Button>
-              )}
-              {isRepairingClaim && (
-                <Button variant="outline" size="sm" onClick={() => openStageDialog({ key: "ready", label: "جاهزة للتسليم" })} className="gap-1.5">
-                  <ClipboardCheck size={14} /> جاهزة للتسليم
                 </Button>
               )}
               {isReadyForDelivery && (
@@ -3075,203 +2934,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
       </Card>
 
-      <Card className="p-5 space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="font-bold text-foreground">حالة المركبة داخل المطالبة</h3>
-            <p className="text-xs text-muted-foreground">كل مرحلة تعتمد على بيانات محفوظة في Supabase وتبقى بعد التحديث.</p>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Badge variant="outline" className={vehiclePresenceMeta[vehiclePresence].cls}>{vehiclePresenceMeta[vehiclePresence].label}</Badge>
-            <Badge variant="outline">آخر تحديث: {formatDateLatin((existing as any)?.updated_at || new Date().toISOString())}</Badge>
-          </div>
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div>
+          <h3 className="font-semibold">{t("vehicleVisit.operationalFile")}</h3>
+          <p className="text-sm text-muted-foreground">{t("vehicleVisit.claimCenterSource")}</p>
         </div>
-        <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
-          <div className="text-sm font-semibold">موقع المركبة التشغيلي</div>
-          <p className="text-xs text-muted-foreground">{vehiclePresenceMeta[vehiclePresence].hint}</p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant={vehiclePresence === "with_customer_not_arrived" ? "default" : "outline"}
-              disabled={isNew || isDeliveredClaim || !!workStartedAt}
-              onClick={() => {
-                setWorkshopArrivalDate("");
-                toast.info("تم ضبط الحالة: مع العميل / لم تصل. اضغط حفظ التعديلات لتثبيتها.");
-              }}
-            >
-              مع العميل / لم تصل
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={vehiclePresence === "in_workshop" ? "default" : "outline"}
-              disabled={isNew || isDeliveredClaim}
-              onClick={() => {
-                if (!workshopArrivalDate) setWorkshopArrivalDate(new Date().toISOString().slice(0, 10));
-                toast.info("تم ضبط الحالة: داخل الورشة. اضغط حفظ التعديلات لتثبيتها.");
-              }}
-            >
-              داخل الورشة / وصلت
-            </Button>
-          </div>
-          {!!workStartedAt && !isDeliveredClaim && (
-            <p className="text-[11px] text-muted-foreground">لا يمكن إرجاع المركبة إلى “لم تصل” بعد تسجيل بدء العمل إلا بتعديل تواريخ سير العملية يدويًا.</p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {vehicleProgress.map((step) => (
-            <div key={step.key} className="inline-flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => step.editable ? openStageDialog(step) : toast.info("هذه المرحلة تُحدَّث من الإجراء الخاص بها.")}
-                disabled={isNew || isClosedClaim || step.state === "upcoming" && !step.editable}
-                className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs transition-colors ${
-                  step.state === "current"
-                    ? "border-primary bg-primary/10 text-primary font-bold"
-                    : step.state === "completed"
-                      ? "border-success/40 bg-success/10 text-success"
-                      : "border-border bg-secondary/20 text-muted-foreground"
-                } ${step.editable && !isClosedClaim ? "hover:border-primary/60 hover:bg-primary/5" : ""}`}
-                title={step.editable ? "اضغط لتحديث المرحلة بتأكيد" : "تُدار هذه المرحلة من الإجراء الخاص بها"}
-              >
-                <span aria-hidden>{step.icon}</span>
-                {step.state === "completed" && <CheckCircle2 size={13} />}
-                <span>{step.label}</span>
-                <span className="text-[10px] opacity-75">
-                  {step.date ? formatDateLatin(step.date) : "لم يتم التسجيل"}
-                </span>
-              </button>
-              {step.key === "delivered" && isDeliveredClaim && !isClosedClaim && (
-                <Can module="Insurance Claims" action="Edit">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8 gap-1 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => setShowUndoDeliveryDialog(true)}
-                  >
-                    <Undo2 size={13} />
-                    إلغاء التسليم
-                  </Button>
-                </Can>
-              )}
-            </div>
-          ))}
-        </div>
+        <Button type="button" variant="outline" onClick={() => navigate(vehicleEntryByClaimQuery.data ? `/vehicle-entry/${vehicleEntryByClaimQuery.data.id}` : "/vehicle-entry")}>
+          {t("vehicleVisit.openCenter")}
+        </Button>
       </Card>
-
-      {/* ── Workflow Dates ── */}
-      <Can module="Insurance Claims" action="Edit" fallback={
-        <Card className="p-4">
-          <div className="flex items-center gap-2 text-sm font-semibold mb-3">
-            <ClipboardCheck size={16} className="text-primary" /> تواريخ سير العملية
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <div><div className="text-muted-foreground mb-1">تاريخ التقدير</div><div className="font-semibold">{estimateDate ? formatDateLatin(estimateDate) : "—"}</div></div>
-            <div><div className="text-muted-foreground mb-1">وصول السيارة للورشة</div><div className="font-semibold">{workshopArrivalDate ? formatDateLatin(workshopArrivalDate) : "—"}</div></div>
-            <div><div className="text-muted-foreground mb-1">بدء العمل</div><div className="font-semibold">{workStartedAt ? formatDateLatin(workStartedAt) : "—"}</div></div>
-            <div><div className="text-muted-foreground mb-1">تاريخ التسليم</div><div className="font-semibold">{(existing as any)?.delivered_at ? formatDateLatin((existing as any).delivered_at) : "—"}</div></div>
-          </div>
-        </Card>
-      }>
-        <Card className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <ClipboardCheck size={16} className="text-primary" /> تواريخ سير العملية
-            </div>
-            <div className="text-[11px] text-muted-foreground">يتم تسجيل أي تعديل تلقائياً في سجل التدقيق.</div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">تاريخ التقدير</Label>
-                <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setEstimateDate(new Date().toISOString().slice(0, 10))}>اليوم</button>
-              </div>
-              <Input ref={estimateDateRef} type="date" value={estimateDate} onChange={(e) => setEstimateDate(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">وصول السيارة للورشة</Label>
-                <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setWorkshopArrivalDate(new Date().toISOString().slice(0, 10))}>اليوم</button>
-              </div>
-              <Input ref={workshopArrivalDateRef} type="date" value={workshopArrivalDate} onChange={(e) => setWorkshopArrivalDate(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">بدء العمل</Label>
-                <button type="button" className="text-[10px] text-primary hover:underline" onClick={() => setWorkStartedAt(new Date().toISOString().slice(0, 10))}>اليوم</button>
-              </div>
-              <Input ref={workStartedAtRef} type="date" value={workStartedAt} onChange={(e) => setWorkStartedAt(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">تاريخ التسليم</Label>
-              <Input
-                type="date"
-                value={(existing as any)?.delivered_at ? String((existing as any).delivered_at).slice(0, 10) : ""}
-                readOnly
-                disabled
-                className="bg-muted/40"
-              />
-              <p className="text-[10px] text-muted-foreground">يُسجَّل تلقائياً عند تسليم السيارة من تبويب «التسليم».</p>
-            </div>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            تاريخ وصول السيارة هو المرجع الرئيسي لاحتساب مدة بقاء المركبة ولون حالة المطالبة (أخضر / برتقالي / أصفر / أحمر).
-          </p>
-          <div className="flex justify-end pt-2 border-t">
-            <Button
-              size="sm"
-              onClick={async () => {
-                if (isNew || !id) {
-                  toast.error("احفظ المطالبة أولاً");
-                  return;
-                }
-                try {
-                  const workflowDates = getWorkflowDateValues();
-                  const { data: verified, error } = await supabase
-                    .from("insurance_claims" as any)
-                    .update({
-                      estimate_date: workflowDates.estimate || null,
-                      workshop_arrival_date: workflowDates.arrival || null,
-                      work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
-                      insurance_employee_id: insuranceEmployeeId,
-                    })
-                    .eq("id", id)
-                    .select("id,estimate_date,workshop_arrival_date,work_started_at,work_completed_at,status,insurance_employee_id")
-                    .single();
-                  if (error) throw error;
-                  if (!(verified as any)?.id) throw new Error("تعذر تأكيد حفظ تواريخ المطالبة");
-                  hydrateFromVerifiedClaim(verified);
-                  await syncClaimOperationalFile({
-                    claimId: id,
-                    workOrderId: linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id || null,
-                    patch: {
-                      vehicle_received_at: workflowDates.arrival || null,
-                      work_started_at: workflowDates.started ? new Date(workflowDates.started).toISOString() : null,
-                    },
-                  }).catch((syncError) => console.warn("[claim workflow operational sync] skipped", syncError));
-                  await writeClaimAudit("claim_workflow_dates_updated", {
-                    estimate_date: (verified as any).estimate_date ?? null,
-                    workshop_arrival_date: (verified as any).workshop_arrival_date ?? null,
-                    work_started_at: (verified as any).work_started_at ?? null,
-                    insurance_employee_id: (verified as any).insurance_employee_id ?? null,
-                    requested_workshop_arrival_date: workflowDates.arrival || null,
-                  });
-                  await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
-                  await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
-                  toast.success("تم الحفظ");
-                } catch (e: any) {
-                  toast.error(e.message || "تعذر الحفظ");
-                }
-              }}
-            >
-              حفظ التعديلات
-            </Button>
-          </div>
-        </Card>
-      </Can>
-
       {/* ── Workflow Tabs ── */}
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <div className="rounded-lg border border-border bg-muted/20 p-3">
@@ -3429,6 +3100,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
         {/* ── 2) Estimate: needed parts + cost estimate ── */}
         <TabsContent value="estimate" className="space-y-4 mt-4">
+          <Card className="p-4">
+            <Label htmlFor="claim-estimate-date">{t("vehicleVisit.estimateDate")}</Label>
+            <Input id="claim-estimate-date" className="mt-2 max-w-xs" type="date" value={estimateDate} onChange={(event) => setEstimateDate(event.target.value)} />
+          </Card>
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -3973,45 +3648,18 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         preselectOrderId={linkedWorkOrderId || undefined}
       />
 
-      <Dialog open={!!stageDialog} onOpenChange={(open) => !open && setStageDialog(null)}>
-        <DialogContent dir="rtl" className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>تأكيد تغيير مرحلة المركبة</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg border border-border bg-secondary/20 p-3">
-                <div className="text-xs text-muted-foreground mb-1">المرحلة الحالية</div>
-                <div className="font-semibold">
-                  {vehicleProgress.find((step) => step.state === "current")?.label || "—"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-primary/30 bg-primary/10 p-3">
-                <div className="text-xs text-muted-foreground mb-1">المرحلة الجديدة</div>
-                <div className="font-semibold text-primary">{stageDialog?.label || "—"}</div>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>تاريخ التغيير</Label>
-              <Input type="date" value={stageDate} onChange={(e) => setStageDate(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>ملاحظة اختيارية</Label>
-              <Textarea
-                value={stageNote}
-                onChange={(e) => setStageNote(e.target.value)}
-                rows={3}
-                placeholder="مثال: تم تحديث المرحلة بعد اتصال شركة التأمين"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setStageDialog(null)} disabled={savingStage}>
-                إلغاء
-              </Button>
-              <Button onClick={handleConfirmStageChange} disabled={savingStage || !stageDate}>
-                {savingStage ? "جاري الحفظ..." : "تأكيد"}
-              </Button>
-            </div>
+
+      <Dialog open={confirmArrivalOpen} onOpenChange={(open) => { if (!registeringVehicleEntry) setConfirmArrivalOpen(open); }}>
+        <DialogContent dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"} className="max-w-md">
+          <DialogHeader><DialogTitle>{t("vehicleVisit.confirmActualArrivalTitle")}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">{t("vehicleVisit.confirmActualArrivalHint")}</p>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={confirmedActualArrival} onCheckedChange={(checked) => setConfirmedActualArrival(checked === true)} />
+            {t("vehicleVisit.physicallyArrived")}
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setConfirmArrivalOpen(false)}>{t("common.cancel")}</Button>
+            <Button disabled={!confirmedActualArrival || registeringVehicleEntry} onClick={() => { setConfirmArrivalOpen(false); void handleRegisterVehicleEntry(); }}>{t("vehicleVisit.recordArrivalInClaim")}</Button>
           </div>
         </DialogContent>
       </Dialog>

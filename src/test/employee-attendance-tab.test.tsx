@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import EmployeeAttendanceTab from "@/pages/staff/EmployeeAttendanceTab";
 
 const mock = vi.hoisted(() => ({
@@ -22,12 +22,18 @@ vi.mock("@/lib/hrStore", () => ({
 }));
 
 beforeEach(() => {
+  // The component defaults to the current month. Keep October fixtures in
+  // October so this regression test remains stable after the calendar rolls on.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-27T12:00:00Z"));
   vi.clearAllMocks();
   mock.manual.length = 0;
   mock.load.mockResolvedValue([{ personId: "7", personName: "", deviceKey: "TEMO Attendance", occurredAt: "2026-10-24T08:05:00+04:00", eventCode: 1 }]);
   mock.reviewLoad.mockResolvedValue({ monthReview: { id: "coverage-1", coverage_start: "2026-10-24", coverage_end: "2026-10-24", grace_minutes: 0, created_at: "2026-10-27T00:00:00Z" }, dayReviews: [] });
   mock.propose.mockResolvedValue({ id: "proposal-1" });
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("employee attendance review", () => {
   it("does not infer a full day from one morning punch or deduct payroll automatically", async () => {

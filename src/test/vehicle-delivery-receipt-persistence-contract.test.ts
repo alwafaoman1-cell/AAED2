@@ -76,7 +76,8 @@ describe("vehicle delivery receipt persistence contract", () => {
     expect(statusDialog).toContain("onRequestHandover");
     expect(statusDialog).toContain("اعتماد التسليم يتم فقط من نموذج خروج وتسليم المركبة");
     expect(claimDetail).toContain("cancelLatestFinalizedVehicleHandover");
-    expect(claimDetail).toContain("لا يمكن اعتماد التسليم من شريط المراحل");
+    expect(claimDetail).not.toContain("handleConfirmStageChange");
+    expect(claimDetail).toContain('setTab("delivery")');
     expect(claimDelivery).toContain("متابعة واعتماد الخروج والتسليم");
     expect(claimDelivery).not.toContain("handleSave(true)");
   });

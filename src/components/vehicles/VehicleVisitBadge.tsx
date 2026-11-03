@@ -16,7 +16,7 @@ export function VehicleVisitBadge({ source, id }: { source: "claim" | "work_orde
   if (query.isError) return <span className="text-xs text-destructive" role="status">{t("vehicleVisit.locationUnavailable")}</span>;
   if (query.isSuccess && !query.data) return <span className="text-xs text-muted-foreground">{t("vehicleVisit.noLinkedEntry")}</span>;
   if (!query.data) return null;
-  const { entryId, number, stage, presence } = query.data;
+  const { entryId, number, stage, presence, reviewReason } = query.data;
   const custody = presence === "in_workshop" ? t("vehicleEntry.workshopTab")
     : presence === "with_customer" ? t("vehicleEntry.customerTab")
     : t("vehicleEntry.reviewLocation");
@@ -24,6 +24,10 @@ export function VehicleVisitBadge({ source, id }: { source: "claim" | "work_orde
     ? [number, t("vehicleEntry.reviewLocation")].filter(Boolean).join(" · ")
     : [number, stage ? t(`vehicleVisit.${stage}`) : t("vehicleVisit.legacyUnrecorded"), custody].filter(Boolean).join(" · ");
   return entryId
-    ? <Link className="inline-flex rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10" to={`/vehicle-entry/${entryId}`}>{label}</Link>
-    : <span className="inline-flex rounded-full border border-warning/40 bg-warning/5 px-2 py-1 text-xs font-semibold text-warning">{t("vehicleVisit.needs_review")}</span>;
+    ? <Link className="inline-flex rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10" to={`/vehicle-entry/${entryId}`}>
+        {[label, reviewReason && stage !== "needs_review" ? t("vehicleEntry.reviewLocation") : ""].filter(Boolean).join(" · ")}
+      </Link>
+    : <span className="inline-flex rounded-full border border-warning/40 bg-warning/5 px-2 py-1 text-xs font-semibold text-warning">
+        {[label, t("vehicleVisit.claimOnlyCard")].filter(Boolean).join(" · ")}
+      </span>;
 }

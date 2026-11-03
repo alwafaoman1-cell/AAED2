@@ -48,15 +48,17 @@ import { toast } from "sonner";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 import { isInsuranceWorkOrder } from "@/lib/workOrderType";
+import { isWorkOrderInWorkshop } from "@/lib/workOrderPresence";
+import { useStaffWorkOrderSync } from "@/hooks/useStaffWorkOrderSync";
 
 const SERVICE_TYPES = ["حادث", "صيانة", "كهرباء", "فحص", "ميكانيكا", "صبغ", "غسيل"] as const;
 const hasInsuranceValue = (value?: string) => !!(value && value.trim() !== "" && value.trim() !== "-");
-const inWorkshop = (order: WorkOrder) => !["تم التسليم", "مغلق"].includes(order.status)
-  && !(order.temporaryInspectionReleaseId && order.vehiclePresenceStatus === "with_customer");
+const inWorkshop = isWorkOrderInWorkshop;
 const IS_INSURANCE = isInsuranceWorkOrder;
 
 export default function SupervisorApp() {
   useRealtimeSync();
+  useStaffWorkOrderSync();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const isAr = i18n.language?.startsWith("ar");
@@ -65,8 +67,6 @@ export default function SupervisorApp() {
 
   const [, force] = useState(0);
   useEffect(() => {
-    // اسحب أحدث البيانات من السحابة فور دخول الصفحة
-    refreshWorkOrdersFromCloud();
     const subs = [
       expenseCategoriesStore.subscribe(() => force((n) => n + 1)),
       employeeCashboxesStore.subscribe(() => force((n) => n + 1)),

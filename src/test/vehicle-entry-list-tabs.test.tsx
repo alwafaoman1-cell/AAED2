@@ -7,7 +7,7 @@ import VehicleEntryList from "@/pages/vehicle-entry/VehicleEntryList";
 import i18n from "@/i18n";
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), rearPhotos: vi.fn() }));
-vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ profile: { tenant_id: "tenant-test" } }) }));
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ profile: { tenant_id: "tenant-test" }, user: { id: "user-test" }, hasRole: () => true }) }));
 vi.mock("@/lib/vehicleRearThumbnails", () => ({ getEntryRearThumbnailUrls: mocks.rearPhotos }));
 vi.mock("@/lib/vehicleVisitLifecycle", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/vehicleVisitLifecycle")>();
@@ -38,10 +38,11 @@ beforeEach(async () => {
   mocks.list.mockReset();
   mocks.rearPhotos.mockReset();
   mocks.rearPhotos.mockResolvedValue({});
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   mocks.list.mockResolvedValue([
-    { entry: { id: "inside", entry_number: "ENT-2026-0001", arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Draft", vehicle_condition: { visit_purpose: "inspection" } }, stage: "arrived" },
-    { entry: { id: "outside", entry_number: "ENT-2026-0002", arrival_date: "2026-10-20", vehicle_location: "مع العميل", status: "Issued" }, stage: "arrived" },
-    { entry: { id: "review", entry_number: "ENT-2026-0003", arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Received", claim: { vehicle_presence_status: "with_customer" } }, stage: "needs_review", reviewReason: "custody_conflict" },
+    { entry: { id: "inside", entry_number: "ENT-2026-0001", arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Draft", vehicle_condition: { visit_purpose: "inspection" } }, stage: "arrived", operationalStage: "arrived" },
+    { entry: { id: "outside", entry_number: "ENT-2026-0002", arrival_date: "2026-10-20", vehicle_location: "مع العميل", status: "Issued" }, stage: "arrived", operationalStage: "arrived" },
+    { entry: { id: "review", entry_number: "ENT-2026-0003", arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Received", claim: { vehicle_presence_status: "with_customer" } }, stage: "needs_review", operationalStage: "needs_review", reviewReason: "custody_conflict" },
   ]);
   Object.defineProperty(window, "matchMedia", { writable: true, value: vi.fn().mockImplementation(() => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() })) });
 });
@@ -94,10 +95,50 @@ describe("vehicle entry list visit workflow", () => {
   it("loads the complete center result instead of silently stopping after a page", async () => {
     mocks.list.mockResolvedValue(Array.from({ length: 101 }, (_, index) => ({
       entry: { id: `entry-${index}`, entry_number: index === 100 ? "ENT-OLDER" : `ENT-${index}`, arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Draft" },
-      stage: "arrived",
+      stage: "arrived", operationalStage: "arrived",
     })));
     renderList();
     expect(await screen.findByText("ENT-OLDER")).toBeTruthy();
     expect(mocks.list).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows claim-only cards with the customer without inventing an entry number", async () => {
+    mocks.list.mockResolvedValue([{
+      entry: {
+        id: "claim:claim-1", _claimOnly: true, entry_number: "", status: "pending",
+        vehicle_id: "vehicle-1", insurance_claim_id: "claim-1", vehicle_location: "مع العميل",
+        claim: { id: "claim-1", claim_number: "C/2026/1", status: "pending", vehicle_presence_status: "with_customer" },
+      },
+      stage: "arrived", operationalStage: "arrived", reviewReason: "claim_without_entry",
+    }]);
+    renderList();
+    fireEvent.click(screen.getByRole("tab", { name: /مع العميل/ }));
+    expect(await screen.findByText("C/2026/1")).toBeTruthy();
+    expect(screen.getByText("مطالبة بلا كرت دخول")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "إجراء سريع" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText(/ليست سند استلام/)).toBeTruthy();
+  });
+
+  it("places reviewed historical records under their operational milestone without hiding the warning", async () => {
+    mocks.list.mockResolvedValue([{
+      entry: { id: "delivered", entry_number: "ENT-2026-0099", arrival_date: "2026-07-01",
+        vehicle_location: "داخل الورشة", status: "Received", claim: { vehicle_presence_status: "with_customer" } },
+      stage: "needs_review", operationalStage: "delivered", reviewReason: "delivery_without_signed_handover",
+    }]);
+    renderList();
+    expect(await screen.findByText(/تحتاج مراجعة الموقع \(1\)/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /تم التسليم\s*1/ }));
+    expect(await screen.findByText("ENT-2026-0099")).toBeTruthy();
+    expect(screen.getByText("حالة تسليم دون محضر تسليم موقّع ومعتمد")).toBeTruthy();
+  });
+
+  it("uses compact cards on a phone while keeping record links and quick actions", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    renderList();
+    expect(await screen.findByText("ENT-2026-0001")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("link", { name: "ENT-2026-0001" })).toHaveAttribute("href", "/vehicle-entry/inside");
+    expect(screen.getByRole("button", { name: "إجراء سريع" })).toBeTruthy();
   });
 });
