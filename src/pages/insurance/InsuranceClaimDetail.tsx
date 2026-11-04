@@ -85,6 +85,7 @@ import { expensesStore } from "@/lib/expensesStore";
 import { isUuid } from "@/lib/uuid";
 import { queryKeys } from "@/lib/queryKeys";
 import { resolveClaimVehicleForWorkOrder } from "@/lib/claimVehicleResolver";
+import { parseFullPlate } from "@/lib/plateUtils";
 import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import ElectronicSignaturePad from "@/components/ElectronicSignaturePad";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
@@ -1229,14 +1230,21 @@ export default function InsuranceClaimDetail() {
             const vehiclePatch: any = {};
             if (vehicleMake)  vehiclePatch.brand = vehicleMake;
             if (vehicleModel) vehiclePatch.model = vehicleModel;
-            if (vehiclePlate) vehiclePatch.plate_number = vehiclePlate;
+            if (vehiclePlate) {
+              const plateParts=parseFullPlate(vehiclePlate);
+              vehiclePatch.plate_number=plateParts.digits;
+              // A digits-only legacy display must not erase known letters.
+              if(plateParts.letters) vehiclePatch.plate_letters=plateParts.letters;
+            }
             if (vehicleYear)  vehiclePatch.year = parseInt(vehicleYear) || null;
             if (vehicleColor) vehiclePatch.color = vehicleColor;
             if (Object.keys(vehiclePatch).length) {
               const { error: vErr } = await supabase
                 .from("vehicles")
                 .update(vehiclePatch)
-                .eq("id", r.vehicle_id);
+                .eq("tenant_id", (existing as any).tenant_id)
+                .eq("id", r.vehicle_id)
+                .is("deleted_at", null);
               if (vErr) console.warn("vehicle sync failed:", vErr.message);
             }
           }

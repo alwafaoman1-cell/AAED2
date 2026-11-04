@@ -1,8 +1,10 @@
+import { assertVehicleEntryWorkOrderLink } from "@/lib/vehicleEntryWorkOrderLink";
+import "@/lib/i18n/vehicleEntryLinks";
 import { supabase } from "@/integrations/supabase/client";
 import i18n from "@/i18n";
 import { findPrimaryClaimWorkOrder } from "@/lib/claimWorkOrderGuard";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
-import { ensureVehicleForCustomer, normalizeVin } from "@/lib/vehicleIdentity";
+import { ensureVehicleForCustomer, normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
 import { extractPlateDigits, extractPlateLetters, formatPlate } from "@/lib/plateUtils";
 import { isValidE164, toE164 } from "@/lib/phoneUtils";
 import { assertVehicleEntryClaimLink } from "@/lib/vehicleEntryClaimLink";
@@ -421,7 +423,7 @@ export async function listVehicleEntries(filters: VehicleEntryListFilters = {}, 
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   let query = supabase
     .from("vehicle_entries" as any)
-    .select("*,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,plate_letters,plate_country,vin_number,vin,color),insurance_company:insurance_companies(id,name),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
+.select("*,customer:customers(id,name,phone,customer_code),vehicle:vehicles(id,brand,model,year,plate_number,plate_letters,plate_country,vin_number,vin,color),insurance_company:insurance_companies(id,name),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,tenant_id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,tenant_id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,tenant_id,vehicle_entry_id,deleted_at,parent_work_order_id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,tenant_id,vehicle_entry_id,deleted_at,parent_work_order_id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
@@ -442,7 +444,7 @@ export async function getVehicleEntry(id: string) {
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   const { data, error } = await supabase
     .from("vehicle_entries" as any)
-    .select("*,customer:customers(*),vehicle:vehicles(*),insurance_company:insurance_companies(*),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
+    .select("*,customer:customers(*),vehicle:vehicles(*),insurance_company:insurance_companies(*),claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,tenant_id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,tenant_id,claim_number,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,tenant_id,vehicle_entry_id,deleted_at,parent_work_order_id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,tenant_id,vehicle_entry_id,deleted_at,parent_work_order_id,order_number,status,technician_name,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_id,vehicle_presence_status,vehicle_delivered_at)")
     .eq("tenant_id", tenantId)
     .eq("id", id)
     .is("deleted_at", null)
@@ -727,11 +729,12 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: str
   const customerId = await ensureCustomer(form, tenantId);
   let vehicleId = form.vehicle_id || null;
   if (customerId && (form.vehicle.plate_number || form.vehicle.vin)) {
+    const plate = normalizeVehiclePlate({ plateNumber: form.vehicle.plate_number, plateLetters: form.vehicle.plate_letters, plateCountry: form.vehicle.plate_country });
     const ensured = await ensureVehicleForCustomer({
       customerId,
       vehicleId: form.vehicle_id,
-      plateNumber: extractPlateDigits(form.vehicle.plate_number),
-      plateLetters: extractPlateLetters(form.vehicle.plate_letters),
+      plateNumber: plate.digits,
+      plateLetters: plate.letters,
       plateCountry: form.vehicle.plate_country || "OM",
       vin: normalizeVin(form.vehicle.vin),
       make: form.vehicle.make,
@@ -1033,6 +1036,28 @@ export async function saveVehicleEntrySignature(args: {
   return data;
 }
 
+/** Explicit existing-only correction: one RLS transaction, no order insertion,
+ * vehicle reassignment or date/financial updates. */
+export async function confirmVehicleEntryWorkOrderLink(entryId: string, orderId: string, expectedUpdatedAt: string) {
+  const tenantId=await getCurrentTenantId();
+  if(!tenantId) throw new Error(i18n.t("vehicleEntryLinks.VEHICLE_ENTRY_LINK_FORBIDDEN"));
+  const {data,error}=await supabase.rpc("confirm_vehicle_entry_work_order_link" as any,{
+    p_entry_id:entryId,p_order_id:orderId,p_expected_updated_at:expectedUpdatedAt,
+  } as any);
+  if(error){
+    const code=String(error.message || "").match(/VEHICLE_ENTRY_LINK_[A-Z_]+/)?.[0];
+    throw new Error(code?i18n.t(`vehicleEntryLinks.${code}`,{defaultValue:error.message}):error.message);
+  }
+  const result=data as any;
+  if(!result?.entry || result.entry.id!==entryId || result.entry.tenant_id!==tenantId
+    || result.entry.work_order_id!==orderId || result.entry.converted_work_order_id!==orderId
+    || result.order?.id!==orderId || result.order.vehicle_entry_id!==entryId){
+    throw new Error(i18n.t("vehicleEntryLinks.failed"));
+  }
+  assertVehicleEntryWorkOrderLink(result.entry,result.order);
+  return {existing:true,work_order_id:orderId,order_number:result.order.order_number || null};
+}
+
 export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: string | null) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
@@ -1044,6 +1069,7 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
     throw new Error(i18n.t("vehicleVisit.insuranceClaimFirst"));
   }
   const assertOrderChannel = (order: any) => {
+    assertVehicleEntryWorkOrderLink(entry,order);
     if (!order || (linkedClaimId
       ? order.work_order_type !== "insurance" || order.claim_id !== linkedClaimId
       : order.work_order_type === "insurance")) {
@@ -1056,7 +1082,7 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
   }
   const existing = await supabase
     .from("job_orders" as any)
-    .select("id,order_number,work_order_type,claim_id")
+    .select("id,tenant_id,vehicle_id,vehicle_entry_id,deleted_at,parent_work_order_id,order_number,work_order_type,claim_id")
     .eq("tenant_id", tenantId)
     .eq("vehicle_entry_id", entryId)
     .is("deleted_at", null)
@@ -1064,15 +1090,7 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
   if (existing.error) throw existing.error;
   if ((existing.data as any)?.id) {
     assertOrderChannel(existing.data);
-    const linked = await supabase.from("vehicle_entries" as any)
-      .update({ work_order_id: (existing.data as any).id, converted_work_order_id: (existing.data as any).id } as any)
-      .eq("tenant_id", tenantId).eq("id", entryId)
-      .is("work_order_id", null).is("converted_work_order_id", null)
-      .select("id,work_order_id").maybeSingle();
-    if (linked.error) throw linked.error;
-    if (!linked.data || (linked.data as any).work_order_id !== (existing.data as any).id)
-      throw new Error(i18n.t("vehicleVisit.workOrderLinkNotConfirmed"));
-    return { existing: true, work_order_id: (existing.data as any).id, order_number: (existing.data as any).order_number };
+    return confirmVehicleEntryWorkOrderLink(entryId,(existing.data as any).id,entry.updated_at);
   }
 
   if (linkedClaimId) {
@@ -1080,21 +1098,11 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
     if (claimOrder) {
       if (claimOrder.vehicle_id !== entry.vehicle_id) throw new Error(i18n.t("claimWorkOrder.vehicleMismatch"));
       const { data: channelOrder, error: channelError } = await supabase.from("job_orders" as any)
-        .select("id,work_order_type,claim_id").eq("tenant_id", tenantId).eq("id", claimOrder.id).single();
+        .select("id,tenant_id,vehicle_id,vehicle_entry_id,deleted_at,parent_work_order_id,work_order_type,claim_id")
+        .eq("tenant_id", tenantId).eq("id", claimOrder.id).single();
       if (channelError) throw channelError;
       assertOrderChannel(channelOrder);
-      const { data: linkedEntry, error: linkError } = await supabase
-        .from("vehicle_entries" as any)
-        .update({ status: "Converted to Work Order", work_order_id: claimOrder.id, converted_work_order_id: claimOrder.id } as any)
-        .eq("tenant_id", tenantId)
-        .eq("id", entryId)
-        .is("work_order_id", null).is("converted_work_order_id", null)
-        .select("id,work_order_id")
-        .maybeSingle();
-      if (linkError) throw linkError;
-      if (!(linkedEntry as any)?.id || (linkedEntry as any).work_order_id !== claimOrder.id)
-        throw new Error(i18n.t("vehicleVisit.workOrderLinkNotConfirmed"));
-      return { existing: true, work_order_id: claimOrder.id, order_number: claimOrder.order_number };
+      return confirmVehicleEntryWorkOrderLink(entryId,claimOrder.id,entry.updated_at);
     }
   }
 

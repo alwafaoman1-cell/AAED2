@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
-import { ensureVehicleForCustomer, findExistingVehicle, normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
+import { ensureVehicleForCustomer, ensureVehicleForVisit, findExistingVehicle } from "@/lib/vehicleIdentity";
 import { isUuid } from "@/lib/uuid";
 
 export interface ResolveClaimVehicleInput {
@@ -16,15 +16,22 @@ export interface ResolveClaimVehicleInput {
   year?: string | number | null;
   color?: string | null;
   vin?: string | null;
+  confirmedNewVisit?: boolean;
 }
 
-async function linkClaimVehicle(claimId: string, vehicleId: string) {
+async function linkClaimVehicle(tenantId: string, claimId: string, vehicleId: string) {
   if (!isUuid(claimId) || !isUuid(vehicleId)) return;
-  const { error } = await supabase
+  if (await getCurrentTenantId() !== tenantId) throw new Error("vehicle_tenant_changed");
+  const { data, error } = await supabase
     .from("insurance_claims" as any)
     .update({ vehicle_id: vehicleId } as any)
-    .eq("id", claimId);
+    .eq("tenant_id", tenantId)
+    .eq("id", claimId)
+    .is("deleted_at", null)
+    .is("vehicle_id", null)
+    .select("id,vehicle_id").maybeSingle();
   if (error) throw error;
+  if ((data as any)?.vehicle_id !== vehicleId) throw new Error("claim_vehicle_link_not_confirmed");
 }
 
 export async function resolveClaimVehicleForWorkOrder(input: ResolveClaimVehicleInput): Promise<string> {
@@ -35,58 +42,39 @@ export async function resolveClaimVehicleForWorkOrder(input: ResolveClaimVehicle
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("لا يمكن تحديد الورشة الحالية");
 
-  if (input.vehicleId && isUuid(input.vehicleId)) {
-    await linkClaimVehicle(input.claimId, input.vehicleId);
-    return input.vehicleId;
+  if (!isUuid(input.claimId)) throw new Error("selected_claim_unavailable");
+  const { data: claim, error } = await supabase.from("insurance_claims" as any)
+    .select("id,vehicle_id,customer_id").eq("tenant_id", tenantId).eq("id", input.claimId)
+    .is("deleted_at", null).maybeSingle();
+  if (error) throw error;
+  // The insurance financial party may differ from the operational visitor.
+  // Authorize the claim by tenant, never by equality of those customer IDs.
+  if (!claim) throw new Error("selected_claim_unavailable");
+  if ((claim as any).vehicle_id && input.vehicleId && (claim as any).vehicle_id !== input.vehicleId) {
+    throw new Error("selected_vehicle_unavailable");
+  }
+  const identity = { ...input, vehicleId: (claim as any).vehicle_id || input.vehicleId, customerId: input.customerId! };
+  if (input.confirmedNewVisit === true) {
+    const resolved = await ensureVehicleForVisit({ ...identity, confirmedNewVisit: true });
+    if (!(claim as any).vehicle_id) await linkClaimVehicle(tenantId, input.claimId, resolved.vehicleId);
+    return resolved.vehicleId;
   }
 
-  const existing = await findExistingVehicle({
-    vehicleId: input.vehicleId,
-    customerId: input.customerId,
-    plate: input.plate,
-    plateNumber: input.plateNumber,
-    plateLetters: input.plateLetters,
-    plateCountry: input.plateCountry,
-    vin: input.vin,
-    make: input.make,
-    model: input.model,
-    year: input.year,
-    color: input.color,
-  });
+  const existing = await findExistingVehicle(identity);
 
   if (existing?.id) {
-    if (!existing.customer_id) {
-      const { error } = await supabase
-        .from("vehicles")
-        .update({ customer_id: input.customerId } as any)
-        .eq("tenant_id", tenantId)
-        .eq("id", existing.id);
-      if (error) throw error;
-    }
-    await linkClaimVehicle(input.claimId, existing.id);
+    if (existing.deleted) throw new Error("deleted_vehicle_requires_restore");
+    if (existing.archived) throw new Error("archived_vehicle_requires_confirmation");
+    if (existing.source === "vin") throw new Error("vin_candidate_requires_user_confirmation");
+    if (!(claim as any).vehicle_id) await linkClaimVehicle(tenantId, input.claimId, existing.id);
     return existing.id;
   }
 
-  const plate = normalizeVehiclePlate(input);
-  const make = String(input.make || "").trim();
-  const vin = normalizeVin(input.vin);
-  if (!plate.digits) throw new Error("لا يمكن إنشاء أمر العمل قبل إدخال رقم لوحة المركبة");
-  if (!make) throw new Error("لا يمكن إنشاء أمر العمل قبل إدخال ماركة المركبة");
-
   const created = await ensureVehicleForCustomer({
-    customerId: input.customerId!,
+    ...identity,
     allowDifferentCustomer: true,
-    plate: input.plate,
-    plateNumber: input.plateNumber || plate.digits,
-    plateLetters: input.plateLetters || plate.letters,
-    plateCountry: input.plateCountry || plate.country,
-    vin,
-    make,
-    model: input.model,
-    year: input.year,
-    color: input.color,
   });
 
-  await linkClaimVehicle(input.claimId, created.vehicleId);
+  await linkClaimVehicle(tenantId, input.claimId, created.vehicleId);
   return created.vehicleId;
 }

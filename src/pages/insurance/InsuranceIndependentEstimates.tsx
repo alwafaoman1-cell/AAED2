@@ -162,6 +162,7 @@ export default function InsuranceIndependentEstimates() {
               customer_name: vehicleRow.customers?.name || null,
               customer_phone: vehicleRow.customers?.phone || null,
               archived: !!vehicleRow.archived || !!vehicleRow.archived_at || !!vehicleRow.deleted_at,
+              deleted: !!vehicleRow.deleted_at,
               source: "plate",
             };
           }

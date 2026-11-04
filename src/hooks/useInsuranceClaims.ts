@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { postInsuranceClaimApproval, removeInsuranceClaimJournal } from "@/lib/insuranceAccounting";
 import { sanitizeClaimWritePayload } from "@/lib/supabasePayload";
 import { queryKeys } from "@/lib/queryKeys";
-import { prepareClaimPayload } from "@/lib/insurance/claimPayloadService";
+import { createClaimInCloud } from "@/lib/insurance/claimPayloadService";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 function formatSupabaseNetworkError(error: unknown, fallback: string): string {
   const message = String((error as any)?.message || error || "");
@@ -231,23 +232,7 @@ export function useCreateClaim() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (claimInput: ClaimInsert) => {
-      const payload = await prepareClaimPayload(claimInput as any);
-      const { data, error } = await supabase
-        .from("insurance_claims" as any)
-        .insert(payload)
-        .select("id")
-        .single();
-      if (error) throw error;
-
-      const { data: verified, error: verifyError } = await supabase
-        .from("insurance_claims" as any)
-        .select("*")
-        .eq("tenant_id", claimInput.tenant_id)
-        .eq("id", (data as any).id)
-        .maybeSingle();
-      if (verifyError) throw verifyError;
-      if (!(verified as any)?.id) throw new Error("Claim was saved but could not be read back for verification");
-      return verified as unknown as InsuranceClaim;
+      return await createClaimInCloud(claimInput as any) as InsuranceClaim;
     },
     onSuccess: (created) => {
       qc.setQueryData(queryKeys.insuranceClaims.detail(created?.id), created);
@@ -515,9 +500,13 @@ export function useCustomers() {
   return useQuery({
     queryKey: queryKeys.customers.all,
     queryFn: async () => {
+      const tenantId = await getCurrentTenantId();
+      if (!tenantId) throw new Error("TENANT_NOT_FOUND");
       const { data, error } = await supabase
         .from("customers")
         .select("id, name, phone, customer_code")
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
         .order("name");
       if (error) throw error;
       return data;

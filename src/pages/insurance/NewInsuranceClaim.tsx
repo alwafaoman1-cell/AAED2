@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import "@/lib/i18n/vehicleVisitIdentity";
 import { smartBack } from "@/lib/smartBack";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -29,6 +31,8 @@ import { toEnglishDigits } from "@/lib/numberUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
 import { ensureVehicleForCustomer, findExistingVehicle, type VehicleIdentityMatch } from "@/lib/vehicleIdentity";
+import CustomerPhoneLookup from "@/components/customers/CustomerPhoneLookup";
+import { createEmptyClaimDraft } from "@/lib/insurance/claimPayloadService";
 import { isUuid } from "@/lib/uuid";
 import { toE164 } from "@/lib/phoneUtils";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
@@ -109,6 +113,7 @@ async function resolveTenantForClaim(): Promise<string> {
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ المكون الرئيسي â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function NewInsuranceClaim() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [params] = useSearchParams();
@@ -148,7 +153,7 @@ export default function NewInsuranceClaim() {
         savedDraftAtRef.current = null;
         setSavedDraftAt(null);
         setDraft({ ...emptyDraft(), company: c || "" });
-        await writeCloudSetting(cloudDraftKey, null).catch(() => {});
+        await writeCloudSetting(cloudDraftKey, createEmptyClaimDraft(emptyDraft())).catch(() => {});
         if (!cancelled) draftHydratedRef.current = true;
         return;
       }
@@ -206,7 +211,7 @@ export default function NewInsuranceClaim() {
     skipNextDraftSaveRef.current = true;
     savedDraftAtRef.current = null;
     setSavedDraftAt(null);
-    void writeCloudSetting(cloudDraftKey, null).catch(() => {});
+    void writeCloudSetting(cloudDraftKey, createEmptyClaimDraft(emptyDraft())).catch(() => {});
     markClean(dirtyScopeId);
   };
 
@@ -228,6 +233,7 @@ export default function NewInsuranceClaim() {
           .from("customers")
           .select("id,name,phone")
           .eq("tenant_id", tenantId as string)
+          .is("deleted_at", null)
           .ilike("phone", `%${phoneDigits}%`)
           .limit(5);
         if (cancelled) return;
@@ -409,33 +415,20 @@ export default function NewInsuranceClaim() {
           const customerName = draft.ownerName.trim() || draft.company.trim();
           if (!customerName) throw new Error("اختر عميلًا موجودًا أو أدخل اسم المالك أو استخدم شركة التأمين كعميل");
 
-          const { data: sameNameRows } = await supabase
+          // A shared name (including an insurer name) is not a customer identity.
+          if (!normalizedPhone) throw new Error(t("vehicleVisitIdentity.newCustomerContactRequired"));
+          const { data: newCust, error: e1 } = await supabase
             .from("customers")
+            .insert({
+              tenant_id: tenantId as string,
+              name: customerName,
+              phone: normalizedPhone || null,
+            } as any)
             .select("id,name,phone")
-            .eq("tenant_id", tenantId as string)
-            .is("deleted_at", null)
-            .ilike("name", customerName)
-            .limit(5);
-          const sameName = ((sameNameRows as any[]) || []).find((customer) =>
-            String(customer.name || "").trim().toLowerCase() === customerName.toLowerCase()
-          );
-          if (sameName) {
-            customerRecord = sameName as any;
-            customerId = customerRecord.id;
-          } else {
-            const { data: newCust, error: e1 } = await supabase
-              .from("customers")
-              .insert({
-                tenant_id: tenantId as string,
-                name: customerName,
-                phone: normalizedPhone || null,
-              } as any)
-              .select("id,name,phone")
-              .single();
-            if (e1) throw e1;
-            customerRecord = newCust as any;
-            customerId = customerRecord.id;
-          }
+            .single();
+          if (e1) throw e1;
+          customerRecord = newCust as any;
+          customerId = customerRecord.id;
         }
       }
 
@@ -472,6 +465,8 @@ export default function NewInsuranceClaim() {
           color: draft.vehicleColor,
         });
         if (vehicleCandidate?.id) {
+          if (vehicleCandidate.deleted) throw new Error("deleted_vehicle_requires_restore");
+          if (vehicleCandidate.source === "vin") throw new Error("vin_candidate_requires_user_confirmation");
           vehicleId = vehicleCandidate.id;
         }
       }
@@ -583,6 +578,8 @@ export default function NewInsuranceClaim() {
       }
       if (String(e?.message || "").includes("vin_candidate_requires_user_confirmation")) {
         toast.error("تم العثور على مركبة محتملة عبر VIN فقط. اربط مركبة موجودة يدويًا أو أكمل بيانات اللوحة والحروف والدولة قبل حفظ المطالبة.");
+      } else if (String(e?.message || "").includes("deleted_vehicle_requires_restore")) {
+        toast.error(t("vehicleVisitIdentity.deletedVehicleRequiresRestore"));
       } else {
         toast.error(e?.message ?? "فشل إنشاء المطالبة");
       }
@@ -878,6 +875,7 @@ function Step1({
   update: (p: Partial<Draft>) => void;
   existingCustomerByPhone: { id: string; name: string; phone: string | null } | null;
 }) {
+  const { t } = useTranslation();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [search, setSearch] = useState("");
@@ -943,6 +941,8 @@ function Step1({
         color: draft.vehicleColor,
       }).then((match) => {
         if (!cancelled) setVehicleMatch(match);
+      }).catch(() => {
+        if (!cancelled) setVehicleMatch(null);
       }).finally(() => {
         if (!cancelled) setVehicleLookupLoading(false);
       });
@@ -958,14 +958,11 @@ function Step1({
   function pickVehicle(v: any) {
     update({
       vehicleId: v.id,
-      customerId: v.customer_id || draft.customerId,
       vehicleMake: v.brand || "",
       vehicleModel: v.model || "",
       vehiclePlate: formatVehiclePlateForClaim(v),
       vehicleYear: v.year ? String(v.year) : "",
       vehicleColor: v.color || "",
-      ownerName: v.customers?.name || draft.ownerName,
-      ownerPhone: v.customers?.phone || draft.ownerPhone,
     });
     setPickerOpen(false);
     toast.success("تم ربط المركبة");
@@ -1010,7 +1007,7 @@ function Step1({
               </p>
               {vehicleMatch.customer_id && draft.customerId && vehicleMatch.customer_id !== draft.customerId && (
                 <p className="rounded-md border border-warning/35 bg-warning/10 p-2 text-warning">
-                  هذه المركبة مرتبطة بعميل آخر. لن يتم ربطها أو نقلها تلقائيًا.
+                  {t("vehicleVisitIdentity.selectedClaimCustomer")}
                 </p>
               )}
             </div>
@@ -1018,6 +1015,7 @@ function Step1({
               type="button"
               variant="outline"
               size="sm"
+              disabled={vehicleMatch.deleted}
               onClick={() => {
                 update({
                   vehicleId: vehicleMatch.id,
@@ -1057,6 +1055,8 @@ function Step1({
                   color: draft.vehicleColor,
                 });
                 if (existing?.id) {
+                  if (existing.deleted) throw new Error("deleted_vehicle_requires_restore");
+                  if (existing.source === "vin") throw new Error("vin_candidate_requires_user_confirmation");
                   update({
                     vehicleId: existing.id,
                     vehicleMake: existing.brand || draft.vehicleMake,
@@ -1081,7 +1081,9 @@ function Step1({
                 update({ vehicleId: resolved.vehicleId });
                 toast.success("تم حفظ السيارة وربطها");
               } catch (e: any) {
-                toast.error(e?.message ?? "فشل حفظ السيارة");
+                toast.error(String(e?.message || "").includes("deleted_vehicle_requires_restore")
+                  ? t("vehicleVisitIdentity.deletedVehicleRequiresRestore")
+                  : e?.message ?? "فشل حفظ السيارة");
               }
             }}
           >
@@ -1113,13 +1115,21 @@ function Step1({
       />
 
       <div className="border-t pt-4 mt-4">
+        <CustomerPhoneLookup
+          customerId={draft.customerId || undefined}
+          onSelect={(customer) => update({
+            customerId: customer?.id || null,
+            ownerName: customer?.name || "",
+            ownerPhone: customer?.phone || "",
+          })}
+        />
         <SectionHeader icon={Phone} title="مالك السيارة (لتسليمها)" desc="بيانات صاحب السيارة لاستلامها بعد الإصلاح" small />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
           <div className="space-y-1.5">
             <Label>اسم المالك</Label>
             <Input
               value={draft.ownerName}
-              onChange={(e) => update({ ownerName: e.target.value })}
+              onChange={(e) => update({ ownerName: e.target.value, customerId: null })}
               placeholder="الاسم الكامل"
             />
           </div>
@@ -1127,7 +1137,7 @@ function Step1({
             <Label>هاتف المالك</Label>
             <Input
               value={draft.ownerPhone}
-              onChange={(e) => update({ ownerPhone: e.target.value })}
+              onChange={(e) => update({ ownerPhone: e.target.value, customerId: null })}
               onBlur={() => update({ ownerPhone: toE164(draft.ownerPhone) })}
               placeholder="+968 9XXX XXXX"
               dir="ltr"
@@ -1168,7 +1178,7 @@ function Step1({
           <div className="rounded-lg border border-border bg-card/60 p-3">
             <div className="font-semibold text-foreground">إنشاء عميل جديد</div>
             <div className="text-muted-foreground mt-1">
-              إذا لم يوجد عميل بنفس الهاتف أو الاسم، سيتم إنشاء عميل جديد عند حفظ المطالبة.
+              {t("vehicleVisitIdentity.newCustomerByPhone")}
             </div>
           </div>
           <button

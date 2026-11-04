@@ -13,6 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { queryKeys } from "@/lib/queryKeys";
+import { confirmVehicleEntryWorkOrderLink } from "@/lib/vehicleEntryService";
+import "@/lib/i18n/vehicleEntryLinks";
+import {hasConfirmedVehicleEntryWorkOrderLink} from "@/lib/vehicleEntryWorkOrderLink";
 import { advanceVehicleVisit, getVehicleVisitBillingKind, getVehicleVisitDetail, getVehicleVisitDocumentUrl, getVehicleVisitNextBlocker, listVehicleVisitStaff, reconcileVehicleVisitCustody, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
 
 const ORDER: PersistedVisitStage[] = ["arrived", "approved", "in_progress", "ready", "delivered"];
@@ -42,6 +45,7 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
   const entry = visit?.entry;
   const claim = entry?.claim || entry?.converted_claim;
   const order = entry?.work_order || entry?.converted_work_order;
+  const safeOrderLink=hasConfirmedVehicleEntryWorkOrderLink(entry,order);
   const billingKind = getVehicleVisitBillingKind(entry);
   // Older, consistent visits remain read-only until an explicit user action;
   // the RPC then creates their first workflow event transactionally.
@@ -51,6 +55,11 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     ? visit?.transitions?.[0]?.from_stage || undefined
     : current ? ORDER[ORDER.indexOf(current) - 1] : undefined;
   const canManage = hasRole("admin", "manager");
+  const canConfirmExistingOrder=canManage && visit?.reviewReason==="work_order_link_conflict"
+    && entry?.__inferredOrderLink && order?.id && order.vehicle_id===entry.vehicle_id
+    && order.work_order_type==="insurance" && order.claim_id===(entry.insurance_claim_id || entry.converted_claim_id)
+    && (!order.vehicle_entry_id || order.vehicle_entry_id===entryId)
+    && !entry.work_order_id && !entry.converted_work_order_id;
   const canAdvance = !visit?.reviewReason && Boolean(current) && current !== "cancelled" && current !== "delivered";
   const nextBlocker = getVehicleVisitNextBlocker(next, entry, hasRole, Boolean(visit?.hasFinalHandover));
   const prerequisiteHref = nextBlocker === "claimApprovalRequired" && claim?.id ? `/insurance/${claim.id}`
@@ -125,6 +134,24 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     onError: (error: Error) => toast.error(displayError(error)),
   });
 
+  const linkMutation=useMutation({
+    mutationFn:async()=>{
+      if(!canConfirmExistingOrder || !entry.updated_at) throw new Error(t("vehicleEntryLinks.VEHICLE_ENTRY_LINK_STALE"));
+      await confirmVehicleEntryWorkOrderLink(entryId,order.id,entry.updated_at);
+      const fresh=await getVehicleVisitDetail(entryId);
+      if(!fresh || fresh.entry.work_order_id!==order.id || fresh.entry.converted_work_order_id!==order.id
+        || fresh.reviewReason==="work_order_link_conflict") throw new Error(t("vehicleEntryLinks.failed"));
+      return fresh;
+    },
+    onSuccess:(fresh)=>{
+      qc.setQueryData(["vehicle_visit","detail",entryId],fresh);
+      for(const key of [queryKeys.vehicleEntries.all,["vehicle_visit","center"],["job_orders"],["insurance_claims"]])
+        void qc.invalidateQueries({queryKey:key});
+      toast.success(t("vehicleEntryLinks.confirmed"));
+    },
+    onError:(error:Error)=>{void qc.invalidateQueries({queryKey:["vehicle_visit","detail",entryId]});toast.error(error.message);},
+  });
+
   async function openDocument(fileId: string) {
     const tab = window.open("", "_blank");
     if (tab) tab.opener = null;
@@ -148,13 +175,13 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
   const refs = [
     { label: t("vehicleVisit.entry"), value: entry.entry_number, href: `/vehicle-entry/${entryId}` },
     { label: t("vehicleVisit.claim"), value: claim?.claim_number, href: claim?.id ? `/insurance/${claim.id}` : "" },
-    { label: t("vehicleVisit.workOrder"), value: order?.order_number, href: order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}` : "" },
+    { label: t("vehicleVisit.workOrder"), value: order?.order_number, href: safeOrderLink && order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}` : "" },
     { label: t("vehicleVisit.documents"), value: String((entry.vehicle_entry_documents?.length || 0) + visit.documents.length), href: `/vehicle-entry/${entryId}` },
     { label: t("vehicleVisit.photos"), value: String(visit.mediaCount), href: `/vehicle-entry/${entryId}` },
-    { label: t("vehicleVisit.expenses"), value: String(visit.expenses.length), href: order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}` : "" },
+    { label: t("vehicleVisit.expenses"), value: String(visit.expenses.length), href: safeOrderLink && order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}` : "" },
     { label: t("vehicleVisit.cashInvoices"), value: String(visit.cashInvoices.length), href: visit.cashInvoices[0]?.id ? `/sales/invoices/${visit.cashInvoices[0].id}` : "" },
     { label: t("vehicleVisit.insuranceInvoices"), value: String(visit.insuranceInvoices.length), href: claim?.id ? `/insurance/${claim.id}` : "" },
-    { label: t("vehicleVisit.handover"), value: visit.handovers.find((row: any) => row.status === "finalized" && row.work_order_id === order?.id)?.receipt_number || "—", href: order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}/delivery` : "" },
+    { label: t("vehicleVisit.handover"), value: visit.handovers.find((row: any) => row.status === "finalized" && row.work_order_id === order?.id)?.receipt_number || "—", href: safeOrderLink && order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}/delivery` : "" },
   ];
 
   return <Card className="space-y-4 p-4" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
@@ -170,6 +197,9 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     </div>
     <p className="text-sm text-muted-foreground">{t(billingKind === "insurance" ? "vehicleVisit.insuranceFlow" : "vehicleVisit.cashFlow")}</p>
     {visit.reviewReason && <div className="flex items-start gap-2 rounded-lg border border-warning/50 bg-warning/5 p-3 text-sm text-warning"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />{t(`vehicleVisit.${visit.reviewReason}`, { defaultValue: visit.reviewReason })}</div>}
+    {canConfirmExistingOrder && <Button variant="outline" disabled={linkMutation.isPending} onClick={()=>linkMutation.mutate()}>
+      {linkMutation.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" aria-hidden="true"/>}{t("vehicleEntryLinks.confirm")} · <bdi className="ms-1">{order.order_number}</bdi>
+    </Button>}
     {canReconcileCustody && <Button variant="outline" onClick={() => setCustodyOpen(true)}>{t("vehicleVisit.reviewCustody")}</Button>}
     <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
       {refs.map((ref) => <div key={ref.label} className="min-w-0 rounded-lg border border-border p-3">

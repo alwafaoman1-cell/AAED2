@@ -1,3 +1,4 @@
+import {hasConfirmedVehicleEntryWorkOrderLink} from "@/lib/vehicleEntryWorkOrderLink";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { getVehicleEntry, getVehicleEntryPresence, getVehicleVisitBillingKind, listVehicleEntries, type VehicleEntryPresence } from "@/lib/vehicleEntryService";
@@ -404,21 +405,26 @@ export async function getVehicleVisitDetail(entryId: string) {
   const item = resolveVehicleVisit(entry, (workflowResult.data as unknown as VehicleVisitWorkflow) || null,
     handovers.some((row) => row.status === "finalized" && row.work_order_id === order?.id),
     releases.some((row) => row.status === "signed" && !row.returned_at));
-  const entityIds = [entryId, order?.id, claim?.id].filter(Boolean) as string[];
+  // Keep contradictory rows visible to the review projection above, but never
+  // load another vehicle's expenses/invoices/documents through a stale FK.
+  const safeOrder=hasConfirmedVehicleEntryWorkOrderLink(entry,order)?order:null;
+  const safeClaim=claim?.tenant_id===entry.tenant_id && claim?.vehicle_id===entry.vehicle_id
+    && !(entry.insurance_claim_id && entry.converted_claim_id && entry.insurance_claim_id!==entry.converted_claim_id)?claim:null;
+  const entityIds = [entryId, safeOrder?.id, safeClaim?.id].filter(Boolean) as string[];
   const linked = await Promise.all([
     supabase.from("document_links" as any).select("id,file_id,entity_type,entity_id")
       .eq("tenant_id", tenantId).is("removed_at", null).in("entity_id", entityIds).limit(300),
-    order?.id ? supabase.from("expenses" as any).select("id,voucher_number,total,amount,description")
-      .eq("tenant_id", tenantId).eq("work_order_id", order.id).is("deleted_at", null).limit(300) : Promise.resolve({ data: [], error: null }),
-    order?.id ? supabase.from("expenses" as any).select("id,voucher_number,total,amount,description")
-      .eq("tenant_id", tenantId).in("linked_work_order_id", [order.id, order.order_number].filter(Boolean)).is("deleted_at", null).limit(300) : Promise.resolve({ data: [], error: null }),
-    order?.id ? supabase.from("sales_documents" as any).select("id,doc_number,status,total")
-      .eq("tenant_id", tenantId).in("work_order_id", [order.id, order.order_number].filter(Boolean)).eq("doc_type", "invoice").is("deleted_at", null).limit(100) : Promise.resolve({ data: [], error: null }),
-    claim?.id ? supabase.from("insurance_invoices" as any).select("id,invoice_number,status,total")
-      .eq("tenant_id", tenantId).eq("claim_id", claim.id).limit(100) : Promise.resolve({ data: [], error: null }),
-    order?.id || claim?.id ? supabase.from("vehicle_media" as any).select("id,media_type,category")
+    safeOrder?.id ? supabase.from("expenses" as any).select("id,voucher_number,total,amount,description")
+      .eq("tenant_id", tenantId).eq("work_order_id", safeOrder.id).is("deleted_at", null).limit(300) : Promise.resolve({ data: [], error: null }),
+    safeOrder?.id ? supabase.from("expenses" as any).select("id,voucher_number,total,amount,description")
+      .eq("tenant_id", tenantId).in("linked_work_order_id", [safeOrder.id, safeOrder.order_number].filter(Boolean)).is("deleted_at", null).limit(300) : Promise.resolve({ data: [], error: null }),
+    safeOrder?.id ? supabase.from("sales_documents" as any).select("id,doc_number,status,total")
+      .eq("tenant_id", tenantId).in("work_order_id", [safeOrder.id, safeOrder.order_number].filter(Boolean)).eq("doc_type", "invoice").is("deleted_at", null).limit(100) : Promise.resolve({ data: [], error: null }),
+    safeClaim?.id ? supabase.from("insurance_invoices" as any).select("id,invoice_number,status,total")
+      .eq("tenant_id", tenantId).eq("claim_id", safeClaim.id).limit(100) : Promise.resolve({ data: [], error: null }),
+    safeOrder?.id || safeClaim?.id ? supabase.from("vehicle_media" as any).select("id,media_type,category")
       .eq("tenant_id", tenantId).is("deleted_at", null)
-      .or([order?.id && `work_order_id.eq.${order.id}`, claim?.id && `claim_id.eq.${claim.id}`].filter(Boolean).join(","))
+      .or([safeOrder?.id && `work_order_id.eq.${safeOrder.id}`, safeClaim?.id && `claim_id.eq.${safeClaim.id}`].filter(Boolean).join(","))
       .limit(300) : Promise.resolve({ data: [], error: null }),
   ]);
   for (const result of linked) if (result.error) throw result.error;
