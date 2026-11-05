@@ -37,8 +37,8 @@ const cloud = vi.hoisted(() => ({
 vi.mock("@/lib/cloud/createCloudStore", () => ({ getCurrentTenantId: cloud.tenantContext }));
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
-    rpc: vi.fn(async (_name: string, args: Record<string, string>) => ({
-      data: cloud.rpcRows ?? cloud.tables.vehicles.filter((row) => row.tenant_id === cloud.tenant &&
+    rpc: vi.fn(async (name: string, args: Record<string, string>) => ({
+      data: name === "next_vehicle_entry_number" ? "ENT-2026-TEST" : cloud.rpcRows ?? cloud.tables.vehicles.filter((row) => row.tenant_id === cloud.tenant &&
         row.plate_letters === args.p_letters && row.plate_number === args.p_digits && row.plate_country === args.p_country),
       error: cloud.rpcError,
     })),
@@ -83,6 +83,7 @@ vi.mock("@/integrations/supabase/client", () => ({
         or: (filter: string) => { vin = filter.split(",")[0].split(".eq.")[1]; return query; },
         limit: (value: number) => { maximum = value; return query; },
         update: (value: Record<string, any>) => { operation = "update"; payload = value; return query; },
+        delete: () => { operation = "delete"; return query; },
         insert: (value: Record<string, any>) => { operation = "insert"; payload = value; return query; },
         maybeSingle: () => execute(true),
         single: () => execute(true),
@@ -96,6 +97,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 import { ensureVehicleForCustomer, ensureVehicleForVisit, findExistingVehicle, normalizeVehiclePlate } from "@/lib/vehicleIdentity";
 import { createClaimInCloud, prepareClaimPayload } from "@/lib/insurance/claimPayloadService";
 import { resolveClaimVehicleForWorkOrder } from "@/lib/claimVehicleResolver";
+import { defaultVehicleEntryForm, saveVehicleEntry } from "@/lib/vehicleEntryService";
 
 const visit = (overrides: Record<string, any> = {}) => ({
   customerId: VISITOR, plate: "AA 1234", make: "Toyota", confirmedNewVisit: true, ...overrides,
@@ -116,6 +118,9 @@ beforeEach(() => {
       customers: { name: "Historical owner", phone: "+96890000001" },
     }],
     insurance_claims: [],
+    vehicle_entries: [],
+    vehicle_entry_damage_marks: [],
+    vehicle_entry_audit_logs: [],
     job_orders: [{ id: "historical-order", customer_id: OWNER, vehicle_id: VEHICLE }],
     invoices: [{ id: "historical-invoice", customer_id: OWNER, vehicle_id: VEHICLE }],
   };
@@ -124,6 +129,78 @@ beforeEach(() => {
   cloud.rpcRows = cloud.rpcError = cloud.readError = cloud.insertError = null;
   cloud.beforeUpdate = cloud.afterRead = null;
   cloud.vehicleUpdateDenied = false;
+});
+
+describe("new entry archived vehicle regression", () => {
+  function newEntry() {
+    const form = defaultVehicleEntryForm();
+    form.customer_id = VISITOR;
+    form.vehicle_id = VEHICLE;
+    form.vehicle.plate_number = "1234";
+    form.vehicle.plate_letters = "AA";
+    form.vehicle.plate_country = "OM";
+    form.vehicle.make = "Toyota";
+    form.vehicle.model = "Camry";
+    form.delivered_by.full_name = "Visit customer";
+    return form;
+  }
+
+  it.each(["Draft", "Issued"] as const)("saves a %s entry using the archived vehicle and current visitor without registry updates", async (status) => {
+    const form = newEntry();
+    form.status = status;
+    Object.assign(cloud.tables.vehicles[0], { archived: true, archived_at: "2026-10-01" });
+    cloud.vehicleUpdateDenied = true;
+    const before = structuredClone(cloud.tables.vehicles);
+    const saved = await saveVehicleEntry(form);
+    expect(saved).toMatchObject({ vehicle_id: VEHICLE, customer_id: VISITOR, status });
+    expect(cloud.tables.vehicle_entries).toHaveLength(1);
+    expect(cloud.tables.vehicles).toEqual(before);
+    expect(cloud.writes.filter((write) => write.table === "vehicles")).toEqual([]);
+    expect(cloud.tables.job_orders).toHaveLength(1);
+    expect(cloud.tables.insurance_claims).toEqual([]);
+    expect(cloud.tables.invoices).toHaveLength(1);
+  });
+
+  it("also resolves an archived full plate when it was typed instead of selected", async () => {
+    const form = newEntry();
+    form.vehicle_id = "";
+    form.vehicle.plate_number = "AA 1234";
+    form.vehicle.plate_letters = "";
+    cloud.tables.vehicles[0].archived = true;
+    const saved = await saveVehicleEntry(form);
+    expect(saved.vehicle_id).toBe(VEHICLE);
+    expect(cloud.tables.vehicles).toHaveLength(1);
+    expect(cloud.writes.filter((write) => write.table === "vehicles")).toEqual([]);
+  });
+
+  it("never changes the archive or owner if the entry insert is rejected", async () => {
+    cloud.tables.vehicles[0].archived = true;
+    cloud.insertError = { code: "23505", message: "duplicate visit" };
+    const before = structuredClone(cloud.tables.vehicles);
+    await expect(saveVehicleEntry(newEntry())).rejects.toMatchObject({ code: "23505" });
+    expect(cloud.tables.vehicle_entries).toEqual([]);
+    expect(cloud.tables.vehicles).toEqual(before);
+    expect(cloud.writes.filter((write) => write.table === "vehicles")).toEqual([]);
+  });
+
+  it.each(["deleted", "foreign tenant", "missing customer"])("rejects %s before writing an entry", async (reason) => {
+    cloud.tables.vehicles[0].archived = true;
+    if (reason === "deleted") cloud.tables.vehicles[0].deleted_at = "2026-10-01";
+    if (reason === "foreign tenant") cloud.tables.vehicles[0].tenant_id = OTHER_TENANT;
+    if (reason === "missing customer") cloud.tables.customers = cloud.tables.customers.filter((customer) => customer.id !== VISITOR);
+    await expect(saveVehicleEntry(newEntry())).rejects.toThrow();
+    expect(cloud.tables.vehicle_entries).toEqual([]);
+    expect(cloud.writes).toEqual([]);
+  });
+
+  it("does not reuse the new-visit permission to reactivate a historical edit", async () => {
+    const form = newEntry();
+    form.id = "50000000-0000-4000-8000-000000000001";
+    cloud.tables.vehicle_entries.push({ id: form.id, tenant_id: TENANT, vehicle_location: form.vehicle_location });
+    cloud.tables.vehicles[0].archived = true;
+    await expect(saveVehicleEntry(form)).rejects.toThrow("archived_vehicle_requires_confirmation");
+    expect(cloud.writes).toEqual([]);
+  });
 });
 
 describe("operational visit vehicle identity", () => {

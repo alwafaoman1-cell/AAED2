@@ -355,12 +355,6 @@ export default function VehicleEntryForm() {
   function selectVehicle(vehicle: any) {
     patch({
       vehicle_id: vehicle.id,
-      customer_id: vehicle.customer_id || form.customer_id,
-      customer_phone_before_edit: vehicle.customers
-        ? vehicle.customers.phone ?? null
-        : vehicle.customer_id && vehicle.customer_id !== form.customer_id
-          ? undefined
-          : form.customer_phone_before_edit,
       vehicle: {
         ...form.vehicle,
         plate_number: vehicle.plate_number || "",
@@ -372,19 +366,7 @@ export default function VehicleEntryForm() {
         color: vehicle.color || "",
         vin: vehicle.vin_number || vehicle.vin || "",
         mileage: vehicle.mileage ? String(vehicle.mileage) : "",
-        current_owner_name: vehicle.customers?.name || form.vehicle.current_owner_name,
       },
-      customer: vehicle.customers ? {
-        ...form.customer,
-        name: vehicle.customers.name || form.customer.name,
-        phone: vehicle.customers.phone || form.customer.phone,
-      } : form.customer,
-      delivered_by: form.delivered_by.delivery_type === "owner" ? {
-        ...form.delivered_by,
-        full_name: vehicle.customers?.name || form.vehicle.current_owner_name || form.customer.name,
-        phone: vehicle.customers?.phone || form.customer.phone,
-        relation: "العميل/مالك المركبة",
-      } : form.delivered_by,
     });
     setVehicleSearch("");
     toast.success("تم اختيار المركبة الموجودة بدون تغيير مالكها");

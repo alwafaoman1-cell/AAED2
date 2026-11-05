@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import i18n from "@/i18n";
 import { findPrimaryClaimWorkOrder } from "@/lib/claimWorkOrderGuard";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
-import { ensureVehicleForCustomer, normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
+import { ensureVehicleForCustomer, ensureVehicleForVisit, normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
 import { extractPlateDigits, extractPlateLetters, formatPlate } from "@/lib/plateUtils";
 import { isValidE164, toE164 } from "@/lib/phoneUtils";
 import { assertVehicleEntryClaimLink } from "@/lib/vehicleEntryClaimLink";
@@ -730,7 +730,7 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: str
   let vehicleId = form.vehicle_id || null;
   if (customerId && (form.vehicle.plate_number || form.vehicle.vin)) {
     const plate = normalizeVehiclePlate({ plateNumber: form.vehicle.plate_number, plateLetters: form.vehicle.plate_letters, plateCountry: form.vehicle.plate_country });
-    const ensured = await ensureVehicleForCustomer({
+    const identity = {
       customerId,
       vehicleId: form.vehicle_id,
       plateNumber: plate.digits,
@@ -741,8 +741,13 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: str
       model: form.vehicle.model || "-",
       year: form.vehicle.year,
       color: form.vehicle.color,
-      allowDifferentCustomer: true,
-    });
+    };
+    // Saving a NEW entry confirms a visit, not a registry/ownership edit.
+    // Reuse the archived record read-only; never unarchive it before the entry
+    // insert succeeds. Historical edits retain their existing strict path.
+    const ensured = form.id
+      ? await ensureVehicleForCustomer({ ...identity, allowDifferentCustomer: true })
+      : await ensureVehicleForVisit({ ...identity, confirmedNewVisit: true });
     vehicleId = ensured.vehicleId;
   }
 
