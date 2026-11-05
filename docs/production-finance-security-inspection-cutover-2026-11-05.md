@@ -43,4 +43,28 @@ The old Development migration files and old remote migration history are not rew
 
 Intentional security-definer/internal-RLS notices and build-tool dependency advisories are not suppressed. The earlier Development reports describe the tested boundaries; this release does not certify every printer, physical camera, OCR document or external provider error-free. The OCR daemon's existing 180-second shutdown grace versus a 270-second OCR timeout is not changed by this release.
 
-Actual deployment identifiers and final Production verification are appended after cutover.
+## Completed Production rollout
+
+- Production URL: https://aaed-2.vercel.app
+- Application commit: `767ead0fdf7bcdbcb816a608cacb6a32177247ea` (includes the complete pending changes from `a44f0f8`). Pushed to `origin/codex/finance-security-development`.
+- Production deployment: `dpl_4schu5osFqb1viTsLE2kuyQGRcfC`, READY; promoted from the staged Production build to the actual site. Staged URL: https://aaed-2-jkk8i6zhr-alwafaoman1-cells-projects.vercel.app
+- Installed atomic migration: `20261105111622_production_finance_security_inspection_cutover.sql`. Local filename matches the actual returned Production ledger version; no ledger row was edited manually. Its 20 component definitions and complete ledger SQL were compared with the rehearsed candidate.
+- Paired `manage-users`: Production version 19, ACTIVE, JWT verification retained. The previous version's source was preserved privately for rollback.
+- Post-install read-only proof: all 145 operational table fingerprints and public/private sequences unchanged; all 96 active insurance invoices inspected, 28 discrepancies → zero; actual cash collection unchanged. Monetary source totals remain in private local evidence, not this source-control report. No historical financial rows, invoice numbers or classifications were repaired or rewritten.
+- Actual Production assets verified: the Supabase client uses `ifnfwssdtjuzdtshnrht`, not Development; only the public application key is in the client; the inspection update is present on the actual site's compiled page.
+- Independent Production OCR daemon: ready, desired/ready/alive 1/1/1 in `syd1`, 2,048 MiB, associated with the new deployment. No local computer is required. This proves process readiness, not a new customer-document OCR accuracy/throughput test.
+- Final full validation: typecheck PASS, lint zero errors/warnings, 1,279 tests total / 1,273 passed / zero failed / six existing optional skips, Production-mode build PASS. A regression test covers SQL separators between all 20 components.
+- Actual signed-in Production browser smoke: eight routes returned 200 with visible page headings—vehicle center, work orders, insurance, cash invoices, reports center, monthly profitability, expenses and settings. Existing active-admin login and paired Edge read succeeded. The real entry-linked inspection form loaded its protected identity fields without saving. No page errors, console errors or failed backend responses were observed in the successful run.
+- Browser verification default-denied business mutations before navigation. An attempted background POST was deliberately blocked and recorded; it was not allowed merely to make the test pass. No Production save/upload/print-autosave or posting fixture was created. Realtime WebSockets were blocked by the test and are not claimed as newly exercised. Authentication established a normal session for the existing authorized administrator; no email was sent, no password changed and no user created.
+- The automatically triggered duplicate Git Preview deployment was cancelled. It was not promoted over the Production deployment.
+
+### Transparent cutover incident
+
+The first combined-file application was rejected at SQL parse time: one component lacked a terminal statement separator that was optional when run individually. No database migration or operational write committed. The briefly updated paired Edge function was restored immediately to its saved source while this was corrected. Explicit separators were added, a regression test introduced, and the **final combined SQL was executed as one statement batch in a new Production rollback rehearsal** before the successful application. The scoped reverse-definition restoration proof also passed again. The failed attempt is not represented as a successful verification.
+
+### Remaining boundaries
+
+- `main` remains unchanged by instruction. Future releases must use the validated release branch/commit until an explicit merge is approved; deploying the older main snapshot would discard frontend improvements.
+- The broader historical migration-ledger difference is not repaired by this release. Do not run blanket database pushes; the installed atomic bundle explicitly records the reviewed components.
+- Security/performance notices are not zero: remaining intentional authenticated/public definer endpoints and internal-RLS information remain documented; the profile SELECT initplan exception is deliberately retained for safe UPDATE policy behaviour. Leaked-password protection and build-tool advisories were not silently reconfigured or suppressed.
+- No full physical restore, fresh Production OCR document, physical phone camera/printer flow or every possible business workflow is claimed as newly tested.
