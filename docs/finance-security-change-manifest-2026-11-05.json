@@ -1,0 +1,329 @@
+{
+  "baseCommit": "87facc590fc4458a51736397732e97962e60b5b2",
+  "branch": "codex/finance-security-development",
+  "production": "NOT_APPLIED",
+  "committed": false,
+  "previewDeployment": "dpl_9vhsk9y4czKF9CcFqGGyJo5LphA5",
+  "files": [
+    {
+      "path": "docs/finance-security-development-verification-2026-11-05.md",
+      "bytes": 16424,
+      "sha256": "daf03d77ac9dbc56135d1ecf4c7079fef40a9391f5ae44778c7bcf3f1f1a910d"
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 507755,
+      "sha256": "bf7f5a5cc37ffe93eed762116e57b310dcc27c7b121c601fd7c20583faf0d3ae"
+    },
+    {
+      "path": "package.json",
+      "bytes": 4086,
+      "sha256": "ba7e2825146c466594880ec3b2466787ed2458b1582d26f0afbf6e3064673825"
+    },
+    {
+      "path": "scripts/auth-signup-provisioning-rollback.py",
+      "bytes": 5775,
+      "sha256": "532c7eec2ad35951cc727c110c081c1af5fb24c1f01f8e29f01f86427556d771"
+    },
+    {
+      "path": "src/components/reports/ReportDataPanel.tsx",
+      "bytes": 11598,
+      "sha256": "8fe1ed287b242c002f21185539d7d3a5cd0175047985e46636dcf047caeb2d9f"
+    },
+    {
+      "path": "src/contexts/AuthProvider.tsx",
+      "bytes": 8874,
+      "sha256": "f5499ad9d5d73cfb74ea64f5910b0b2994869a6a64515c77301f19982f14dc37"
+    },
+    {
+      "path": "src/lib/accounting/monthlyVehicleProfitability.ts",
+      "bytes": 4220,
+      "sha256": "0ad995a8cf2b2c24c01b96a506a5fc7bb646896f9bb155b75bd8cfc0797c68d0"
+    },
+    {
+      "path": "src/lib/accounting/monthlyWorkshopReport.ts",
+      "bytes": 20984,
+      "sha256": "c8b27fb0c0d06b2ce482d2e524e4879f4d18f8865bdcdee443ea56073e177f14"
+    },
+    {
+      "path": "src/lib/authProfileCache.ts",
+      "bytes": 7891,
+      "sha256": "2effffb63345deeb2708a7d146d71b26157e6242d0aa2b754b11df934b2f97f2"
+    },
+    {
+      "path": "src/lib/cloud/createCloudStore.ts",
+      "bytes": 7649,
+      "sha256": "5455e481e9f623bc62008b839a2ee91dfd67ad0bee938d1493cb69316cbded2d"
+    },
+    {
+      "path": "src/lib/cloudSettings.ts",
+      "bytes": 17750,
+      "sha256": "e9b2aab422930064dd767bd853cbb4dbd7584810a74712de6f059b9f7e512c6f"
+    },
+    {
+      "path": "src/lib/i18n/authProfileSafety.ts",
+      "bytes": 699,
+      "sha256": "92b32bec580d119c9bd5c75d26f376c85b233244916f18b22d0b43119efffda7"
+    },
+    {
+      "path": "src/lib/i18n/reportSafety.ts",
+      "bytes": 2182,
+      "sha256": "a7e336ad59c94e45a2644e04d04974a1d0ea5d79261595486e3c895d19887b81"
+    },
+    {
+      "path": "src/lib/reports-center/reportCenterService.ts",
+      "bytes": 10897,
+      "sha256": "d791bd3dccdbb08f0141f429902f6be70d726e9792087c640b41df5b3845f174"
+    },
+    {
+      "path": "src/pages/ReportsCenter.tsx",
+      "bytes": 30009,
+      "sha256": "fa1a5efe1a645709efae5f72455ccfdd5f9ababf7761fc33ee1bbfef9ab3dcb1"
+    },
+    {
+      "path": "src/pages/ResetPassword.tsx",
+      "bytes": 5260,
+      "sha256": "99e5f69d488f4c19af80979cc651e105abeb99918e4dc154a38e4a9f0f727323"
+    },
+    {
+      "path": "src/pages/accounting/reports/MonthlyVehicleProfitabilityPage.tsx",
+      "bytes": 35060,
+      "sha256": "9b17bc09a65098beb595611b4c210f8aa4985fee00f50128bca8d73ee08fe89d"
+    },
+    {
+      "path": "src/pages/accounting/setup/AccountTemplatePage.tsx",
+      "bytes": 7579,
+      "sha256": "7adbde66dc25f0871dbbaffb39e2a116c5abe66d57dce94c445d23cd669cae6d"
+    },
+    {
+      "path": "src/pages/accounting/setup/AccountingSetupPages.tsx",
+      "bytes": 46069,
+      "sha256": "e91525408ffa9c5bc3dfe304c6929dfd3134834befae451f461c4ce77bc9f1d0"
+    },
+    {
+      "path": "src/pages/accounting/setup/workshopAccountsTemplate.ts",
+      "bytes": 3437,
+      "sha256": "d32b9f387c90a7d539803627acc9f26bae7082a5d439ef13e35a461f37ef182b"
+    },
+    {
+      "path": "src/test/active-profile-identity-gate.test.ts",
+      "bytes": 1307,
+      "sha256": "8278056efc1de8d0acfef23f5ec5a5c6c4c085fcc860689f9572649d977fb9f7"
+    },
+    {
+      "path": "src/test/auth-profile-authority-runtime.test.ts",
+      "bytes": 3935,
+      "sha256": "38808ea6c580dfd46f21605fb2b5df9f1963df2c3bfd1ecbcd99bc6111274434"
+    },
+    {
+      "path": "src/test/auth-profile-runtime-de-dup.test.ts",
+      "bytes": 2719,
+      "sha256": "e1dcfd7a74f80fed927d8b19475c437e49e0ae84722c12592a0893f3afc9f749"
+    },
+    {
+      "path": "src/test/auth-signup-provisioning.test.ts",
+      "bytes": 20246,
+      "sha256": "d2565af28d6d4d74ee29f0553357e413d38038f499faaabcdad3efb7e33ac2eb"
+    },
+    {
+      "path": "src/test/cloud-settings-financial-confirmation.test.ts",
+      "bytes": 2339,
+      "sha256": "451348100415b6069f56cff4d6436fa58804c13ffe4b73f5961f9471c14f0090"
+    },
+    {
+      "path": "src/test/document-active-profile-contract.test.ts",
+      "bytes": 939,
+      "sha256": "4bdfe9ea462e1fda439134f8ef4a7250fd9cf09ee370964fb1a488a0a5a838cc"
+    },
+    {
+      "path": "src/test/expense-work-order-search-security-parity.test.ts",
+      "bytes": 1452,
+      "sha256": "873f6d7062bf1f46ab50b6afe42c59e6c6a453fe3239b721fcda54551c64576a"
+    },
+    {
+      "path": "src/test/invitation-activation-retry.test.tsx",
+      "bytes": 2473,
+      "sha256": "57bdd58e86f43b21087cbff97f7083dac481867b2812313cfe249b6ecc74bdbc"
+    },
+    {
+      "path": "src/test/monthly-expense-supplier-account-contract.test.ts",
+      "bytes": 3667,
+      "sha256": "b2bd633a6bbf2d0105a0c9517c8e490264df6d3bd5ba9d80857bea2bfe755424"
+    },
+    {
+      "path": "src/test/monthly-overhead-confirmed-read.test.ts",
+      "bytes": 2559,
+      "sha256": "bfc3b8b871f06208966b917f3168392b4a68ff0143356c99b70c273968839a32"
+    },
+    {
+      "path": "src/test/monthly-overhead-restoration-contract.test.ts",
+      "bytes": 1246,
+      "sha256": "53d1b214f2a7fb7b88a793b29234b267abca2521819e4f592f3b41114e93d0ac"
+    },
+    {
+      "path": "src/test/monthly-profitability-service-regression.test.ts",
+      "bytes": 4504,
+      "sha256": "6667276250dc046cb1053f026afd8c9805702148ea480464e59e276f724ae880"
+    },
+    {
+      "path": "src/test/monthly-report-confirmed-ui.test.tsx",
+      "bytes": 3335,
+      "sha256": "260ed8250af67bdf8ad7004f41c7a85d44b6642e3930b45cadbd2f44177be1f2"
+    },
+    {
+      "path": "src/test/permissive-policy-consolidation.test.ts",
+      "bytes": 1171,
+      "sha256": "b17dd55601c8e25e8d78b1b2eb6ebeb537ed25aa11e8005b8e7c7f4e4dd4bc8b"
+    },
+    {
+      "path": "src/test/profile-authority-fields.test.ts",
+      "bytes": 1699,
+      "sha256": "31131c2559df1e3979caa89eb5a38df1eb178fa61cbc4b7d6a263aaa195977bc"
+    },
+    {
+      "path": "src/test/profile-update-identity-rls.test.ts",
+      "bytes": 1951,
+      "sha256": "04149f1c34160c56485464c8479a41124e684a516cb538c7dd00fc4a81dd9703"
+    },
+    {
+      "path": "src/test/reports-settlement-runtime-fixtures.test.ts",
+      "bytes": 1543,
+      "sha256": "c6ec08bec12082899304818b33de15f2af82139e816ff691f81a95fdba7b5f45"
+    },
+    {
+      "path": "src/test/reports-settlement-summary-regression.test.ts",
+      "bytes": 8487,
+      "sha256": "03974ac5bc63f9f1777abd3de8932f7aec99809c5c58fee95714756428418cee"
+    },
+    {
+      "path": "src/test/tenant-cache-session-race.test.ts",
+      "bytes": 6158,
+      "sha256": "55f458c5b48e5293372aaa5cb05deb23189dab8f31de9ee79db406dfcaa7e5ff"
+    },
+    {
+      "path": "supabase/functions/manage-users/index.ts",
+      "bytes": 19944,
+      "sha256": "3dfe2fadc3b26485f9dc1c5ec0dd1ab49570e026d86416f7a350d458cb98de41"
+    },
+    {
+      "path": "supabase/migrations/20261101082501_reports_invoice_settlement_discount_receivables.sql",
+      "bytes": 3754,
+      "sha256": "f81340b38fa3437d62b05be47b1f1d42e4339e5baec586e867f6020e282dfea3"
+    },
+    {
+      "path": "supabase/migrations/20261101083908_reports_insurance_statement_settlement_discount.sql",
+      "bytes": 21307,
+      "sha256": "5d75568b131e1b009a2c157184ead134a1667ca8b0a8bee004c75b381364462a"
+    },
+    {
+      "path": "supabase/migrations/20261101084659_reports_center_summary_settlement_discount.sql",
+      "bytes": 11175,
+      "sha256": "6dc5000203cd6425011db425e16dc9721a64a4a626ab46dc8a6e90fa44ea0712"
+    },
+    {
+      "path": "supabase/migrations/20261101085816_monthly_vehicle_settlement_cost_release.sql",
+      "bytes": 19726,
+      "sha256": "22329361f564d17f498aaa2e18363230542fb8f10088eef218ef87abd3972834"
+    },
+    {
+      "path": "supabase/migrations/20261104043300_reports_summary_payment_period_and_receivable_parity.sql",
+      "bytes": 11061,
+      "sha256": "8b1398eff6cfa79194440ae6da6f7b099ac381f4bd98d65390042c4dfd6ee246"
+    },
+    {
+      "path": "supabase/migrations/20261104043915_monthly_vehicle_parent_eligibility_guard.sql",
+      "bytes": 19877,
+      "sha256": "b27ce192f729c9408ced8205dc17d36025f230b43fdefd60b32d27a9d8688653"
+    },
+    {
+      "path": "supabase/migrations/20261104044624_accounting_guard_null_tenant_and_supplier_permission.sql",
+      "bytes": 12660,
+      "sha256": "75917f1fdfbac29b87472bab0f304d598a10e1cb81875988170b5b3f1a7f4a4c"
+    },
+    {
+      "path": "supabase/migrations/20261104045828_rls_stable_uid_scalar_initplans.sql",
+      "bytes": 41567,
+      "sha256": "2f4cbae9bc8016b232e779e1c04c72fa1226cad6a10324725164f3792d62038b"
+    },
+    {
+      "path": "supabase/migrations/20261104050619_profiles_select_policy_preserve_update_planning.sql",
+      "bytes": 1750,
+      "sha256": "cabdc4c898d3ae4bdac44ce531e057b4a91eb65f2b9c2d92fb0807f99bbf4c5c"
+    },
+    {
+      "path": "supabase/migrations/20261104051402_remove_verified_redundant_workshop_indexes.sql",
+      "bytes": 3029,
+      "sha256": "21ba9a439fe619f6b373be65cda4c83b9fe202920eb15f8414377c610219a988"
+    },
+    {
+      "path": "supabase/migrations/20261104072551_document_access_active_profile_guard.sql",
+      "bytes": 1380,
+      "sha256": "06eb96f8a211df1976dca7cfe2259252b1140e77ee0d2670aaf912dd9e5060f0"
+    },
+    {
+      "path": "supabase/migrations/20261104123558_profiles_rls_update_identity_without_self_recursion.sql",
+      "bytes": 3948,
+      "sha256": "5c9ec4acb4dd92886cba59c8f765d7c383d5a47f380f9e6653c1f9d807902dc8"
+    },
+    {
+      "path": "supabase/migrations/20261104124329_expense_work_order_lookup_rls_parity_and_private_dedupe_acl.sql",
+      "bytes": 1332,
+      "sha256": "0c732a89cf96f021d4daec829344d970b3112e14582bdb5cee8313a5f00be25e"
+    },
+    {
+      "path": "supabase/migrations/20261104125745_isolate_auth_signup_profile_provisioning.sql",
+      "bytes": 2352,
+      "sha256": "281c24caf945a9b2e2df8c1c623616bbe909ead1f4f5d681a78e98c940984f5f"
+    },
+    {
+      "path": "supabase/migrations/20261104130809_profiles_browser_authority_fields_guard.sql",
+      "bytes": 2278,
+      "sha256": "7a5d4625760a3acc552ef4254f3282f6d8e649cace801a1c4004c284fedfd8b0"
+    },
+    {
+      "path": "supabase/migrations/20261105082707_active_profile_identity_gate.sql",
+      "bytes": 2653,
+      "sha256": "462b2fda174926c5da86bb8b0a307e198fc45dd2f37549bad43e860b779698d7"
+    },
+    {
+      "path": "supabase/migrations/20261105082709_consolidate_role_scoped_permissive_policies.sql",
+      "bytes": 54981,
+      "sha256": "7c891d717bbf67e9fa3434a219b3b87bb1e203c106ba641023d0316a18459f02"
+    },
+    {
+      "path": "supabase/migrations/20261105085159_restore_monthly_workshop_overheads_readmodel.sql",
+      "bytes": 9361,
+      "sha256": "23e2066cbb11f13eb13b183f6ed3ed2371c8b29f47e5149b5b13a3af95731461"
+    },
+    {
+      "path": "supabase/tests/active_profile_identity_gate_rollback.sql",
+      "bytes": 6079,
+      "sha256": "405fe8b4688ad21070cf9709722aae77a72e95c42c0731aa683526738413df32"
+    },
+    {
+      "path": "supabase/tests/auth_signup_provisioning_rollback.sql",
+      "bytes": 6987,
+      "sha256": "42e4e335f32fe95eb9a4b2942fd452f8826f551d35a7800cdc210e161fdb34a9"
+    },
+    {
+      "path": "supabase/tests/profile_update_rls_rollback.sql",
+      "bytes": 1751,
+      "sha256": "238bc310e20c740dac68ba4fc1bbdd058149b011d9822c24eb1dc8014dab5a3d"
+    },
+    {
+      "path": "supabase/tests/reports_invoice_settlement_discount_runtime.sql",
+      "bytes": 15422,
+      "sha256": "abe21a0edb388d2fc5473841d9829cd3cbb6dd772bdb9b39bc6c9ea24c8bff66"
+    },
+    {
+      "path": "supabase/tests/reports_settlement_28_case_rollback.sql",
+      "bytes": 4772,
+      "sha256": "30f6524d3a51541370e1f10c08578dd4bbb8a38603735f10b5ecd9ef75f4d6b4"
+    },
+    {
+      "path": "vite.config.ts",
+      "bytes": 4199,
+      "sha256": "bbca175afb8ed9414170274fa12de728252d550bea9f8b45228da0c4e3b730d0"
+    }
+  ]
+}

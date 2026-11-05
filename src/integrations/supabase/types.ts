@@ -9976,6 +9976,10 @@ export type Database = {
       }
     }
     Functions: {
+      save_vehicle_entry_damage_inspection: {
+        Args: { p_entry_id: string; p_existing_code: string | null; p_request_id: string; p_report: Json }
+        Returns: Json
+      }
       document_enqueue_processing: {
         Args: { p_engine_version: string; p_file_id: string }
         Returns: { extraction_id: string; processing_status: string }[]

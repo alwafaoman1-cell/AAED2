@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { VehicleEntryInspectionAction } from "@/components/vehicle-entry/VehicleEntryInspectionAction";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowRight, ClipboardList, Loader2, ShieldAlert } from "lucide-react";
@@ -216,6 +217,7 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
         </div>
       </details>}
     <div className="flex flex-wrap gap-2">
+      <VehicleEntryInspectionAction entry={visit.entry} />
       {canAdvance && next && <Button variant="outline" disabled={Boolean(nextBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(next); }}><ArrowRight className="me-2 h-4 w-4" />{t("vehicleVisit.next")}: {stageLabel(next)}</Button>}
       {canManage && current && previous && <Button variant="outline" onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
       {canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && current &&

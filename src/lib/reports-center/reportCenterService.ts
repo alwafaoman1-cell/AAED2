@@ -34,12 +34,20 @@ const EMPTY_SUMMARY: ReportCenterSummary = {
 };
 
 function numberValue(row: Record<string, unknown>, key: string): number {
-  const value = Number(row[key] ?? 0);
-  return Number.isFinite(value) ? value : 0;
+  const raw = row[key];
+  if ((typeof raw !== "number" && typeof raw !== "string") || String(raw).trim() === "") {
+    throw new Error(`REPORT_SUMMARY_INVALID_VALUE:${key}`);
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error(`REPORT_SUMMARY_INVALID_VALUE:${key}`);
+  return value;
 }
 
 function normalizeSummary(input: unknown): ReportCenterSummary {
-  const row = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("REPORT_SUMMARY_INVALID_RESPONSE");
+  }
+  const row = input as Record<string, unknown>;
   return {
     claimsCount: numberValue(row, "claims_count"),
     workOrdersCount: numberValue(row, "work_orders_count"),
@@ -90,7 +98,7 @@ export async function fetchReportCenterSummary(
   if (error) {
     const missingRpc =
       error.code === "PGRST202" ||
-      /reports_center_(secure_)?summary_rpc/i.test(error.message || "");
+      (error.code === "42883" && /reports_center_(secure_)?summary_rpc/i.test(error.message || ""));
     if (missingRpc) {
       return {
         available: false,
@@ -223,22 +231,30 @@ export async function fetchReportData(
   if (error) {
     const missingRpc =
       error.code === "PGRST202" ||
-      /reports_.*_rpc|schema cache|could not find the function/i.test(error.message || "");
+      (error.code === "42883" && /reports_.*_rpc/i.test(error.message || ""));
     if (missingRpc) return unavailableReport("detail_rpc_not_activated");
     throw error;
   }
 
-  const payload = (data && typeof data === "object" ? data : {}) as Record<string, any>;
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("REPORT_DETAIL_INVALID_RESPONSE");
+  const payload = data as Record<string, any>;
+  if (!Array.isArray(payload.rows) || payload.rows.some((row: unknown) => !row || typeof row !== "object" || Array.isArray(row))) {
+    throw new Error("REPORT_DETAIL_INVALID_ROWS");
+  }
   const pagination = payload.pagination || {};
+  const totalRows = Number(pagination.totalRows ?? pagination.total_rows);
+  const totalPages = Number(pagination.totalPages ?? pagination.total_pages);
+  if (!Number.isSafeInteger(totalRows) || totalRows < 0 || !Number.isSafeInteger(totalPages) || totalPages < 0
+    || (totalRows > 0 && totalPages === 0)) throw new Error("REPORT_DETAIL_INVALID_PAGINATION");
   const quality = payload.dataQuality || payload.data_quality || {};
   return {
     available: true,
-    rows: Array.isArray(payload.rows) ? payload.rows.map(camelRow) : [],
+    rows: payload.rows.map(camelRow),
     pagination: {
       page: Number(pagination.page || filters.page),
       pageSize: Number(pagination.pageSize || pagination.page_size || filters.pageSize),
-      totalRows: Number(pagination.totalRows || pagination.total_rows || 0),
-      totalPages: Number(pagination.totalPages || pagination.total_pages || 0),
+      totalRows,
+      totalPages,
     },
     aggregates: camelRow(payload.aggregates) as Record<string, number>,
     dataQuality: {
@@ -263,7 +279,7 @@ export async function fetchAllReportRows(
     { ...filters, page: 1, pageSize: 100 },
     signal,
   );
-  if (!first.available || first.pagination.totalPages <= 1) return first;
+  if (!first.available) return first;
 
   const rows = [...first.rows];
   for (let page = 2; page <= first.pagination.totalPages; page += 1) {
@@ -274,8 +290,13 @@ export async function fetchAllReportRows(
       signal,
     );
     if (!next.available) return next;
+    if (next.pagination.totalRows !== first.pagination.totalRows || next.pagination.totalPages !== first.pagination.totalPages
+      || JSON.stringify(Object.entries(next.aggregates).sort()) !== JSON.stringify(Object.entries(first.aggregates).sort())) {
+      throw new Error("REPORT_SET_CHANGED_DURING_EXPORT");
+    }
     rows.push(...next.rows);
   }
+  if (rows.length !== first.pagination.totalRows) throw new Error("REPORT_EXPORT_INCOMPLETE");
   return {
     ...first,
     rows,

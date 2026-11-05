@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { accountingQueryKeys } from "@/lib/accounting/accountingQueryKeys";
 import { createAccountingAccount, listAccountingAccounts } from "@/lib/accounting/accountingAccountsService";
 import type { AccountingAccountType } from "@/lib/accounting/accountingTypes";
-import { WORKSHOP_ACCOUNTS } from "./AccountingSetupPages";
+import { WORKSHOP_ACCOUNTS } from "./workshopAccountsTemplate";
 
 type TemplateRow = {
   code: string;

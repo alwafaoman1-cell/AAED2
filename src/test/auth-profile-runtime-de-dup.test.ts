@@ -23,7 +23,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.from.mockReturnValue({
     select: () => ({ eq: () => ({ maybeSingle: async () => ({
-      data: { id: "profile", user_id: "user-a", tenant_id: "tenant-a", role: "manager", full_name: "Test" },
+      data: { id: "profile", user_id: "user-a", tenant_id: "tenant-a", role: "manager", full_name: "Test", account_status: "active", disabled_at: null },
       error: null,
     }) }) }),
   });

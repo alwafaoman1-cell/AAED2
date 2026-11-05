@@ -78,6 +78,9 @@ export default defineConfig(({ mode }) => ({
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
   },
   build: {
+    // Preserve the Vite 5 browser baseline during the security toolchain
+    // upgrade; do not silently drop older workshop tablets/Safari support.
+    target: ["es2020", "edge88", "firefox78", "chrome87", "safari14"],
     // Keep only genuinely shared startup vendors here. Rollup's object-form
     // manualChunks also pulls in dependencies of each entry: assigning PDF or
     // Recharts here dragged the preload helper / clsx into those chunks, so

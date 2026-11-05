@@ -43,6 +43,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (p?.tenant_id) {
       setCachedTenantId(p.tenant_id);
       setCloudSettingsTenantScope(p.tenant_id);
+    } else {
+      setCachedTenantId(null);
+      clearCloudSettingsCache();
     }
     setPermissionsRole((p?.role as any) ?? null);
     // Do not start company-settings reads on logout or before tenant resolution.

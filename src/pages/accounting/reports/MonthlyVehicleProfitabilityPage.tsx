@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import "@/lib/i18n/reportSafety";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { BarChart3, CalendarRange, Car, FileDown, FileSpreadsheet, Filter, Printer, ReceiptText, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Users, Wallet } from "lucide-react";
@@ -143,6 +145,7 @@ function SectionExportActions({ section, exporting, onExport }: {
 }
 
 export default function MonthlyVehicleProfitabilityPage() {
+  const { t } = useTranslation();
   const { profile } = useAuth();
   const [businessType, setBusinessType] = useState<MonthlyBusinessType>("cash");
   const [month, setMonth] = useState(currentMonth);
@@ -170,6 +173,11 @@ export default function MonthlyVehicleProfitabilityPage() {
     queryFn: ({ signal }) => fetchMonthlyWorkshopOverheads(from, to, signal),
     enabled: Boolean(profile?.tenant_id), staleTime: 120_000, gcTime: 900_000, refetchOnWindowFocus: false,
   });
+  const financialReady = report.isSuccess && oppositeReport.isSuccess && overheadReport.isSuccess;
+  const financialError = report.isError || oppositeReport.isError || overheadReport.isError;
+  const reloadFinancialSources = () => {
+    void report.refetch(); void oppositeReport.refetch(); void overheadReport.refetch();
+  };
   const selectedColumns = COLUMNS.filter((column) => visible.includes(column.key));
   const aggregates = report.data?.aggregates;
   const overheads = report.data?.overheads;
@@ -186,6 +194,7 @@ export default function MonthlyVehicleProfitabilityPage() {
   async function runExport(kind: "xlsx" | "pdf" | "print") {
     setExporting(kind);
     try {
+      if (!financialReady) throw new Error(t("reportSafety.monthlyFailure"));
       if (!selectedColumns.length) throw new Error("اختر عمودًا واحدًا على الأقل قبل إنشاء المستخرج");
       const permission = kind === "xlsx" ? "accounting_reports.export_excel" : kind === "pdf" ? "accounting_reports.export_pdf" : "accounting_reports.print";
       if (!await hasAccountingPermission(permission)) throw new Error("لا تملك صلاحية إنشاء هذا المستخرج");
@@ -306,6 +315,12 @@ export default function MonthlyVehicleProfitabilityPage() {
       <div className="flex flex-wrap items-center gap-2"><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline"><SlidersHorizontal size={15}/>الأعمدة ({visible.length})</Button></DropdownMenuTrigger><DropdownMenuContent className="max-h-[65vh] w-64 overflow-y-auto" align="end"><DropdownMenuLabel>أعمدة العرض والتصدير</DropdownMenuLabel><DropdownMenuSeparator/><DropdownMenuCheckboxItem checked={visible.length === COLUMNS.length} onCheckedChange={(checked) => setVisible(checked ? COLUMNS.map((c) => c.key) : COLUMNS.filter((c) => c.default).map((c) => c.key))}>تحديد الكل / الافتراضي</DropdownMenuCheckboxItem>{COLUMNS.map((column) => <DropdownMenuCheckboxItem key={column.key} checked={visible.includes(column.key)} onCheckedChange={(checked) => setVisible((current) => checked ? [...new Set([...current, column.key])] : current.filter((key) => key !== column.key))}>{column.ar}</DropdownMenuCheckboxItem>)}</DropdownMenuContent></DropdownMenu><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("xlsx")}><FileSpreadsheet size={15}/>Excel</Button><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("pdf")}><FileDown size={15}/>PDF</Button><Button variant="outline" disabled={Boolean(exporting)} onClick={() => runExport("print")}><Printer size={15}/>طباعة</Button></div>
     </div>
 
+    {!financialReady ? <Card role={financialError ? "alert" : "status"} className="p-5">
+      <p>{t(financialError ? "reportSafety.monthlyFailure" : "reportSafety.monthlyLoading")}</p>
+      {financialError && <Button variant="outline" className="mt-3" onClick={reloadFinancialSources}>
+        {t("reportSafety.monthlyRetry")}
+      </Button>}
+    </Card> : <>
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">{kpis.map(([title, amount, color]) => <Card key={title}><CardContent className="p-4"><p className="text-xs text-muted-foreground">{title}</p><p className={`mt-2 font-mono text-lg font-bold ${color}`} dir="ltr">{formatOMR(Number(amount || 0))}</p></CardContent></Card>)}</section>
 
     <Card className="border-blue-200 bg-blue-50/40 dark:border-blue-900 dark:bg-blue-950/20"><CardHeader className="flex-row flex-wrap items-center justify-between gap-2 pb-2"><CardTitle className="flex items-center gap-2 text-base"><BarChart3 size={18}/>ملخص الربح والخسارة للشهر — الكاش والتأمين منفصلان</CardTitle><SectionExportActions section="summary" exporting={exporting} onExport={(section, format) => void runSectionExport(section, format)}/></CardHeader><CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -325,8 +340,9 @@ export default function MonthlyVehicleProfitabilityPage() {
       <Card><CardHeader className="flex-row flex-wrap items-center justify-between gap-2"><CardTitle className="flex items-center gap-2 text-base"><Users size={18}/>تفاصيل الرواتب والأجور — سند فعلي أو استحقاق HR تلقائي</CardTitle><SectionExportActions section="payroll" exporting={exporting} onExport={(section, format) => void runSectionExport(section, format)}/></CardHeader><CardContent className="p-0">{overheadReport.isLoading ? <div className="p-10 text-center">جاري التحميل…</div> : !overheadReport.data?.payrollRows.length ? <div className="p-10 text-center text-muted-foreground">لا توجد بيانات رواتب أو إعداد راتب افتراضي خلال الفترة.</div> : <div className="max-h-[420px] overflow-auto"><Table><TableHeader className="sticky top-0 bg-muted"><TableRow><TableHead>التاريخ</TableHead><TableHead>السند/الاستحقاق</TableHead><TableHead>الموظف/المستفيد</TableHead><TableHead>نوع المصدر</TableHead><TableHead>البيان</TableHead><TableHead>المبلغ</TableHead></TableRow></TableHeader><TableBody>{overheadReport.data.payrollRows.map((row, index) => <TableRow key={String(row.id || index)}><TableCell>{String(row.date || "—")}</TableCell><TableCell>{String(row.voucher_number || "—")}</TableCell><TableCell>{String(row.beneficiary || row.supplier_name || "—")}</TableCell><TableCell>{sourceLabel(row.source_basis)}</TableCell><TableCell className="max-w-[280px]">{String(row.description || "—")}</TableCell><TableCell dir="ltr">{formatOMR(Number(row.subtotal || 0))}</TableCell></TableRow>)}</TableBody></Table></div>}</CardContent></Card>
     </div>
 
-    <Card><CardHeader className="flex-row items-center justify-between"><div><CardTitle className="flex items-center gap-2"><Car size={19}/>تفاصيل ربح وخسارة كل سيارة</CardTitle><p className="mt-1 text-xs text-muted-foreground">يعتمد التقرير على دفعات الشهر ويطابق معها التكلفة الحقيقية للسيارة حتى لو كان سند المصروف بتاريخ مختلف.</p></div><span className="text-sm text-muted-foreground">{report.data?.pagination.totalRows || 0} سجل</span></CardHeader><CardContent className="p-0">{report.isLoading ? <div className="p-16 text-center">جاري تحميل التقرير…</div> : report.isError ? <div className="p-10 text-center text-destructive">{(report.error as Error).message}</div> : !report.data?.rows.length ? <div className="p-16 text-center text-muted-foreground">لا توجد حركة مالية مطابقة خلال الفترة.</div> : <div className="overflow-x-auto"><Table className="min-w-max"><TableHeader className="sticky top-0 z-10 bg-muted"><TableRow>{selectedColumns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.ar}</TableHead>)}</TableRow></TableHeader><TableBody>{report.data.rows.map((row, index) => <TableRow key={String(row.operation_id || index)}>{selectedColumns.map((column) => <TableCell key={column.key} className={`max-w-[260px] whitespace-nowrap ${column.key === "gross_profit" || column.key === "parts_profit" ? Number(row[column.key] || 0) >= 0 ? "font-bold text-emerald-600" : "font-bold text-rose-600" : ""}`} dir={column.type === "money" || column.type === "number" || column.type === "percentage" ? "ltr" : undefined}>{display(row[column.key], column)}</TableCell>)}</TableRow>)}</TableBody></Table></div>}</CardContent></Card>
+    <Card><CardHeader className="flex-row items-center justify-between"><div><CardTitle className="flex items-center gap-2"><Car size={19}/>تفاصيل ربح وخسارة كل سيارة</CardTitle><p className="mt-1 text-xs text-muted-foreground">يعتمد التقرير على دفعات الشهر ويطابق معها التكلفة الحقيقية للسيارة حتى لو كان سند المصروف بتاريخ مختلف.</p></div><span className="text-sm text-muted-foreground">{report.data?.pagination.totalRows || 0} سجل</span></CardHeader><CardContent className="p-0">{!report.data.rows.length ? <div className="p-16 text-center text-muted-foreground">لا توجد حركة مالية مطابقة خلال الفترة.</div> : <div className="overflow-x-auto"><Table className="min-w-max"><TableHeader className="sticky top-0 z-10 bg-muted"><TableRow>{selectedColumns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.ar}</TableHead>)}</TableRow></TableHeader><TableBody>{report.data.rows.map((row, index) => <TableRow key={String(row.operation_id || index)}>{selectedColumns.map((column) => <TableCell key={column.key} className={`max-w-[260px] whitespace-nowrap ${column.key === "gross_profit" || column.key === "parts_profit" ? Number(row[column.key] || 0) >= 0 ? "font-bold text-emerald-600" : "font-bold text-rose-600" : ""}`} dir={column.type === "money" || column.type === "number" || column.type === "percentage" ? "ltr" : undefined}>{display(row[column.key], column)}</TableCell>)}</TableRow>)}</TableBody></Table></div>}</CardContent></Card>
 
     <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-sm md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-2 text-muted-foreground"><CalendarRange size={16}/><span>أساس الشهر: الإيراد من الدفعات المحصلة بعد استبعاد VAT، وتُطابق معه تكلفة السيارة الحقيقية بنسبة التحصيل دون تكرار التكلفة بين دفعات الأشهر.</span></div><div className="flex items-center gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>السابق</Button><span dir="ltr">{page} / {report.data?.pagination.totalPages || 1}</span><Button variant="outline" disabled={page >= (report.data?.pagination.totalPages || 1)} onClick={() => setPage((value) => value + 1)}>التالي</Button></div></div>
+    </>}
   </main>;
 }

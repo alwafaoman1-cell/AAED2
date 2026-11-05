@@ -7,13 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Loader2, KeyRound } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
+import "@/lib/i18n/authProfileSafety";
 
 export default function ResetPasswordPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [ready, setReady] = useState(false);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [passwordSaved, setPasswordSaved] = useState(false);
 
   useEffect(() => {
     // Supabase parses the recovery token from URL hash and emits PASSWORD_RECOVERY
@@ -29,24 +33,35 @@ export default function ResetPasswordPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < 6) {
+    if (!passwordSaved && password.length < 6) {
       toast.error("كلمة المرور يجب أن تكون 6 أحرف على الأقل");
       return;
     }
-    if (password !== confirm) {
+    if (!passwordSaved && password !== confirm) {
       toast.error("كلمتا المرور غير متطابقتين");
       return;
     }
     setSubmitting(true);
-    const { error } = await supabase.auth.updateUser({ password });
-    setSubmitting(false);
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      if (!passwordSaved) {
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) { toast.error(error.message); return; }
+        setPasswordSaved(true);
+      }
+      // Retry activation independently of the already-confirmed password save.
+      // Supabase can reject an attempt to save the same password again.
+      const { data: activation, error: activationError } = await supabase.functions.invoke("manage-users", {
+        body: { action: "accept_invite" },
+      });
+      if (activationError || activation?.ok !== true) throw new Error("activation_unconfirmed");
+      toast.success("تم تحديث كلمة المرور بنجاح");
+      await supabase.auth.signOut();
+      navigate("/auth", { replace: true });
+    } catch {
+      toast.error(t("authSafety.invitationActivationUnconfirmed"));
+    } finally {
+      setSubmitting(false);
     }
-    toast.success("تم تحديث كلمة المرور بنجاح");
-    await supabase.auth.signOut();
-    navigate("/auth", { replace: true });
   }
 
   return (
@@ -74,6 +89,7 @@ export default function ResetPasswordPage() {
                   placeholder="••••••••"
                   required
                   minLength={6}
+                  disabled={passwordSaved || submitting}
                 />
               </div>
               <div className="space-y-2">
@@ -86,11 +102,12 @@ export default function ResetPasswordPage() {
                   placeholder="••••••••"
                   required
                   minLength={6}
+                  disabled={passwordSaved || submitting}
                 />
               </div>
               <Button type="submit" className="w-full" disabled={submitting}>
                 {submitting && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
-                حفظ كلمة المرور
+                {passwordSaved ? t("authSafety.retryActivation") : "حفظ كلمة المرور"}
               </Button>
             </form>
           ) : (

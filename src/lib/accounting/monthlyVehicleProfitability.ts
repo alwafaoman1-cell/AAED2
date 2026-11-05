@@ -71,6 +71,12 @@ export async function fetchMonthlyVehicleProfitability(
   } as never).abortSignal(signal ?? new AbortController().signal);
   if (result.error) throw result.error;
   const data = result.data as unknown as MonthlyVehicleProfitabilityResult;
+  if (!data || !Array.isArray(data.rows) || !data.pagination
+    || !Number.isSafeInteger(data.pagination.totalRows) || data.pagination.totalRows < 0
+    || !Number.isSafeInteger(data.pagination.totalPages) || data.pagination.totalPages < 0
+    || (data.pagination.totalRows > 0 && data.pagination.totalPages === 0)) {
+    throw new Error("MONTHLY_REPORT_INVALID_RESPONSE");
+  }
   return {
     ...data,
     rows: (data.rows || []).map(withPartsProfit),
@@ -85,10 +91,24 @@ export async function fetchAllMonthlyVehicleProfitabilityRows(
   filters: MonthlyVehicleProfitabilityFilters,
 ): Promise<MonthlyVehicleProfitabilityRow[]> {
   const rows: MonthlyVehicleProfitabilityRow[] = [];
+  let expected: MonthlyVehicleProfitabilityResult | undefined;
+  const operationIds = new Set<string>();
   for (let page = 1; page <= 200; page += 1) {
     const result = await fetchMonthlyVehicleProfitability({ ...filters, page, pageSize: 500 });
+    if (result.pagination.totalPages > 200) throw new Error("MONTHLY_REPORT_EXPORT_LIMIT_EXCEEDED");
+    expected ??= result;
+    if (result.pagination.totalRows !== expected.pagination.totalRows || result.pagination.totalPages !== expected.pagination.totalPages
+      || JSON.stringify(Object.entries(result.aggregates).sort()) !== JSON.stringify(Object.entries(expected.aggregates).sort())) {
+      throw new Error("MONTHLY_REPORT_SET_CHANGED_DURING_EXPORT");
+    }
+    for (const row of result.rows) {
+      const operationId = String(row.operation_id || "");
+      if (operationId && operationIds.has(operationId)) throw new Error("MONTHLY_REPORT_DUPLICATE_EXPORT_ROW");
+      if (operationId) operationIds.add(operationId);
+    }
     rows.push(...result.rows);
     if (page >= result.pagination.totalPages) break;
   }
+  if (!expected || rows.length !== expected.pagination.totalRows) throw new Error("MONTHLY_REPORT_EXPORT_INCOMPLETE");
   return rows;
 }

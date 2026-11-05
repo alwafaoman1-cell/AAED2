@@ -95,7 +95,6 @@ export default function ReportDataPanel({
     staleTime: 2 * 60_000,
     gcTime: 15 * 60_000,
     refetchOnWindowFocus: false,
-    placeholderData: (previous) => previous,
   });
 
   const runExport = async (format: "xlsx" | "pdf" | "print") => {

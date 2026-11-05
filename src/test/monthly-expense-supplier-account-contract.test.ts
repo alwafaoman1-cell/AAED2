@@ -7,8 +7,9 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8"
 describe("monthly expense and supplier account contracts", () => {
   it("loads payroll and fixed-cost settings into the monthly report without creating expenses", () => {
     const source = read("src/lib/accounting/monthlyWorkshopReport.ts");
-    expect(source).toContain('readCloudSetting<HrSnapshot>("alwafa_hr_v1"');
-    expect(source).toContain('readCloudSetting<MonthlySettingsSnapshot>("alwafa_monthly_settings_v1"');
+    expect(source).toContain('readCloudSettingFresh<HrSnapshot>("alwafa_hr_v1", EMPTY_HR, { requireConfirmed: true })');
+    expect(source).toContain('readCloudSettingFresh<MonthlySettingsSnapshot>("alwafa_monthly_settings_v1", EMPTY_MONTHLY_SETTINGS, { requireConfirmed: true })');
+    expect(source).toContain('MONTHLY_OVERHEAD_SESSION_CHANGED');
     expect(source).toContain('source_basis: "hr_accrual"');
     expect(source).toContain('source_basis: "fixed_cost_setting"');
     expect(source).not.toContain('.from("expenses").insert');

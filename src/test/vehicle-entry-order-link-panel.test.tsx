@@ -8,7 +8,7 @@ import i18n from "@/i18n";
 const mock=vi.hoisted(()=>({get:vi.fn(),confirm:vi.fn(),success:vi.fn(),error:vi.fn(),role:"manager"}));
 vi.mock("sonner",()=>({toast:{success:mock.success,error:mock.error}}));
 vi.mock("@/contexts/AuthContext",()=>({useAuth:()=>({user:{id:"user"},hasRole:(...roles:string[])=>roles.includes(mock.role)})}));
-vi.mock("@/lib/vehicleEntryService",()=>({confirmVehicleEntryWorkOrderLink:mock.confirm}));
+vi.mock("@/lib/vehicleEntryService",async importOriginal=>({...await importOriginal<typeof import("@/lib/vehicleEntryService")>(),confirmVehicleEntryWorkOrderLink:mock.confirm}));
 vi.mock("@/lib/vehicleVisitLifecycle",()=>({getVehicleVisitDetail:mock.get,listVehicleVisitStaff:async()=>[],canReconcileVehicleVisitCustody:()=>false,getVehicleVisitBillingKind:()=>"insurance",getVehicleVisitNextBlocker:()=>null,advanceVehicleVisit:vi.fn(),reconcileVehicleVisitCustody:vi.fn()}));
 function fixture(){return{
   entry:{id:"entry",tenant_id:"tenant",entry_number:"ENT-1",updated_at:"baseline",vehicle_id:"car",insurance_claim_id:"claim",work_order_id:null,converted_work_order_id:null,__inferredOrderLink:true,

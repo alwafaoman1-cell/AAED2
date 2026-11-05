@@ -72,31 +72,23 @@ export async function getCurrentTenantId(): Promise<string | null> {
     if (!uid) return null;
     const { data, error } = await supabase
       .from("profiles")
-      .select("tenant_id")
+      .select("tenant_id, user_id, account_status, disabled_at")
       .eq("user_id", uid)
       .maybeSingle();
     if (!isCurrent()) return null;
-    if (!error && data?.tenant_id) {
+    if (!error) {
+      if (data?.user_id !== uid || data.account_status !== "active" || data.disabled_at != null || !data.tenant_id) return null;
       cachedTenantId = data.tenant_id;
       return cachedTenantId;
     }
 
-    const { data: rpcTenant } = await (supabase as any).rpc("get_user_tenant_id");
+    // One canonical server fallback after a transport error. An orphan
+    // user_roles row must not restore authority denied by the profile gate.
+    const { data: rpcTenant, error: rpcError } = await (supabase as any).rpc("get_user_tenant_id");
     if (!isCurrent()) return null;
-    if (rpcTenant) {
+    if (rpcError) throw rpcError;
+    if (typeof rpcTenant === "string" && rpcTenant) {
       cachedTenantId = rpcTenant;
-      return cachedTenantId;
-    }
-
-    const { data: roleTenant } = await supabase
-      .from("user_roles" as any)
-      .select("tenant_id")
-      .eq("user_id", uid)
-      .limit(1)
-      .maybeSingle();
-    if (!isCurrent()) return null;
-    if ((roleTenant as any)?.tenant_id) {
-      cachedTenantId = (roleTenant as any).tenant_id;
       return cachedTenantId;
     }
 

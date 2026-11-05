@@ -15,17 +15,12 @@ export interface UserProfile {
 
 const PROFILE_QUERY_TIMEOUT_MS = 7_000;
 const PROFILE_STORAGE_PREFIX = "alwafa.auth.profile.";
-const PROFILE_STORAGE_TTL_MS = 12 * 60 * 60_000;
+const INTERNAL_ROLES: readonly string[] = ["admin", "manager", "supervisor", "technician", "insurance", "accountant"];
 
 const profileCache = new Map<string, UserProfile | null>();
 const inFlightProfileRequests = new Map<string, Promise<UserProfile | null>>();
 const profileRequestGenerations = new Map<string, number>();
 let globalProfileCacheGeneration = 0;
-
-type StoredUserProfile = {
-  cached_at: number;
-  profile: UserProfile;
-};
 
 function profileStorageKey(uid: string) {
   return `${PROFILE_STORAGE_PREFIX}${uid}`;
@@ -41,47 +36,22 @@ function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: strin
   }) as Promise<T>;
 }
 
-function readStoredProfile(uid: string): UserProfile | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(profileStorageKey(uid));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredUserProfile>;
-    const storedProfile = parsed.profile;
-    if (!storedProfile || storedProfile.user_id !== uid || !storedProfile.tenant_id) {
-      window.sessionStorage.removeItem(profileStorageKey(uid));
-      return null;
-    }
-    if (!parsed.cached_at || Date.now() - parsed.cached_at > PROFILE_STORAGE_TTL_MS) {
-      window.sessionStorage.removeItem(profileStorageKey(uid));
-      return null;
-    }
-    return storedProfile;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredProfile(uid: string, profile: UserProfile | null) {
+function clearLegacyStoredProfile(uid: string) {
   if (typeof window === "undefined") return;
   try {
-    if (!profile) {
-      window.sessionStorage.removeItem(profileStorageKey(uid));
-      return;
-    }
-    window.sessionStorage.setItem(
-      profileStorageKey(uid),
-      JSON.stringify({ cached_at: Date.now(), profile } satisfies StoredUserProfile),
-    );
+    window.sessionStorage.removeItem(profileStorageKey(uid));
   } catch {
-    // Storage cache is best-effort only; Supabase remains the source of truth.
+    // An old browser cache must never authorize a tenant or a role.
   }
 }
 
 function profileFromPartial(row: any, uid: string, user?: User | null): UserProfile | null {
-  const tenantId = String(row?.tenant_id || user?.user_metadata?.tenant_id || "").trim();
-  const role = String(row?.role || user?.user_metadata?.role || "admin").trim() as AppRole;
-  if (!tenantId) return null;
+  // Only a confirmed database row can establish authority. Auth user_metadata
+  // is user-editable; it is suitable for display defaults, never tenant/role.
+  if (!row || row.user_id !== uid || row.account_status !== "active" || row.disabled_at != null) return null;
+  const tenantId = typeof row.tenant_id === "string" ? row.tenant_id.trim() : "";
+  const role = typeof row.role === "string" ? row.role.trim() : "";
+  if (!tenantId || !INTERNAL_ROLES.includes(role)) return null;
   return {
     id: String(row?.id || uid),
     user_id: String(row?.user_id || uid),
@@ -95,7 +65,7 @@ function profileFromPartial(row: any, uid: string, user?: User | null): UserProf
     ),
     phone: row?.phone ?? user?.user_metadata?.phone ?? null,
     avatar_url: row?.avatar_url ?? user?.user_metadata?.avatar_url ?? null,
-    role,
+    role: role as AppRole,
   };
 }
 
@@ -157,28 +127,27 @@ async function fetchProfileFromSupabase(uid: string, session: Session | null): P
   ).catch((error) => ({ data: null, error }));
 
   if (!(sdkResult as any)?.error) {
-    const profile = profileFromPartial((sdkResult as any).data, uid, sessionUser);
-    if (profile) return profile;
+    // Missing, inactive or invalid cloud identity is authoritative, not a
+    // transient transport error. Do not retry it through a different path.
+    return profileFromPartial((sdkResult as any).data, uid, sessionUser);
   }
 
-  // Single explicit fallback when the Supabase SDK profile read fails or returns
-  // no usable tenant. This avoids the previous parallel SDK/REST/RPC/user_roles
+  // Single explicit fallback when the Supabase SDK profile read fails.
+  // This avoids the previous parallel SDK/REST/RPC/user_roles
   // request fan-out while preserving a recovery path for transient SDK issues.
   const restProfile = await fetchProfileViaRest(uid, sessionUser, accessToken);
   if (restProfile) return restProfile;
 
-  return profileFromPartial(null, uid, sessionUser);
+  return null;
 }
 
 export async function getCachedAuthProfile(uid: string, options: { forceRefresh?: boolean; session?: Session | null } = {}): Promise<UserProfile | null> {
   if (options.forceRefresh) clearCachedAuthProfile(uid);
   if (!options.forceRefresh && profileCache.has(uid)) return profileCache.get(uid) ?? null;
 
-  const stored = options.forceRefresh ? null : readStoredProfile(uid);
-  if (stored) {
-    profileCache.set(uid, stored);
-    return stored;
-  }
+  // Keep in-memory request de-duplication, but revalidate cloud authority after
+  // every page reload. A twelve-hour sessionStorage snapshot is not authority.
+  clearLegacyStoredProfile(uid);
 
   const inFlight = inFlightProfileRequests.get(uid);
   if (inFlight) return inFlight;
@@ -196,10 +165,8 @@ export async function getCachedAuthProfile(uid: string, options: { forceRefresh?
     if (!isStillCurrent) return result;
     if (result) {
       profileCache.set(uid, result);
-      writeStoredProfile(uid, result);
     } else {
       profileCache.delete(uid);
-      writeStoredProfile(uid, null);
     }
     return result;
   } finally {
@@ -213,7 +180,7 @@ export function clearCachedAuthProfile(uid: string) {
   profileRequestGenerations.set(uid, (profileRequestGenerations.get(uid) || 0) + 1);
   profileCache.delete(uid);
   inFlightProfileRequests.delete(uid);
-  writeStoredProfile(uid, null);
+  clearLegacyStoredProfile(uid);
 }
 
 export function clearAllAuthProfileCache() {

@@ -26,6 +26,10 @@ import { saveInsuranceDamageReport } from "@/lib/insuranceDamageReportService";
 import { logActivity } from "@/lib/auditLogStore";
 import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
+import type { VehicleEntryInspectionContext } from "@/lib/vehicleEntryInspection";
+import "@/i18n/vehicleEntryInspection";
 
 interface Props {
   open: boolean;
@@ -35,6 +39,7 @@ interface Props {
   asPage?: boolean;
   /** When provided, loads an existing saved inspection for editing */
   editId?: string;
+  entryContext?: VehicleEntryInspectionContext;
 }
 
 const STEPS = ["البيانات الأساسية", "بنود الفحص", "مخطط الأضرار", "الملاحظات والحفظ"];
@@ -45,7 +50,9 @@ const cloneSections = (): InsuranceInspSection[] =>
     items: s.items.map(i => ({ ...i, repair: false, suspect: false, replace: false, comment: "" })),
   }));
 
-export default function InsuranceInspectionDialog({ open, onOpenChange, preselectOrderId, asPage, editId }: Props) {
+export default function InsuranceInspectionDialog({ open, onOpenChange, preselectOrderId, asPage, editId, entryContext }: Props) {
+  const { t } = useTranslation("vehicleEntryInspection");
+  const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
   const [linkedOrderId, setLinkedOrderId] = useState("");
   const [meta, setMeta] = useState({
@@ -86,7 +93,7 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
   const pendingSaveRef = useRef<Promise<{ id: string; data: Parameters<typeof generateInsuranceInspectionPdf>[0] }> | null>(null);
 
   const workOrders = getWorkOrders();
-  const { data: claims = [] } = useInsuranceClaims();
+  const { data: claims = [] } = useInsuranceClaims(!entryContext);
   const currentTemplate = VEHICLE_TEMPLATES.find(t => t.id === templateId) || VEHICLE_TEMPLATES[0];
   const currentImage = imageMode === "photo" && photos[activePhotoIdx]
     ? photos[activePhotoIdx]
@@ -94,6 +101,21 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
 
   // reset on open/close
   useEffect(() => {
+    if (open && entryContext) {
+      savedCodeRef.current = entryContext.existingCode || null;
+      setLinkedOrderId(entryContext.workOrderNumber || "");
+      setLinkedClaimId(entryContext.claimId);
+      setLoadFailed(false);
+      if (entryContext.report) {
+        const { remarks: r, sections: s, photos: p, annotatedImages: a, ...rest } = entryContext.report;
+        setMeta(m => ({ ...m, ...rest, ...entryContext.meta }));
+        setSections(s?.length ? s : cloneSections()); setRemarks(r || ""); setPhotos(p || []);
+        setAnnotatedMap(Object.fromEntries((a || []).map((src, index) => [`saved:${index}`, src])));
+      } else {
+        setMeta(m => ({ ...m, ...entryContext.meta, reportNo: "" }));
+      }
+      return;
+    }
     if (open && editId) {
       savedCodeRef.current = editId;
       setSaveBusy(true);
@@ -153,7 +175,7 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
       setMeta(m => ({ ...m, reportNo: "DR-00001", date: new Date().toISOString().split("T")[0] }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, preselectOrderId, editId]);
+  }, [open, preselectOrderId, editId, entryContext]);
 
   function selectOrder(orderId: string) {
     setLinkedOrderId(orderId);
@@ -312,17 +334,26 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
           existingCode,
           requestId: requestIdRef.current,
           workOrderNumber: linkedOrderId || undefined,
+          vehicleEntryId: entryContext?.entryId, claimId: entryContext?.claimId,
           report,
         });
-        if (!existingCode && saveOutcomeUnknownRef.current) {
+        if (!entryContext && !existingCode && saveOutcomeUnknownRef.current) {
           // A timed-out first request may already have committed an older draft.
           savedCodeRef.current = saved.id;
           saved = await saveInsuranceDamageReport({
             existingCode: saved.id,
             requestId: requestIdRef.current,
             workOrderNumber: linkedOrderId || undefined,
+            vehicleEntryId: entryContext?.entryId, claimId: entryContext?.claimId,
             report,
           });
+        }
+        if (entryContext && saveOutcomeUnknownRef.current) {
+          // A lost response is not permission to overwrite another user's edit.
+          // Recover the confirmed server version and display exactly that data.
+          const { remarks: r, sections: s, photos: p, annotatedImages: a, ...rest } = saved.report;
+          setMeta(m => ({ ...m, ...rest })); setRemarks(r || ""); setSections(s || cloneSections());
+          setPhotos(p || []); setAnnotatedMap(Object.fromEntries((a || []).map((src, index) => [`saved:${index}`, src])));
         }
         saveOutcomeUnknownRef.current = false;
       } catch (error) {
@@ -333,6 +364,11 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
       setMeta(m => ({ ...m, reportNo: saved.id }));
       insuranceInspectionStore.prime(saved.id, saved.report);
       await inspectionsStore.refresh();
+      if (entryContext) {
+        void queryClient.invalidateQueries({ queryKey: ["insurance_claims"] });
+        void queryClient.invalidateQueries({ queryKey: ["vehicle_visit"] });
+        void queryClient.invalidateQueries({ queryKey: ["vehicle_entry_inspection"], refetchType: "none" });
+      }
       logActivity({
         action: existingCode ? "update" : "create",
         entity: "inspection",
@@ -357,10 +393,10 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
     setSaveBusy(true);
     try {
       const saved = await persistInspection();
-      toast.success(`Saved report ${saved.id}`);
+      toast.success(entryContext ? t("saved", { number: saved.id }) : `Saved report ${saved.id}`);
       onOpenChange(false);
     } catch (error) {
-      toast.error(`تعذّر حفظ التقرير: ${(error as Error)?.message || "خطأ غير معروف"}`);
+      toast.error(entryContext ? t("saveFailed") : `تعذّر حفظ التقرير: ${(error as Error)?.message || "خطأ غير معروف"}`);
     } finally { setSaveBusy(false); }
   }
 
@@ -453,7 +489,7 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
         {/* Step 0 — Meta */}
         {step === 0 && (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {!entryContext && <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Searchable work-order picker */}
               <div className="p-3 rounded-lg bg-primary/5 border border-primary/20 space-y-2">
                 <label className="text-xs font-semibold text-primary flex items-center gap-1">
@@ -540,15 +576,15 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
                   </PopoverContent>
                 </Popover>
               </div>
-            </div>
+            </div>}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="رقم المطالبة CLAIM NO." val={meta.claimNo} onChange={v => setMeta(m => ({ ...m, claimNo: v }))} mono />
-              <Field label="شركة التأمين Insurance Company" val={meta.insuranceCompany} onChange={v => setMeta(m => ({ ...m, insuranceCompany: v }))} />
-              <Field label="رقم اللوحة REG NO." val={meta.regNo} onChange={v => setMeta(m => ({ ...m, regNo: v }))} mono />
-              <Field label="إذن الدخول GATE PASS" val={meta.gatePass} onChange={v => setMeta(m => ({ ...m, gatePass: v }))} mono />
-              <Field label="الماركة/الموديل MAKE/MODEL" val={meta.makeModel} onChange={v => setMeta(m => ({ ...m, makeModel: v }))} />
-              <Field label="سنة الصنع MODEL YEAR" val={meta.modelYear} onChange={v => setMeta(m => ({ ...m, modelYear: v }))} mono />
+              <Field label="رقم المطالبة CLAIM NO." val={meta.claimNo} onChange={v => setMeta(m => ({ ...m, claimNo: v }))} mono disabled={Boolean(entryContext)} />
+              <Field label="شركة التأمين Insurance Company" val={meta.insuranceCompany} onChange={v => setMeta(m => ({ ...m, insuranceCompany: v }))} disabled={Boolean(entryContext)} />
+              <Field label="رقم اللوحة REG NO." val={meta.regNo} onChange={v => setMeta(m => ({ ...m, regNo: v }))} mono disabled={Boolean(entryContext)} />
+              <Field label="إذن الدخول GATE PASS" val={meta.gatePass} onChange={v => setMeta(m => ({ ...m, gatePass: v }))} mono disabled={Boolean(entryContext)} />
+              <Field label="الماركة/الموديل MAKE/MODEL" val={meta.makeModel} onChange={v => setMeta(m => ({ ...m, makeModel: v }))} disabled={Boolean(entryContext)} />
+              <Field label="سنة الصنع MODEL YEAR" val={meta.modelYear} onChange={v => setMeta(m => ({ ...m, modelYear: v }))} mono disabled={Boolean(entryContext)} />
               <Field label="المنطقة AREA" val={meta.area} onChange={v => setMeta(m => ({ ...m, area: v }))} />
               <Field label="النوع TYPE" val={meta.type} onChange={v => setMeta(m => ({ ...m, type: v }))} />
               <Field label="درجة الورشة W/S GRADE" val={meta.workshopGrade} onChange={v => setMeta(m => ({ ...m, workshopGrade: v }))} />
@@ -800,11 +836,11 @@ export default function InsuranceInspectionDialog({ open, onOpenChange, preselec
   );
 }
 
-function Field({ label, val, onChange, mono }: { label: string; val: string; onChange: (v: string) => void; mono?: boolean }) {
+function Field({ label, val, onChange, mono, disabled }: { label: string; val: string; onChange: (v: string) => void; mono?: boolean; disabled?: boolean }) {
   return (
     <div className="space-y-1">
       <label className="text-xs text-muted-foreground">{label}</label>
-      <Input value={val} onChange={e => onChange(e.target.value)} className={cn("bg-secondary border-border text-foreground", mono && "font-mono")} />
+      <Input aria-label={label} disabled={disabled} value={val} onChange={e => onChange(e.target.value)} className={cn("bg-secondary border-border text-foreground", mono && "font-mono")} />
     </div>
   );
 }

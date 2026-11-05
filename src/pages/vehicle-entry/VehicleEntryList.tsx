@@ -19,6 +19,7 @@ import { VehicleEntryStartChoices } from "@/components/vehicle-entry/VehicleEntr
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { VehicleEntryInspectionAction } from "@/components/vehicle-entry/VehicleEntryInspectionAction";
 
 export default function VehicleEntryList() {
   const { t, i18n } = useTranslation();
@@ -188,6 +189,7 @@ export default function VehicleEntryList() {
             <div className="mt-2 break-words text-xs text-muted-foreground">{row.work_order?.order_number || row.converted_work_order?.order_number || row.claim?.claim_number || row.converted_claim?.claim_number || purposeLabel(row)}</div>
             <Button aria-label={`${t("vehicleVisit.manageLocationAndStage")} · ${row.entry_number || row.claim?.claim_number || t("vehicleVisit.claimOnlyCard")}`} className="mt-2 h-auto min-h-9 w-full gap-2 whitespace-normal" variant="outline" size="sm" onClick={() => setQuickActionRow(row)}><MapPin className="h-4 w-4" aria-hidden="true" />{t("vehicleVisit.manageLocationAndStage")}</Button>
             {registerEntryAction(row)}
+            <div className="mt-2"><VehicleEntryInspectionAction entry={row} /></div>
           </div>;
         })}</div>
       </section>)}</div>;
@@ -226,6 +228,7 @@ export default function VehicleEntryList() {
         </details>
         <Button aria-label={`${t("vehicleVisit.manageLocationAndStage")} · ${row.entry_number || row.claim?.claim_number || t("vehicleVisit.claimOnlyCard")}`} className="mt-3 h-auto min-h-9 w-full gap-2 whitespace-normal" size="sm" variant="outline" onClick={() => setQuickActionRow(row)}><MapPin className="h-4 w-4" aria-hidden="true" />{t("vehicleVisit.manageLocationAndStage")}</Button>
         {registerEntryAction(row)}
+        <div className="mt-2"><VehicleEntryInspectionAction entry={row} /></div>
       </article>;
     })}</div>;
     return (
@@ -266,7 +269,7 @@ export default function VehicleEntryList() {
                   <td className="p-3"><span className="rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">{row._claimOnly ? t(`vehicleVisit.claimStatus.${row.status}`, { defaultValue: row.status }) : statusLabel(row.status)}</span></td>
                   <td className="p-3">{t(`vehicleVisit.${row._visitStage}`)}{row._reviewReason && !row._claimOnly && <div className="max-w-44 text-xs text-warning" role="status">{t(`vehicleVisit.${row._reviewReason}`, { defaultValue: row._reviewReason })}</div>}</td>
                   <td className="p-3">{row.work_order?.technician_name || row.converted_work_order?.technician_name || "—"}</td>
-                  <td className="p-3"><Button size="sm" variant="outline" aria-label={`${t("vehicleVisit.manageLocationAndStage")} · ${row.entry_number || row.claim?.claim_number || t("vehicleVisit.claimOnlyCard")}`} className="gap-2 whitespace-nowrap" onClick={() => setQuickActionRow(row)}><MapPin className="h-4 w-4" aria-hidden="true" />{t("vehicleVisit.manageLocationAndStage")}</Button>{registerEntryAction(row)}</td>
+                  <td className="p-3"><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" aria-label={`${t("vehicleVisit.manageLocationAndStage")} · ${row.entry_number || row.claim?.claim_number || t("vehicleVisit.claimOnlyCard")}`} className="gap-2 whitespace-nowrap" onClick={() => setQuickActionRow(row)}><MapPin className="h-4 w-4" aria-hidden="true" />{t("vehicleVisit.manageLocationAndStage")}</Button>{registerEntryAction(row)}<VehicleEntryInspectionAction entry={row} /></div></td>
                 </tr>
               );
             })}

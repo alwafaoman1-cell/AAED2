@@ -1,3 +1,4 @@
+import "@/lib/i18n/reportSafety";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -103,7 +104,7 @@ function datePreset(preset: "today" | "month" | "year") {
 }
 
 export default function ReportsCenter() {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { profile } = useAuth();
   const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -125,7 +126,6 @@ export default function ReportsCenter() {
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
-    placeholderData: (previous) => previous,
   });
 
   const visibleReports = useMemo(() => {
@@ -221,8 +221,8 @@ export default function ReportsCenter() {
         { labelAr: "الفواتير قبل الضريبة", labelEn: "Invoice Subtotal", value: formatOMR(summary.invoiceSubtotal), tip: REPORT_ACCOUNTING_RULES.invoiceRevenue },
         { labelAr: "VAT", labelEn: "VAT", value: formatOMR(summary.vat), tip: REPORT_ACCOUNTING_RULES.vat },
         { labelAr: "إجمالي الفواتير", labelEn: "Invoice Total", value: formatOMR(summary.invoiceTotal) },
-        { labelAr: "المحصّل", labelEn: "Paid", value: formatOMR(summary.paid), tip: REPORT_ACCOUNTING_RULES.paidAmount },
-        { labelAr: "المتبقي", labelEn: "Outstanding", value: formatOMR(summary.outstanding) },
+        { labelAr: "المحصّل", labelEn: "Paid", value: formatOMR(summary.paid), tip: t("reportSafety.paymentPeriod") },
+        { labelAr: "المتبقي", labelEn: "Outstanding", value: formatOMR(summary.outstanding), tip: t("reportSafety.invoiceBalance") },
         { labelAr: "التكاليف الفعلية", labelEn: "Actual Costs", value: formatOMR(summary.expenses), tip: REPORT_ACCOUNTING_RULES.directCosts },
         { labelAr: "تكلفة القطع", labelEn: "Parts Cost", value: formatOMR(summary.partsCost) },
         { labelAr: "تكلفة العمالة", labelEn: "Labour Cost", value: formatOMR(summary.laborCost) },
@@ -449,6 +449,13 @@ export default function ReportsCenter() {
             <Card key={index} className="h-24 animate-pulse bg-muted/40" />
           ))}
         </div>
+      ) : summaryQuery.isError ? (
+        <Card role="alert" className="border-destructive/40 bg-destructive/10 p-4 text-sm text-foreground">
+          <p>{t("reportSafety.summaryFailure")}</p>
+          <Button variant="outline" className="mt-3" onClick={() => summaryQuery.refetch()} disabled={summaryQuery.isFetching}>
+            {t("reportSafety.retry")}
+          </Button>
+        </Card>
       ) : summaryQuery.data?.available && summary ? (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
           {summaryCards.map((card) => (

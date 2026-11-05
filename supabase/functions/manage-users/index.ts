@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 interface Body {
-  action: "create" | "update" | "delete" | "list" | "invite" | "login_link" | "reset_access" | "disable" | "enable" | "assign_tenant";
+  action: "create" | "update" | "delete" | "list" | "invite" | "accept_invite" | "login_link" | "reset_access" | "disable" | "enable" | "assign_tenant";
   id?: string;
   tenant_id?: string;
   email?: string;
@@ -16,6 +16,12 @@ interface Body {
   phone?: string;
   role?: "admin" | "manager" | "supervisor" | "technician" | "insurance" | "accountant";
   avatar_url?: string;
+}
+
+class ProfileProvisioningError extends Error {
+  constructor(readonly userId: string) {
+    super("profile_provisioning_incomplete");
+  }
 }
 
 Deno.serve(async (req) => {
@@ -61,17 +67,45 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const { data: callerProfile } = await admin
       .from("profiles")
-      .select("tenant_id, role, is_platform_admin, account_status")
+      .select("tenant_id, role, is_platform_admin, account_status, disabled_at")
       .eq("user_id", callerUserId)
       .maybeSingle();
 
-    if (!callerProfile || callerProfile.account_status === "disabled" || !["admin", "manager"].includes(callerProfile.role)) {
+    const body: Body = await req.json();
+    // Accepting one's own verified invitation is not an administrative action.
+    // The Auth service confirms acceptance; user metadata and body target IDs
+    // cannot activate, reparent or grant roles to any account.
+    if (body.action === "accept_invite") {
+      if (!callerProfile?.tenant_id || callerProfile.disabled_at != null
+        || !["active", "invited"].includes(callerProfile.account_status)) {
+        return Response.json({ error: "invitation_activation_denied" }, { status: 403, headers: corsHeaders });
+      }
+      if (callerProfile.account_status === "active") return Response.json({ ok: true }, { headers: corsHeaders });
+      const { data: accepted, error: authError } = await admin.auth.admin.getUserById(callerUserId);
+      if (authError || accepted.user?.id !== callerUserId || !accepted.user.email_confirmed_at || !accepted.user.last_sign_in_at) {
+        return Response.json({ error: "invitation_not_confirmed" }, { status: 403, headers: corsHeaders });
+      }
+      const { data: roles, error: roleError } = await admin.from("user_roles").select("role, tenant_id").eq("user_id", callerUserId);
+      if (roleError || roles?.length !== 1 || roles[0].role !== callerProfile.role || roles[0].tenant_id !== callerProfile.tenant_id) {
+        return Response.json({ error: "invitation_role_unconfirmed" }, { status: 403, headers: corsHeaders });
+      }
+      const { data: activated, error: activationError } = await admin.from("profiles")
+        .update({ account_status: "active" }).eq("user_id", callerUserId)
+        .eq("tenant_id", callerProfile.tenant_id).eq("role", callerProfile.role)
+        .eq("account_status", "invited").is("disabled_at", null)
+        .select("user_id, account_status").maybeSingle();
+      if (activationError || activated?.user_id !== callerUserId || activated.account_status !== "active") {
+        return Response.json({ error: "invitation_activation_unconfirmed" }, { status: 409, headers: corsHeaders });
+      }
+      return Response.json({ ok: true }, { headers: corsHeaders });
+    }
+
+    if (!callerProfile || callerProfile.account_status !== "active" || callerProfile.disabled_at != null || !["admin", "manager"].includes(callerProfile.role)) {
       return new Response(JSON.stringify({ error: "Forbidden — admin only" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const body: Body = await req.json();
     const tenant_id = callerProfile.is_platform_admin && body.tenant_id
       ? body.tenant_id
       : callerProfile.tenant_id;
@@ -120,6 +154,63 @@ Deno.serve(async (req) => {
       });
     }
 
+    const isNewUser = body.action === "create" || (body.action === "invite" && !body.id);
+    if (isNewUser) {
+      if (!body.role || !["admin", "manager", "supervisor", "technician", "insurance", "accountant"].includes(body.role)) {
+        return new Response(JSON.stringify({ error: "Valid role required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      // Platform admins may choose an EXISTING tenant; ordinary admins/managers
+      // always use their DB profile tenant, never a request/metadata override.
+      const { data: tenant, error: tenantError } = await admin.from("tenants")
+        .select("id").eq("id", tenant_id).maybeSingle();
+      if (tenantError) throw tenantError;
+      if (!tenant) throw new Error("Target tenant not found");
+    }
+
+    const saveManagedProfile = async (userId: string | undefined, accountStatus: "active" | "invited") => {
+      if (!userId) throw new Error("Auth did not return a user");
+      const incomplete = () => new ProfileProvisioningError(userId);
+      const { data: existing, error: existingError } = await admin.from("profiles")
+        .select("tenant_id, role").eq("user_id", userId).maybeSingle();
+      if (existingError) throw incomplete();
+      // Invite can return an already-existing unconfirmed Auth user. Do not
+      // reparent that account, or let a manager overwrite an existing admin.
+      if (existing && (existing.tenant_id !== tenant_id || (existing.role === "admin" && callerRole !== "admin"))) {
+        throw incomplete();
+      }
+      const fields = {
+        user_id: userId,
+        tenant_id,
+        full_name: body.full_name,
+        phone: body.phone || null,
+        role: body.role,
+        account_status: accountStatus,
+        ...(accountStatus === "invited"
+          ? { invited_at: new Date().toISOString() }
+          : { avatar_url: body.avatar_url || null }),
+      };
+      // No read-then-upsert: concurrent invitations/assignment must not overwrite
+      // a profile that appeared or changed tenants/roles after our lookup.
+      const write = existing
+        ? admin.from("profiles").update(fields).eq("user_id", userId)
+          .eq("tenant_id", tenant_id).eq("role", existing.role)
+        : admin.from("profiles").insert(fields);
+      const { data: saved, error: profileError } = await write
+        .select("user_id, tenant_id, role, account_status").single();
+      if (profileError || !saved || saved.user_id !== userId || saved.tenant_id !== tenant_id
+        || saved.role !== body.role || saved.account_status !== accountStatus) throw incomplete();
+
+      // The existing profile trigger maintains the authoritative single-role
+      // table. Confirm it too; never silently repair/move a stale role binding.
+      const { data: roles, error: roleError } = await admin.from("user_roles")
+        .select("tenant_id, role").eq("user_id", userId);
+      if (roleError || !roles || roles.length !== 1 || roles[0].tenant_id !== tenant_id
+        || roles[0].role !== body.role) throw incomplete();
+    };
+
     if (body.action === "create") {
       if (!body.email || !body.password || !body.full_name || !body.role) {
         return new Response(JSON.stringify({ error: "Missing fields" }), {
@@ -133,24 +224,12 @@ Deno.serve(async (req) => {
         email_confirm: true,
         user_metadata: {
           full_name: body.full_name,
-          tenant_id,
-          role: body.role,
+          // Deferral only, never authorization. See handle_new_user migration.
+          profile_provisioning: "manage-users",
         },
       });
       if (createErr) throw createErr;
-      // Ensure profile exists with correct fields (in case trigger ran with defaults)
-      await admin.from("profiles").upsert(
-        {
-          user_id: created.user!.id,
-          tenant_id,
-          full_name: body.full_name,
-          phone: body.phone || null,
-          role: body.role,
-          avatar_url: body.avatar_url || null,
-          account_status: "active",
-        },
-        { onConflict: "user_id" }
-      );
+      await saveManagedProfile(created?.user?.id, "active");
       await audit("user_created", created.user!.id, { email: body.email, role: body.role });
       return new Response(JSON.stringify({ ok: true, user_id: created.user!.id }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -167,21 +246,11 @@ Deno.serve(async (req) => {
       const siteUrl = Deno.env.get("SITE_URL") || "https://aaed-2.vercel.app";
       const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(body.email, {
         redirectTo: `${siteUrl}/reset-password`,
-        data: { full_name: body.full_name, tenant_id, role: body.role },
+        data: { full_name: body.full_name, profile_provisioning: "manage-users" },
       });
       if (inviteError) throw inviteError;
-      if (invited.user) {
-        await admin.from("profiles").upsert({
-          user_id: invited.user.id,
-          tenant_id,
-          full_name: body.full_name,
-          phone: body.phone || null,
-          role: body.role,
-          account_status: "invited",
-          invited_at: new Date().toISOString(),
-        }, { onConflict: "user_id" });
-        await audit("user_invited", invited.user.id, { email: body.email, role: body.role });
-      }
+      await saveManagedProfile(invited?.user?.id, "invited");
+      await audit("user_invited", invited.user!.id, { email: body.email, role: body.role });
       return new Response(JSON.stringify({ ok: true, user_id: invited.user?.id }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -289,7 +358,7 @@ Deno.serve(async (req) => {
       const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
         type: linkType,
         email,
-        options: { redirectTo: body.action === "reset_access" ? `${siteUrl}/reset-password` : siteUrl },
+        options: { redirectTo: ["reset_access", "invite"].includes(body.action) ? `${siteUrl}/reset-password` : siteUrl },
       });
       if (linkError) throw linkError;
       const profileUpdates: Record<string, unknown> = {
@@ -342,6 +411,18 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
+    if (e instanceof ProfileProvisioningError) {
+      // Auth creation / invite email may already have completed. Surface the ID
+      // for explicit admin recovery; do not delete accounts or blindly retry.
+      return new Response(JSON.stringify({
+        error: "Profile provisioning incomplete. Review this user before retrying.",
+        code: "profile_provisioning_incomplete",
+        user_id: e.userId,
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     console.error("manage-users unhandled error:", e);
     return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,

@@ -176,9 +176,12 @@ export async function readCloudSetting<T>(key: string, fallback: T): Promise<T> 
 }
 
 /** Bypass the short-lived cache after a rejected optimistic write. */
-export async function readCloudSettingFresh<T>(key: string, fallback: T): Promise<T> {
+export async function readCloudSettingFresh<T>(key: string, fallback: T, options: { requireConfirmed?: boolean } = {}): Promise<T> {
   const tenantId = await getCurrentTenantId();
-  if (!tenantId) return fallback;
+  if (!tenantId) {
+    if (options.requireConfirmed) throw new Error("CLOUD_SETTING_TENANT_REQUIRED");
+    return fallback;
+  }
   ensureTenantScope(tenantId);
   const generation = settingsGeneration;
   const { data, error } = await supabase.from("tenant_settings")
@@ -187,10 +190,14 @@ export async function readCloudSettingFresh<T>(key: string, fallback: T): Promis
     .eq("key", key)
     .maybeSingle();
   if (error) throw error;
-  if (generation !== settingsGeneration || activeTenantId !== tenantId) return fallback;
+  if (generation !== settingsGeneration || activeTenantId !== tenantId) {
+    if (options.requireConfirmed) throw new Error("CLOUD_SETTING_SESSION_CHANGED_DURING_READ");
+    return fallback;
+  }
   const cacheKey = scopedKey(key, tenantId);
   const version = Number(data?.version || 0);
   if (version < (memoryCacheVersions.get(cacheKey) ?? 0)) {
+    if (options.requireConfirmed) throw new Error("CLOUD_SETTING_STALE_READ");
     return (memoryCache.get(cacheKey) ?? fallback) as T;
   }
   const value = (data?.value ?? fallback) as T;

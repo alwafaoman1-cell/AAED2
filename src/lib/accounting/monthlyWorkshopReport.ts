@@ -1,7 +1,8 @@
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
 import type { MonthlyVehicleProfitabilityRow } from "@/lib/accounting/monthlyVehicleProfitability";
-import { readCloudSetting } from "@/lib/cloudSettings";
+import { getCloudSettingsScopeVersion, readCloudSettingFresh, setCloudSettingsTenantScope } from "@/lib/cloudSettings";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 export type MonthlyExpenseRow = Record<string, unknown>;
 export type MonthlyExpenseGroup = Record<string, unknown>;
@@ -260,14 +261,28 @@ export function composeMonthlyWorkshopOverheads(
 }
 
 export async function fetchMonthlyWorkshopOverheads(from: string, to: string, signal?: AbortSignal) {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("MONTHLY_OVERHEAD_TENANT_REQUIRED");
+  setCloudSettingsTenantScope(tenantId);
+  const scope = getCloudSettingsScopeVersion();
   const requestSignal = signal ?? new AbortController().signal;
   const [result, hr, settings] = await Promise.all([
     supabase.rpc("monthly_workshop_overheads_rpc" as never, { p_from: from, p_to: to } as never).abortSignal(requestSignal),
-    readCloudSetting<HrSnapshot>("alwafa_hr_v1", EMPTY_HR),
-    readCloudSetting<MonthlySettingsSnapshot>("alwafa_monthly_settings_v1", EMPTY_MONTHLY_SETTINGS),
+    readCloudSettingFresh<HrSnapshot>("alwafa_hr_v1", EMPTY_HR, { requireConfirmed: true }),
+    readCloudSettingFresh<MonthlySettingsSnapshot>("alwafa_monthly_settings_v1", EMPTY_MONTHLY_SETTINGS, { requireConfirmed: true }),
   ]);
   if (result.error) throw result.error;
-  return composeMonthlyWorkshopOverheads(result.data as unknown as MonthlyWorkshopOverheads, hr, settings, from, to);
+  if (scope !== getCloudSettingsScopeVersion()) throw new Error("MONTHLY_OVERHEAD_SESSION_CHANGED");
+  if (requestSignal.aborted) throw new DOMException("Monthly overhead request cancelled", "AbortError");
+  const source = result.data as unknown as MonthlyWorkshopOverheads;
+  if (!source || !Array.isArray(source.expenseRows)
+    || !hr || typeof hr !== "object" || Array.isArray(hr)
+    || !settings || typeof settings !== "object" || Array.isArray(settings)
+    || (hr.employees !== undefined && !Array.isArray(hr.employees))
+    || (settings.fixedCosts !== undefined && !Array.isArray(settings.fixedCosts))) {
+    throw new Error("MONTHLY_OVERHEAD_INVALID_RESPONSE");
+  }
+  return composeMonthlyWorkshopOverheads(source, hr, settings, from, to);
 }
 
 function sheet(rows: unknown[][], widths: number[]) {

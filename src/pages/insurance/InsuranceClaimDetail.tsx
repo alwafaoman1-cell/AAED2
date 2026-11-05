@@ -49,6 +49,8 @@ import TemplatePicker from "@/components/print/TemplatePicker";
 import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
 import { saveWorkOrderToCloud, type WorkOrder, type NeededPart } from "@/lib/workOrdersStore";
 import { inspectionsStore, type InspectionRecord } from "@/lib/inspectionsStore";
+import { loadClaimInspection } from "@/lib/vehicleEntryInspection";
+import "@/i18n/vehicleEntryInspection";
 import { buildReopenDeliveredVehiclePatch } from "@/lib/claimDelivery";
 import InsuranceInspectionDialog from "@/components/inspection/InsuranceInspectionDialog";
 import { insuranceInspectionStore } from "@/lib/insuranceInspectionStore";
@@ -321,6 +323,16 @@ export default function InsuranceClaimDetail() {
   });
 
   // Hydrate from DB
+  const persistedInspection = useQuery({
+    queryKey: ["claim_inspection", existing?.tenant_id, id, existing?.inspection_id],
+    queryFn: () => loadClaimInspection(id!, existing!.inspection_id!),
+    enabled: Boolean(!isNew && id && existing?.inspection_id), retry: false,
+  });
+  useEffect(() => { setLinkedInspection(null); }, [id]);
+  useEffect(() => {
+    if (persistedInspection.data) setLinkedInspection(persistedInspection.data);
+  }, [persistedInspection.data]);
+
   useEffect(() => {
     if (!existing) return;
     setCompany(existing.insurance_company || "");
@@ -1469,7 +1481,7 @@ export default function InsuranceClaimDetail() {
       : "";
 
     // ── Insurance-kind: use Al Madina Takaful template with full saved payload ──
-    const insurancePayload = ins ? insuranceInspectionStore.get(ins.id) : null;
+    const insurancePayload = ins?.details?.insuranceInspectionReport || (ins ? insuranceInspectionStore.get(ins.id) : null);
     if (ins?.kind === "insurance" || insurancePayload) {
       const payload = insurancePayload || {
         reportNo: ins?.id || `INS-${claimNumber || "TMP"}`,
@@ -2982,6 +2994,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         <TabsContent value="inspect" className="space-y-4 mt-4">
           {/* Linked inspection report */}
           <Card className="p-5 space-y-3">
+            {persistedInspection.error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+              <span>{t("vehicleEntryInspection:linkedLoadFailed")}</span>
+              <Button size="sm" variant="outline" onClick={() => void persistedInspection.refetch()}>{t("vehicleEntryInspection:retry")}</Button>
+            </div>}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <ClipboardCheck size={16} className="text-primary" /> تقرير الفحص الفني
