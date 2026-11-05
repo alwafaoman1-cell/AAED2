@@ -4,6 +4,8 @@ Date: 2026-11-05. Scope: Supervisor web workspace and its shared intake, expense
 
 Decision: Development Preview ready for review, not approved for Production rollout. Browser verification is complete within the scope below. Production remains NOT APPLIED. No commit, push, main change, historical repair or external message was authorized or performed in this task.
 
+This decision records the Development-only phase. Subsequent explicit authorization to publish was handled separately; see [the Production rollout and observed limits](supervisor-tablet-production-rollout-2026-11-05.md). The historical Development evidence and its unresolved Auth discrepancy below are retained, not rewritten as an all-clear.
+
 ## Verified source and preview
 
 - Base HEAD: `b592fbbcc13f77a9e12d3a838e3be3d0b07e8755`.
