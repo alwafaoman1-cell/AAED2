@@ -4,6 +4,8 @@ import type { WaMessageKind } from "./waMessageLogStore";
 import { normalizePhone } from "./phoneUtils";
 import { readSystemPreferences } from "@/lib/systemPreferences";
 import { sendUnifiedMessage } from "@/lib/messaging/messagingService";
+import i18n from "@/i18n";
+import "@/lib/i18n/supervisorWorkspace";
 
 async function digits(s: string | undefined | null): Promise<string> {
   const prefs = await readSystemPreferences();
@@ -28,60 +30,48 @@ function getCompanyName(): string {
 // قوالب الرسائل
 // ============================================================
 
-/** قالب طلب قطع غيار للعميل (إعلامه بما يحتاجه) — بدون اسم العميل */
-export function buildPartsRequestMessage(order: WorkOrder, opts?: { onlyPending?: boolean }): string {
-  const parts = (order.partsNeeded || []).filter((p) => (opts?.onlyPending ? isPartStillNeeded(p) : true));
-  const lines: string[] = [];
-  lines.push(`*طلب قطع غيار*`);
-  lines.push(`أمر العمل: ${order.id}`);
-  const car = `${order.vehicleType || ""} ${order.model || ""} ${order.year || ""}`.trim();
-  if (car) lines.push(`السيارة: ${car}`);
-  if (order.plate) lines.push(`اللوحة: ${order.plate}`);
-  if (order.vin) lines.push(`رقم الهيكل (VIN): ${order.vin}`);
-  lines.push("");
-  lines.push(`*القطع المطلوبة (${parts.length}):*`);
-  if (parts.length === 0) {
-    lines.push("— لا توجد قطع مطلوبة —");
-  } else {
-    parts.forEach((p, i) => {
-      const status = p.status ? NEEDED_PART_STATUS_LABELS[p.status] : (p.fulfilled ? "مؤمّنة" : "بانتظار");
-      const note = p.notes ? ` — ${p.notes}` : "";
-      lines.push(`${i + 1}. ${p.name || "(بدون اسم)"} × ${p.quantity}  [${status}]${note}`);
-    });
-  }
-  lines.push("");
-  lines.push(`الرجاء تأكيد التوفر والسعر. شكراً.`);
-  lines.push(`— ${getCompanyName()}`);
+/** Language is explicit for reviewed drafts; defaults to the active UI language. */
+export function buildPartsRequestMessage(order: WorkOrder, opts?: { onlyPending?: boolean; language?: "ar" | "en" }): string {
+  const language = opts?.language || (i18n.language.startsWith("en") ? "en" : "ar");
+  const tr = (key: string) => i18n.t(key, { ns: "supervisorWorkspace", lng: language });
+  const parts = (order.partsNeeded || []).filter((part) => !opts?.onlyPending || isPartStillNeeded(part));
+  const lines = [`*${tr("partsTemplateTitle")}*`, `${tr("partsTemplateOrder")}: ${order.displayNumber || order.id}`];
+  const vehicle = [order.vehicleType, order.model, order.year].filter(Boolean).join(" ");
+  if (vehicle) lines.push(`${tr("partsTemplateVehicle")}: ${vehicle}`);
+  if (order.plate) lines.push(`${tr("partsTemplatePlate")}: ${order.plate}`);
+  if (order.vin) lines.push(`${tr("partsTemplateVin")}: ${order.vin}`);
+  lines.push("", `*${tr("partsTemplateItems")} (${parts.length}):*`);
+  if (!parts.length) lines.push(`— ${tr("partsTemplateEmpty")} —`);
+  const statusKeys = { pending: "partsTemplatePending", ordered: "partsTemplateOrdered", secured: "partsTemplateSecured", received: "partsTemplateReceived" };
+  parts.forEach((part, index) => {
+    const status = tr(part.status ? statusKeys[part.status] : part.fulfilled ? "partsTemplateSecured" : "partsTemplatePending");
+    lines.push(`${index + 1}. ${part.name || tr("partsTemplateUnnamed")} × ${part.quantity}  [${status}]${part.notes ? " — " + part.notes : ""}`);
+  });
+  lines.push("", tr("partsTemplateFooter"), `— ${tr("partsTemplateCompany")}`);
   return lines.join("\n");
 }
 
-/** طلب موجه لمورد محدد لقطعة/قطع معينة — يتضمن VIN ونوع السيارة وسنة الإصدار */
 export function buildSupplierPartsRequest(args: {
   supplierName: string;
   parts: { name: string; quantity: number; notes?: string }[];
   workOrder?: WorkOrder;
+  language?: "ar" | "en";
 }): string {
-  const lines: string[] = [];
-  lines.push(`*طلب عرض سعر — قطع غيار*`);
-  lines.push(`المورد: ${args.supplierName}`);
-  if (args.workOrder) {
-    const wo = args.workOrder;
-    if (wo.vin) lines.push(`رقم الهيكل (VIN): ${wo.vin}`);
-    const make = wo.vehicleType || "";
-    const model = wo.model || "";
-    if (make || model) lines.push(`نوع السيارة: ${[make, model].filter(Boolean).join(" ")}`);
-    if (wo.year) lines.push(`سنة الإصدار: ${wo.year}`);
-    if (wo.plate) lines.push(`اللوحة: ${wo.plate}`);
+  const language = args.language || (i18n.language.startsWith("en") ? "en" : "ar");
+  const tr = (key: string) => i18n.t(key, { ns: "supervisorWorkspace", lng: language });
+  const lines = [`*${tr("partsTemplateSupplierTitle")}*`, `${tr("supplier")}: ${args.supplierName}`];
+  const order = args.workOrder;
+  if (order) {
+    lines.push(`${tr("partsTemplateOrder")}: ${order.displayNumber || order.id}`);
+    if (order.vin) lines.push(`${tr("partsTemplateVin")}: ${order.vin}`);
+    const vehicle = [order.vehicleType, order.model].filter(Boolean).join(" ");
+    if (vehicle) lines.push(`${tr("partsTemplateVehicle")}: ${vehicle}`);
+    if (order.year) lines.push(`${tr("partsTemplateYear")}: ${order.year}`);
+    if (order.plate) lines.push(`${tr("partsTemplatePlate")}: ${order.plate}`);
   }
-  lines.push("");
-  lines.push(`*القطع المطلوبة:*`);
-  args.parts.forEach((p, i) => {
-    const note = p.notes ? ` — ${p.notes}` : "";
-    lines.push(`${i + 1}. ${p.name} × ${p.quantity}${note}`);
-  });
-  lines.push("");
-  lines.push(`الرجاء إفادتنا بالتوفر والسعر وموعد التسليم. شكراً.`);
-  lines.push(`— ${getCompanyName()}`);
+  lines.push("", `*${tr("partsTemplateItems")}:*`);
+  args.parts.forEach((part, index) => lines.push(`${index + 1}. ${part.name || tr("partsTemplateUnnamed")} × ${part.quantity}${part.notes ? " — " + part.notes : ""}`));
+  lines.push("", tr("partsTemplateSupplierFooter"), `— ${tr("partsTemplateCompany")}`);
   return lines.join("\n");
 }
 

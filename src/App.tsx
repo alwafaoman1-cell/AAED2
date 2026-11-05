@@ -154,6 +154,7 @@ const TechQrScanPage = lazy(() => import("./pages/tech/TechQrScanPage"));
 const ManagerApp = lazy(() => import("./pages/apps/ManagerApp"));
 const AccountantApp = lazy(() => import("./pages/apps/AccountantApp"));
 const SupervisorApp = lazy(() => import("./pages/apps/SupervisorApp"));
+const SupervisorEntryWorkspace = lazy(() => import("./pages/apps/SupervisorEntryWorkspace"));
 const InstallAppPage = lazy(() => import("./pages/InstallAppPage"));
 const AppsHub = lazy(() => import("./pages/AppsHub"));
 const SupplementApprovalPage = lazy(() => import("./pages/public/SupplementApprovalPage"));
@@ -286,6 +287,11 @@ const App = () => (
             <Route path="/accountant" element={<ProtectedRoute roles={["admin","manager","accountant"]}><AccountantApp /></ProtectedRoute>} />
             <Route path="/accountant-app" element={<Navigate to="/accountant" replace />} />
             <Route path="/supervisor" element={<ProtectedRoute roles={["admin","manager","supervisor"]}><SupervisorApp /></ProtectedRoute>} />
+            <Route path="/supervisor/entry/new" element={<ProtectedRoute roles={["admin","manager","supervisor"]}><SupervisorEntryWorkspace /></ProtectedRoute>} />
+            <Route path="/supervisor/entry/:id/edit" element={<ProtectedRoute roles={["admin","manager","supervisor"]}><SupervisorEntryWorkspace /></ProtectedRoute>} />
+            <Route path="/supervisor/entry/:id/complete" element={<ProtectedRoute roles={["admin","manager","supervisor"]}><SupervisorEntryWorkspace view="complete" /></ProtectedRoute>} />
+            <Route path="/supervisor/entry/:id/inspection-release" element={<ProtectedRoute roles={["admin","manager","supervisor"]}><SupervisorEntryWorkspace view="release" /></ProtectedRoute>} />
+            <Route path="/supervisor/entry/:id/technical-declaration" element={<ProtectedRoute roles={["admin","manager","supervisor"]}><SupervisorEntryWorkspace view="technical" /></ProtectedRoute>} />
             <Route path="/supervisor-app" element={<Navigate to="/supervisor" replace />} />
 
             <Route

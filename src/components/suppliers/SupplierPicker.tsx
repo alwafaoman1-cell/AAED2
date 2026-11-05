@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import { Building2, Loader2, Plus, Search } from "lucide-react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { Building2, Loader2, Plus, Search, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { suppliersStore, type Supplier } from "@/lib/suppliersStore";
+import i18n from "@/i18n";
+import "@/lib/i18n/expenseEntryForm";
+import type { ExpenseEntryFormKey } from "@/lib/i18n/expenseEntryForm";
 
 export interface SupplierOption {
   id: string;
@@ -93,7 +97,7 @@ async function loadTableSuppliers(search: string, supplierId?: string): Promise<
 
 async function findTableDuplicate(input: { name: string; phone?: string; taxNumber?: string }) {
   const tenantId = await getCurrentTenantId();
-  if (!tenantId) throw new Error("لا يمكن تحديد الورشة الحالية");
+  if (!tenantId) throw new Error(i18n.t("expenseEntryForm.pickerTenantUnavailable"));
 
   const name = input.name.trim();
   const phone = input.phone?.trim();
@@ -140,7 +144,7 @@ async function ensureTableSupplier(input: {
   vehicleBrands?: string[];
 }) {
   const tenantId = await getCurrentTenantId();
-  if (!tenantId) throw new Error("لا يمكن تحديد الورشة الحالية");
+  if (!tenantId) throw new Error(i18n.t("expenseEntryForm.pickerTenantUnavailable"));
 
   const duplicate = await findTableDuplicate(input);
   const requestedBrands = Array.from(new Set((input.vehicleBrands || []).map((brand) => brand.trim()).filter(Boolean)));
@@ -207,11 +211,18 @@ export default function SupplierPicker({
   supplierId,
   supplierName,
   taxNumber,
-  label = "المورد",
-  placeholder = "ابحث باسم المورد أو الهاتف أو الرقم الضريبي",
+  label,
+  placeholder,
   onChange,
   onClear,
 }: SupplierPickerProps) {
+  const { t: translate, i18n: language } = useTranslation();
+  const t = (key: ExpenseEntryFormKey, values?: Record<string, unknown>) => translate("expenseEntryForm." + key, values);
+  const isAr = language.language?.startsWith("ar");
+  const id = useId();
+  const inputId = (field: string) => id + "-" + field;
+  const displayError = (message: string | undefined, fallback: ExpenseEntryFormKey) =>
+    !message || message === "SUPPLIER_SEARCH_FAILED" || (!isAr && /[\u0600-\u06ff]/.test(message)) ? t(fallback) : message;
   const [query, setQuery] = useState(supplierName || "");
   const [debouncedQuery, setDebouncedQuery] = useState(supplierName || "");
   const [tableSuppliers, setTableSuppliers] = useState<SupplierOption[]>([]);
@@ -252,7 +263,7 @@ export default function SupplierPicker({
       .catch((error: any) => {
         if (!cancelled) {
           setTableSuppliers([]);
-          setSearchError(error?.message || "تعذر البحث في الموردين");
+          setSearchError(error?.message || "SUPPLIER_SEARCH_FAILED");
         }
       })
       .finally(() => {
@@ -319,7 +330,7 @@ export default function SupplierPicker({
       onChange({ id: selected.id, name: selected.name, taxNumber: selected.taxNumber });
       setTableSuppliers((rows) => rows.some((row) => row.id === selected.id) ? rows : [...rows, selected]);
     } catch (error: any) {
-      toast.error(error?.message || "تعذر اختيار المورد من Supabase");
+      toast.error(displayError(error?.message, "pickerSelectFailed"));
     }
   };
 
@@ -334,7 +345,7 @@ export default function SupplierPicker({
   const saveSupplier = async () => {
     const name = newName.trim();
     if (!name) {
-      toast.error("اكتب اسم المورد");
+      toast.error(t("pickerNameRequired"));
       return;
     }
 
@@ -349,8 +360,8 @@ export default function SupplierPicker({
         vehicleBrands: parseVehicleBrands(newVehicleBrands),
       });
 
-      if (duplicate?.id) toast.info("المورد موجود مسبقًا وتم اختياره");
-      else toast.success("تم إضافة المورد واختياره");
+      if (duplicate?.id) toast.info(t("pickerExistingSelected"));
+      else toast.success(t("pickerAddedSelected"));
 
       syncLegacySupplier(selected);
       setTableSuppliers((rows) => rows.some((row) => row.id === selected.id) ? rows : [...rows, selected]);
@@ -358,27 +369,29 @@ export default function SupplierPicker({
       onChange({ id: selected.id, name: selected.name, taxNumber: selected.taxNumber });
       setAddOpen(false);
     } catch (error: any) {
-      toast.error(error?.message || "تعذر إضافة المورد");
+      toast.error(displayError(error?.message, "pickerAddFailed"));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
+    <div className="space-y-1 [&_input]:min-h-11 [&_button]:min-h-11 [&_button]:min-w-11" dir={isAr ? "rtl" : "ltr"}>
+      <Label htmlFor={inputId("search")} className="text-xs">{label ?? t("pickerSupplier")}</Label>
       <div className="relative">
-        <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute start-3 top-3 h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <Input
+          id={inputId("search")}
+          aria-label={label ?? t("pickerSupplier")}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
             onClear?.();
           }}
-          placeholder={placeholder}
-          className="pr-9"
+          placeholder={placeholder ?? t("pickerPlaceholder")}
+          className="ps-9"
         />
-        {searching && <Loader2 className="absolute left-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />}
+        {searching && <Loader2 role="status" aria-label={t("searching")} className="absolute end-3 top-3 h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
       <div className="rounded-md border border-border bg-background">
         {filtered.length > 0 ? (
@@ -388,76 +401,78 @@ export default function SupplierPicker({
                 key={`${supplier.source}-${supplier.id}`}
                 type="button"
                 onClick={() => void select(supplier)}
-                className={`w-full text-right px-3 py-2 text-xs hover:bg-secondary/60 border-b border-border/50 last:border-b-0 ${
+                className={`min-h-11 w-full text-start px-3 py-2 text-xs hover:bg-secondary/60 border-b border-border/50 last:border-b-0 ${
                   supplierId === supplier.id ? "bg-primary/10 text-primary" : ""
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold">{supplier.name}</span>
                   <span className="text-[10px] text-muted-foreground font-mono">
-                    {supplier.phone || supplier.taxNumber || "بدون هاتف"}
+                    {supplier.phone || supplier.taxNumber || t("pickerNoPhone")}
                   </span>
                 </div>
                 {(supplier.category || supplier.vehicleBrands?.length) && (
                   <div className="mt-0.5 text-[10px] text-muted-foreground">
-                    {[supplier.category, ...(supplier.vehicleBrands || [])].filter(Boolean).join(" • ")}
+                    {[supplier.category === "مصروفات" ? t("pickerExpenseCategory") : supplier.category, ...(supplier.vehicleBrands || [])].filter(Boolean).join(" • ")}
                   </div>
                 )}
               </button>
             ))}
           </div>
         ) : searchError ? (
-          <div className="px-3 py-2 text-xs text-destructive">تعذر البحث: {searchError}</div>
+          <div role="alert" className="px-3 py-2 text-xs text-destructive">{t("pickerSearchError", { error: displayError(searchError, "pickerSearchFailed") })}</div>
         ) : (
           <div className="px-3 py-2 text-xs text-muted-foreground">
-            {normalizedQuery.length < 2 ? "اكتب حرفين على الأقل للبحث" : searching ? "جاري البحث..." : "لا يوجد مورد مطابق"}
+            {t(normalizedQuery.length < 2 ? "pickerSearchMinimum" : searching ? "searching" : "pickerNoMatch")}
           </div>
         )}
         <button
           type="button"
           onClick={openAddDialog}
-          className="w-full px-3 py-2 text-xs text-right text-primary hover:bg-primary/10 flex items-center gap-2 border-t border-border"
+          className="min-h-11 w-full px-3 py-2 text-xs text-start text-primary hover:bg-primary/10 flex items-center gap-2 border-t border-border"
         >
-          <Plus size={13} />
-          + إضافة مورد جديد
+          <Plus size={13} aria-hidden="true" />
+          {t("pickerAddNew")}
         </button>
       </div>
-      {supplierId && <p className="text-[10px] text-success">تم اختيار مورد محفوظ.</p>}
+      {supplierId && <p className="text-[10px] text-success">{t("pickerSelected")}</p>}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent dir="rtl" className="max-w-md">
+        <DialogContent dir={isAr ? "rtl" : "ltr"} className="max-w-md [&_input]:min-h-11 [&_button]:min-h-11 [&_button]:min-w-11 [&>button:last-child]:hidden">
+          <DialogClose asChild><Button type="button" variant="ghost" size="icon" className="absolute end-4 top-4 min-h-11 min-w-11" aria-label={t("pickerClose")}><X className="h-4 w-4" aria-hidden="true" /></Button></DialogClose>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 size={18} /> إضافة مورد جديد
+            <DialogTitle className="flex items-center gap-2 pe-12">
+              <Building2 size={18} aria-hidden="true" />{t("pickerAddTitle")}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label>اسم المورد</Label>
-              <Input value={newName} onChange={(event) => setNewName(event.target.value)} />
+              <Label htmlFor={inputId("name")}>{t("pickerName")}</Label>
+              <Input id={inputId("name")} value={newName} onChange={(event) => setNewName(event.target.value)} />
             </div>
             <div className="space-y-1">
-              <Label>رقم الهاتف</Label>
-              <Input value={newPhone} onChange={(event) => setNewPhone(event.target.value)} />
+              <Label htmlFor={inputId("phone")}>{t("pickerPhone")}</Label>
+              <Input id={inputId("phone")} value={newPhone} onChange={(event) => setNewPhone(event.target.value)} />
             </div>
             <div className="space-y-1">
-              <Label>الرقم الضريبي</Label>
-              <Input value={newTaxNumber} onChange={(event) => setNewTaxNumber(event.target.value)} placeholder="OM..." />
+              <Label htmlFor={inputId("tax")}>{t("pickerTaxNumber")}</Label>
+              <Input id={inputId("tax")} value={newTaxNumber} onChange={(event) => setNewTaxNumber(event.target.value)} placeholder="OM..." />
             </div>
             <div className="space-y-1">
-              <Label>ماذا يبيع؟ / ماركات السيارات</Label>
+              <Label htmlFor={inputId("brands")}>{t("pickerBrands")}</Label>
               <Input
+                id={inputId("brands")}
                 value={newVehicleBrands}
                 onChange={(event) => setNewVehicleBrands(event.target.value)}
-                placeholder="مثال: لكزس، هيونداي، تويوتا"
+                placeholder={t("pickerBrandsPlaceholder")}
               />
-              <p className="text-[10px] text-muted-foreground">افصل بين الماركات بفاصلة. ستظهر هذه المعلومات في بحث الموردين.</p>
+              <p className="text-[10px] text-muted-foreground">{t("pickerBrandsHint")}</p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={saving}>إلغاء</Button>
-            <Button onClick={saveSupplier} disabled={saving}>
-              {saving ? "جاري الحفظ..." : "حفظ واختيار"}
+            <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={saving}>{t("cancel")}</Button>
+            <Button type="button" onClick={saveSupplier} disabled={saving}>
+              {t(saving ? "saving" : "pickerSaveAndSelect")}
             </Button>
           </DialogFooter>
         </DialogContent>

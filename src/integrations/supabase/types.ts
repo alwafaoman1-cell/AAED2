@@ -8457,6 +8457,60 @@ export type Database = {
           },
         ]
       }
+      vehicle_visit_transitions: {
+        Row: {
+          id: string
+          tenant_id: string
+          entry_id: string
+          revision: number
+          from_stage: string | null
+          to_stage: string
+          occurred_at: string
+          recorded_at: string
+          recorded_by: string | null
+          responsible_user_id: string | null
+          source: string
+          notes: string | null
+          reason: string | null
+          requirements: Json
+        }
+        Insert: {
+          id?: string
+          tenant_id: string
+          entry_id: string
+          revision: number
+          from_stage?: string | null
+          to_stage: string
+          occurred_at: string
+          recorded_at?: string
+          recorded_by?: string | null
+          responsible_user_id?: string | null
+          source: string
+          notes?: string | null
+          reason?: string | null
+          requirements?: Json
+        }
+        Update: {
+          id?: string
+          tenant_id?: string
+          entry_id?: string
+          revision?: number
+          from_stage?: string | null
+          to_stage?: string
+          occurred_at?: string
+          recorded_at?: string
+          recorded_by?: string | null
+          responsible_user_id?: string | null
+          source?: string
+          notes?: string | null
+          reason?: string | null
+          requirements?: Json
+        }
+        Relationships: [
+          { foreignKeyName: "vehicle_visit_transitions_entry_id_fkey"; columns: ["entry_id"]; isOneToOne: false; referencedRelation: "vehicle_entries"; referencedColumns: ["id"] },
+          { foreignKeyName: "vehicle_visit_transitions_tenant_id_fkey"; columns: ["tenant_id"]; isOneToOne: false; referencedRelation: "tenants"; referencedColumns: ["id"] },
+        ]
+      }
       vehicle_stay_notifications: {
         Row: {
           acknowledged_at: string | null
@@ -9976,6 +10030,10 @@ export type Database = {
       }
     }
     Functions: {
+      create_vehicle_inspection_release_view_link: {
+        Args: { p_release_id: string; p_expires_hours?: number }
+        Returns: Json
+      }
       save_vehicle_entry_damage_inspection: {
         Args: { p_entry_id: string; p_existing_code: string | null; p_request_id: string; p_report: Json }
         Returns: Json

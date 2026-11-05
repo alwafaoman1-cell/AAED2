@@ -53,6 +53,7 @@ export interface VehicleVisitItem {
 export const VEHICLE_CENTER_TABS = ["in_workshop", "with_customer", "delivered", "cancelled", "needs_review"] as const;
 export type VehicleCenterTab = typeof VEHICLE_CENTER_TABS[number];
 export interface VehicleCenterFilters {
+  channel?: "all" | "cash" | "insurance";
   search?: string;
   status?: string;
   from?: string;
@@ -97,6 +98,7 @@ export async function listVehicleVisitCenterPage(request: VehicleCenterPageReque
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("TENANT_NOT_FOUND");
   if (!VEHICLE_CENTER_TABS.includes(request.tab)) throw new Error("VEHICLE_CENTER_INVALID_TAB");
+  if (request.filters?.channel && !["all", "cash", "insurance"].includes(request.filters.channel)) throw new Error("VEHICLE_CENTER_INVALID_REQUEST");
   const page = Math.max(1, Math.trunc(request.page || 1));
   const pageSize = Math.max(1, Math.min(100, Math.trunc(request.pageSize || 30)));
   const { data, error } = await supabase.rpc("vehicle_visit_center_page_v1" as any, {
@@ -111,6 +113,7 @@ export async function listVehicleVisitCenterPage(request: VehicleCenterPageReque
     || !/^[a-f0-9]{32}$/.test(result.scopeToken || "")) throw new Error("VEHICLE_CENTER_INVALID_RESPONSE");
   const items = result.items.map((raw: any) => {
     const entry = raw.entry;
+    if (request.filters?.channel && request.filters.channel !== "all" && getVehicleVisitBillingKind(entry) !== request.filters.channel) throw new Error("VEHICLE_CENTER_PROJECTION_MISMATCH");
     // Defense in depth: malformed/cross-tenant payloads must not reach cards or exports.
     if (!entry || entry.tenant_id !== tenantId || (raw.workflow && raw.workflow.tenant_id !== tenantId)
       || [entry.claim, entry.converted_claim, entry.work_order, entry.converted_work_order, entry.vehicle, entry.customer]
@@ -338,6 +341,16 @@ export function getVehicleVisitNextBlocker(
     : next === "ready" && order?.status !== "completed" ? "finishWorkFirst"
     : next === "delivered" && (!hasFinalHandover || order?.status !== "delivered" || !order?.vehicle_delivered_at) ? "signedHandoverRequired"
     : null;
+}
+
+/** Mirrors the existing server's source-first reversal guard. A workflow
+ * reversal must not hide actual repair, approval or signed handover evidence.
+ * This is read-only guidance; the RPC remains the final concurrency guard. */
+export function getVehicleVisitReverseBlocker(previous: PersistedVisitStage | null | undefined, visit: VehicleVisitItem | null | undefined): string | null {
+  if (!previous || !visit) return null;
+  const rank: Record<string,number> = {arrived:1,approved:2,in_progress:3,ready:4,delivered:5,cancelled:6};
+  const evidence = resolveVehicleVisit(visit.entry, null, visit.hasFinalHandover, visit.hasSignedTemporaryRelease);
+  return (rank[evidence.operationalStage] || 0) > (rank[previous] || 0) ? "reverseSourceFirst" : null;
 }
 
 export async function listVehicleVisitCenter(): Promise<VehicleVisitItem[]> {

@@ -145,7 +145,8 @@ describe("work-order expense persistence and profitability", () => {
   it("stores and searches supplier vehicle brands from the quick add dialog", () => {
     const source = read("src/components/suppliers/SupplierPicker.tsx");
     expect(source).toContain("vehicle_brands: requestedBrands");
-    expect(source).toContain("ماذا يبيع؟ / ماركات السيارات");
+    expect(source).toContain('t("pickerBrands")');
+    expect(read("src/lib/i18n/expenseEntryForm.ts")).toContain("ماذا يبيع؟ / ماركات السيارات");
     expect(source).toContain("supplier.vehicleBrands");
   });
 });

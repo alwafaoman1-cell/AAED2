@@ -12,6 +12,8 @@ interface Props {
   orderId: string | null;
   open: boolean;
   onClose: () => void;
+  /** Photos are evidence, not canonical visit transitions, in the tablet workspace. */
+  updateOrderStatus?: boolean;
 }
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
@@ -39,7 +41,7 @@ function deriveStatusFromPhotos(photos: StagePhoto[]): string | null {
   return null;
 }
 
-export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
+export default function StagePhotosDialog({ orderId, open, onClose, updateOrderStatus = true }: Props) {
   const [order, setOrder] = useState<WorkOrder | undefined>();
   const [activePhase, setActivePhase] = useState<StagePhase>("received");
   const [caption, setCaption] = useState("");
@@ -150,7 +152,7 @@ export default function StagePhotosDialog({ orderId, open, onClose }: Props) {
     const derivedStatus = deriveStatusFromPhotos(finalPhotos);
     const patch: Partial<WorkOrder> = { photos: finalPhotos };
     let statusChanged = false;
-    if (derivedStatus && derivedStatus !== order!.status) {
+    if (updateOrderStatus && derivedStatus && derivedStatus !== order!.status) {
       patch.status = derivedStatus;
       statusChanged = true;
     }

@@ -110,14 +110,21 @@ export function requestPotentialDuplicateOverride(
 export async function checkExpenseDuplicates(
   candidate: ExpenseDuplicateCandidate,
   excludeId?: string | null,
+  options?: { required?: boolean },
 ): Promise<ExpenseDuplicateResult> {
   const { data, error } = await (supabase.rpc as any)("expense_duplicate_candidates_rpc", {
     p_candidate: candidate,
     p_exclude_id: excludeId || null,
   });
   if (error) {
-    if (isDuplicateGuardUnavailable(error)) return { exact: [], potential: [] };
+    if (isDuplicateGuardUnavailable(error)) {
+      if(options?.required) throw new Error("EXPENSE_DUPLICATE_GUARD_UNAVAILABLE");
+      return { exact: [], potential: [] };
+    }
     throw error;
+  }
+  if(options?.required && (!data || !Array.isArray(data.exact) || !Array.isArray(data.potential))) {
+    throw new Error("EXPENSE_DUPLICATE_GUARD_UNAVAILABLE");
   }
   return {
     exact: Array.isArray(data?.exact) ? data.exact : [],

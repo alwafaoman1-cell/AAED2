@@ -29,10 +29,13 @@ function omanConfirmationTime() {
   }).format(new Date()).replace(" ", "T");
 }
 
-export function VehicleVisitQuickActionDialog({ row, open, onOpenChange }: {
+export function VehicleVisitQuickActionDialog({ row, open, onOpenChange, workspace, mode, onRequestHandover }: {
   row: any | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  workspace?: "supervisor";
+  mode?: "location";
+  onRequestHandover?: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const { user, hasRole, profile } = useAuth();
@@ -234,8 +237,9 @@ export function VehicleVisitQuickActionDialog({ row, open, onOpenChange }: {
                     ? <p role="status" className="text-sm text-warning">{t("vehicleVisit.locationPermissionRequired")}</p>
                     : <div className="flex flex-wrap gap-2 rounded-lg border p-3">
                       <p className="w-full text-sm text-muted-foreground">{t("vehicleVisit.exitDocumentationRequired")}</p>
-                      {entryId && <Button variant="outline" asChild><Link to={`/vehicle-entry/${entryId}/inspection-release`}>{t("vehicleVisit.temporaryExit")}</Link></Button>}
-                      {order?.order_number && <Button variant="outline" asChild><Link to={`/work-orders/${encodeURIComponent(order.order_number)}/delivery`}>{t("vehicleVisit.finalHandover")}</Link></Button>}
+                      {entryId && <Button variant="outline" asChild><Link to={workspace === "supervisor" ? `/supervisor/entry/${entryId}/inspection-release` : `/vehicle-entry/${entryId}/inspection-release`}>{t("vehicleVisit.temporaryExit")}</Link></Button>}
+                      {order?.order_number && (workspace === "supervisor" ? <Button variant="outline" disabled={!onRequestHandover} onClick={()=>{onOpenChange(false);onRequestHandover?.();}}>{t("vehicleVisit.finalHandover")}</Button>
+                        : <Button variant="outline" asChild><Link to={`/work-orders/${encodeURIComponent(order.order_number)}/delivery`}>{t("vehicleVisit.finalHandover")}</Link></Button>)}
                     </div>
               )}
               {locationTarget === "in_workshop" && presence !== "in_workshop" && (
@@ -264,14 +268,14 @@ export function VehicleVisitQuickActionDialog({ row, open, onOpenChange }: {
                       : <p role="status" className="text-sm text-warning">{t(openRelease && !canManageLocation ? "vehicleVisit.locationPermissionRequired" : "vehicleVisit.locationRequiresReview")}</p>
               )}
             </div>
-            {claim?.id && claim.status === "pending" && hasRole("admin", "manager", "insurance") &&
+            {mode !== "location" && claim?.id && claim.status === "pending" && hasRole("admin", "manager", "insurance") &&
               <Button className="w-full gap-2 bg-success text-success-foreground hover:bg-success/90" asChild>
                 <Link to={`/insurance/${claim.id}?visitAction=approve`}><CheckCircle2 className="h-4 w-4" />{t("vehicleVisit.approveClaim")}</Link>
               </Button>}
-            {claim?.id && claim.delivered_at && hasRole("admin", "manager") &&
+            {mode !== "location" && claim?.id && claim.delivered_at && hasRole("admin", "manager") &&
               <Button variant="outline" asChild><Link to={`/insurance/${claim.id}?visitAction=undoDelivery`}>{t("vehicleVisit.undoDelivery")}</Link></Button>}
-            {nextBlocker && <p role="status" className="text-sm text-warning">{t(`vehicleVisit.${nextBlocker}`)}</p>}
-            {canChangeStage && <form className="space-y-2 border-t pt-3" onSubmit={(event) => { event.preventDefault(); transition.mutate(); }}>
+            {mode !== "location" && nextBlocker && <p role="status" className="text-sm text-warning">{t(`vehicleVisit.${nextBlocker}`)}</p>}
+            {mode !== "location" && canChangeStage && <form className="space-y-2 border-t pt-3" onSubmit={(event) => { event.preventDefault(); transition.mutate(); }}>
               <h3 className="text-sm font-semibold">{t("vehicleVisit.next")}: {t(`vehicleVisit.${next}`)}</h3>
               <label className="block text-sm">{t("vehicleVisit.occurredAt")}<Input type="datetime-local" required value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} /></label>
               <label className="block text-sm">{t("vehicleVisit.responsible")}
@@ -285,7 +289,7 @@ export function VehicleVisitQuickActionDialog({ row, open, onOpenChange }: {
               <Button type="submit" disabled={transition.isPending || !responsible || !occurredAt}>{transition.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}{t("vehicleVisit.save")}</Button>
             </form>}
             <div className="border-t pt-3 text-sm">
-              <Link className="font-semibold text-primary underline" to={row._claimOnly ? `/insurance/${claim?.id}` : `/vehicle-entry/${entryId}`}>{t("vehicleVisit.openFullRecord")}</Link>
+              <Link className="font-semibold text-primary underline" to={workspace === "supervisor" ? `/supervisor/entry/${entryId}/complete` : row._claimOnly ? `/insurance/${claim?.id}` : `/vehicle-entry/${entryId}`}>{t("vehicleVisit.openFullRecord")}</Link>
             </div>
           </div>}
     </DialogContent>

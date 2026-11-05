@@ -22,9 +22,10 @@ import {
   assertPrintableTechnicalDeclaration, downloadTechnicalDeclarationPdf, openTechnicalDeclarationPreview, printTechnicalDeclaration,
 } from "@/lib/vehicleTechnicalDeclarationPdf";
 
-export default function VehicleTechnicalDeclarationPage() {
+export default function VehicleTechnicalDeclarationPage({ workspace }: { workspace?: "supervisor" } = {}) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const backPath = workspace === "supervisor" ? `/supervisor/entry/${id}/complete` : `/vehicle-entry/${id}`;
   const qc = useQueryClient();
   const { profile } = useAuth();
   const { i18n } = useTranslation();
@@ -135,7 +136,7 @@ export default function VehicleTechnicalDeclarationPage() {
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" aria-label={label("العودة إلى دخول المركبة", "Back to vehicle entry")}
-          onClick={() => dirty ? setLeaveOpen(true) : navigate(`/vehicle-entry/${id}`)}>
+          onClick={() => dirty ? setLeaveOpen(true) : navigate(backPath)}>
           <ArrowRight className={isAr ? "" : "rotate-180"} size={18} />
         </Button>
         <div><h1 className="text-2xl font-bold">{label("الإقرار الفني للمركبة", "Vehicle Technical Declaration")}</h1>
@@ -165,7 +166,7 @@ export default function VehicleTechnicalDeclarationPage() {
         <AlertDialogDescription>{label("ستفقد التعديلات غير المحفوظة عند العودة.", "You will lose unsaved edits if you leave.")}</AlertDialogDescription>
       </AlertDialogHeader><AlertDialogFooter>
         <AlertDialogCancel>{label("البقاء", "Stay")}</AlertDialogCancel>
-        <AlertDialogAction onClick={() => navigate(`/vehicle-entry/${id}`)}>{label("العودة دون حفظ", "Leave without saving")}</AlertDialogAction>
+        <AlertDialogAction onClick={() => navigate(backPath)}>{label("العودة دون حفظ", "Leave without saving")}</AlertDialogAction>
       </AlertDialogFooter></AlertDialogContent>
     </AlertDialog>
   </div>;

@@ -84,7 +84,10 @@ describe("data sync performance contract", () => {
     const manager = read("src/components/workorders/NeededPartsManager.tsx");
 
     expect(realtime).toContain('scope: "supervisor"');
-    expect(realtime).toContain('tables: ["job_orders", "job_order_parts", "expenses", "vehicle_entries", "vehicle_inspection_releases", "vehicle_visit_workflows"]');
+    const supervisorScope=realtime.slice(realtime.indexOf('scope: "supervisor"'),realtime.indexOf('scope: "technician"'));
+    for(const table of ["job_orders","job_order_parts","expenses","vehicle_entries","vehicle_inspection_releases","vehicle_visit_workflows","insurance_claims","vehicle_handover_records"])
+      expect(supervisorScope).toContain(`"${table}"`);
+    expect(supervisorScope).toContain('path.startsWith("/supervisor/")');
     expect(realtime).toContain("applyWorkOrderRealtimeChange(payload)");
     expect(supervisor).toContain("useRealtimeSync();");
     expect(supervisor).not.toContain("setInterval(() => { refreshWorkOrdersFromCloud(); }, 30000)");

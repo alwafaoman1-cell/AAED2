@@ -46,7 +46,7 @@ const fields: Array<{ key: keyof InspectionReleaseForm; ar: string; en: string; 
   { key: "notes", ar: "ملاحظات إضافية", en: "Additional notes", long: true },
 ];
 
-export default function VehicleInspectionReleasePage() {
+export default function VehicleInspectionReleasePage({ workspace }: { workspace?: "supervisor" } = {}) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -92,9 +92,9 @@ export default function VehicleInspectionReleasePage() {
 
   useEffect(() => {
     if (!id || initializedFor === id || !entryQuery.isSuccess || !releaseQuery.isSuccess || !entry) return;
-    setForm(release?.form_data ? { ...emptyInspectionReleaseForm, ...release.form_data } : inspectionReleaseInitialForm(entry));
+    setForm(release?.form_data ? { ...emptyInspectionReleaseForm, ...release.form_data } : inspectionReleaseInitialForm(entry, isAr ? "ar" : "en"));
     setInitializedFor(id);
-  }, [id, initializedFor, entryQuery.isSuccess, releaseQuery.isSuccess, entry, release]);
+  }, [id, initializedFor, entryQuery.isSuccess, releaseQuery.isSuccess, entry, release, isAr]);
 
   const save = useMutation({
     mutationFn: () => saveInspectionRelease(id!, form),
@@ -132,6 +132,8 @@ export default function VehicleInspectionReleasePage() {
       void qc.invalidateQueries({ queryKey: ["vehicle_inspection_release_history", id] });
       void qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
       void qc.invalidateQueries({ queryKey: queryKeys.jobOrders.all });
+      void qc.invalidateQueries({ queryKey: ["vehicle_visit"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
       toast.success(t("سُجلت عودة المركبة إلى الورشة", "Vehicle return recorded"));
     },
     onError: (error: Error) => toast.error(error.message),
@@ -144,7 +146,7 @@ export default function VehicleInspectionReleasePage() {
 
   function backToEntry() {
     if (dirty && !window.confirm(t("لديك تعديلات غير محفوظة. هل تريد مغادرة الصفحة؟", "You have unsaved changes. Leave this page?"))) return;
-    navigate(`/vehicle-entry/${id}`);
+    navigate(workspace === "supervisor" ? `/supervisor/entry/${id}/complete` : `/vehicle-entry/${id}`);
   }
 
   function html(media?: any[]) {

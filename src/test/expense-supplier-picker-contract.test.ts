@@ -19,8 +19,11 @@ describe("expense supplier picker", () => {
     expect(picker).toContain("term.length >= 2");
     expect(picker).toContain("tax_number.ilike");
     expect(picker).toContain("category.ilike");
-    expect(picker).toContain("+ إضافة مورد جديد");
+    const labels=read("src/lib/i18n/expenseEntryForm.ts");
+    expect(picker).toContain('t("pickerAddNew")');
+    expect(labels).toContain("+ إضافة مورد جديد");
     expect(picker).toContain("ensureTableSupplier");
-    expect(picker).toContain("المورد موجود مسبقًا وتم اختياره");
+    expect(picker).toContain('t("pickerExistingSelected")');
+    expect(labels).toContain("المورد موجود مسبقًا وتم اختياره");
   });
 });

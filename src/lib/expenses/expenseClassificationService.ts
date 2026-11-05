@@ -228,7 +228,28 @@ export async function listCostCenters(tenantId: string) {
   if (error) fail(error); return data || [];
 }
 
-export async function saveExpense(input: ExpenseInput, userId: string, id?: string, duplicateOverrideReason?: string) {
+export class ExpenseCreateRetryConflictError extends Error {
+  constructor(readonly expenseId: string) { super("EXPENSE_CREATE_RETRY_CHANGED"); this.name="ExpenseCreateRetryConflictError"; }
+}
+
+/** A lost response may follow a committed insert. A caller-held UUID identifies
+ * that one create attempt; it never authorizes overwriting an existing voucher. */
+export async function recoverExpenseCreate(input: ExpenseInput, userId: string, createRequestId: string) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(createRequestId)) throw new Error("EXPENSE_CREATE_REQUEST_INVALID");
+  const {data,error}=await (supabase.from("expenses") as any).select("*").eq("tenant_id",input.tenant_id).eq("id",createRequestId).maybeSingle();
+  if(error) throw error;
+  if(!data) return null;
+  const fields: (keyof ExpenseInput)[]=["date","expense_scope","work_order_id","department_id","expense_category_id","subcategory_id","supplier_id","supplier_tax_number","supplier_invoice_number","supplier_invoice_date","payment_method","description","notes","reference_number","document_sha256"];
+  if(data.tenant_id!==input.tenant_id || data.created_by!==userId || data.deleted_at
+    || fields.some(field=>String(data[field] ?? "")!==String(input[field] ?? ""))
+    || (input.cost_center_id && data.cost_center_id!==input.cost_center_id)
+    || ["subtotal","vat_amount","total"].some(field=>roundMoney(Number(data[field]))!==roundMoney(Number(input[field as keyof ExpenseInput])))
+    || roundMoney(Number(data.amount))!==roundMoney(input.total)) throw new ExpenseCreateRetryConflictError(data.id);
+  return data;
+}
+
+export async function saveExpense(input: ExpenseInput, userId: string, id?: string, duplicateOverrideReason?: string, createRequestId?: string) {
+  if(!id && createRequestId){const recovered=await recoverExpenseCreate(input,userId,createRequestId);if(recovered)return recovered;}
   const duplicates = await checkExpenseDuplicates({
     supplier_id: input.supplier_id,
     supplier_tax_number: input.supplier_tax_number,
@@ -240,7 +261,7 @@ export async function saveExpense(input: ExpenseInput, userId: string, id?: stri
     linked_work_order_id: input.linked_work_order_id,
     description: input.description,
     document_sha256: input.document_sha256,
-  }, id);
+  }, id || createRequestId, { required: true });
   if (duplicates.exact.length) throw new ExpenseExactDuplicateError(duplicates.exact);
   if (duplicates.potential.length && !duplicateOverrideReason) {
     throw new ExpensePotentialDuplicateError(duplicates.potential);
@@ -250,6 +271,7 @@ export async function saveExpense(input: ExpenseInput, userId: string, id?: stri
     vat_amount: roundMoney(input.vat_amount), total: roundMoney(input.total), created_by: userId,
     category_id: input.subcategory_id || input.expense_category_id,
   };
+  if(!id && createRequestId) payload.id=createRequestId;
   if (duplicateOverrideReason) {
     let existingMeta: Record<string, unknown> = {};
     if (id) {
@@ -265,6 +287,10 @@ export async function saveExpense(input: ExpenseInput, userId: string, id?: stri
     : (supabase.from("expenses") as any).insert(payload);
   const { data, error } = await query.select("*").single();
   if (error) {
+    if(!id && createRequestId && error.code==="23505"){
+      const recovered=await recoverExpenseCreate(input,userId,createRequestId);
+      if(recovered)return recovered;
+    }
     const exactDuplicate = exactDuplicateErrorFromDatabase(error);
     if (exactDuplicate) throw exactDuplicate;
     throw new Error(duplicateExpenseMessage(error) || error.message || "تعذر حفظ المصروف");

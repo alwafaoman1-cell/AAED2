@@ -41,9 +41,10 @@ interface Props {
   deliveryDraft?: VehicleDeliveryReceiptDraft;
   onFinalized?: (record: VehicleDeliveryReceiptDraft) => void;
   presentation?: "dialog" | "page";
+  supervisor?: boolean;
 }
 
-export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order, deliveryDraft, onFinalized, presentation = "dialog" }: Props) {
+export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order, deliveryDraft, onFinalized, presentation = "dialog", supervisor = false }: Props) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [date, setDate] = useState(() => getDeliveredDateInputValue(deliveryDraft?.date));
@@ -560,7 +561,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
                 اعتماد الخروج والتسليم
               </Button>
             )}
-            {isInsuranceWorkOrder(order) ? (
+            {!supervisor && (isInsuranceWorkOrder(order) ? (
               <Button
                 onClick={async () => {
                   try {
@@ -589,7 +590,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
               <Button onClick={handleIssueInvoice} variant="default" className="sm:flex-1 gap-2">
                 <FileCheck2 size={16} /> إصدار فاتورة ضريبية
               </Button>
-            )}
+            ))}
             <Button disabled={savingDraft || loadingDraft} onClick={() => void handlePreview()} className="sm:flex-1 gap-2 bg-success hover:bg-success/90 text-white">
               <Printer size={16} /> معاينة وطباعة الإقرار
             </Button>

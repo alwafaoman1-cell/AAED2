@@ -101,7 +101,11 @@ describe("expense management classification refactor", () => {
     expect(accounting).toContain('value="expenses"');
     expect(accounting).toContain('/accounting/expenses/categories');
     expect(accounting).toContain('/accounting/expenses/new');
-    expect(form).toContain('إدارة الأقسام والتصنيفات');
+    const translations = read("src/lib/i18n/expenseEntryForm.ts");
+    expect(form).toContain('t("manageCategories")');
+    expect(form).toContain('to="/accounting/expenses/categories"');
+    expect(translations).toContain('manageCategories: "إدارة الأقسام والتصنيفات"');
+    expect(translations).toContain('manageCategories: "Manage departments and categories"');
   });
 
   it("adds a manual three-level workshop template without historical backfill", () => {

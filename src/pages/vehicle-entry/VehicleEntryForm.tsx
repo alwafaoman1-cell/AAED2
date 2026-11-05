@@ -1,5 +1,5 @@
 import {useTranslation} from "react-i18next";
-import {useRef} from "react";
+import {useEffect,useRef} from "react";
 import {useFixedActionBarClearance} from "@/hooks/useFixedActionBarClearance";
 import {ArrowLeft,ArrowRight,LoaderCircle,Save} from "lucide-react";
 import {Button} from "@/components/ui/button";
@@ -12,14 +12,17 @@ import {VehicleEntryReviewStep} from "@/components/vehicle-entry/VehicleEntryRev
 import {VehicleEntryExtraction} from "@/components/vehicle-entry/VehicleEntryExtraction";
 import "@/lib/i18n/vehicleIntakeWizard";
 
-export default function VehicleEntryForm() {
+export default function VehicleEntryForm({workspace,onBusyChange}:{workspace?:"supervisor";onBusyChange?:(busy:boolean)=>void} = {}) {
   const {t,i18n}=useTranslation();
   const actionBarRef=useRef<HTMLDivElement>(null);
-  const editor=useVehicleEntryEditor();
+  const editor=useVehicleEntryEditor({workspace});
+  useEffect(()=>{onBusyChange?.(editor.saving);return()=>onBusyChange?.(false)},[editor.saving,onBusyChange]);
   useFixedActionBarClearance(actionBarRef,!editor.isEdit || Boolean(editor.detail.data));
   const {form,step,setStep,goNext,channel,purpose,setChannel,setPurpose,detail,isEdit,saving,canSave,handleSave,navigate,visit}=editor;
   const stages=t("vehicleIntakeWizard.stages",{returnObjects:true}) as string[];
   const closed=["delivered","cancelled"].includes(visit.data?.operationalStage || "");
+  if(editor.needsSource && editor.source.error) return <div role="alert" className="space-y-3 rounded-xl border border-warning p-4"><p>{t("vehicleIntakeWizard.sourceReview")}</p><Button variant="outline" onClick={()=>navigate(editor.centerPath)}>{t("vehicleIntakeWizard.back")}</Button></div>;
+  if(editor.needsSource && (!editor.sourceReady || editor.source.data?.existingEntryId)) return <p role="status" className="p-8 text-center">{t("vehicleIntakeWizard.loading")}</p>;
   if(isEdit && detail.isLoading) return <p role="status" className="p-8 text-center">{t("vehicleIntakeWizard.loading")}</p>;
   if(isEdit && (detail.error || !detail.data)) return <p role="alert" className="p-8 text-destructive">{t("vehicleIntakeWizard.saveFailed")}: {detail.error?.message}</p>;
   return <div className="space-y-5 pb-12" dir={i18n.language.startsWith("ar")?"rtl":"ltr"}>
@@ -28,7 +31,7 @@ export default function VehicleEntryForm() {
         {form.entry_number && <p className="font-mono font-semibold" dir="ltr">{form.entry_number}</p>}
         <p className="mt-1 text-sm text-muted-foreground">{t("vehicleIntakeWizard.step",{current:step})}</p>
       </div>
-      <Button type="button" variant="outline" onClick={()=>navigate("/vehicle-entry")}>{t("vehicleIntakeWizard.back")}</Button>
+      {workspace !== "supervisor" && <Button type="button" variant="outline" onClick={()=>navigate(editor.centerPath)}>{t("vehicleIntakeWizard.back")}</Button>}
     </header>
     <nav aria-label={t("vehicleIntakeWizard.title")} className="grid grid-cols-2 gap-2 lg:grid-cols-4">
       {stages.map((label,index)=><Button key={label} type="button" variant={step===index+1?"default":"outline"} aria-current={step===index+1?"step":undefined} disabled={saving || index+1>step} onClick={()=>setStep(index+1)} className="h-auto min-h-12 justify-start gap-2 whitespace-normal text-start">

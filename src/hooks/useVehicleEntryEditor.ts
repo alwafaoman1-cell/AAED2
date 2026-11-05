@@ -13,6 +13,7 @@ import {initialTechnicalDeclarationForm,validateTechnicalDeclarationForm,type Ve
 import {getVehicleVisitDetail} from "@/lib/vehicleVisitLifecycle";
 import "@/lib/i18n/vehicleIntakeWizard";
 import {markDirty,markClean} from "@/lib/unsavedWork";
+import {loadSupervisorIntakeSource} from "@/lib/supervisorIntakeSource";
 export const ENTRY_PHOTO_SLOTS= [
   { key: "front_view", ar: "الواجهة الأمامية", en: "Front View" },
   { key: "rear_view", ar: "الواجهة الخلفية", en: "Rear View" },
@@ -31,7 +32,7 @@ type PendingEntryPhoto = {
 };
 
 
-export function useVehicleEntryEditor() {  const { id } = useParams();
+export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) {  const { id } = useParams();
   const [searchParams] = useSearchParams();
   const { t } = useTranslation();
 
@@ -43,6 +44,8 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
   const hydratedData=useRef<unknown>(null);
   const savingRef=useRef(false);
   const navigate = useNavigate();
+  const centerPath = options?.workspace === "supervisor" ? "/supervisor" : "/vehicle-entry";
+  const entryBasePath = options?.workspace === "supervisor" ? "/supervisor/entry" : "/vehicle-entry";
   const qc = useQueryClient();
   const { user, profile } = useAuth();
   const isEdit = !!id;
@@ -52,6 +55,22 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
   });
   const [saving, setSaving] = useState(false);
   const savedFormBaseline=useRef(JSON.stringify(form));
+  const sourceClaimId = searchParams.get("claim");
+  const sourceWorkOrderId = searchParams.get("work_order");
+  const editorScope = JSON.stringify([profile?.tenant_id,id || null,options?.workspace || null,
+    options?.workspace === "supervisor" ? sourceClaimId : null,options?.workspace === "supervisor" ? sourceWorkOrderId : null]);
+  const scopeRef=useRef(editorScope);
+  scopeRef.current=editorScope;
+  useEffect(()=>{scopeRef.current=editorScope;return()=>{if(scopeRef.current===editorScope)scopeRef.current="disposed";}},[editorScope]);
+  const [draftScope,setDraftScope]=useState(editorScope);
+  const needsSource = options?.workspace === "supervisor" && !isEdit && Boolean(sourceClaimId || sourceWorkOrderId);
+  const sourceKey = JSON.stringify([profile?.tenant_id,sourceClaimId,sourceWorkOrderId]);
+  const [hydratedSourceKey,setHydratedSourceKey] = useState<string | null>(null);
+  const source = useQuery({
+    queryKey:["vehicle_visit","supervisor_intake_source",profile?.tenant_id,sourceClaimId,sourceWorkOrderId],
+    queryFn:()=>loadSupervisorIntakeSource({claimId:sourceClaimId,workOrderId:sourceWorkOrderId}),
+    enabled:needsSource && Boolean(profile?.tenant_id),retry:false,staleTime:0,
+  });
   const [uploading, setUploading] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [vehicleSearch, setVehicleSearch] = useState("");
@@ -64,17 +83,49 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
   const documentInputRef = useRef<HTMLInputElement>(null);
   const { data: insuranceEmployees = [] } = useInsuranceEmployees(form.insurance_company_id || undefined);
   const { data: vehicleMakes = [] } = useVehicleMakes();
+  useEffect(()=>{
+    if(draftScope===editorScope) return;
+    pendingPhotosRef.current.forEach(photo=>URL.revokeObjectURL(photo.previewUrl));
+    pendingPhotosRef.current=[];
+    setPendingPhotos([]);setPendingDocumentFileId(null);
+    setCustomerSearch("");setVehicleSearch("");setDeliveryDataSource("manual");
+    setActivePhotoCategory("front_view");
+    if(photoInputRef.current) photoInputRef.current.value="";
+    if(documentInputRef.current) documentInputRef.current.value="";
+    const base=defaultVehicleEntryForm();
+    const fresh:VehicleEntryFormState={...base,received_by_name:profile?.full_name||"",insurance:{...base.insurance,is_insurance_related:searchParams.get("channel")==="insurance"},condition:{...base.condition,visit_purpose:selectedPurpose||undefined}};
+    savedFormBaseline.current=JSON.stringify(fresh);
+    setForm(fresh);setStep(1);setSaving(false);setUploading(false);
+    savingRef.current=false;hydratedId.current=null;hydratedData.current=null;
+    setHydratedSourceKey(null);setDraftScope(editorScope);
+    setChannelState(searchParams.get("channel")==="insurance"?"insurance":searchParams.get("channel")==="cash"?"cash":null);
+    setPurposeState(selectedPurpose);
+  },[draftScope,editorScope,profile?.full_name,searchParams,selectedPurpose]);
+  useEffect(()=>{
+    if(draftScope!==editorScope || !needsSource || !source.data || hydratedSourceKey===sourceKey) return;
+    setHydratedSourceKey(sourceKey);
+    if(source.data.existingEntryId){navigate(`/supervisor/entry/${source.data.existingEntryId}/complete`,{replace:true});return;}
+    if(!source.data.form) return;
+    const initial:VehicleEntryFormState={...source.data.form,received_by_name:profile?.full_name||"",condition:{...source.data.form.condition,visit_purpose:selectedPurpose||undefined}};
+    savedFormBaseline.current=JSON.stringify(initial);
+    setForm(initial);
+    setChannelState(source.data.channel);
+  },[needsSource,source.data,sourceKey,hydratedSourceKey,navigate,profile?.full_name,selectedPurpose,draftScope,editorScope]);
 
   const detail = useQuery({
-    queryKey: queryKeys.vehicleEntries.detail(id),
-    queryFn: () => getVehicleEntry(id!),
-    enabled: isEdit,
+    queryKey: [...queryKeys.vehicleEntries.detail(id),profile?.tenant_id],
+    queryFn: async () => {
+      const entry=await getVehicleEntry(id!);
+      if(entry && entry.tenant_id!==profile?.tenant_id) throw new Error(t("vehicleIntakeWizard.saveFailed"));
+      return entry;
+    },
+    enabled: isEdit && Boolean(profile?.tenant_id),
     staleTime: 60_000,
   });
 
   useEffect(() => {
     const pristine=JSON.stringify(form)===savedFormBaseline.current && !pendingPhotos.length && !pendingDocumentFileId;
-    if (detail.data && (hydratedId.current!==id || (hydratedData.current!==detail.data && pristine))) {
+    if (draftScope===editorScope && detail.data && (hydratedId.current!==id || (hydratedData.current!==detail.data && pristine))) {
       const hydrated=formFromVehicleEntry(detail.data);
       savedFormBaseline.current=JSON.stringify(hydrated);
       setForm(hydrated);
@@ -83,7 +134,7 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
       hydratedId.current=id!;
       hydratedData.current=detail.data;
     }
-  }, [detail.data,id,form,pendingPhotos.length,pendingDocumentFileId]);
+  }, [detail.data,id,form,pendingPhotos.length,pendingDocumentFileId,draftScope,editorScope]);
 
   useEffect(() => {
     pendingPhotosRef.current = pendingPhotos;
@@ -148,8 +199,8 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
   const patchContents = (next: Partial<VehicleEntryFormState["contents"]>) => setForm((prev) => ({ ...prev, contents: { ...prev.contents, ...next } }));
 
   const canSave = useMemo(() => {
-    return !!channel && !!purpose && !!form.arrival_date && !!form.arrival_time && !!form.delivered_by.full_name.trim() && (!!form.customer_id || !!form.customer.customer_code || isValidE164(toE164(form.customer.phone))) && (!!form.vehicle_id || (!!form.vehicle.plate_number.trim() && !!form.vehicle.make.trim()));
-  }, [form,channel,purpose]);
+    return Boolean(profile?.tenant_id) && draftScope===editorScope && (!needsSource || (hydratedSourceKey===sourceKey && !source.error && !source.data?.existingEntryId)) && !!channel && !!purpose && !!form.arrival_date && !!form.arrival_time && !!form.delivered_by.full_name.trim() && (!!form.customer_id || !!form.customer.customer_code || isValidE164(toE164(form.customer.phone))) && (!!form.vehicle_id || (!!form.vehicle.plate_number.trim() && !!form.vehicle.make.trim()));
+  }, [form,channel,purpose,needsSource,hydratedSourceKey,sourceKey,source.error,source.data,draftScope,editorScope,profile?.tenant_id]);
 
   function chooseDeliveredBy(type: VehicleEntryFormState["delivered_by"]["delivery_type"]) {
     if (type === "owner") {
@@ -244,11 +295,13 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
     }
     savingRef.current=true;
     setSaving(true);
+    const savingScope=editorScope;
     try {
       const customerPhoneWasEdited = form.customer_id &&
         form.customer_phone_before_edit !== undefined &&
         form.customer.phone.trim() !== (form.customer_phone_before_edit || "").trim();
       const saved = await saveVehicleEntry({ ...form, status, technical_declaration:{form:technicalForm,revision:form.technical_declaration?.revision ?? null} }, user?.id);
+      if(scopeRef.current!==savingScope) return;
       // Retain the committed identity even when a later attachment/read-back fails.
       const savedState=formFromVehicleEntry({...saved,damage_marks:form.damage_marks});
       savedFormBaseline.current=JSON.stringify(savedState);
@@ -259,6 +312,7 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
         try {
           const { linkDocumentFile } = await import("@/lib/documentExtraction/persistence");
           await linkDocumentFile({ tenantId: profile.tenant_id, fileId: savedDocumentFileId, entityType: "vehicle_entry", entityId: saved.id });
+          if(scopeRef.current!==savingScope) return;
           setPendingDocumentFileId(null);
         } catch {
           documentLinkWarning = true;
@@ -267,6 +321,7 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
       if (pendingPhotos.length) {
         try {
           for (const photo of pendingPhotos) {
+            if(scopeRef.current!==savingScope) return;
             await uploadVehicleEntryFiles({
               entryId: saved.id,
               files: [photo.file],
@@ -274,12 +329,14 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
               category: photo.category,
               uploadedBy: user?.id,
             });
+            if(scopeRef.current!==savingScope) return;
             setPendingPhotos(previous=>previous.filter(item=>item!==photo));
             URL.revokeObjectURL(photo.previewUrl);
           }
           pendingPhotos.forEach((photo) => URL.revokeObjectURL(photo.previewUrl));
           setPendingPhotos([]);
         } catch (uploadError: any) {
+          if(scopeRef.current!==savingScope) return;
           setForm(savedState);
           qc.setQueryData(queryKeys.vehicleEntries.detail(saved.id), saved);
           await qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
@@ -288,9 +345,16 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
         }
       }
       const refreshed = await getVehicleEntry(saved.id);
+      if(scopeRef.current!==savingScope) return;
       if(!refreshed) throw new Error(t("vehicleIntakeWizard.saveFailed"));
       qc.setQueryData(queryKeys.vehicleEntries.detail(saved.id), refreshed || saved);
-      await qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all }),
+        qc.invalidateQueries({ queryKey: ["vehicle_visit"] }),
+        qc.invalidateQueries({ queryKey: ["insurance_claims"] }),
+        qc.invalidateQueries({ queryKey: ["job_orders"] }),
+      ]);
+      if(scopeRef.current!==savingScope) return;
       if (!form.customer_id || customerPhoneWasEdited) {
         void Promise.allSettled([
           qc.invalidateQueries({ queryKey: queryKeys.customers.all }),
@@ -309,8 +373,9 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
             .catch(() => toast.error(t("vehicleIntakeWizard.documentNotLinked")));
         } } },
       );
-      navigate(`/vehicle-entry/${saved.id}`, { replace: true });
+      navigate(`${entryBasePath}/${saved.id}${options?.workspace === "supervisor" ? "/complete" : ""}`, { replace: true });
     } catch (error: any) {
+      if(scopeRef.current!==savingScope) return;
       if (error?.savedEntry?.id) {
         const savedEntry = error.savedEntry;
         patch({
@@ -326,8 +391,7 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
       if (String(error?.code || "").match(/^VEHICLE_INTAKE_(CUSTOMER|PHONE)_/)) setStep(2);
       toast.error(`${t("vehicleIntakeWizard.saveFailed")}: ${message}`);
     } finally {
-      savingRef.current=false;
-      setSaving(false);
+      if(scopeRef.current===savingScope){savingRef.current=false;setSaving(false);}
     }
   }
 
@@ -467,7 +531,7 @@ export function useVehicleEntryEditor() {  const { id } = useParams();
   }
 
 
-return {channel,purpose,step,setStep,setChannel,setPurpose,goNext,technicalForm,setTechnicalForm,visit,form,patch,patchCustomer,patchVehicle,patchInsurance,patchDeliveredBy,patchCondition,patchContents,chooseDeliveredBy,deliveryDataSource,setDeliveryDataSource,customerSearch,setCustomerSearch,vehicleSearch,setVehicleSearch,customerResults,vehicleResults,selectCustomer,selectVehicle,insuranceEmployees,vehicleMakes,detail,pendingPhotos,photoInputRef,documentInputRef,stageEntryPhoto,activePhotoCategory,setActivePhotoCategory,removePendingPhoto,uploading,handleUpload,handleSignature,supplementalEntryMedia,addDamageAt,addDamageMark,updateDamageMark,removeDamageMark,setPendingDocumentFileId,saving,handleSave,canSave,isEdit,navigate,user,profile,setForm};
+return {channel,purpose,step,setStep,setChannel,setPurpose,goNext,technicalForm,setTechnicalForm,visit,form,patch,patchCustomer,patchVehicle,patchInsurance,patchDeliveredBy,patchCondition,patchContents,chooseDeliveredBy,deliveryDataSource,setDeliveryDataSource,customerSearch,setCustomerSearch,vehicleSearch,setVehicleSearch,customerResults,vehicleResults,selectCustomer,selectVehicle,insuranceEmployees,vehicleMakes,detail,pendingPhotos,photoInputRef,documentInputRef,stageEntryPhoto,activePhotoCategory,setActivePhotoCategory,removePendingPhoto,uploading,handleUpload,handleSignature,supplementalEntryMedia,addDamageAt,addDamageMark,updateDamageMark,removeDamageMark,setPendingDocumentFileId,saving,handleSave,canSave,isEdit,navigate,user,profile,setForm,centerPath,entryBasePath,source,needsSource,sourceReady:!needsSource || hydratedSourceKey===sourceKey,hasDraftChanges:JSON.stringify(form)!==savedFormBaseline.current || pendingPhotos.length>0 || Boolean(pendingDocumentFileId)};
 }
 export type VehicleEntryEditor=ReturnType<typeof useVehicleEntryEditor>;
 

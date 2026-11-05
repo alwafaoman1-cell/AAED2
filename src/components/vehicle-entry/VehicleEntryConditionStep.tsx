@@ -21,7 +21,10 @@ export function VehicleEntryConditionStep({editor}:{editor:VehicleEntryEditor}){
   const {form,patch,patchContents,technicalForm,setTechnicalForm,profile,addDamageAt,addDamageMark,updateDamageMark,removeDamageMark}=editor;
   return <>
     <Section title={t("vehicleIntakeWizard.conditionTitle")} desc={t("vehicleIntakeWizard.conditionHint")}>
-      {form.id && <Button asChild variant="outline"><Link to={`/vehicle-entry/${form.id}/technical-declaration`} target="_blank" rel="noopener noreferrer">{t("vehicleIntakeWizard.technicalLink")}</Link></Button>}
+      {form.id && (editor.centerPath === "/supervisor" ? <div className="space-y-2"><Button variant="outline" disabled={editor.saving || editor.hasDraftChanges}
+        onClick={()=>editor.navigate(`${editor.entryBasePath}/${form.id}/technical-declaration`)}>{t("vehicleIntakeWizard.technicalLink")}</Button>
+        {editor.hasDraftChanges && <p className="text-sm text-muted-foreground">{t("vehicleIntakeWizard.saveBeforeTechnical")}</p>}</div>
+        : <Button asChild variant="outline"><Link to={`/vehicle-entry/${form.id}/technical-declaration`} target="_blank" rel="noopener noreferrer">{t("vehicleIntakeWizard.technicalLink")}</Link></Button>)}
       <VehicleTechnicalDeclarationFields value={technicalForm} onChange={setTechnicalForm} identityReadOnly={!form.id} reportAuthorName={profile?.full_name || ""}/>
     </Section>
     <details className="rounded-xl border border-border p-4">

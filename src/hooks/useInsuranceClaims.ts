@@ -299,7 +299,7 @@ export function useUpdateClaim() {
   });
 }
 
-export function useUpdateClaimStatus() {
+export function useUpdateClaimStatus(options: { notify?: boolean } = {}) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -307,11 +307,13 @@ export function useUpdateClaimStatus() {
       status,
       approved_amount,
       rejection_reason,
+      expected_status,
     }: {
       id: string;
       status: "pending" | "approved" | "rejected" | "paid" | "cancelled";
       approved_amount?: number;
       rejection_reason?: string;
+      expected_status?: "pending";
     }) => {
       const { data: current, error: currentError } = await supabase
         .from("insurance_claims" as any)
@@ -321,6 +323,7 @@ export function useUpdateClaimStatus() {
       if (currentError) throw new Error(formatSupabaseNetworkError(currentError, "تعذر قراءة المطالبة قبل تحديث الحالة"));
       if (!(current as any)?.id) throw new Error("Claim was not found in Supabase");
       if ((current as any).deleted_at) throw new Error("Cannot update a deleted claim");
+      if (expected_status && (current as any).status !== expected_status) throw new Error("CLAIM_STATUS_CHANGED");
 
       const updates: any = { status };
       if (status === "approved") {
@@ -332,10 +335,14 @@ export function useUpdateClaimStatus() {
         updates.rejection_reason = rejection_reason;
       }
 
-      const { data: updated, error } = await supabase
+      let write = supabase
         .from("insurance_claims" as any)
         .update(updates)
-        .eq("id", id)
+        .eq("id", id);
+      // Optional compare-and-set for reviewed approvals; a competing action
+      // cannot be silently overwritten between the fresh read and this write.
+      if (expected_status) write = write.eq("tenant_id", (current as any).tenant_id).eq("status", expected_status);
+      const { data: updated, error } = await write
         .select("id,tenant_id,status,approved_amount,approved_at,rejection_reason,paid_at")
         .single();
       if (error) throw new Error(formatSupabaseNetworkError(error, "تعذر تحديث حالة المطالبة"));
@@ -388,9 +395,13 @@ export function useUpdateClaimStatus() {
     onSuccess: (_data, vars) => {
       qc.setQueryData(queryKeys.insuranceClaims.detail(vars.id), (current: any) => ({ ...(current || {}), ...(_data as any) }));
       qc.invalidateQueries({ queryKey: queryKeys.insuranceClaims.all });
-      toast.success("تم تحديث حالة المطالبة");
+      // Approval triggers update the canonical visit and linked order as well.
+      // Own-action freshness must not depend on a live WebSocket connection.
+      qc.invalidateQueries({ queryKey: ["vehicle_visit"] });
+      qc.invalidateQueries({ queryKey: ["job_orders"] });
+      if (options.notify !== false) toast.success("تم تحديث حالة المطالبة");
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => { if (options.notify !== false) toast.error(e.message); },
   });
 }
 

@@ -52,7 +52,7 @@ export function VehicleEntryIdentityStep({ editor }: { editor: VehicleEntryEdito
         <Field label={t("vehicleIntakeWizard.location")}><Input value={locationLabel} readOnly /></Field>
         <Field label={t("vehicleIntakeWizard.bay")}><Input value={form.vehicle_location_bay} disabled={location !== "داخل الورشة" && location !== "in_workshop"} onChange={(e) => patch({ vehicle_location_bay: e.target.value })} /></Field>
         <Field label={t("vehicleIntakeWizard.centerStatus")}><Input value={stageLabel} readOnly /></Field>
-        <Button type="button" variant="outline" asChild className="self-end"><Link to="/vehicle-entry">{t("vehicleIntakeWizard.views.openCenter")}</Link></Button>
+        {editor.centerPath !== "/supervisor" && <Button type="button" variant="outline" asChild className="self-end"><Link to={editor.centerPath || "/vehicle-entry"}>{t("vehicleIntakeWizard.views.openCenter")}</Link></Button>}
       </div>
     </Section>
     <Section title={t("vehicleIntakeWizard.customerTitle")} desc={t("vehicleIntakeWizard.customerHint")}>

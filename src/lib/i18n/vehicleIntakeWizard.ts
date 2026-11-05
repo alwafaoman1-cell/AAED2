@@ -1,6 +1,8 @@
 import i18n from '@/i18n';
 
 const ar={
+  saveBeforeTechnical:'احفظ تغييرات الزيارة أولًا قبل فتح مستند الإقرار الفني المنفصل.',
+  sourceReview:'تعذر تأكيد روابط المطالبة أو أمر العمل. السجل يحتاج مراجعة؛ لم يُنشأ دخول جديد أو ربط تلقائي.',
   title:'دخول واستلام المركبة',editTitle:'تعديل نموذج الزيارة',step:'المرحلة {{current}} من 4',
   stages:['نوع الخدمة والزيارة','العميل والمركبة','الفحص والإقرار الفني','الصور والمراجعة'],
   channelTitle:'اختر نوع الخدمة',insurance:'تأمين',cash:'زبون كاش',channelHint:'يحدد مسار الزيارة دون خلط فواتير الكاش والتأمين.',
@@ -28,6 +30,8 @@ const ar={
   VEHICLE_INTAKE_LINK_CONFLICT:'الرابط بالمطالبة أو أمر العمل يحتاج مراجعة.',VEHICLE_INTAKE_TECHNICAL_STALE:'تغير الإقرار الفني في صفحة أخرى؛ أعد فتحه قبل الحفظ.',VEHICLE_INTAKE_FORBIDDEN:'ليست لديك صلاحية حفظ هذه الزيارة.',VEHICLE_INTAKE_CLOSED:'الزيارة مغلقة؛ أنشئ زيارة جديدة بدل تغيير تاريخها.',
 };
 const en:Record<keyof typeof ar,string|string[]>={
+  saveBeforeTechnical:'Save the visit changes before opening the separate technical declaration document.',
+  sourceReview:'The claim or work order links could not be confirmed. Review is required; no new entry or automatic link was created.',
   title:'Vehicle Entry & Receipt',editTitle:'Edit visit form',step:'Step {{current}} of 4',stages:['Service and visit type','Customer and vehicle','Inspection and technical declaration','Photos and review'],
   channelTitle:'Choose service channel',insurance:'Insurance',cash:'Cash customer',channelHint:'Keeps the visit channel separate from cash and insurance invoicing.',purposeTitle:'Choose the vehicle visit type',workshop:'Workshop admission',inspection:'Inspection and collection',workshopHint:'Stays in the workshop until an actual exit is recorded.',inspectionHint:'Enters for inspection; customer custody is recorded only after confirming its temporary exit.',changeChannel:'Change service channel',next:'Next',previous:'Previous',back:'Back to center',save:'Save and confirm entry',saveEdit:'Save changes',draft:'Save draft',saving:'Confirming save…',
   customerTitle:'Customer for this visit',customerHint:'Phone and customer code identify the visitor. Selecting an existing vehicle never changes the customer or transfers ownership.',customerSearch:'Search by phone or customer code',customerName:'Customer name',phone:'Phone number',code:'Customer code',alternatePhone:'Additional phone',idNumber:'ID number',address:'Address',notes:'Notes',vehicleTitle:'Vehicle',vehicleSearch:'Search by plate or VIN',existingVehicle:'Use this vehicle',vehicleSelected:'Vehicle selected; visit customer unchanged.',customerSelected:'Customer selected.',clearVehicle:'Clear selection and search again',vehicleHint:'Reuse the same vehicle record without transferring ownership or creating a duplicate.',

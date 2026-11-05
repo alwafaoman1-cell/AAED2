@@ -19,7 +19,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import i18n from "@/i18n";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
@@ -53,6 +53,7 @@ import { loadClaimInspection } from "@/lib/vehicleEntryInspection";
 import "@/i18n/vehicleEntryInspection";
 import { buildReopenDeliveredVehiclePatch } from "@/lib/claimDelivery";
 import InsuranceInspectionDialog from "@/components/inspection/InsuranceInspectionDialog";
+import { SupervisorVisitMessages } from "@/components/supervisor/SupervisorVisitMessages";
 import { insuranceInspectionStore } from "@/lib/insuranceInspectionStore";
 import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "@/lib/cloudSettings";
 import { buildInsuranceInspectionHtml } from "@/lib/insuranceInspectionPdf";
@@ -212,6 +213,7 @@ export default function InsuranceClaimDetail() {
   const [uplItems, setUplItems] = useState<UplItem[]>([]);
   const [status, setStatus] = useState<"pending" | "approved" | "rejected" | "paid" | "cancelled">("pending");
   const [rejectionReason, setRejectionReason] = useState("");
+  const [visitMessageClaimId, setVisitMessageClaimId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
 
   // ── Workflow date tracking ──
@@ -1220,6 +1222,9 @@ export default function InsuranceClaimDetail() {
         onSuccess: async (verified: any) => {
           setShowApproveDialog(false);
           hydrateFromVerifiedClaim(verified);
+          if (verified?.id === id && verified?.tenant_id === existing?.tenant_id && verified?.status === "approved") {
+            setVisitMessageClaimId(id);
+          }
           await queryClient.invalidateQueries({ queryKey: queryKeys.claimAudit(id) });
           await queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
           // اقرأ المطالبة المحدّثة من DB لمعرفة WO المُنشأ
@@ -3738,6 +3743,14 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(visitMessageClaimId && visitMessageClaimId === id)} onOpenChange={(open) => { if (!open) setVisitMessageClaimId(null); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader><DialogTitle>{i18n.t("vehicleVisitMessages.title")}</DialogTitle>
+            <DialogDescription>{i18n.t("vehicleVisitMessages.manual")}</DialogDescription></DialogHeader>
+          {visitMessageClaimId === id && <SupervisorVisitMessages key={visitMessageClaimId} claimId={visitMessageClaimId} />}
         </DialogContent>
       </Dialog>
 

@@ -9,14 +9,19 @@ describe("staff app workshop presence", () => {
     expect(isWorkOrderInWorkshop({ status: "تم التسليم", vehiclePresenceStatus: "in_workshop" })).toBe(false);
     expect(isWorkOrderInWorkshop({ status: "تحت الإصلاح", vehiclePresenceStatus: "in_workshop" })).toBe(true);
   });
-  it("keeps supervisor and technician on the same source and realtime subscription", () => {
+  it("uses canonical visits for supervisor and the synchronized order mirror for technicians", () => {
     const supervisor = readFileSync(join(process.cwd(), "src/pages/apps/SupervisorApp.tsx"), "utf8");
     const technician = readFileSync(join(process.cwd(), "src/pages/tech/TechnicianApp.tsx"), "utf8");
     const sync = readFileSync(join(process.cwd(), "src/hooks/useRealtimeSync.ts"), "utf8");
-    expect(supervisor).toContain("const inWorkshop = isWorkOrderInWorkshop");
+    const projection=readFileSync(join(process.cwd(), "src/lib/supervisorWorkspace.ts"), "utf8");
+    expect(supervisor).toContain("listSupervisorVisits");
+    expect(projection).toContain("listVehicleVisitCenterPage");
+    expect(projection).toContain("custody: getVehicleEntryPresence(entry)");
     expect(technician).toContain("isWorkOrderInWorkshop(o)");
     expect(technician).toContain("useRealtimeSync()");
-    expect(supervisor).toContain("useStaffWorkOrderSync()");
+    expect(supervisor).toContain("useRealtimeSync()");
+    expect(supervisor).not.toContain("useStaffWorkOrderSync()");
+    expect(sync).toContain('scope: "supervisor"');
     expect(technician).toContain("useStaffWorkOrderSync()");
     expect(sync).toContain('scope: "technician"');
     expect(sync).toContain('vehicle_inspection_releases: ["vehicle_visit"');

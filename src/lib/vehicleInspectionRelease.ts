@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
+import { buildTechnicalDeclarationConditionSummary } from "@/lib/vehicleTechnicalDeclaration";
 
 export interface InspectionReleaseForm {
   inspection_summary: string;
@@ -58,20 +59,31 @@ export const emptyInspectionReleaseForm: InspectionReleaseForm = {
   notes: "",
 };
 
-export function inspectionReleaseInitialForm(entry: any): InspectionReleaseForm {
-  const customer = entry?.customer || entry?.customer_snapshot || {};
+export function inspectionReleaseInitialForm(entry: any, language: "ar" | "en" = "ar"): InspectionReleaseForm {
+  // A registry owner may not be the visitor for this visit. Use the saved
+  // intake snapshot first and never reassign the vehicle/customer registry.
+  const customer = { ...entry?.customer, ...entry?.customer_snapshot };
   const contents = entry?.vehicle_contents || {};
   const condition = entry?.vehicle_condition || {};
+  const declaration = entry?.vehicle_technical_declaration;
+  const inspected = buildTechnicalDeclarationConditionSummary(declaration, language)
+    .map((section) => `${section.title}: ${section.items.map((item) => `${item.label}: ${item.value}`).join("; ")}`).join("\n");
   return {
     ...emptyInspectionReleaseForm,
+    // Reuse confirmed findings only. Pending action and actual exit condition
+    // remain reviewable; blank/unticked observations are not negative findings.
+    inspected_items: inspected,
+    inspection_summary: String(declaration?.id ? declaration.form_data?.other_observations || "" : ""),
     visible_damage: String(condition.visible_damage || ""),
     exit_condition: String(condition.condition_description || ""),
     contents_handed_over: String(contents.notes || ""),
-    keys_handed_over: String(contents.keys_count || ""),
+    keys_handed_over: String(contents.keys_count ?? ""),
     recipient_name: String(customer.name || ""),
     recipient_id_number: String(customer.id_number || ""),
     recipient_phone: String(customer.phone || ""),
-    recipient_relation: "owner",
+    // Today's visitor is not necessarily the registered owner or the person
+    // collecting the vehicle. The operator confirms this at actual release.
+    recipient_relation: "",
     staff_name: String(entry?.received_by_name || ""),
   };
 }
@@ -141,6 +153,16 @@ export async function createInspectionReleaseLink(releaseId: string): Promise<{ 
     url: `${window.location.origin}/vehicle-entry/inspection-release/sign/${encodeURIComponent(response.token)}`,
     expires_at: response.expires_at,
   };
+}
+
+/** Issue a customer read capability for a completed release, never a new
+ * signature request. The server keeps the signed report unchanged. */
+export async function createInspectionReleaseViewLink(releaseId: string): Promise<{ url: string; expires_at: string }> {
+  const {data,error}=await supabase.rpc("create_vehicle_inspection_release_view_link",{p_release_id:releaseId,p_expires_hours:168});
+  if(error) throw error;
+  const response=data as any;
+  if(response?.view_only!==true || response.release_id!==releaseId || !/^[a-f0-9]{64}$/.test(response.token || "") || !response.expires_at) throw new Error("INSPECTION_RELEASE_VIEW_LINK_UNCONFIRMED");
+  return {url:`${window.location.origin}/vehicle-entry/inspection-release/sign/${encodeURIComponent(response.token)}`,expires_at:response.expires_at};
 }
 
 export async function reopenInspectionRelease(releaseId: string): Promise<InspectionReleaseRecord> {

@@ -31,7 +31,10 @@ describe("work order type rules", () => {
   it("keeps an explicitly cash accident job in the cash channel on the supervisor screen", () => {
     expect(isInsuranceWorkOrder({ workOrderType: "general_customer" })).toBe(false);
     const supervisor = readFileSync(resolve(process.cwd(), "src/pages/apps/SupervisorApp.tsx"), "utf8");
-    expect(supervisor).toContain("const IS_INSURANCE = isInsuranceWorkOrder;");
+    const projection = readFileSync(resolve(process.cwd(), "src/lib/supervisorWorkspace.ts"), "utf8");
+    expect(supervisor).toContain("listSupervisorVisits");
+    expect(projection).toContain("channel: getVehicleVisitBillingKind(entry)");
+    expect(projection).toContain('channel: isInsuranceWorkOrder(order) ? "insurance" : "cash"');
     expect(supervisor).not.toContain('(o.serviceType || "").trim() === "حادث"');
   });
 });

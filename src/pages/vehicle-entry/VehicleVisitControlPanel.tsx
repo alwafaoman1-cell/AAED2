@@ -17,7 +17,10 @@ import { queryKeys } from "@/lib/queryKeys";
 import { confirmVehicleEntryWorkOrderLink } from "@/lib/vehicleEntryService";
 import "@/lib/i18n/vehicleEntryLinks";
 import {hasConfirmedVehicleEntryWorkOrderLink} from "@/lib/vehicleEntryWorkOrderLink";
-import { advanceVehicleVisit, canReconcileVehicleVisitCustody, getVehicleVisitBillingKind, getVehicleVisitDetail, getVehicleVisitDocumentUrl, getVehicleVisitNextBlocker, listVehicleVisitStaff, reconcileVehicleVisitCustody, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
+import { supabase } from "@/integrations/supabase/client";
+import type { VehicleVisitTransition } from "@/lib/vehicleVisitLifecycle";
+import "@/lib/i18n/supervisorWorkspace";
+import { advanceVehicleVisit, canReconcileVehicleVisitCustody, getVehicleVisitBillingKind, getVehicleVisitDetail, getVehicleVisitDocumentUrl, getVehicleVisitNextBlocker, getVehicleVisitReverseBlocker, listVehicleVisitStaff, reconcileVehicleVisitCustody, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
 
 const ORDER: PersistedVisitStage[] = ["arrived", "approved", "in_progress", "ready", "delivered"];
 function localDateTime() {
@@ -25,9 +28,14 @@ function localDateTime() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
-export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
+export function VehicleVisitControlPanel({ entryId, supervisor = false, onRequestWorkOrderStatus, onRequestHandover }: {
+  entryId: string;
+  supervisor?: boolean;
+  onRequestWorkOrderStatus?: () => void;
+  onRequestHandover?: () => void;
+}) {
   const { t, i18n } = useTranslation();
-  const { user, hasRole } = useAuth();
+  const { user, profile, hasRole } = useAuth();
   const qc = useQueryClient();
   const [target, setTarget] = useState<PersistedVisitStage | null>(null);
   const [occurredAt, setOccurredAt] = useState(localDateTime);
@@ -39,9 +47,14 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
   const [custodyOpen, setCustodyOpen] = useState(false);
   const [custodyReason, setCustodyReason] = useState("");
   const [physicallyChecked, setPhysicallyChecked] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
-  const detail = useQuery({ queryKey: ["vehicle_visit", "detail", entryId], queryFn: () => getVehicleVisitDetail(entryId), staleTime: 5_000, refetchOnWindowFocus: "always" });
-  const staff = useQuery({ queryKey: ["vehicle_visit", "staff"], queryFn: listVehicleVisitStaff, staleTime: 300_000 });
+  // Separate cache identity prevents an existing full operational-file query
+  // from injecting invoice/expense data into the tablet's lightweight view.
+  const readDetail = () => supervisor ? getVehicleVisitDetail(entryId, { includeOperationalFile: false }) : getVehicleVisitDetail(entryId);
+  const detailKey = supervisor ? ["vehicle_visit", "detail", entryId, "supervisor", profile?.tenant_id] : ["vehicle_visit", "detail", entryId];
+  const detail = useQuery({ queryKey: detailKey, queryFn: readDetail, staleTime: 5_000, refetchOnWindowFocus: "always" });
+  const staff = useQuery({ queryKey: ["vehicle_visit", "staff", profile?.tenant_id], queryFn: listVehicleVisitStaff, staleTime: 300_000 });
   const visit = detail.data;
   const entry = visit?.entry;
   const claim = entry?.claim || entry?.converted_claim;
@@ -51,9 +64,22 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
   // Older, consistent visits remain read-only until an explicit user action;
   // the RPC then creates their first workflow event transactionally.
   const current = visit?.workflow?.stage || (visit?.stage !== "needs_review" ? visit?.stage : undefined);
+  // Lightweight detail deliberately omits history. Load only transition rows
+  // when expanded (or to recover the previous stage of a cancelled visit).
+  const historyQuery = useQuery({
+    queryKey: ["vehicle_visit", "transitions", entryId, profile?.tenant_id],
+    enabled: supervisor && Boolean(profile?.tenant_id) && (historyOpen || current === "cancelled"),
+    queryFn: async () => {
+      const { data, error } = await supabase.from("vehicle_visit_transitions").select("*")
+        .eq("tenant_id", profile!.tenant_id).eq("entry_id", entryId).order("revision", { ascending: false }).limit(500);
+      if (error) throw error;
+      return (data || []) as VehicleVisitTransition[];
+    }, staleTime: 5_000,
+  });
+  const transitions = supervisor ? historyQuery.data || [] : visit?.transitions || [];
   const next = current ? ORDER[ORDER.indexOf(current) + 1] : undefined;
   const previous = current === "cancelled"
-    ? visit?.transitions?.[0]?.from_stage || undefined
+    ? transitions[0]?.from_stage || undefined
     : current ? ORDER[ORDER.indexOf(current) - 1] : undefined;
   const canManage = hasRole("admin", "manager");
   const canConfirmExistingOrder=canManage && visit?.reviewReason==="work_order_link_conflict"
@@ -63,7 +89,8 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     && !entry.work_order_id && !entry.converted_work_order_id;
   const canAdvance = !visit?.reviewReason && Boolean(current) && current !== "cancelled" && current !== "delivered";
   const nextBlocker = getVehicleVisitNextBlocker(next, entry, hasRole, Boolean(visit?.hasFinalHandover));
-  const prerequisiteHref = nextBlocker === "claimApprovalRequired" && claim?.id ? `/insurance/${claim.id}`
+  const reverseBlocker = getVehicleVisitReverseBlocker(previous, visit);
+  const prerequisiteHref = supervisor ? `/supervisor/entry/${encodeURIComponent(entryId)}/complete` : nextBlocker === "claimApprovalRequired" && claim?.id ? `/insurance/${claim.id}`
     : ["cashWorkOrderRequired", "workOrderRequired", "workshopPresenceRequired"].includes(nextBlocker || "") ? `/vehicle-entry/${entryId}`
     : ["workOrderStatusInvalid", "finishWorkFirst"].includes(nextBlocker || "") && order?.order_number
       ? `/work-orders/${encodeURIComponent(order.order_number)}` : null;
@@ -73,6 +100,7 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
 
   const displayError = (error: Error) => {
     const code = error.message?.match(/VEHICLE_VISIT_[A-Z_]+/)?.[0];
+    if(code === "VEHICLE_VISIT_REVERSE_SOURCE_FIRST") return t("supervisorWorkspace:reverseSourceFirst");
     return code ? t(`vehicleVisit.errors.${code}`, { defaultValue: error.message }) : error.message || t("vehicleVisit.saveFailed");
   };
 
@@ -89,14 +117,15 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
         responsibleUserId: responsible || user?.id || "",
         requirements: { details: requirements.trim(), customer_approved: customerApproved },
       });
-      const confirmed = await getVehicleVisitDetail(entryId);
+      const confirmed = await readDetail();
       if (!confirmed?.workflow || confirmed.workflow.revision !== result.revision || confirmed.workflow.stage !== result.stage) {
         throw new Error("VEHICLE_VISIT_SAVE_NOT_CONFIRMED");
       }
       return confirmed;
     },
     onSuccess: (confirmed) => {
-      qc.setQueryData(["vehicle_visit", "detail", entryId], confirmed);
+      qc.setQueryData(detailKey, confirmed);
+      void qc.invalidateQueries({ queryKey: ["vehicle_visit", "transitions", entryId] });
       void qc.invalidateQueries({ queryKey: ["vehicle_visit", "center"] });
       void qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
       void qc.invalidateQueries({ queryKey: ["job_orders"] });
@@ -116,12 +145,12 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     mutationFn: async () => {
       if (!physicallyChecked || custodyReason.trim().length < 8) throw new Error("VEHICLE_VISIT_REASON_REQUIRED");
       await reconcileVehicleVisitCustody(entryId, custodyReason);
-      const confirmed = await getVehicleVisitDetail(entryId);
+      const confirmed = await readDetail();
       if (!confirmed || confirmed.reviewReason === "custody_conflict") throw new Error("VEHICLE_VISIT_SAVE_NOT_CONFIRMED");
       return confirmed;
     },
     onSuccess: (confirmed) => {
-      qc.setQueryData(["vehicle_visit", "detail", entryId], confirmed);
+      qc.setQueryData(detailKey, confirmed);
       void qc.invalidateQueries({ queryKey: ["vehicle_visit", "center"] });
       void qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.all });
       setCustodyOpen(false); setCustodyReason(""); setPhysicallyChecked(false);
@@ -134,13 +163,13 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     mutationFn:async()=>{
       if(!canConfirmExistingOrder || !entry.updated_at) throw new Error(t("vehicleEntryLinks.VEHICLE_ENTRY_LINK_STALE"));
       await confirmVehicleEntryWorkOrderLink(entryId,order.id,entry.updated_at);
-      const fresh=await getVehicleVisitDetail(entryId);
+      const fresh=await readDetail();
       if(!fresh || fresh.entry.work_order_id!==order.id || fresh.entry.converted_work_order_id!==order.id
         || fresh.reviewReason==="work_order_link_conflict") throw new Error(t("vehicleEntryLinks.failed"));
       return fresh;
     },
     onSuccess:(fresh)=>{
-      qc.setQueryData(["vehicle_visit","detail",entryId],fresh);
+      qc.setQueryData(detailKey,fresh);
       for(const key of [queryKeys.vehicleEntries.all,["vehicle_visit","center"],["job_orders"],["insurance_claims"]])
         void qc.invalidateQueries({queryKey:key});
       toast.success(t("vehicleEntryLinks.confirmed"));
@@ -168,7 +197,11 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
   const presenceLabel = (presence: string | null | undefined) => presence === "داخل الورشة" || presence === "in_workshop"
     ? t("vehicleEntry.workshopTab") : presence === "مع العميل" || presence === "with_customer"
       ? t("vehicleEntry.customerTab") : presence || "—";
-  const refs = [
+  const refs = supervisor ? [
+    { label: t("vehicleVisit.entry"), value: entry.entry_number, href: `/supervisor/entry/${encodeURIComponent(entryId)}/complete` },
+    { label: t("vehicleVisit.claim"), value: claim?.claim_number, href: "" },
+    { label: t("vehicleVisit.workOrder"), value: safeOrderLink ? order?.order_number : "", href: "" },
+  ] : [
     { label: t("vehicleVisit.entry"), value: entry.entry_number, href: `/vehicle-entry/${entryId}` },
     { label: t("vehicleVisit.claim"), value: claim?.claim_number, href: claim?.id ? `/insurance/${claim.id}` : "" },
     { label: t("vehicleVisit.workOrder"), value: order?.order_number, href: safeOrderLink && order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}` : "" },
@@ -180,7 +213,7 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
     { label: t("vehicleVisit.handover"), value: visit.handovers.find((row: any) => row.status === "finalized" && row.work_order_id === order?.id)?.receipt_number || "—", href: safeOrderLink && order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}/delivery` : "" },
   ];
 
-  return <Card className="space-y-4 p-4" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
+  return <Card className={`space-y-4 p-4 ${supervisor ? "[&_button]:min-h-11 [&_input]:min-h-11 [&_summary]:min-h-11 [&_select]:min-h-11" : ""}`} dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 className="flex items-center gap-2 text-lg font-bold"><ClipboardList className="h-5 w-5" />{t("vehicleVisit.operationalFile")}</h2>
@@ -203,7 +236,7 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
         {ref.href && ref.value ? <Link className="block truncate font-semibold text-primary hover:underline" to={ref.href}>{ref.value}</Link> : <div className="truncate font-semibold">{ref.value || "—"}</div>}
       </div>)}
     </div>
-    {(visit.documentFiles.length > 0 || visit.expenses.length > 0 || visit.cashInvoices.length > 0 || visit.insuranceInvoices.length > 0) &&
+    {!supervisor && (visit.documentFiles.length > 0 || visit.expenses.length > 0 || visit.cashInvoices.length > 0 || visit.insuranceInvoices.length > 0) &&
       <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer font-semibold">{t("vehicleVisit.operationalFile")} · {t("vehicleVisit.documents")} / {t("vehicleVisit.expenses")}</summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <section><h3 className="text-sm font-semibold">{t("vehicleVisit.documents")}</h3><div className="mt-2 space-y-1">
@@ -217,22 +250,32 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
         </div>
       </details>}
     <div className="flex flex-wrap gap-2">
-      <VehicleEntryInspectionAction entry={visit.entry} />
+      {!supervisor && <VehicleEntryInspectionAction entry={visit.entry} />}
       {canAdvance && next && <Button variant="outline" disabled={Boolean(nextBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(next); }}><ArrowRight className="me-2 h-4 w-4" />{t("vehicleVisit.next")}: {stageLabel(next)}</Button>}
-      {canManage && current && previous && <Button variant="outline" onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
+      {canManage && current && previous && <Button variant="outline" disabled={Boolean(reverseBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
       {canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && current &&
         <Button variant="outline" disabled={Boolean(cancelBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget("cancelled"); }}>{t("vehicleVisit.cancel")}</Button>}
-      {next === "delivered" && !visit.hasFinalHandover && order?.order_number && <Link className="text-sm text-primary underline" to={`/work-orders/${encodeURIComponent(order.order_number)}/delivery`}>{t("vehicleVisit.signedHandoverRequired")}</Link>}
+      {next === "delivered" && !visit.hasFinalHandover && order?.order_number && (supervisor
+        ? <Button variant="outline" disabled={!onRequestHandover} onClick={onRequestHandover}>{t("vehicleVisit.signedHandoverRequired")}</Button>
+        : <Link className="text-sm text-primary underline" to={`/work-orders/${encodeURIComponent(order.order_number)}/delivery`}>{t("vehicleVisit.signedHandoverRequired")}</Link>)}
     </div>
-    {canAdvance && nextBlocker && <p role="status" className="text-sm text-warning">{t(`vehicleVisit.${nextBlocker}`)}{prerequisiteHref && <> <Link to={prerequisiteHref} className="font-semibold underline">{t("vehicleVisit.openPrerequisite")}</Link></>}</p>}
+    {canManage && reverseBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/40 p-3 text-sm">
+      <p>{t("supervisorWorkspace:reverseSourceFirst")}</p>
+      {supervisor && onRequestWorkOrderStatus && <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("supervisorWorkspace:reviewSource")}</Button>}
+    </div>}
+    {canAdvance && nextBlocker && <div role="status" className="text-sm text-warning">{t(`vehicleVisit.${nextBlocker}`)}{prerequisiteHref && <>{" "}{supervisor && ["workOrderStatusInvalid", "finishWorkFirst"].includes(nextBlocker) && onRequestWorkOrderStatus
+      ? <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("vehicleVisit.openPrerequisite")}</Button>
+      : <Link to={prerequisiteHref} className="inline-flex min-h-11 items-center font-semibold underline">{t("vehicleVisit.openPrerequisite")}</Link>}</>}</div>}
     {canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && cancelBlocker &&
       <p className="text-sm text-muted-foreground">{t(`vehicleVisit.${cancelBlocker}`)}</p>}
     {visit.reviewReason && <p className="text-sm text-muted-foreground">{t("vehicleVisit.reviewBlocked")}</p>}
-    <details className="rounded-lg border border-border p-3">
-      <summary className="cursor-pointer font-semibold">{t("vehicleVisit.history")} ({visit.transitions.length})</summary>
+    <details className="rounded-lg border border-border p-3" onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
+      <summary className="cursor-pointer font-semibold">{t("vehicleVisit.history")}{!supervisor || historyQuery.isSuccess ? ` (${transitions.length})` : ""}</summary>
       <div className="mt-3 space-y-2">
-        {visit.transitions.length === 0 && <p className="text-sm text-muted-foreground">{t("vehicleVisit.noHistory")}</p>}
-        {visit.transitions.map((event) => <div key={event.id} className="rounded-lg bg-muted/50 p-3 text-sm">
+        {supervisor && historyQuery.isPending && <p role="status">{t("supervisorWorkspace:loading")}</p>}
+        {supervisor && historyQuery.isError && <div role="alert"><p>{t("supervisorWorkspace:loadError")}</p><Button variant="outline" onClick={() => void historyQuery.refetch()}>{t("supervisorWorkspace:retry")}</Button></div>}
+        {(!supervisor || historyQuery.isSuccess) && transitions.length === 0 && <p className="text-sm text-muted-foreground">{t("vehicleVisit.noHistory")}</p>}
+        {(!supervisor || !historyQuery.isError) && transitions.map((event) => <div key={event.id} className="rounded-lg bg-muted/50 p-3 text-sm">
           <div className="flex flex-wrap justify-between gap-2"><strong>{stageLabel(event.from_stage)} → {stageLabel(event.to_stage)}</strong><time dir="ltr">{new Date(event.occurred_at).toLocaleString(i18n.language)}</time></div>
           <div className="text-xs text-muted-foreground">{event.source} · {event.responsible_user_id || "—"}</div>
           {event.notes && <p>{event.notes}</p>}{event.reason && <p>{t("vehicleVisit.reason")}: {event.reason}</p>}
