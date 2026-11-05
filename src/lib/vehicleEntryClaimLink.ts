@@ -22,13 +22,20 @@ export function assertVehicleEntryClaimLink(entry: VehicleEntryClaimIdentity, cl
   if (entry.insurance_claim_id && entry.converted_claim_id && entry.insurance_claim_id !== entry.converted_claim_id) {
     throw new Error("نموذج الدخول مرتبط بمطالبتين مختلفتين. راجع الربط قبل المتابعة.");
   }
-  if (claim.deleted_at || claim.tenant_id !== entry.tenant_id) {
+  const explicitClaimId = entry.insurance_claim_id || entry.converted_claim_id;
+  if (explicitClaimId && explicitClaimId !== claim.id) {
+    throw new Error("المطالبة المحددة لا تطابق رابط نموذج الدخول. لم يتم تغيير أي بيانات.");
+  }
+  if (!entry.id || !claim.id || !entry.tenant_id || claim.deleted_at || claim.tenant_id !== entry.tenant_id) {
     throw new Error("المطالبة المرتبطة غير متاحة لهذه الورشة. لم يتم تغيير أي بيانات.");
   }
   if (!entry.vehicle_id || !claim.vehicle_id || claim.vehicle_id !== entry.vehicle_id) {
     throw new Error("رقم المطالبة مرتبط بمركبة أخرى. صحّح رقم المطالبة في نموذج الدخول قبل إنشاء مطالبة جديدة.");
   }
-  if (!entry.customer_id || !claim.customer_id || claim.customer_id !== entry.customer_id) {
+  // An explicit same-vehicle link identifies the insurance financial party.
+  // The visitor is independent; never copy either customer ID to the other.
+  // Number-only resolution remains strict so it cannot silently switch parties.
+  if (!entry.customer_id || !claim.customer_id || (!explicitClaimId && claim.customer_id !== entry.customer_id)) {
     throw new Error("رقم المطالبة مرتبط بعميل آخر. راجع بيانات العميل ورقم المطالبة قبل المتابعة.");
   }
   if (claim.vehicle_entry_id && claim.vehicle_entry_id !== entry.id) {

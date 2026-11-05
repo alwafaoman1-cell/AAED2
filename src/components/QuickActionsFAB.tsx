@@ -146,7 +146,7 @@ export default function QuickActionsFAB() {
 
   // position
   const sideStyle: React.CSSProperties = {};
-  const bottom = `${settings.offsetY}px`;
+  const bottom = `max(${settings.offsetY}px, var(--app-form-action-clearance, 0px))`;
   sideStyle.bottom = bottom;
   if (settings.position === "bottom-center") {
     sideStyle.left = "50%";
@@ -158,7 +158,7 @@ export default function QuickActionsFAB() {
   }
 
   // popover side based on FAB position
-  const popoverStyle: React.CSSProperties = { ...sideStyle, bottom: `${settings.offsetY + 72}px` };
+  const popoverStyle: React.CSSProperties = { ...sideStyle, bottom: `calc(${bottom} + 72px)` };
   if (settings.position === "bottom-center") {
     popoverStyle.left = "50%";
     popoverStyle.transform = "translateX(-50%)";

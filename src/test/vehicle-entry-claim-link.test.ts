@@ -21,6 +21,11 @@ const claim: LinkedClaimIdentity = {
 };
 
 describe("vehicle entry to insurance claim identity", () => {
+  it("preserves an explicit same-vehicle claim with a different visit customer without rewriting either party", () => {
+    expect(() => assertVehicleEntryClaimLink({...entry, insurance_claim_id: claim.id, customer_id: "visit-customer"}, claim)).not.toThrow();
+    expect(() => assertVehicleEntryClaimLink({...entry, insurance_claim_id: "other-claim", customer_id: "visit-customer"}, claim)).toThrow(/لا تطابق/);
+    expect(() => assertVehicleEntryClaimLink({...entry, insurance_claim_id: claim.id}, {...claim, vehicle_id: "other-vehicle"})).toThrow(/مركبة أخرى/);
+  });
   it("permits only the same vehicle, owner, tenant and entry", () => {
     expect(() => assertVehicleEntryClaimLink(entry, claim)).not.toThrow();
   });

@@ -1,111 +1,43 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  from: vi.fn(),
-  getTenant: vi.fn(),
-}));
-
-vi.mock("@/integrations/supabase/client", () => ({ supabase: { from: mocks.from } }));
-vi.mock("@/lib/cloud/createCloudStore", () => ({ getCurrentTenantId: mocks.getTenant }));
-
-import { customerPhoneEdit, defaultVehicleEntryForm, formFromVehicleEntry, saveVehicleEntry } from "@/lib/vehicleEntryService";
-
-function mockQueries(options: { duplicate?: boolean; conflict?: boolean; location?: string } = {}) {
-  const calls: Array<{ table: string; action: string; payload?: unknown; filters: Array<[string, unknown]> }> = [];
-  mocks.from.mockImplementation((table: string) => {
-    const call = { table, action: "read", payload: undefined as unknown, filters: [] as Array<[string, unknown]> };
-    calls.push(call);
-    const result = () => {
-      if (table === "vehicle_entries") return { data: { id: "entry-1", entry_number: "ENT-2026-00001", vehicle_location: options.location || "داخل الورشة" }, error: null };
-      if (table === "customers" && call.action === "update") {
-        return { data: options.conflict ? null : { id: "customer-1", phone: "+96891234567" }, error: null };
-      }
-      if (table === "customers") return {
-        data: options.duplicate ? [{ id: "customer-2", phone: "+96891234567" }] : [],
-        error: null,
-      };
-      return { data: null, error: null };
-    };
-    const query: any = {
-      select: () => query,
-      eq: (key: string, value: unknown) => { call.filters.push([key, value]); return query; },
-      is: (key: string, value: unknown) => { call.filters.push([key, value]); return query; },
-      ilike: () => query,
-      limit: () => query,
-      update: (payload: unknown) => { call.action = "update"; call.payload = payload; return query; },
-      delete: () => { call.action = "delete"; return query; },
-      insert: (payload: unknown) => { call.action = "insert"; call.payload = payload; return query; },
-      single: async () => result(),
-      maybeSingle: async () => result(),
-      then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
-        Promise.resolve(result()).then(resolve, reject),
-    };
-    return query;
-  });
-  return calls;
+import {beforeEach,describe,expect,it,vi} from "vitest";
+const mocks=vi.hoisted(()=>({rpc:vi.fn(),getTenant:vi.fn()}));
+vi.mock("@/integrations/supabase/client",()=>({supabase:{rpc:mocks.rpc}}));
+vi.mock("@/lib/cloud/createCloudStore",()=>({getCurrentTenantId:mocks.getTenant}));
+import {customerPhoneEdit,defaultVehicleEntryForm,formFromVehicleEntry,saveVehicleEntry} from "@/lib/vehicleEntryService";
+function editedEntry(){
+  return {...defaultVehicleEntryForm(),id:"entry-1",updated_at_before_edit:"2026-11-04T10:00:00Z",entry_number:"ENT-2026-00001",customer_id:"customer-1",customer_phone_before_edit:"90000000",
+    customer:{...defaultVehicleEntryForm().customer,phone:"91234567"}};
 }
-
-function editedEntry() {
-  const form = defaultVehicleEntryForm();
-  form.id = "entry-1";
-  form.entry_number = "ENT-2026-00001";
-  form.customer_id = "customer-1";
-  form.customer_phone_before_edit = "90000000";
-  form.customer.phone = "91234567";
-  return form;
-}
-
-describe("vehicle entry customer phone sync", () => {
-  beforeEach(() => {
-    mocks.from.mockReset();
-    mocks.getTenant.mockReset().mockResolvedValue("tenant-1");
+describe("vehicle entry customer phone sync",()=>{
+  beforeEach(()=>{vi.clearAllMocks();mocks.getTenant.mockResolvedValue("tenant-1");mocks.rpc.mockResolvedValue({data:{entry:{id:"entry-1",tenant_id:"tenant-1"}},error:null});});
+  it("loads live customer phone and row revision rather than an old snapshot",()=>{
+    const form=formFromVehicleEntry({id:"entry-1",updated_at:"2026-11-04T10:00:00Z",customer_id:"customer-1",customer_snapshot:{phone:"90000000"},customer:{phone:"+96891111111"}});
+    expect(form.customer.phone).toBe("+96891111111");expect(form.customer_phone_before_edit).toBe("+96891111111");expect(customerPhoneEdit(form)).toBeNull();
+    expect(form.updated_at_before_edit).toBe("2026-11-04T10:00:00Z");
   });
-
-  it("loads the live customer phone as the edit baseline, not an old snapshot", () => {
-    const form = formFromVehicleEntry({
-      id: "entry-1",
-      customer_id: "customer-1",
-      customer_snapshot: { phone: "90000000" },
-      customer: { phone: "+96891111111" },
-    });
-    expect(form.customer.phone).toBe("+96891111111");
-    expect(form.customer_phone_before_edit).toBe("+96891111111");
+  it("requests a phone CAS in the same atomic save with the original raw baseline",async()=>{
+    await saveVehicleEntry(editedEntry(),"user-1");expect(mocks.rpc).toHaveBeenCalledOnce();
+    expect(mocks.rpc).toHaveBeenCalledWith("save_vehicle_entry_intake",expect.objectContaining({p_entry_id:"entry-1",p_expected_updated_at:"2026-11-04T10:00:00Z",
+      p_form:expect.objectContaining({customer_id:"customer-1",customer_phone_changed:true,customer_phone_before_edit:"90000000",customer:expect.objectContaining({phone:"+96891234567"})})}));
+  });
+  it("does not normalize/overwrite the master phone while saving unrelated changes",async()=>{
+    const form=editedEntry();form.customer.phone="90000000";await saveVehicleEntry(form);
+    expect(mocks.rpc.mock.calls[0][1].p_form.customer_phone_changed).toBe(false);
+  });
+  it.each([undefined,"entry-1"])("does not treat equivalent phone formatting as a customer mutation (entry=%s)",async(id)=>{
+    const form={...editedEntry(),id,customer_phone_before_edit:"91234567"};
+    form.customer.phone="+96891234567";
     expect(customerPhoneEdit(form)).toBeNull();
+    await saveVehicleEntry(form);
+    expect(mocks.rpc.mock.calls[0][1].p_form.customer_phone_changed).toBe(false);
   });
-
-  it("updates the linked customer only when the phone was edited, scoped to tenant and original phone", async () => {
-    const calls = mockQueries();
-    await saveVehicleEntry(editedEntry(), "user-1");
-    const update = calls.find((call) => call.table === "customers" && call.action === "update");
-    expect(update?.payload).toEqual({ phone: "+96891234567" });
-    expect(update?.filters).toEqual(expect.arrayContaining([
-      ["tenant_id", "tenant-1"], ["id", "customer-1"], ["phone", "90000000"],
-    ]));
+  it("rejects a stale entry/release atomically without a misleading partial-save identity",async()=>{
+    mocks.rpc.mockResolvedValue({data:null,error:{message:"VEHICLE_INTAKE_STALE"}});
+    await expect(saveVehicleEntry(editedEntry())).rejects.toBeInstanceOf(Error);
+    await expect(saveVehicleEntry(editedEntry())).rejects.not.toHaveProperty("savedEntry");
   });
-
-  it("does not overwrite a customer's phone while saving unrelated entry changes", async () => {
-    const calls = mockQueries();
-    const form = editedEntry();
-    form.customer.phone = "90000000";
-    await saveVehicleEntry(form, "user-1");
-    expect(calls.some((call) => call.table === "customers" && call.action === "update")).toBe(false);
-  });
-
-  it("rejects a stale entry after a vehicle release before changing customer data", async () => {
-    const calls = mockQueries({ location: "مع العميل" });
-    await expect(saveVehicleEntry(editedEntry(), "user-1")).rejects.toThrow("تغير موقع المركبة أثناء فتح النموذج");
-    expect(calls.some((call) => call.table === "customers" && call.action === "update")).toBe(false);
-    expect(calls.some((call) => call.table === "vehicle_entries" && call.action === "update")).toBe(false);
-  });
-
-  it("rejects duplicate numbers and concurrent changes instead of reporting success", async () => {
-    mockQueries({ duplicate: true });
-    await expect(saveVehicleEntry(editedEntry(), "user-1")).rejects.toMatchObject({
-      message: expect.stringContaining("رقم الهاتف مرتبط بعميل آخر"),
-      savedEntry: { id: "entry-1" },
-    });
-    mocks.from.mockReset();
-    mockQueries({ conflict: true });
-    await expect(saveVehicleEntry(editedEntry(), "user-1")).rejects.toThrow("تغيّر رقم هاتف العميل في جلسة أخرى");
+  it("rejects a duplicate phone rather than claiming the entry saved before the phone failed",async()=>{
+    mocks.rpc.mockResolvedValue({data:null,error:{message:"VEHICLE_INTAKE_PHONE_CONFLICT"}});
+    await expect(saveVehicleEntry(editedEntry())).rejects.toThrow();
+    await expect(saveVehicleEntry(editedEntry())).rejects.not.toHaveProperty("savedEntry");
   });
 });

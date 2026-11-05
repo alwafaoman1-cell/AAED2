@@ -1,8 +1,9 @@
-import {hasConfirmedVehicleEntryWorkOrderLink} from "@/lib/vehicleEntryWorkOrderLink";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { getVehicleEntry, getVehicleEntryPresence, getVehicleVisitBillingKind, listVehicleEntries, type VehicleEntryPresence } from "@/lib/vehicleEntryService";
 import { getPrivateDocumentUrl } from "@/lib/documentExtraction/persistence";
+import {workshopDateTime} from "@/lib/workshopDateTime";
+import {hasConfirmedVehicleEntryWorkOrderLink} from "@/lib/vehicleEntryWorkOrderLink";
 
 export const VISIT_STAGES = ["arrived", "approved", "in_progress", "ready", "delivered", "cancelled", "needs_review"] as const;
 export type VisitStage = typeof VISIT_STAGES[number];
@@ -44,6 +45,133 @@ export interface VehicleVisitItem {
   operationalStage: VisitStage;
   reviewReason: string | null;
   hasFinalHandover: boolean;
+  /** Existing finalized release state (`signed`), including paper acknowledgement.
+   * No electronic signature image is required or fetched. Not a stored custody source. */
+  hasSignedTemporaryRelease?: boolean;
+}
+
+export const VEHICLE_CENTER_TABS = ["in_workshop", "with_customer", "delivered", "cancelled", "needs_review"] as const;
+export type VehicleCenterTab = typeof VEHICLE_CENTER_TABS[number];
+export interface VehicleCenterFilters {
+  search?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  technician?: string;
+  location?: VehicleEntryPresence | "all";
+  minDays?: number;
+  stage?: VisitStage | "all";
+}
+export interface VehicleCenterPageRequest {
+  tab: VehicleCenterTab;
+  page?: number;
+  pageSize?: number;
+  filters?: VehicleCenterFilters;
+}
+export interface VehicleCenterPage {
+  items: VehicleVisitItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  tabs: Record<VehicleCenterTab, number>;
+  stages: Record<VisitStage, number>;
+  technicians: string[];
+  entryCount: number;
+  claimOnlyCount: number;
+  scopeToken: string;
+}
+
+/** Terminal operational evidence wins over a historical review warning.
+ * A claim alone is never proof of an arrival, inspection or temporary exit. */
+export function getVehicleCenterTab(visit: VehicleVisitItem): VehicleCenterTab {
+  if (visit.entry?._claimOnly) return "needs_review";
+  if (visit.operationalStage === "delivered" || visit.operationalStage === "cancelled") return visit.operationalStage;
+  if (visit.reviewReason) return "needs_review";
+  const presence = getVehicleEntryPresence(visit.entry);
+  if (presence === "in_workshop") return "in_workshop";
+  return presence === "with_customer" && visit.hasSignedTemporaryRelease ? "with_customer" : "needs_review";
+}
+
+/** No unbounded fallback: missing candidate RPC is a visible release prerequisite. */
+export async function listVehicleVisitCenterPage(request: VehicleCenterPageRequest): Promise<VehicleCenterPage> {
+  const tenantId = await getCurrentTenantId();
+  if (!tenantId) throw new Error("TENANT_NOT_FOUND");
+  if (!VEHICLE_CENTER_TABS.includes(request.tab)) throw new Error("VEHICLE_CENTER_INVALID_TAB");
+  const page = Math.max(1, Math.trunc(request.page || 1));
+  const pageSize = Math.max(1, Math.min(100, Math.trunc(request.pageSize || 30)));
+  const { data, error } = await supabase.rpc("vehicle_visit_center_page_v1" as any, {
+    p_tenant_id: tenantId, p_tab: request.tab, p_page: page, p_page_size: pageSize,
+    p_filters: request.filters || {},
+  } as any);
+  if (error) throw error;
+  const result = data as any;
+  if (!result || !Array.isArray(result.items) || !Number.isSafeInteger(result.total) || result.total < 0
+    || result.page !== page || result.pageSize !== pageSize || result.items.length > pageSize
+    || !result.tabs || !result.stages || !Array.isArray(result.technicians)
+    || !/^[a-f0-9]{32}$/.test(result.scopeToken || "")) throw new Error("VEHICLE_CENTER_INVALID_RESPONSE");
+  const items = result.items.map((raw: any) => {
+    const entry = raw.entry;
+    // Defense in depth: malformed/cross-tenant payloads must not reach cards or exports.
+    if (!entry || entry.tenant_id !== tenantId || (raw.workflow && raw.workflow.tenant_id !== tenantId)
+      || [entry.claim, entry.converted_claim, entry.work_order, entry.converted_work_order, entry.vehicle, entry.customer]
+        .some((linked) => linked && linked.tenant_id !== tenantId)) throw new Error("VEHICLE_CENTER_TENANT_MISMATCH");
+    const visit = entry._claimOnly ? projectClaimWithoutEntry(entry.claim, entry.work_order || null)
+      : resolveVehicleVisit(entry, raw.workflow || null, raw.hasFinalHandover === true, raw.hasSignedTemporaryRelease === true);
+    visit.entry = entry;
+    visit.hasSignedTemporaryRelease = raw.hasSignedTemporaryRelease === true;
+    if (raw.duplicateOpenVisit) {
+      visit.stage = "needs_review";
+      visit.operationalStage = "needs_review";
+      visit.reviewReason ||= "duplicate_open_visit";
+    }
+    if (visit.stage !== raw.stage || visit.operationalStage !== raw.operationalStage || visit.reviewReason !== raw.reviewReason
+      || getVehicleCenterTab(visit) !== request.tab) throw new Error("VEHICLE_CENTER_PROJECTION_MISMATCH");
+    return visit;
+  });
+  for (const count of [...VEHICLE_CENTER_TABS.map((key) => result.tabs[key]), ...VISIT_STAGES.map((key) => result.stages[key]), result.entryCount, result.claimOnlyCount]) {
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error("VEHICLE_CENTER_INVALID_RESPONSE");
+  }
+  if (result.tabs[request.tab] !== result.total || result.entryCount + result.claimOnlyCount !== result.total
+    || items.length > result.total || result.technicians.some((value: unknown) => typeof value !== "string")) {
+    throw new Error("VEHICLE_CENTER_INVALID_RESPONSE");
+  }
+  return { ...result, items } as VehicleCenterPage;
+}
+
+/** Explicit all-matching export, bounded per request and fail-closed on drift/limits. */
+export async function listAllMatchingVehicleCenter(request: Omit<VehicleCenterPageRequest, "page" | "pageSize">): Promise<VehicleVisitItem[]> {
+  const items: VehicleVisitItem[] = [];
+  const seen = new Set<string>();
+  let expectedTotal: number | undefined;
+  let expectedScope: string | undefined;
+  for (let page = 1; ; page++) {
+    const result = await listVehicleVisitCenterPage({ ...request, page, pageSize: 100 });
+    expectedTotal ??= result.total;
+    expectedScope ??= result.scopeToken;
+    if (result.total !== expectedTotal || result.scopeToken !== expectedScope) throw new Error("VEHICLE_CENTER_EXPORT_CHANGED");
+    if (result.total > MAX_ENTRIES) throw new Error("VEHICLE_VISIT_RESULT_LIMIT");
+    for (const item of result.items) {
+      if (seen.has(item.entry.id)) throw new Error("VEHICLE_CENTER_EXPORT_CHANGED");
+      seen.add(item.entry.id);
+      items.push(item);
+    }
+    if (items.length === result.total) return items;
+    if (!result.items.length || items.length > result.total) throw new Error("VEHICLE_CENTER_EXPORT_CHANGED");
+  }
+}
+
+/** Only an attested, unresolved workshop/linked-record conflict can use the existing custody repair RPC. */
+export function canReconcileVehicleVisitCustody(visit: (VehicleVisitItem & { releases?: Array<{ status: string; returned_at: string | null }> }) | null | undefined): boolean {
+  if (!visit || visit.reviewReason !== "custody_conflict" || visit.hasFinalHandover) return false;
+  const entry = visit.entry;
+  const claim = entry?.claim || entry?.converted_claim;
+  const order = entry?.work_order || entry?.converted_work_order;
+  return entry?.vehicle_location === "داخل الورشة"
+    && (claim?.vehicle_presence_status === "with_customer" || order?.vehicle_presence_status === "with_customer")
+    && !["cancelled", "rejected"].includes(claim?.status)
+    && !claim?.vehicle_delivered_at && !claim?.delivered_at
+    && order?.status !== "delivered" && !order?.vehicle_delivered_at
+    && !(visit.releases || []).some((release) => release.status === "signed" && !release.returned_at);
 }
 
 const PAGE_SIZE = 200;
@@ -120,13 +248,7 @@ export function resolveVehicleVisit(entry: any, workflow: VehicleVisitWorkflow |
 }
 
 function omanDateTime(value: string | null | undefined): { date: string; time: string } {
-  if (!value || !Number.isFinite(Date.parse(value))) return { date: "", time: "" };
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Muscat", year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).formatToParts(new Date(value));
-  const part = (type: string) => parts.find((item) => item.type === type)?.value || "";
-  return { date: `${part("year")}-${part("month")}-${part("day")}`, time: `${part("hour")}:${part("minute")}` };
+  return workshopDateTime(value);
 }
 
 /** Read-only stage projection: a claim does not become a signed entry or handover. */
@@ -365,10 +487,11 @@ export async function listVehicleVisitCenter(): Promise<VehicleVisitItem[]> {
   return [...visits, ...claimCards];
 }
 
-export async function getVehicleVisitDetail(entryId: string) {
+export async function getVehicleVisitDetail(entryId: string, options?: { includeOperationalFile?: boolean }) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("TENANT_NOT_FOUND");
-  const entry = await getVehicleEntry(entryId);
+  const lightweight = options?.includeOperationalFile === false;
+  const entry = await getVehicleEntry(entryId, { includeAttachments: !lightweight });
   if (!entry) return null;
   if (!entry.work_order_id && !entry.converted_work_order_id) {
     const claimId = entry.insurance_claim_id || entry.converted_claim_id;
@@ -388,7 +511,7 @@ export async function getVehicleVisitDetail(entryId: string) {
   }
   const [workflowResult, eventsResult, handoversResult, releasesResult] = await Promise.all([
     supabase.from("vehicle_visit_workflows" as any).select("*").eq("tenant_id", tenantId).eq("entry_id", entryId).maybeSingle(),
-    supabase.from("vehicle_visit_transitions" as any).select("*").eq("tenant_id", tenantId).eq("entry_id", entryId).order("revision", { ascending: false }).limit(500),
+    lightweight ? Promise.resolve({ data: [], error: null }) : supabase.from("vehicle_visit_transitions" as any).select("*").eq("tenant_id", tenantId).eq("entry_id", entryId).order("revision", { ascending: false }).limit(500),
     supabase.from("vehicle_handover_records" as any).select("id,work_order_id,receipt_number,status,delivered_at,finalized_at,cancellation_reason")
       .eq("tenant_id", tenantId).eq("vehicle_entry_id", entryId).order("created_at", { ascending: false }).limit(30),
     supabase.from("vehicle_inspection_releases" as any).select("id,release_number,status,released_at,returned_at")
@@ -405,6 +528,11 @@ export async function getVehicleVisitDetail(entryId: string) {
   const item = resolveVehicleVisit(entry, (workflowResult.data as unknown as VehicleVisitWorkflow) || null,
     handovers.some((row) => row.status === "finalized" && row.work_order_id === order?.id),
     releases.some((row) => row.status === "signed" && !row.returned_at));
+  if (lightweight) return {
+    ...item,
+    transitions: [] as VehicleVisitTransition[], handovers, releases,
+    documents: [], documentFiles: [], expenses: [], cashInvoices: [], insuranceInvoices: [], mediaCount: 0,
+  };
   // Keep contradictory rows visible to the review projection above, but never
   // load another vehicle's expenses/invoices/documents through a stale FK.
   const safeOrder=hasConfirmedVehicleEntryWorkOrderLink(entry,order)?order:null;

@@ -22,6 +22,7 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
   vehicle_entries: ["vehicle_entries", "vehicle_visit", "vehicle_360"],
   vehicle_visit_workflows: ["vehicle_visit", "vehicle_entries", "job_orders", "insurance_claims"],
   vehicle_entry_signatures: ["vehicle_entries", "vehicle_360"],
+  vehicle_technical_declarations: ["vehicle_technical_declaration", "vehicle_entries"],
   vehicle_handover_records: ["vehicle_handover_records", "vehicle_visit", "job_orders", "insurance_claims", "vehicle_360"],
   vehicle_inspection_releases: ["vehicle_visit", "vehicle_entries", "job_orders", "insurance_claims"],
   inventory: ["inventory"],
@@ -104,7 +105,7 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   {
     scope: "vehicle_entry_detail",
     test: (path) => /^\/vehicle-entry\/[^/]+/.test(path) && !path.startsWith("/vehicle-entry/sign/"),
-    tables: ["vehicle_entries", "vehicle_entry_signatures", "vehicle_visit_workflows", "vehicle_handover_records", "vehicle_inspection_releases", "job_orders", "insurance_claims", "expenses", "sales_documents", "insurance_invoices"],
+    tables: ["vehicle_entries", "vehicle_entry_signatures", "vehicle_technical_declarations", "vehicle_visit_workflows", "vehicle_handover_records", "vehicle_inspection_releases", "job_orders", "insurance_claims", "expenses", "sales_documents", "insurance_invoices"],
   },
   {
     scope: "vehicle_detail",

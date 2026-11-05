@@ -1,4 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect,useRef, useState } from "react";
+import {useTranslation} from "react-i18next";
+import "@/lib/i18n/vehicleIdentityFields";
 import { Camera, Loader2, X, Check, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -17,7 +19,11 @@ interface Props {
  * sends it to the `vin-scan` edge function, and returns {vin, year}.
  * Falls back to file-picker (mobile camera) on devices without getUserMedia.
  */
-export default function VinScannerButton({ onResult, title = "مسح رقم الشاصي بالكاميرا" }: Props) {
+export default function VinScannerButton({ onResult, title }: Props) {
+  const {t}=useTranslation();
+  const mounted=useRef(true);
+  const streamRef=useRef<MediaStream|null>(null);
+  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;streamRef.current?.getTracks().forEach(track=>track.stop());};},[]);
   const [open, setOpen] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [shot, setShot] = useState<string | null>(null);
@@ -33,6 +39,8 @@ export default function VinScannerButton({ onResult, title = "مسح رقم ال
         video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       });
+      if(!mounted.current){s.getTracks().forEach(track=>track.stop());return;}
+      streamRef.current=s;
       setStream(s);
       setTimeout(() => {
         if (videoRef.current) {
@@ -48,7 +56,8 @@ export default function VinScannerButton({ onResult, title = "مسح رقم ال
   };
 
   const stopCamera = () => {
-    stream?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current=null;
     setStream(null);
   };
 
@@ -92,17 +101,17 @@ export default function VinScannerButton({ onResult, title = "مسح رقم ال
       const vin = (data?.vin || "").toString();
       const year = (data?.year || "").toString();
       if (!vin && !year) {
-        toast.error("لم نتمكن من قراءة الصورة، حاول بإضاءة أفضل أو تقريب أكثر");
+        toast.error(t("vehicleVinScanner.unreadable"));
         return;
       }
       onResult({ vin, year });
       toast.success(
-        `تم الاستخراج${vin ? ` — VIN: ${vin}` : ""}${year ? ` — السنة: ${year}` : ""}`
+        `${t("vehicleVinScanner.extracted")}${vin ? ` — VIN: ${vin}` : ""}${year ? ` — ${t("vehicleIdentityFields.year")}: ${year}` : ""}`
       );
       close();
     } catch (e: any) {
-      const msg = e?.message || "فشل المسح";
-      toast.error(msg.includes("429") ? "حد المحاولات، جرّب بعد قليل" : msg);
+      const msg = e?.message || t("vehicleVinScanner.failed");
+      toast.error(msg.includes("429") ? t("vehicleVinScanner.rateLimit") : msg);
     } finally {
       setBusy(false);
     }
@@ -114,7 +123,8 @@ export default function VinScannerButton({ onResult, title = "مسح رقم ال
         type="button"
         variant="outline"
         size="icon"
-        title={title}
+        title={title || t("vehicleVinScanner.title")}
+        aria-label={title || t("vehicleVinScanner.title")}
         onClick={startCamera}
         className="shrink-0"
       >
@@ -138,11 +148,11 @@ export default function VinScannerButton({ onResult, title = "مسح رقم ال
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Camera className="h-5 w-5" /> مسح رقم الشاصي
+              <Camera className="h-5 w-5" /> {t("vehicleVinScanner.scanTitle")}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
+          <div className="relative bg-foreground rounded-lg overflow-hidden aspect-video">
             {!shot ? (
               <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
             ) : (
@@ -151,31 +161,31 @@ export default function VinScannerButton({ onResult, title = "مسح رقم ال
             {/* alignment overlay */}
             {!shot && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="border-2 border-emerald-400/80 rounded-md w-[85%] h-[28%]" />
+                <div className="border-2 border-success/80 rounded-md w-[85%] h-[28%]" />
               </div>
             )}
           </div>
 
           <p className="text-xs text-muted-foreground">
-            وجّه الكاميرا نحو لوحة رقم الشاصي أو البطاقة الجمركية، ثم اضغط «التقاط». سيتم استخراج VIN وسنة الصنع تلقائياً.
+            {t("vehicleVinScanner.hint")}
           </p>
 
           <DialogFooter className="gap-2 sm:gap-2">
             {!shot ? (
               <>
-                <Button variant="ghost" onClick={close}><X className="h-4 w-4 ml-1" /> إلغاء</Button>
+                <Button variant="ghost" onClick={close}><X className="h-4 w-4 me-1" /> {t("vehicleVinScanner.cancel")}</Button>
                 <Button onClick={capture} disabled={!stream}>
-                  <Camera className="h-4 w-4 ml-1" /> التقاط
+                  <Camera className="h-4 w-4 me-1" /> {t("vehicleVinScanner.capture")}
                 </Button>
               </>
             ) : (
               <>
                 <Button variant="ghost" onClick={() => { setShot(null); startCamera(); }} disabled={busy}>
-                  <RefreshCw className="h-4 w-4 ml-1" /> إعادة
+                  <RefreshCw className="h-4 w-4 me-1" /> {t("vehicleVinScanner.retake")}
                 </Button>
                 <Button onClick={analyze} disabled={busy}>
-                  {busy ? <Loader2 className="h-4 w-4 ml-1 animate-spin" /> : <Check className="h-4 w-4 ml-1" />}
-                  استخراج
+                  {busy ? <Loader2 className="h-4 w-4 me-1 animate-spin" /> : <Check className="h-4 w-4 me-1" />}
+                  {t("vehicleVinScanner.extract")}
                 </Button>
               </>
             )}

@@ -8,7 +8,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("project-bound OCR rollout", () => {
   it("uses document detection only for vehicle entry and keeps the claim Review path", () => {
-    const form = readFileSync(new URL("../pages/vehicle-entry/VehicleEntryForm.tsx", import.meta.url), "utf8");
+    const form = readFileSync(new URL("../components/vehicle-entry/VehicleEntryExtraction.tsx", import.meta.url), "utf8");
     const button = readFileSync(new URL("../components/ai/AiExtractButton.tsx", import.meta.url), "utf8");
     const engine = readFileSync(new URL("../lib/documentExtraction/engine.ts", import.meta.url), "utf8");
     expect(form).toContain('schema="insurance_claim"');

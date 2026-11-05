@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { AlertCircle } from "lucide-react";
 import {
@@ -45,6 +46,9 @@ export default function PlateInput({
   compact = false,
   disabled,
 }: Props) {
+  const id = useId();
+  const { i18n } = useTranslation();
+  const isEnglish = (i18n.resolvedLanguage || i18n.language || "ar").startsWith("en");
   // Seed from incoming combined value once per mount, then sync on external changes.
   const seed = useMemo(() => parseFullPlate(value), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [letters, setLetters] = useState(seed.letters);
@@ -73,22 +77,30 @@ export default function PlateInput({
 
   // Live duplicate lookup
   useEffect(() => {
-    if (!checkDuplicate) { setDup(null); return; }
-    if (!letters || !digits) { setDup(null); return; }
+    let cancelled = false;
+    setDup(null);
+    if (!checkDuplicate || !letters || !digits) return;
     const t = setTimeout(async () => {
-      const f = await findVehicleByPlate(letters, digits, country);
-      if (f && excludeId && f.id === excludeId) { setDup(null); return; }
-      setDup(f);
+      try {
+        const f = await findVehicleByPlate(letters, digits, country);
+        if (cancelled) return;
+        if (f && excludeId && f.id === excludeId) { setDup(null); return; }
+        setDup(f);
+      } catch {
+        if (!cancelled) setDup(null);
+      }
     }, 350);
-    return () => clearTimeout(t);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [letters, digits, country, checkDuplicate, excludeId]);
 
   return (
-    <div className={compact ? "flex items-end gap-2" : "space-y-2"}>
+    <div dir={isEnglish ? "ltr" : "rtl"} className={compact ? "flex items-end gap-2" : "space-y-2"}>
       <div className={compact ? "flex gap-2 flex-1" : "grid grid-cols-2 gap-2"}>
         <div className="space-y-1 flex-1">
-          <label className="text-[10px] uppercase tracking-wide text-muted-foreground">الأرقام</label>
+          <label htmlFor={`${id}-digits`} className="text-xs leading-relaxed text-muted-foreground">{isEnglish ? "Plate digits" : "أرقام اللوحة"}</label>
           <Input
+            id={`${id}-digits`}
+            aria-describedby={dup ? `${id}-duplicate` : undefined}
             value={digits}
             onChange={(e) => setDigits(extractPlateDigits(e.target.value))}
             inputMode="numeric"
@@ -100,8 +112,10 @@ export default function PlateInput({
           />
         </div>
         <div className="space-y-1 flex-1">
-          <label className="text-[10px] uppercase tracking-wide text-muted-foreground">الحروف (EN)</label>
+          <label htmlFor={`${id}-letters`} className="text-xs leading-relaxed text-muted-foreground">{isEnglish ? "Plate letters (Latin)" : "حروف اللوحة (EN)"}</label>
           <Input
+            id={`${id}-letters`}
+            aria-describedby={dup ? `${id}-duplicate` : undefined}
             value={letters}
             onChange={(e) => setLetters(extractPlateLetters(e.target.value))}
             dir="ltr"
@@ -113,8 +127,10 @@ export default function PlateInput({
         </div>
         {showCountry && (
           <div className="space-y-1 w-20">
-            <label className="text-[10px] uppercase tracking-wide text-muted-foreground">الدولة</label>
+            <label htmlFor={`${id}-country`} className="text-xs leading-relaxed text-muted-foreground">{isEnglish ? "Country" : "الدولة"}</label>
             <Input
+              id={`${id}-country`}
+              aria-describedby={dup ? `${id}-duplicate` : undefined}
               value={country}
               onChange={(e) => setCountry(e.target.value.toUpperCase().slice(0, 4))}
               dir="ltr"
@@ -128,18 +144,18 @@ export default function PlateInput({
       </div>
       {(letters || digits) && (
         <div className="flex items-center justify-between gap-2 rounded-md bg-muted/40 px-2 py-1">
-          <span className="text-[10px] text-muted-foreground">العرض الموحد</span>
+          <span className="text-xs text-muted-foreground">{isEnglish ? "Formatted plate" : "العرض الموحد"}</span>
           <span className="font-mono text-sm font-semibold" dir="ltr">
             {formatPlate({ plate_letters: letters, plate_number: digits })}
           </span>
         </div>
       )}
       {dup && (
-        <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
-          <AlertCircle size={12} className="mt-0.5 shrink-0" />
+        <div id={`${id}-duplicate`} role="status" className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs leading-relaxed text-destructive">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
           <span>
-            مركبة موجودة مسبقاً: {dup.brand} {dup.model} {dup.year ? `(${dup.year})` : ""}
-            {dup.archived ? " — مؤرشفة" : ""}
+            {isEnglish ? "Vehicle already exists:" : "مركبة موجودة مسبقاً:"} {dup.brand} {dup.model} {dup.year ? `(${dup.year})` : ""}
+            {dup.archived ? (isEnglish ? " — Archived" : " — مؤرشفة") : ""}
           </span>
         </div>
       )}

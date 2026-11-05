@@ -221,6 +221,7 @@ export function getPdfLayoutSettings(): PdfLayoutSettings {
 export function buildPageMarginCss(
   s: PdfLayoutSettings = load(),
   orientation: "portrait" | "landscape" = "portrait",
+  preserveTemplateStyles = false,
 ): string {
   if (!s.enforce) return "";
   const layout = { ...DEFAULT_PDF_LAYOUT, ...s };
@@ -236,7 +237,7 @@ export function buildPageMarginCss(
     @page{size:${sizeRule};margin:0}
     html,body{margin:0!important;padding:0!important}
     .page,.pdf-v2-page{padding:${top}mm ${right}mm ${bottom}mm ${left}mm !important;box-sizing:border-box !important}
-    ${buildPdfLayoutRuntimeCss(layout)}
+    ${preserveTemplateStyles ? "" : buildPdfLayoutRuntimeCss(layout)}
     @media print{
       html,body{margin:0!important;padding:0!important;background:#fff!important}
       .page,.pdf-v2-page{width:${pageW}!important;min-height:${pageH}!important;padding:${top}mm ${right}mm ${bottom}mm ${left}mm !important;margin:0!important;box-shadow:none!important;box-sizing:border-box!important}
@@ -328,7 +329,11 @@ export function buildHtmlWithPageMarginStyle(
   html: string,
   orientation: "portrait" | "landscape" = detectOrientation(html),
 ): string {
-  const css = buildPageMarginCss(load(), orientation);
+  // Fixed operational forms own their typography/grid. Global invoice rules
+  // for generic .top/.footer/.section-title classes otherwise create blank
+  // continuation pages. Keep the user's page margins, not those overrides.
+  const fixedForm = /\bdata-pdf-fixed-form\s*=\s*["']vehicle-entry["']/i.test(html);
+  const css = buildPageMarginCss(load(), orientation, fixedForm);
   if (!css) return html;
   const style = `<style data-pdf-margins="1">${css}</style>`;
   if (/<style[^>]*data-pdf-margins=["']1["'][^>]*>/i.test(html)) return html;
@@ -342,13 +347,17 @@ export function injectPageMarginStyle(
   orientation: "portrait" | "landscape" = "portrait",
 ) {
   if (!doc) return;
-  const css = buildPageMarginCss(load(), orientation);
+  // An already prepared preview/export owns one settings snapshot. Replacing
+  // it after asset loading both loses fixed-form semantics and can mix settings
+  // changed concurrently during generation.
+  if (doc.head?.querySelector('style[data-pdf-margins="1"]')) return;
+  const fixedForm = Boolean(doc.querySelector('[data-pdf-fixed-form="vehicle-entry"]'));
+  const css = buildPageMarginCss(load(), orientation, fixedForm);
   if (!css) return;
   try {
     const style = doc.createElement("style");
     style.setAttribute("data-pdf-margins", "1");
     style.textContent = css;
-    doc.head?.querySelector('style[data-pdf-margins="1"]')?.remove();
     doc.head?.appendChild(style);
   } catch {
     /* noop */

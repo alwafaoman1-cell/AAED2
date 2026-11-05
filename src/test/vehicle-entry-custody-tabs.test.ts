@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync,readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   defaultVehicleEntryForm,
@@ -66,11 +66,15 @@ describe("vehicle entry custody tabs", () => {
   it("guards stale edit saves and queries custody evidence without modifying legacy data", () => {
     const service = readFileSync(join(process.cwd(), "src/lib/vehicleEntryService.ts"), "utf8");
     const list = readFileSync(join(process.cwd(), "src/pages/vehicle-entry/VehicleEntryList.tsx"), "utf8");
-    expect(service).toContain('update.eq("vehicle_location", locationBeforeEdit)');
-    expect(service).toContain('update.is("vehicle_location", null)');
-    expect(service).toContain('(current.data as any).vehicle_location !== locationBeforeEdit');
+    expect(service).toContain('p_expected_updated_at: form.updated_at_before_edit || null');
+    expect(service).toContain('supabase.rpc("save_vehicle_entry_intake"');
+    const migrations=join(process.cwd(),"supabase/migrations");
+    const atomic = readFileSync(join(migrations,readdirSync(migrations).find(name=>name.endsWith("_atomic_vehicle_intake_with_technical_declaration.sql"))!), "utf8");
+    expect(atomic).toContain("v_old.vehicle_location is distinct from p_form->>'vehicle_location_before_edit'");
+    expect(atomic).toContain("v_old.updated_at is distinct from p_expected_updated_at");
     expect(service).toContain("vehicle_delivered_at,delivered_at");
-    expect(list).toContain('navigate(`/vehicle-entry/new?purpose=${purpose}`)');
-    expect(list).toContain("rowsByPresence.needs_review");
+    expect(list).toContain('navigate(`/vehicle-entry/new?channel=${entryChannel}&purpose=${purpose}`)');
+    expect(list).toContain("listVehicleVisitCenterPage");
+    expect(list).toContain("VEHICLE_CENTER_TABS");
   });
 });

@@ -5,13 +5,14 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import VehicleEntryList from "@/pages/vehicle-entry/VehicleEntryList";
 import i18n from "@/i18n";
+import { getVehicleCenterTab, VEHICLE_CENTER_TABS, VISIT_STAGES } from "@/lib/vehicleVisitLifecycle";
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), rearPhotos: vi.fn() }));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ profile: { tenant_id: "tenant-test" }, user: { id: "user-test" }, hasRole: () => true }) }));
 vi.mock("@/lib/vehicleRearThumbnails", () => ({ getEntryRearThumbnailUrls: mocks.rearPhotos }));
 vi.mock("@/lib/vehicleVisitLifecycle", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/vehicleVisitLifecycle")>();
-  return { ...real, listVehicleVisitCenter: mocks.list };
+  return { ...real, listVehicleVisitCenterPage: mocks.list };
 });
 
 function NewEntryLocation() {
@@ -39,13 +40,28 @@ beforeEach(async () => {
   mocks.rearPhotos.mockReset();
   mocks.rearPhotos.mockResolvedValue({});
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
-  mocks.list.mockResolvedValue([
+  setVisits([
     { entry: { id: "inside", entry_number: "ENT-2026-0001", arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Draft", vehicle_condition: { visit_purpose: "inspection" } }, stage: "arrived", operationalStage: "arrived" },
-    { entry: { id: "outside", entry_number: "ENT-2026-0002", arrival_date: "2026-10-20", vehicle_location: "مع العميل", status: "Issued" }, stage: "arrived", operationalStage: "arrived" },
+    { entry: { id: "outside", entry_number: "ENT-2026-0002", arrival_date: "2026-10-20", vehicle_location: "مع العميل", status: "Issued" }, stage: "arrived", operationalStage: "arrived", hasSignedTemporaryRelease: true },
     { entry: { id: "review", entry_number: "ENT-2026-0003", arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Received", claim: { vehicle_presence_status: "with_customer" } }, stage: "needs_review", operationalStage: "needs_review", reviewReason: "custody_conflict" },
   ]);
   Object.defineProperty(window, "matchMedia", { writable: true, value: vi.fn().mockImplementation(() => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() })) });
 });
+
+function setVisits(visits: any[]) {
+  mocks.list.mockImplementation(async ({ tab, page, pageSize, filters }: any) => {
+    const matches = visits.filter((v) => (!filters.search || v.entry.entry_number?.includes(filters.search))
+      && (filters.stage === "all" || v.operationalStage === filters.stage || (filters.stage === "needs_review" && v.reviewReason)));
+    const selected = matches.filter((v) => getVehicleCenterTab(v) === tab);
+    return {
+      items: selected.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: selected.length,
+      tabs: Object.fromEntries(VEHICLE_CENTER_TABS.map((key) => [key, matches.filter((v) => getVehicleCenterTab(v) === key).length])),
+      stages: Object.fromEntries(VISIT_STAGES.map((key) => [key, visits.filter((v) => getVehicleCenterTab(v) === tab && v.operationalStage === key).length])),
+      technicians: [], entryCount: selected.filter((v) => !v.entry._claimOnly).length,
+      claimOnlyCount: selected.filter((v) => v.entry._claimOnly).length,
+    };
+  });
+}
 
 describe("vehicle entry list visit workflow", () => {
   it("shows the same saved rear-view thumbnail beside the vehicle in list and stage views", async () => {
@@ -70,7 +86,21 @@ describe("vehicle entry list visit workflow", () => {
     expect(screen.getByText("صادرة")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "عرض السجلات" }));
-    expect(screen.getByText("ENT-2026-0003")).toBeTruthy();
+    expect(await screen.findByText("ENT-2026-0003")).toBeTruthy();
+  });
+
+  it("keeps a selected milestone inside the active custody tab", async () => {
+    renderList();
+    expect(await screen.findByText("ENT-2026-0001")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /المركبات الواصلة\s*1/ }));
+    expect(await screen.findByText("ENT-2026-0001")).toBeTruthy();
+    expect(screen.queryByText("ENT-2026-0002")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: /مع العميل/ }));
+    await screen.findByText("ENT-2026-0002");
+    fireEvent.click(screen.getByRole("button", { name: /المركبات الواصلة\s*1/ }));
+    expect(await screen.findByText("ENT-2026-0002")).toBeTruthy();
+    expect(screen.queryByText("ENT-2026-0001")).toBeNull();
   });
 
   it("asks for the visit purpose before opening the creation page", async () => {
@@ -78,8 +108,10 @@ describe("vehicle entry list visit workflow", () => {
     await waitFor(() => expect(mocks.list).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "تسجيل دخول مركبة" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /فحص ومعاينة/ }));
-    expect(screen.getByTestId("new-entry-url").textContent).toBe("?purpose=inspection");
+    expect(screen.queryByRole("button", { name: new RegExp(i18n.t("vehicleIntakeWizard.inspection")) })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("vehicleIntakeWizard.cash") }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(i18n.t("vehicleIntakeWizard.inspection")) }));
+    expect(screen.getByTestId("new-entry-url").textContent).toBe("?channel=cash&purpose=inspection");
   });
 
   it("shows the new workflow labels in English when the application language changes", async () => {
@@ -92,18 +124,36 @@ describe("vehicle entry list visit workflow", () => {
     expect(screen.getByRole("button", { name: "Record vehicle arrival" })).toBeTruthy();
   });
 
-  it("loads the complete center result instead of silently stopping after a page", async () => {
-    mocks.list.mockResolvedValue(Array.from({ length: 101 }, (_, index) => ({
-      entry: { id: `entry-${index}`, entry_number: index === 100 ? "ENT-OLDER" : `ENT-${index}`, arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Draft" },
+  it("requests one bounded page and only loads later records after paging", async () => {
+    setVisits(Array.from({ length: 31 }, (_, index) => ({
+      entry: { id: `entry-${index}`, entry_number: index === 30 ? "ENT-OLDER" : `ENT-${index}`, arrival_date: "2026-10-20", vehicle_location: "داخل الورشة", status: "Draft" },
       stage: "arrived", operationalStage: "arrived",
     })));
     renderList();
-    expect(await screen.findByText("ENT-OLDER")).toBeTruthy();
+    await screen.findByText("ENT-0");
+    expect(screen.queryByText("ENT-OLDER")).toBeNull();
     expect(mocks.list).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /التالي/ }));
+    expect(await screen.findByText("ENT-OLDER")).toBeTruthy();
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 30, tab: "in_workshop" }));
+    fireEvent.change(screen.getByRole("textbox", { name: i18n.t("vehicleVisit.search") }), { target: { value: "ENT-OLDER" } });
+    expect(await screen.findByText("ENT-OLDER")).toBeTruthy();
+    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, filters: expect.objectContaining({ search: "ENT-OLDER" }) })));
   });
 
-  it("shows claim-only cards with the customer without inventing an entry number", async () => {
-    mocks.list.mockResolvedValue([{
+  it("shows Register entry only for actual signed temporary exits, never terminal tabs", async () => {
+    renderList();
+    await screen.findByText("ENT-2026-0001");
+    expect(screen.queryByRole("button", { name: "تسجيل الدخول · ENT-2026-0001" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /مع العميل/ }));
+    expect(await screen.findByRole("button", { name: "تسجيل الدخول · ENT-2026-0002" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /تم التسليم/ }));
+    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ tab: "delivered", page: 1 })));
+    expect(screen.queryByRole("button", { name: "تسجيل الدخول · ENT-2026-0002" })).toBeNull();
+  });
+
+  it("keeps claim-only cards in Review without inventing an inspected arrival", async () => {
+    setVisits([{
       entry: {
         id: "claim:claim-1", _claimOnly: true, entry_number: "", status: "pending",
         vehicle_id: "vehicle-1", insurance_claim_id: "claim-1", vehicle_location: "مع العميل",
@@ -112,23 +162,26 @@ describe("vehicle entry list visit workflow", () => {
       stage: "arrived", operationalStage: "arrived", reviewReason: "claim_without_entry",
     }]);
     renderList();
-    fireEvent.click(screen.getByRole("tab", { name: /مع العميل/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /تحتاج مراجعة/ }));
     expect(await screen.findByText("C/2026/1")).toBeTruthy();
     expect(screen.getByText("مطالبة بلا كرت دخول")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "إجراء سريع" }));
+    fireEvent.click(screen.getByRole("button", { name: "الموقع والمراحل · C/2026/1" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByText(/ليست سند استلام/)).toBeTruthy();
   });
 
-  it("places reviewed historical records under their operational milestone without hiding the warning", async () => {
-    mocks.list.mockResolvedValue([{
+  it("retrieves reviewed terminal details only when the matching closed tab opens", async () => {
+    setVisits([{
       entry: { id: "delivered", entry_number: "ENT-2026-0099", arrival_date: "2026-07-01",
         vehicle_location: "داخل الورشة", status: "Received", claim: { vehicle_presence_status: "with_customer" } },
       stage: "needs_review", operationalStage: "delivered", reviewReason: "delivery_without_signed_handover",
     }]);
     renderList();
-    expect(await screen.findByText(/تحتاج مراجعة الموقع \(1\)/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /تم التسليم\s*1/ }));
+    await waitFor(() => expect(mocks.list).toHaveBeenCalled());
+    expect(await screen.findByRole("tab", { name: /تم التسليم.*1/ })).toBeTruthy();
+    expect(screen.queryByText("ENT-2026-0099")).toBeNull();
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("tab", { name: /تم التسليم/ }));
     expect(await screen.findByText("ENT-2026-0099")).toBeTruthy();
     expect(screen.getByText("حالة تسليم دون محضر تسليم موقّع ومعتمد")).toBeTruthy();
   });
@@ -139,6 +192,29 @@ describe("vehicle entry list visit workflow", () => {
     expect(await screen.findByText("ENT-2026-0001")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByRole("link", { name: "ENT-2026-0001" })).toHaveAttribute("href", "/vehicle-entry/inside");
-    expect(screen.getByRole("button", { name: "إجراء سريع" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "الموقع والمراحل · ENT-2026-0001" })).toBeTruthy();
+  });
+
+  it.each(["en", "ar"])("names filters and connects keyboard tabs to the live custody panel in %s", async (language) => {
+    await i18n.changeLanguage(language);
+    renderList();
+    expect(await screen.findByText("ENT-2026-0001")).toBeTruthy();
+    for (const key of ["vehicleEntry.statusFilter", "vehicleVisit.technician", "vehicleVisit.location"]) {
+      expect(screen.getByRole("combobox", { name: i18n.t(key) })).toBeTruthy();
+    }
+    expect(screen.getByRole("textbox", { name: i18n.t("vehicleVisit.search") })).toBeTruthy();
+    const inside = screen.getByRole("tab", { selected: true });
+    const panel = screen.getByRole("tabpanel");
+    expect(inside).toHaveAttribute("aria-controls", panel.id);
+    expect(panel).toHaveAttribute("aria-labelledby", inside.id);
+    fireEvent.keyDown(inside, { key: language === "ar" ? "ArrowLeft" : "ArrowRight" });
+    expect(await screen.findByText("ENT-2026-0002")).toBeTruthy();
+    expect(screen.queryByText("ENT-2026-0001")).toBeNull();
+    const outside = screen.getByRole("tab", { selected: true });
+    expect(outside).toHaveFocus();
+    expect(panel).toHaveAttribute("aria-labelledby", outside.id);
+    fireEvent.keyDown(outside, { key: "Home" });
+    expect(await screen.findByText("ENT-2026-0001")).toBeTruthy();
+    expect(inside).toHaveFocus();
   });
 });

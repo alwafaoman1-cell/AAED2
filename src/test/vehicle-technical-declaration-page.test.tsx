@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DOMPurify from "dompurify";
+import { queryKeys } from "@/lib/queryKeys";
 
 const getEntry = vi.hoisted(() => vi.fn());
 const getDeclaration = vi.hoisted(() => vi.fn());
@@ -28,6 +29,8 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import VehicleTechnicalDeclarationPage from "@/pages/vehicle-entry/VehicleTechnicalDeclarationPage";
 import { buildVehicleTechnicalDeclarationHtml, emptyVehicleTechnicalDeclaration } from "@/lib/vehicleTechnicalDeclaration";
+import { downloadTechnicalDeclarationPdf, openTechnicalDeclarationPreview } from "@/lib/vehicleTechnicalDeclarationPdf";
+import { toast } from "sonner";
 
 function showPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -42,6 +45,9 @@ function showPage() {
 describe("vehicle technical declaration page", () => {
   beforeEach(() => {
     getEntry.mockReset(); getDeclaration.mockReset(); saveDeclaration.mockReset();
+    vi.mocked(downloadTechnicalDeclarationPdf).mockClear();
+    vi.mocked(openTechnicalDeclarationPreview).mockClear();
+    vi.mocked(toast.error).mockClear();
     getEntry.mockResolvedValue({
       id: "entry-test", entry_number: "ENT-2026-0001",
       claim: { claim_number: "C/NEW" },
@@ -55,7 +61,8 @@ describe("vehicle technical declaration page", () => {
       id: "declaration-1", vehicle_entry_id: "entry-test", revision: 1,
       form_data: form, updated_at: "2026-11-03T10:00:00Z",
     }));
-    showPage();
+    const { client } = showPage();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
     expect(await screen.findByDisplayValue("C/NEW")).toBeTruthy();
     expect(screen.getByDisplayValue("AB 1234")).toBeTruthy();
     expect(screen.getByDisplayValue("المركز التخصصي لصيانة السيارات")).toBeTruthy();
@@ -76,6 +83,7 @@ describe("vehicle technical declaration page", () => {
       cranking: "yes", authorized_person: "Report Creator", signer_role: "report_author",
       signature_data_url: "data:image/png;base64,aGVsbG8=",
     });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.vehicleEntries.detail("entry-test") });
     await waitFor(() => expect((screen.getByRole("button", { name: /تنزيل PDF/ }) as HTMLButtonElement).disabled).toBe(false));
   });
 
@@ -148,5 +156,51 @@ describe("vehicle technical declaration page", () => {
     fireEvent.click(screen.getByRole("button", { name: "حفظ النموذج" }));
     await waitFor(() => expect(saveDeclaration).toHaveBeenCalledTimes(1));
     expect(saveDeclaration.mock.calls[0][2]).toBe(3);
+  });
+
+  it("downloads the freshly confirmed canonical form instead of a copy from the entry", async () => {
+    const saved = {
+      id: "declaration-1", vehicle_entry_id: "entry-test", revision: 2,
+      form_data: { ...emptyVehicleTechnicalDeclaration, claim_number: "C/SAVED", cranking: "yes" },
+    };
+    getDeclaration.mockResolvedValue(saved);
+    showPage();
+    await screen.findByDisplayValue("C/SAVED");
+    fireEvent.click(screen.getByRole("button", { name: /تنزيل PDF/ }));
+    await waitFor(() => expect(downloadTechnicalDeclarationPdf).toHaveBeenCalledWith(saved.form_data, "ENT-2026-0001"));
+    expect(getDeclaration.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("refuses output after a concurrent canonical revision changes until it has been reviewed", async () => {
+    getDeclaration.mockResolvedValue({
+      id: "declaration-1", vehicle_entry_id: "entry-test", revision: 2,
+      form_data: { ...emptyVehicleTechnicalDeclaration, claim_number: "C/ORIGINAL" },
+    });
+    showPage();
+    await screen.findByDisplayValue("C/ORIGINAL");
+    getDeclaration.mockResolvedValue({
+      id: "declaration-1", vehicle_entry_id: "entry-test", revision: 3,
+      form_data: { ...emptyVehicleTechnicalDeclaration, claim_number: "C/OTHER-SESSION" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /تنزيل PDF/ }));
+    await screen.findByDisplayValue("C/OTHER-SESSION");
+    expect(downloadTechnicalDeclarationPdf).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("تغيّر النموذج في جلسة أخرى"));
+  });
+
+  it("keeps dirty values and output disabled after a failed revision-checked save", async () => {
+    getDeclaration.mockResolvedValue({
+      id: "declaration-1", vehicle_entry_id: "entry-test", revision: 2,
+      form_data: { ...emptyVehicleTechnicalDeclaration, claim_number: "C/ORIGINAL" },
+    });
+    saveDeclaration.mockRejectedValue(new Error("Revision conflict"));
+    showPage();
+    fireEvent.change(await screen.findByDisplayValue("C/ORIGINAL"), { target: { value: "C/UNSAVED" } });
+    fireEvent.click(screen.getByRole("button", { name: "حفظ النموذج" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Revision conflict"));
+    expect(saveDeclaration.mock.calls[0][2]).toBe(2);
+    expect(screen.getByDisplayValue("C/UNSAVED")).toBeTruthy();
+    expect((screen.getByRole("button", { name: /تنزيل PDF/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "حفظ النموذج" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

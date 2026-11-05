@@ -1,3 +1,8 @@
+import {
+  technicalDeclarationIdentityFields, technicalDeclarationSections, type TechnicalDeclarationField,
+} from "./vehicleTechnicalDeclarationLocale";
+import { technicalArabicFontData } from "./vehicleTechnicalDeclarationFont";
+
 export type TechnicalChoice = "" | "yes" | "no";
 export type TechnicalOilChoice = "" | "ok" | "no";
 export type TechnicalChassisChoice = "" | "ok" | "deformed";
@@ -120,6 +125,40 @@ export function initialTechnicalDeclarationForm(entry: any, reportAuthorName = "
   };
 }
 
+export interface TechnicalDeclarationConditionSummary {
+  title: string;
+  items: Array<{ key: keyof VehicleTechnicalDeclarationForm; label: string; value: string }>;
+}
+
+/** A saved canonical record only: no draft, condition_snapshot or legacy flags.
+ * Blank choices and unticked boxes are not negative inspection findings. */
+export function buildTechnicalDeclarationConditionSummary(
+  record: Pick<VehicleTechnicalDeclarationRecord, "id" | "form_data"> | null | undefined,
+  language: "ar" | "en",
+): TechnicalDeclarationConditionSummary[] {
+  if (!record?.id || !record.form_data || typeof record.form_data !== "object") return [];
+  const label = (ar: string, en: string) => language === "ar" ? ar : en;
+  const answer = (field: TechnicalDeclarationField): string => {
+    const raw = record.form_data[field.key];
+    if (field.kind === "checkbox") return raw === true ? label("نعم", "Yes") : "";
+    if (field.kind === "choice") return raw === "yes" ? label("نعم", "Yes") : raw === "no" ? label("لا", "No") : "";
+    if (field.kind === "oil") return raw === "ok" ? label("سليم", "OK") : raw === "no" ? label("غير سليم", "No") : "";
+    if (field.kind === "chassis") return raw === "ok" ? label("سليم", "OK") : raw === "deformed" ? label("متشوه", "Deformed") : "";
+    return typeof raw === "string" ? raw.trim() : "";
+  };
+  const groups = [
+    { ar: "بيانات الفحص", en: "Inspection Details", fields: technicalDeclarationIdentityFields.filter((field) => field.kind === "choice") },
+    ...technicalDeclarationSections,
+  ];
+  return groups.flatMap((group) => {
+    const items = group.fields.flatMap((field) => {
+      const value = answer(field);
+      return value ? [{ key: field.key, label: label(field.ar, field.en), value }] : [];
+    });
+    return items.length ? [{ title: label(group.ar, group.en), items }] : [];
+  });
+}
+
 export function validateTechnicalDeclarationForm(form: VehicleTechnicalDeclarationForm): void {
   for (const key of choiceKeys) {
     if (!["", "yes", "no"].includes(form[key])) throw new Error(`Invalid choice: ${key}`);
@@ -215,7 +254,7 @@ function line(value: unknown, className = ""): string {
 }
 
 function marked(selected: boolean): string {
-  return selected ? '[<span class="tick">✓</span>]' : "[ ]";
+  return selected ? '[<span class="tick" role="img" aria-label="Checked"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8L6 12L14 3" fill="none" stroke="#14532d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>]' : "[ ]";
 }
 function yesNo(value: TechnicalChoice): string {
   return `Yes ${marked(value === "yes")} / No ${marked(value === "no")}`;
@@ -244,7 +283,7 @@ export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDecla
   .write-line{display:inline-block;border-bottom:1px solid #777;min-height:4.2mm;vertical-align:baseline;white-space:pre-wrap;overflow-wrap:anywhere}
   .vehicle-data{color:#b42318;font-weight:bold}
   .tick{color:#14532d;font-family:Arial,sans-serif;font-weight:900}
-  .garage-name{font-family:Arial,"Noto Naskh Arabic",sans-serif;direction:rtl;text-align:right;font-weight:bold}
+  .garage-name{font-family:TemoTechnicalArabic,serif;direction:rtl;text-align:right;font-weight:700}
   .signer-role{display:block;margin-top:1mm;font:8pt Arial,sans-serif;color:#555}
   .top-rule{margin:8mm 0 5mm}
   .grid{display:grid;grid-template-columns:1.15fr .85fr;column-gap:10mm;row-gap:5mm}
@@ -260,7 +299,7 @@ export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDecla
   .remarks .bullet-line{width:163mm}
   .signature-rule{margin:22mm 0 6mm}
   .footer-row{display:grid;grid-template-columns:62mm 8mm 1fr;align-items:end;margin-bottom:8mm}
-  .footer-row .write-line{width:58mm}
+  .footer-row .write-line{width:100%;min-width:0}
   .sign-row{display:flex;gap:4mm;align-items:end;margin-top:18mm}
   .signature-box{display:inline-flex;align-items:end;justify-content:center;width:55mm;height:14mm;border-bottom:1px solid #777}
   .signature-box img{display:block;max-width:55mm;max-height:13mm;object-fit:contain}
@@ -269,6 +308,7 @@ export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDecla
   @media screen{body{background:#e9e9e9}.page{box-shadow:0 2px 10px #999}}
   @media print{html,body{background:#fff}.page{box-shadow:none;margin:0;break-after:page}}
   </style></head><body><div class="page">
+    <style data-technical-font="embedded">@font-face{font-family:TemoTechnicalArabic;src:url("${technicalArabicFontData}") format("woff");font-style:normal;font-weight:700;font-display:block}</style>
     <h1>VEHICLE TECHNICAL DECLARATION</h1><div class="rule"></div>
     <div class="top"><div>Claim Number: ${line(form.claim_number,"vehicle-data")}</div><div>Registration Number: ${line(form.registration_number,"right-line vehicle-data")}</div>
       <div>Make &amp; Model: ${line(form.make_model,"vehicle-data")}</div><div>Non GCC Vehicle: ${yesNo(form.non_gcc_vehicle)} Towing : ${yesNo(form.towing)}</div></div>

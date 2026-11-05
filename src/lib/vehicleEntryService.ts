@@ -1,16 +1,21 @@
-import { assertVehicleEntryWorkOrderLink } from "@/lib/vehicleEntryWorkOrderLink";
-import "@/lib/i18n/vehicleEntryLinks";
 import { supabase } from "@/integrations/supabase/client";
 import i18n from "@/i18n";
 import { findPrimaryClaimWorkOrder } from "@/lib/claimWorkOrderGuard";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
-import { ensureVehicleForCustomer, ensureVehicleForVisit, normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
+import { normalizeVehiclePlate, normalizeVin } from "@/lib/vehicleIdentity";
+import { assertVehicleEntryWorkOrderLink } from "@/lib/vehicleEntryWorkOrderLink";
+import { emptyVehicleTechnicalDeclaration, validateTechnicalDeclarationForm, type VehicleTechnicalDeclarationForm, type VehicleTechnicalDeclarationRecord } from "@/lib/vehicleTechnicalDeclaration";
+import { buildVehicleEntryTechnicalDeclarationSummaryHtml } from "@/lib/vehicleEntryTechnicalDeclarationSummary";
+import "@/lib/i18n/vehicleIntakeWizard";
+import "@/lib/i18n/vehicleEntryLinks";
 import { extractPlateDigits, extractPlateLetters, formatPlate } from "@/lib/plateUtils";
 import { isValidE164, toE164 } from "@/lib/phoneUtils";
 import { assertVehicleEntryClaimLink } from "@/lib/vehicleEntryClaimLink";
 import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import JsBarcode from "jsbarcode";
+import {workshopDateTime} from "@/lib/workshopDateTime";
+import {pdfControlledLabel} from "@/lib/pdfDisplayLabels";
 
 type VehicleEntryMediaKind = "entry_photo" | "damage_photo" | "document";
 type VehicleEntrySignatureRole = "delivered_by" | "receiver" | "override";
@@ -47,6 +52,8 @@ export function vehicleEntryStatusKey(status: string): string | null {
 export interface VehicleEntryFormState {
   id?: string;
   entry_number?: string;
+  updated_at_before_edit?: string | null;
+  technical_declaration?: { form: VehicleTechnicalDeclarationForm; revision: number | null };
   status: VehicleEntryStatus;
   customer_id?: string | null;
   // Form-only baseline: never persisted in the entry snapshot. It prevents an
@@ -68,6 +75,7 @@ export interface VehicleEntryFormState {
   declaration_en: string;
   customer: {
     name: string;
+    customer_code?: string;
     phone: string;
     alternate_phone: string;
     email: string;
@@ -171,7 +179,7 @@ export type VehicleEntryPresence = "in_workshop" | "with_customer" | "needs_revi
 export function getVehicleVisitBillingKind(entry: any): "insurance" | "cash" {
   const snapshot = entry?.insurance_snapshot || {};
   const order = entry?.work_order || entry?.converted_work_order;
-  return entry?.insurance_claim_id || entry?.converted_claim_id || entry?.insurance_company_id
+  return entry?.insurance_claim_id || entry?.converted_claim_id || entry?.insurance_company_id || snapshot.is_insurance_related === true
     || String(snapshot.claim_number || "").trim() || String(snapshot.company_name || "").trim()
     || order?.work_order_type === "insurance"
     ? "insurance" : "cash";
@@ -244,11 +252,11 @@ export interface ClaimVehicleEntryInput {
 }
 
 export function defaultVehicleEntryForm(): VehicleEntryFormState {
-  const now = new Date();
+  const now = workshopDateTime(new Date());
   return {
     status: "Draft",
-    arrival_date: now.toISOString().slice(0, 10),
-    arrival_time: now.toTimeString().slice(0, 5),
+    arrival_date: now.date,
+    arrival_time: now.time,
     vehicle_location: "داخل الورشة",
     vehicle_location_bay: "",
     arrival_method: "العميل أحضر المركبة",
@@ -339,64 +347,16 @@ function cleanText(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function normalizePhoneKey(value: string) {
-  return toE164(value).replace(/\D/g, "").slice(-8);
-}
-
-async function ensureCustomer(form: VehicleEntryFormState, tenantId: string): Promise<string | null> {
-  if (form.customer_id) return form.customer_id;
-  const name = cleanText(form.customer.name);
-  const phone = toE164(form.customer.phone);
-  const phoneKey = normalizePhoneKey(phone);
-
-  if (phoneKey) {
-    const { data, error } = await supabase
-      .from("customers")
-      .select("id,name,phone")
-      .eq("tenant_id", tenantId)
-      .ilike("phone", `%${phoneKey}%`)
-      .limit(10);
-    if (error) throw error;
-    const match = ((data as any[]) || []).find((row) => normalizePhoneKey(row.phone || "") === phoneKey);
-    if (match?.id) return match.id;
-  }
-
-  if (!name && !phone) return null;
-
-  const { data, error } = await supabase
-    .from("customers")
-    .insert({
-      tenant_id: tenantId,
-      name: name || phone || "Vehicle Entry Customer",
-      phone: phone || null,
-      email: cleanText(form.customer.email) || null,
-      address: cleanText(form.customer.address) || null,
-      id_number: cleanText(form.customer.id_number) || null,
-    })
-    .select("id")
-    .single();
-  if (error) throw error;
-  return (data as any).id as string;
-}
-
-async function ensureEntryNumber(existing?: string | null): Promise<string> {
-  if (existing) return existing;
-  const { data, error } = await supabase.rpc("next_vehicle_entry_number" as any, {
-    p_year: new Date().getFullYear(),
-  });
-  if (error) throw error;
-  return String(data);
-}
-
 export async function searchVehicleEntryCustomers(search: string) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId || search.trim().length < 2) return [];
-  const pattern = `%${search.trim()}%`;
+  const pattern = `%${search.trim().replace(/[%,().]/g, "")}%`;
   const { data, error } = await supabase
     .from("customers")
     .select("id,name,phone,email,address,id_number,customer_code")
     .eq("tenant_id", tenantId)
-    .or(`name.ilike.${pattern},phone.ilike.${pattern},customer_code.ilike.${pattern}`)
+    .is("deleted_at", null)
+    .or(`phone.ilike.${pattern},customer_code.ilike.${pattern}`)
     .order("created_at", { ascending: false })
     .limit(20);
   if (error) throw error;
@@ -409,7 +369,8 @@ export async function searchVehicleEntryVehicles(search: string) {
   const pattern = `%${search.trim()}%`;
   const { data, error } = await supabase
     .from("vehicles")
-    .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin_number,vin,mileage,customers(name,phone)")
+    .select("id,customer_id,plate_number,plate_letters,plate_country,brand,model,year,color,vin_number,vin,mileage,archived,archived_at,customers(name,phone)")
+    .is("deleted_at", null)
     .eq("tenant_id", tenantId)
     .or(`plate_number.ilike.${pattern},plate_letters.ilike.${pattern},vin_number.ilike.${pattern},vin.ilike.${pattern},brand.ilike.${pattern},model.ilike.${pattern}`)
     .order("created_at", { ascending: false })
@@ -439,7 +400,7 @@ export async function listVehicleEntries(filters: VehicleEntryListFilters = {}, 
   return ((data as any[]) || []);
 }
 
-export async function getVehicleEntry(id: string) {
+export async function getVehicleEntry(id: string, options?: { includeAttachments?: boolean }) {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   const { data, error } = await supabase
@@ -451,6 +412,9 @@ export async function getVehicleEntry(id: string) {
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
+  // The visit center only needs the canonical entry and linked custody rows.
+  // Do not fetch photos, signatures, marks and signed URLs for a quick action.
+  if (options?.includeAttachments === false) return data as any;
 
   const { data: marks, error: marksError } = await supabase
     .from("vehicle_entry_damage_marks" as any)
@@ -460,7 +424,7 @@ export async function getVehicleEntry(id: string) {
     .order("mark_number", { ascending: true });
   if (marksError) throw marksError;
 
-  const [mediaRes, docsRes, signaturesRes, auditRes] = await Promise.all([
+  const [mediaRes, docsRes, signaturesRes, auditRes, technicalRes] = await Promise.all([
     supabase
       .from("vehicle_media" as any)
       .select("*")
@@ -488,16 +452,19 @@ export async function getVehicleEntry(id: string) {
       .eq("vehicle_entry_id", id)
       .order("created_at", { ascending: false })
       .limit(100),
+    supabase.from("vehicle_technical_declarations" as any).select("*").eq("tenant_id", tenantId).eq("vehicle_entry_id", id).maybeSingle(),
   ]);
   if (mediaRes.error) throw mediaRes.error;
   if (docsRes.error) throw docsRes.error;
   if (signaturesRes.error) throw signaturesRes.error;
   if (auditRes.error) throw auditRes.error;
+  if (technicalRes.error) throw technicalRes.error;
 
   const resolvedMedia = await resolveVehicleMediaUrls((mediaRes.data as any[]) || []);
 
   return {
     ...(data as any),
+    vehicle_technical_declaration: technicalRes.data as unknown as VehicleTechnicalDeclarationRecord | null,
     damage_marks: (marks as any[]) || [],
     vehicle_media: resolvedMedia,
     vehicle_entry_documents: (docsRes.data as any[]) || [],
@@ -590,6 +557,8 @@ export function formFromVehicleEntry(row: any): VehicleEntryFormState {
     ...base,
     id: row.id,
     entry_number: row.entry_number,
+    updated_at_before_edit: row.updated_at ?? null,
+    technical_declaration: row.vehicle_technical_declaration ? { form: { ...emptyVehicleTechnicalDeclaration, ...row.vehicle_technical_declaration.form_data }, revision: row.vehicle_technical_declaration.revision } : undefined,
     status: row.status || "Draft",
     customer_id: row.customer_id || null,
     customer_phone_before_edit: row.customer?.phone ?? customerSnapshot.phone ?? null,
@@ -645,186 +614,41 @@ export function customerPhoneEdit(form: VehicleEntryFormState): { previous: stri
   const entered = cleanText(form.customer.phone);
   if (entered === (previous || "")) return null;
   const next = toE164(entered);
-  if (!isValidE164(next)) throw new Error("أدخل رقم هاتف عميل صحيحًا قبل حفظ التعديل.");
+  if (previous && next === toE164(previous)) return null;
+  if (!isValidE164(next)) throw new Error(i18n.t("vehicleIntakeWizard.phoneOrCodeRequired"));
   return { previous, next };
 }
 
-async function syncCustomerPhone(customerId: string, tenantId: string, change: { previous: string | null; next: string }) {
-  const phoneKey = normalizePhoneKey(change.next);
-  const { data: matches, error: lookupError } = await supabase
-    .from("customers")
-    .select("id,phone")
-    .eq("tenant_id", tenantId)
-    .ilike("phone", `%${phoneKey}%`)
-    .limit(20);
-  if (lookupError) throw lookupError;
-  if (((matches as any[]) || []).some((row) => row.id !== customerId && toE164(row.phone) === change.next)) {
-    throw new Error("رقم الهاتف مرتبط بعميل آخر؛ راجع سجل العملاء قبل الحفظ.");
-  }
-
-  let update = supabase.from("customers")
-    .update({ phone: change.next })
-    .eq("tenant_id", tenantId)
-    .eq("id", customerId);
-  update = change.previous ? update.eq("phone", change.previous) : update.is("phone", null);
-  const { data, error } = await update.select("id,phone").maybeSingle();
-  if (error) throw error;
-  if (!data) throw new Error("تغيّر رقم هاتف العميل في جلسة أخرى؛ أعد تحميل النموذج ثم حاول مجددًا.");
-}
-
-function entryPayload(form: VehicleEntryFormState, tenantId: string, entryNumber: string, customerId: string | null, vehicleId: string | null, userId?: string | null) {
-  return {
-    tenant_id: tenantId,
-    entry_number: entryNumber,
-    customer_id: customerId,
-    vehicle_id: vehicleId,
-    insurance_company_id: form.insurance_company_id || null,
-    insurance_claim_id: form.insurance_claim_id || null,
-    work_order_id: form.work_order_id || null,
-    received_by_user_id: userId || null,
-    status: form.status,
-    arrival_date: form.arrival_date,
-    arrival_time: form.arrival_time,
-    vehicle_location: form.id ? cleanText(form.vehicle_location) || null : "داخل الورشة",
-    vehicle_location_bay: cleanText(form.vehicle_location_bay) || null,
-    arrival_method: cleanText(form.arrival_method) || null,
-    received_by_name: cleanText(form.received_by_name) || null,
-    delivered_by: form.delivered_by,
-    customer_snapshot: form.customer,
-    vehicle_snapshot: form.vehicle,
-    insurance_snapshot: form.insurance,
-    vehicle_condition: form.condition,
-    vehicle_contents: form.contents,
-    damage_map: { marks: form.damage_marks.map((m) => ({ n: m.mark_number, x: m.x ?? null, y: m.y ?? null, type: m.damage_type })) },
-    declaration_ar: cleanText(form.declaration_ar) || VEHICLE_ENTRY_DECLARATION_AR,
-    declaration_en: cleanText(form.declaration_en) || VEHICLE_ENTRY_DECLARATION_EN,
-    issued_at: form.status === "Issued" ? new Date().toISOString() : null,
-    issued_by: form.status === "Issued" ? userId || null : null,
-    updated_by: userId || null,
-  };
-}
-
-export async function saveVehicleEntry(form: VehicleEntryFormState, userId?: string | null) {
+/** Identity, entry, marks and canonical declaration commit together; no partial fallback. */
+export async function saveVehicleEntry(form: VehicleEntryFormState, _userId?: string | null) {
   const tenantId = await getCurrentTenantId();
-  if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
-
-  const locationBeforeEdit = form.id
-    ? form.vehicle_location_before_edit === undefined ? cleanText(form.vehicle_location) || null : form.vehicle_location_before_edit
-    : null;
-  if (form.id) {
-    const current = await supabase.from("vehicle_entries" as any)
-      .select("vehicle_location")
-      .eq("tenant_id", tenantId)
-      .eq("id", form.id)
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (current.error) throw current.error;
-    if (!current.data || (current.data as any).vehicle_location !== locationBeforeEdit) {
-      throw new Error("تغير موقع المركبة أثناء فتح النموذج. أعد فتح السجل قبل الحفظ حتى لا يُلغى خروجها أو عودتها.");
-    }
-  }
-
+  if (!tenantId) throw new Error(i18n.t("vehicleIntakeWizard.VEHICLE_INTAKE_FORBIDDEN"));
   const phoneChange = customerPhoneEdit(form);
-
-  const customerId = await ensureCustomer(form, tenantId);
-  let vehicleId = form.vehicle_id || null;
-  if (customerId && (form.vehicle.plate_number || form.vehicle.vin)) {
-    const plate = normalizeVehiclePlate({ plateNumber: form.vehicle.plate_number, plateLetters: form.vehicle.plate_letters, plateCountry: form.vehicle.plate_country });
-    const identity = {
-      customerId,
-      vehicleId: form.vehicle_id,
-      plateNumber: plate.digits,
-      plateLetters: plate.letters,
-      plateCountry: form.vehicle.plate_country || "OM",
-      vin: normalizeVin(form.vehicle.vin),
-      make: form.vehicle.make,
-      model: form.vehicle.model || "-",
-      year: form.vehicle.year,
-      color: form.vehicle.color,
-    };
-    // Saving a NEW entry confirms a visit, not a registry/ownership edit.
-    // Reuse the archived record read-only; never unarchive it before the entry
-    // insert succeeds. Historical edits retain their existing strict path.
-    const ensured = form.id
-      ? await ensureVehicleForCustomer({ ...identity, allowDifferentCustomer: true })
-      : await ensureVehicleForVisit({ ...identity, confirmedNewVisit: true });
-    vehicleId = ensured.vehicleId;
+  if (form.technical_declaration) validateTechnicalDeclarationForm(form.technical_declaration.form);
+  const phone = form.customer.phone.trim() ? toE164(form.customer.phone) : "";
+  const plate = normalizeVehiclePlate({ plateNumber: form.vehicle.plate_number, plateLetters: form.vehicle.plate_letters, plateCountry: form.vehicle.plate_country });
+  if ((!form.customer_id && !form.customer.customer_code && !isValidE164(phone)) || (phone && !isValidE164(phone))) {
+    throw new Error(i18n.t("vehicleIntakeWizard.phoneOrCodeRequired"));
   }
-
-  const entryNumber = await ensureEntryNumber(form.entry_number);
-  const payload = entryPayload(form, tenantId, entryNumber, customerId, vehicleId, userId);
-  let saved: any;
-
-  if (form.id) {
-    let update = supabase
-      .from("vehicle_entries" as any)
-      .update(payload as any)
-      .eq("tenant_id", tenantId)
-      .eq("id", form.id)
-      .is("deleted_at", null);
-    update = locationBeforeEdit === null
-      ? update.is("vehicle_location", null)
-      : update.eq("vehicle_location", locationBeforeEdit);
-    const { data, error } = await update
-      .select("*")
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) throw new Error("تغير موقع المركبة أثناء فتح النموذج. أعد فتح السجل قبل الحفظ حتى لا يُلغى خروجها أو عودتها.");
-    saved = data;
-  } else {
-    const { data, error } = await supabase
-      .from("vehicle_entries" as any)
-      .insert({ ...payload, created_by: userId || null } as any)
-      .select("*")
-      .single();
-    if (error) throw error;
-    saved = data;
-  }
-
-  await saveDamageMarks(saved.id, tenantId, form.damage_marks);
-  if (phoneChange && customerId) {
-    try {
-      await syncCustomerPhone(customerId, tenantId, phoneChange);
-    } catch (error) {
-      const partialError = new Error(`حُفظ نموذج الدخول، لكن تعذر تحديث رقم هاتف العميل: ${(error as Error)?.message || error}`) as Error & { savedEntry: any };
-      partialError.savedEntry = saved;
-      throw partialError;
-    }
-  }
-  await insertVehicleEntryAudit({
-    tenantId,
-    vehicleEntryId: saved.id,
-    userId,
-    action: form.id ? "vehicle_entry.updated" : "vehicle_entry.created",
-    newValue: { status: form.status, entry_number: saved.entry_number },
+  const { data, error } = await supabase.rpc("save_vehicle_entry_intake" as any, {
+    p_entry_id: form.id || null, p_expected_updated_at: form.updated_at_before_edit || null,
+    p_form: { ...form, customer_phone_changed: Boolean(phoneChange), technical_declaration: undefined, updated_at_before_edit: undefined,
+      customer: { ...form.customer, phone },
+      vehicle: { ...form.vehicle, plate_number: plate.digits,
+        plate_letters: plate.letters, plate_country: plate.country, vin: normalizeVin(form.vehicle.vin) },
+      declaration_ar: cleanText(form.declaration_ar) || VEHICLE_ENTRY_DECLARATION_AR,
+      declaration_en: cleanText(form.declaration_en) || VEHICLE_ENTRY_DECLARATION_EN },
+    p_technical: form.technical_declaration?.form || null,
+    p_technical_revision: form.technical_declaration?.revision ?? null,
   });
-  return saved;
-}
-
-async function saveDamageMarks(entryId: string, tenantId: string, marks: VehicleEntryDamageMark[]) {
-  const { error: deleteError } = await supabase
-    .from("vehicle_entry_damage_marks" as any)
-    .delete()
-    .eq("tenant_id", tenantId)
-    .eq("vehicle_entry_id", entryId);
-  if (deleteError) throw deleteError;
-  if (!marks.length) return;
-  const rows = marks.map((mark, index) => ({
-    tenant_id: tenantId,
-    vehicle_entry_id: entryId,
-    mark_number: mark.mark_number || index + 1,
-    damage_type: mark.damage_type || null,
-    vehicle_part: mark.vehicle_part || null,
-    description: mark.description || null,
-    related_to_incident: mark.related_to_incident,
-    expected_action: mark.expected_action || null,
-    notes: mark.notes || null,
-    x: mark.x ?? null,
-    y: mark.y ?? null,
-    color: mark.color || null,
-  }));
-  const { error } = await supabase.from("vehicle_entry_damage_marks" as any).insert(rows as any);
-  if (error) throw error;
+  if (error) {
+    const code = String(error.message || "").match(/VEHICLE_(?:INTAKE_[A-Z_]+|VISIT_ALREADY_OPEN)/)?.[0];
+    throw Object.assign(new Error(code ? i18n.t(`vehicleIntakeWizard.${code}`, { defaultValue: error.message }) : error.message), { code: code || error.code });
+  }
+  const result = data as any;
+  if (!result?.entry?.id || result.entry.tenant_id !== tenantId || (form.id && result.entry.id !== form.id) ||
+      (form.technical_declaration && !result.technical?.id)) throw new Error(i18n.t("vehicleIntakeWizard.saveFailed"));
+  return { ...result.entry, vehicle_technical_declaration: result.technical || null };
 }
 
 export async function cancelVehicleEntry(id: string) {
@@ -1383,7 +1207,9 @@ function buildVehicleEntryBarcode(value: string) {
   }
 }
 
-export function buildVehicleEntryHtml(entry: any) {
+export function buildVehicleEntryHtml(entry: any, language: "ar" | "en" = (i18n.language || "ar").slice(0, 2) === "en" ? "en" : "ar") {
+  const english = language === "en";
+  const text = (arabicOrBilingual: string, en: string) => english ? en : arabicOrBilingual;
   const settings = getTemplateSettings();
   const customer = entry.customer || entry.customer_snapshot || {};
   const vehicle = entry.vehicle || entry.vehicle_snapshot || {};
@@ -1423,9 +1249,24 @@ export function buildVehicleEntryHtml(entry: any) {
     .slice(0, 8)
     .map((mark, index) => `<span class="damage-dot dot-${index % 4}" style="left:${Number(mark.x)}%;top:${Number(mark.y)}%">${htmlEscape(mark.mark_number || index + 1)}</span>`)
     .join("");
-  const cell = (label: string, value: unknown) => `<td><span>${htmlEscape(label)}</span><strong>${htmlEscape(value || "-")}</strong></td>`;
-  const title = (n: number, ar: string, en: string) => `<div class="section-title">${n}. ${htmlEscape(ar)} <b>${htmlEscape(en)}</b></div>`;
-  const yn = (value: unknown) => value ? "Yes / نعم" : "No / لا";
+  // These are authored labels only, never customer/vehicle values. Keep all
+  // stored data and both declaration texts unchanged when selecting a language.
+  const englishLabels: Record<string, string> = {
+    "الاسم الكامل Full Name": "Full Name", "رقم الهاتف Contact No.": "Contact No.",
+    "رقم البطاقة ID No.": "ID No.", "شركة الرافعة Tow Company": "Tow Company",
+    "رقم لوحة الرافعة Tow Plate No.": "Tow Plate No.", "اسم السائق Driver Name": "Driver Name",
+    "اسم العميل/المالك Customer / Owner": "Customer / Owner", "تاريخ الدخول Date & Time": "Date & Time",
+    "طريقة الوصول Arrival By": "Arrival By", "موقع المركبة داخل الكراج": "Vehicle Location in Workshop",
+    "الموظف المستلم Received By": "Received By", "رقم المطالبة Claim No.": "Claim No.",
+    "شركة التأمين Insurance Company": "Insurance Company", "موظف التأمين Insurance Officer": "Insurance Officer",
+    "رقم تقرير الشرطة ROP No.": "ROP No.", "رقم أمر الإصلاح Repair Order No.": "Repair Order No.",
+    "الدولة Country": "Country", "الموديل Model": "Model", "سنة الصنع Year": "Year", "اللون Color": "Color",
+    "قراءة العداد Odometer": "Odometer", "حالة التشغيل Running Condition": "Running Condition",
+    "اسم عميل الزيارة Visit Customer": "Visit Customer",
+  };
+  const cell = (label: string, value: unknown) => `<td><span>${htmlEscape(english ? englishLabels[label] || label : label)}</span><strong>${htmlEscape(value || "-")}</strong></td>`;
+  const title = (n: number, ar: string, en: string) => `<div class="section-title">${n}. ${english ? htmlEscape(en) : `${htmlEscape(ar)} <b>${htmlEscape(en)}</b>`}</div>`;
+  const yn = (value: unknown) => value ? text("Yes / نعم", "Yes") : text("No / لا", "No");
   const barcodeSvg = buildVehicleEntryBarcode(String(entry.entry_number || ""));
   const highlightColor = /^#[0-9a-f]{6}$/i.test(String(vehicle.highlight_color || "")) ? vehicle.highlight_color : "#dc2626";
   const deliveryType = deliveredBy.delivery_type || "owner";
@@ -1446,34 +1287,35 @@ export function buildVehicleEntryHtml(entry: any) {
     ? new URL("/assets/vehicle-damage-map.png", window.location.origin).toString()
     : "/assets/vehicle-damage-map.png";
 
-  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"/>
+  return `<!doctype html><html lang="${language}" dir="${english ? "ltr" : "rtl"}"><head><meta charset="utf-8"/>
   <title>${htmlEscape(entry.entry_number)}</title>
   <style>
     @page{size:A4 portrait;margin:5mm}
     *{box-sizing:border-box}
     html,body{margin:0;background:#fff;color:#071d3a;font-family:Arial,Tahoma,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    body{font-size:8.4px;line-height:1.25}.page{width:200mm;min-height:287mm;margin:0 auto;border:1px solid #9aa8b8;padding:2mm;background:#fff;overflow:visible}
-    .top{display:grid;grid-template-columns:54mm 1fr 49mm;align-items:center;gap:3mm;margin-bottom:2mm}.brand{display:grid;grid-template-columns:18mm 1fr;gap:2mm;align-items:center;direction:ltr;text-align:left}
-    .brand img{width:17mm;height:17mm;object-fit:contain}.logo-fallback{font-weight:900;color:#0b3b78;text-align:center;font-size:10px;line-height:1}.brand h2{font-size:9.8px;margin:0;color:#061c3c;line-height:1.15}.brand p{font-size:7.6px;margin:.6mm 0 0;color:#23364f}
+    body{font-size:10.5px;line-height:1.3}.page{width:200mm;min-height:287mm;margin:0 auto;border:1px solid #9aa8b8;padding:2mm;background:#fff;overflow:visible}
+    .top{display:grid;grid-template-columns:54mm 1fr 49mm;align-items:center;gap:3mm;margin-bottom:1mm}.brand{display:grid;grid-template-columns:18mm 1fr;gap:2mm;align-items:center;direction:ltr;text-align:left}
+    .brand img{width:17mm;height:17mm;object-fit:contain}.logo-fallback{font-weight:900;color:#0b3b78;text-align:center;font-size:11px;line-height:1}.brand h2{font-size:11px;margin:0;color:#061c3c;line-height:1.2}.brand p{font-size:8.5px;margin:.6mm 0 0;color:#23364f}
     .doc-title{text-align:center}.doc-title h1{font-size:15px;margin:0 0 1mm;line-height:1.25}.doc-title h2{font-size:13px;margin:0;letter-spacing:.2px}.entry-box{border:1px solid #9aa8b8;border-radius:2mm;text-align:center;overflow:hidden;direction:ltr}
-    .entry-box .label{font-weight:700;padding:1mm;background:#f8fafc;border-bottom:1px solid #cbd5e1;font-size:8px}.entry-box .num{font-size:15px;font-weight:900;padding:1.6mm 1mm}.barcode{height:10mm;margin:0 4mm 2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}.barcode svg{display:block;width:100%;height:10mm}.barcode-fallback{width:100%;height:10mm;background:repeating-linear-gradient(90deg,#111 0 1px,#fff 1px 2px,#111 2px 4px,#fff 4px 6px,#111 6px 7px,#fff 7px 9px)}
-    .thin-table,.damage-table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:1.6mm}.thin-table td,.thin-table th,.damage-table td,.damage-table th{border:1px solid #b8c2cf;padding:1.15mm .9mm;text-align:center;vertical-align:middle}.thin-table span,.damage-table span{display:block;font-weight:700;font-size:7.1px;color:#111827}.thin-table strong{display:block;font-size:8.9px;margin-top:.8mm;color:#020817;word-break:break-word}.important-value{color:${highlightColor}!important;font-size:10px!important;font-weight:900!important}
-    .section-title{background:#082a59;color:#fff;text-align:center;font-weight:800;padding:1mm;margin:1.5mm 0 0;font-size:8.2px}.section-title b{font-size:7.5px;margin-inline-start:1mm}.tri-grid{display:grid;grid-template-columns:29% 31% 40%;gap:1.3mm;margin-top:1.5mm}.box{border:1px solid #b8c2cf;min-height:38mm}.box h3{background:#082a59;color:#fff;margin:0;padding:1mm;text-align:center;font-size:7.7px}.box p{margin:0;padding:1.1mm;border-bottom:1px solid #e2e8f0;min-height:7mm}
+    .entry-box .label{font-weight:700;padding:.8mm;background:#f8fafc;border-bottom:1px solid #cbd5e1;font-size:8.5px}.entry-box .num{font-size:15px;font-weight:900;padding:1.3mm 1mm}.barcode{height:8mm;margin:0 4mm 1mm;display:flex;align-items:center;justify-content:center;overflow:hidden}.barcode svg{display:block;width:100%;height:8mm}.barcode-fallback{width:100%;height:8mm;background:repeating-linear-gradient(90deg,#111 0 1px,#fff 1px 2px,#111 2px 4px,#fff 4px 6px,#111 6px 7px,#fff 7px 9px)}
+    .thin-table,.damage-table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:1mm}.thin-table td,.thin-table th,.damage-table td,.damage-table th{border:1px solid #b8c2cf;padding:.7mm .9mm;text-align:center;vertical-align:middle}.thin-table span,.damage-table span{display:block;font-weight:700;font-size:8.5px;color:#111827}.thin-table strong{display:block;font-size:10.5px;margin-top:.4mm;color:#020817;overflow-wrap:anywhere}.important-value{color:${highlightColor}!important;font-size:11px!important;font-weight:900!important}
+    .section-title{background:#082a59;color:#fff;text-align:center;font-weight:800;padding:.8mm;margin:1.5mm 0 0;font-size:9px}.section-title b{font-size:8.5px;margin-inline-start:1mm}.tri-grid{display:grid;grid-template-columns:minmax(0,29fr) minmax(0,31fr) minmax(0,40fr);gap:1.3mm;margin-top:1.5mm}.box{border:1px solid #b8c2cf;min-height:38mm}.box h3{background:#082a59;color:#fff;margin:0;padding:1mm;text-align:center;font-size:9px}.box p{margin:0;padding:1.1mm;border-bottom:1px solid #e2e8f0;min-height:7mm}
     .damage-map{height:52mm;background:#fff;display:flex;align-items:center;justify-content:center;overflow:visible}.damage-map-stage{position:relative;height:100%;aspect-ratio:944/1676;max-width:100%;flex:0 0 auto}.damage-map-image{position:absolute;inset:0;width:100%;height:100%;display:block}
     .damage-dot{position:absolute;z-index:2;display:flex;align-items:center;justify-content:center;width:4.6mm;height:4.6mm;border-radius:50%;font-size:6px;font-weight:800;background:#fff;border:1.2px solid #ef4444;color:#ef4444;transform:translate(-50%,-50%)}.dot-1{border-color:#f59e0b;color:#b45309}.dot-2{border-color:#22c55e;color:#15803d}.dot-3{border-color:#2563eb;color:#1d4ed8}.legend{display:flex;gap:1mm;justify-content:center;font-size:6px;margin-top:.5mm}.legend span{display:inline-flex;align-items:center;gap:.5mm}.legend i{width:3mm;height:3mm;border-radius:50%;border:1px solid currentColor;display:inline-block}
-    .damage-table{margin:0}.damage-table th{background:#f8fafc;font-size:7px}.damage-table td{font-size:7.2px;height:7.5mm}.lower{display:grid;grid-template-columns:27% 41% 32%;gap:1.3mm;margin-top:1.5mm}.contents-table{width:100%;border-collapse:collapse;table-layout:fixed}.contents-table td{border:1px solid #cbd5e1;padding:1mm;text-align:center;font-size:7.1px}.check{font-size:11px;color:#15803d;font-weight:900}
-    .photos{display:grid;grid-template-columns:repeat(4,1fr);gap:1mm;padding:1mm}.photo-cell{height:20mm;border:1px solid #d6dde7;text-align:center;overflow:hidden;background:#f8fafc}.photo-title{font-size:5.7px;height:4mm;line-height:4mm;background:#fff}.photo-cell img{width:100%;height:16mm;object-fit:cover}.photo-empty{font-size:6px;color:#94a3b8;padding-top:5mm}.declaration{padding:1.4mm;font-size:7.2px;line-height:1.35;text-align:justify}.declaration p{margin:0 0 1mm}.declaration p.en{direction:ltr;text-align:left}
-    .sign-row{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid #cbd5e1;border-top:0;margin-top:1.5mm}.sig{min-height:21mm;text-align:center;border-inline-start:1px solid #cbd5e1;padding:1.2mm}.sig:first-child{border-inline-start:0}.sig h4{margin:0 0 1mm;font-size:7.4px}.sig img{max-width:35mm;max-height:12mm;object-fit:contain}.sig .line{height:10mm;border-bottom:1px solid #334155;margin:1mm 7mm}.stamp img{max-width:25mm;max-height:15mm;object-fit:contain}.sig-meta{display:flex;justify-content:space-around;border-top:1px solid #e2e8f0;padding-top:.8mm;font-size:6.5px}.footer{text-align:center;font-size:6.8px;margin-top:1.2mm;color:#475569}
+    .damage-table{margin:0}.damage-table th{background:#f8fafc;font-size:8.5px}.damage-table td{font-size:9px;height:7.5mm}.lower{display:grid;grid-template-columns:minmax(0,27fr) minmax(0,37fr) minmax(0,36fr);gap:1.3mm;margin-top:1.5mm}.contents-table{width:100%;border-collapse:collapse;table-layout:fixed}.contents-table td{border:1px solid #cbd5e1;padding:1mm;text-align:center;font-size:8.5px}.check{font-size:11px;color:#15803d;font-weight:900}
+    .photos{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1mm;padding:1mm}.photo-cell{height:18mm;border:1px solid #d6dde7;text-align:center;overflow:hidden;background:#f8fafc}.photo-title{font-size:7.5px;min-height:4mm;line-height:1.2;background:#fff;padding:.5mm .2mm}.photo-cell img{width:100%;height:14mm;object-fit:cover}.photo-empty{font-size:8px;color:#64748b;padding-top:5mm}.declaration{padding:1.4mm;font-size:9px;line-height:1.3;text-align:justify}.declaration p{margin:0 0 1mm}.declaration p.en{direction:ltr;text-align:left}
+    .sign-row{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid #cbd5e1;border-top:0;margin-top:1.5mm}.sig{min-height:21mm;text-align:center;border-inline-start:1px solid #cbd5e1;padding:1.2mm}.sig:first-child{border-inline-start:0}.sig h4{margin:0 0 1mm;font-size:9px}.sig img{max-width:35mm;max-height:12mm;object-fit:contain}.sig .line{height:10mm;border-bottom:1px solid #334155;margin:1mm 7mm}.stamp img{max-width:25mm;max-height:15mm;object-fit:contain}.sig-meta{display:flex;justify-content:space-around;border-top:1px solid #e2e8f0;padding-top:.8mm;font-size:8px}.footer{text-align:center;font-size:8px;margin-top:1.2mm;color:#475569}
     @media screen{body{background:#e5e7eb;padding:8mm}.page{box-shadow:0 2px 12px rgba(15,23,42,.18)}}@media print{body{background:#fff}.page{box-shadow:none;margin:0;page-break-after:auto}}
-  </style></head><body><main class="page">
-    <section class="top"><div class="brand">${logo}<div><h2>${htmlEscape(companyNameAr)}</h2><h2>${htmlEscape(companyNameEn)}</h2><p>Specialized Car Maintenance Center</p></div></div><div class="doc-title"><h1>نموذج دخول واستلام مركبة</h1><h2>VEHICLE ENTRY & RECEIPT FORM</h2></div><div class="entry-box"><div class="label">رقم الدخول / Entry No.</div><div class="num">${htmlEscape(entry.entry_number)}</div><div class="barcode">${barcodeSvg || '<div class="barcode-fallback"></div>'}</div></div></section>
-    <table class="thin-table"><tr>${cell("تاريخ الدخول Date & Time", `${arrivalDate}   ${arrivalTime}`)}${cell("طريقة الوصول Arrival By", entry.arrival_method || "-")}${cell("موقع المركبة داخل الكراج", [entry.vehicle_location, entry.vehicle_location_bay].filter(Boolean).join(" / "))}${cell("الموظف المستلم Received By", entry.received_by_name || "-")}</tr></table>
+  </style></head><body><main class="page" data-pdf-fixed-form="vehicle-entry">
+    <section class="top"><div class="brand">${logo}<div>${english ? "" : `<h2>${htmlEscape(companyNameAr)}</h2>`}<h2>${htmlEscape(companyNameEn)}</h2><p>Specialized Car Maintenance Center</p></div></div><div class="doc-title"><h1>${text("نموذج دخول واستلام مركبة", "VEHICLE ENTRY & RECEIPT FORM")}</h1>${english ? "" : '<h2>VEHICLE ENTRY & RECEIPT FORM</h2>'}</div><div class="entry-box"><div class="label">${text("رقم الدخول / Entry No.", "Entry No.")}</div><div class="num">${htmlEscape(entry.entry_number)}</div><div class="barcode">${barcodeSvg || '<div class="barcode-fallback"></div>'}</div></div></section>
+    <table class="thin-table"><tr>${cell("تاريخ الدخول Date & Time", `${arrivalDate}   ${arrivalTime}`)}${cell("طريقة الوصول Arrival By", pdfControlledLabel(entry.arrival_method || "-", "arrivalMethod", language))}${cell("موقع المركبة داخل الكراج", [pdfControlledLabel(entry.vehicle_location || "", "vehicleLocation", language), entry.vehicle_location_bay].filter(Boolean).join(" / "))}${cell("الموظف المستلم Received By", entry.received_by_name || "-")}</tr></table>
     ${title(1, "بيانات المطالبة", "CLAIM INFORMATION")}<table class="thin-table"><tr>${cell("رقم المطالبة Claim No.", insurance.claim_number || entry.claim?.claim_number)}${cell("شركة التأمين Insurance Company", insurance.company_name || insurance.insurance_company_name || entry.insurance_company?.name)}${cell("موظف التأمين Insurance Officer", insurance.employee_name)}${cell("رقم تقرير الشرطة ROP No.", insurance.police_report_number)}${cell("رقم أمر الإصلاح Repair Order No.", insurance.lpo_number)}</tr></table>
-    ${title(2, "بيانات المركبة", "VEHICLE INFORMATION")}<table class="thin-table"><tr><td><span>رقم اللوحة Plate No.</span><strong class="important-value">${htmlEscape(plate || "-")}</strong></td>${cell("الدولة Country", vehicle.plate_country || "Oman")}<td><span>الماركة Make</span><strong class="important-value">${htmlEscape(vehicle.brand || vehicle.make || "-")}</strong></td>${cell("الموديل Model", vehicle.model)}${cell("سنة الصنع Year", vehicle.year)}${cell("اللون Color", vehicle.color)}</tr><tr><td><span>رقم الهيكل VIN</span><strong class="important-value">${htmlEscape(vehicle.vin_number || vehicle.vin || "-")}</strong></td>${cell("قراءة العداد Odometer", vehicle.mileage)}${cell("حالة التشغيل Running Condition", condition.condition_description)}${cell("اسم المالك Owner Name", vehicle.current_owner_name || customer.name)}${cell("رقم الهاتف Contact No.", customer.phone)}</tr></table>
+    ${title(2, "بيانات المركبة", "VEHICLE INFORMATION")}<table class="thin-table"><tr><td><span>${text("رقم اللوحة Plate No.", "Plate No.")}</span><strong class="important-value">${htmlEscape(plate || "-")}</strong></td>${cell("الدولة Country", vehicle.plate_country || "Oman")}<td><span>${text("الماركة Make", "Make")}</span><strong class="important-value">${htmlEscape(vehicle.brand || vehicle.make || "-")}</strong></td>${cell("الموديل Model", vehicle.model)}${cell("سنة الصنع Year", vehicle.year)}${cell("اللون Color", vehicle.color)}</tr><tr><td><span>${text("رقم الهيكل VIN", "VIN")}</span><strong class="important-value">${htmlEscape(vehicle.vin_number || vehicle.vin || "-")}</strong></td>${cell("قراءة العداد Odometer", vehicle.mileage)}${cell("حالة التشغيل Running Condition", condition.condition_description)}${cell("اسم عميل الزيارة Visit Customer", customer.name)}${cell("رقم الهاتف Contact No.", customer.phone)}</tr></table>
     ${title(3, "بيانات الشخص الذي أدخل المركبة", "VEHICLE DELIVERED BY")}<table class="thin-table"><tr>${deliveryCells}</tr></table>
-    <section class="tri-grid"><div class="box"><h3>4. وصف الحادث والأضرار الظاهرة</h3><p><b>Accident Description</b><br/>${htmlEscape(condition.incident_description || "-")}</p><p><b>Visible Damages</b><br/>${htmlEscape(condition.visible_damage || "-")}</p><p><b>Previous Damages</b><br/>${htmlEscape(condition.previous_damage || "-")}</p><p><b>Additional Notes</b><br/>${htmlEscape(condition.additional_notes || condition.mechanical_notes || "-")}</p></div><div class="box"><h3>5. خريطة الأضرار DAMAGE MAP</h3><div class="damage-map"><div class="damage-map-stage"><img class="damage-map-image" src="${htmlEscape(damageMapImageUrl)}" alt="Vehicle damage map" />${markDots}</div></div><div class="legend"><span><i></i>Impact</span><span><i></i>Broken</span><span><i></i>Scratch</span><span><i></i>Dent</span></div></div><div class="box"><h3>Damage Details تفاصيل الأضرار</h3><table class="damage-table"><thead><tr><th>No.</th><th>Damage Type</th><th>Affected Part</th><th>Notes</th></tr></thead><tbody>${damageRows}</tbody></table></div></section>
-    <section class="lower"><div class="box"><h3>6. محتويات المركبة VEHICLE CONTENTS</h3><table class="contents-table"><tr><td>Keys<br/><b>${htmlEscape(contents.keys_count || "-")}</b></td><td>Personal Items<br/><b>${yn(contents.personal_items)}</b></td></tr><tr><td>Registration Card<br/><b>${contents.registration_card ? '<span class="check">✓</span>' : '-'}</b></td><td>Number Plates<br/><b>${contents.front_plate || contents.rear_plate ? '<span class="check">✓</span>' : '-'}</b></td></tr><tr><td>Spare Tire<br/><b>${contents.spare_tire ? '<span class="check">✓</span>' : '-'}</b></td><td>Fuel Level<br/><b>${htmlEscape(contents.fuel_level || "-")}</b></td></tr><tr><td>Tools & Jack<br/><b>${contents.tools_jack ? '<span class="check">✓</span>' : '-'}</b></td><td>Fire Extinguisher<br/><b>${contents.fire_extinguisher ? '<span class="check">✓</span>' : '-'}</b></td></tr></table></div><div class="box"><h3>7. صور المركبة عند الدخول VEHICLE PHOTOS AT ENTRY</h3><div class="photos">${photoCells}</div></div><div class="box"><h3>8. الإقرار DECLARATION</h3><div class="declaration"><p>${htmlEscape(entry.declaration_ar || VEHICLE_ENTRY_DECLARATION_AR)}</p><p class="en">${htmlEscape(entry.declaration_en || VEHICLE_ENTRY_DECLARATION_EN)}</p></div></div></section>
-    <section class="sign-row"><div class="sig"><h4>توقيع الشخص الذي أدخل المركبة<br/>Signature of Vehicle Delivered By</h4>${deliveredBySignature?.signature_data_url ? `<img src="${htmlEscape(deliveredBySignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig"><h4>توقيع موظف الاستلام<br/>Signature of Receiver</h4>${receiverSignature?.signature_data_url ? `<img src="${htmlEscape(receiverSignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig stamp"><h4>ختم الشركة<br/>Company Stamp</h4>${stamp || '<div class="line"></div>'}</div></section>
+    <section class="tri-grid"><div class="box"><h3>${text("4. وصف الحادث والأضرار الظاهرة", "4. Accident Description & Visible Damages")}</h3><p><b>Accident Description</b><br/>${htmlEscape(condition.incident_description || "-")}</p><p><b>Visible Damages</b><br/>${htmlEscape(condition.visible_damage || "-")}</p><p><b>Previous Damages</b><br/>${htmlEscape(condition.previous_damage || "-")}</p><p><b>Additional Notes</b><br/>${htmlEscape(condition.additional_notes || condition.mechanical_notes || "-")}</p></div><div class="box"><h3>${text("5. خريطة الأضرار DAMAGE MAP", "5. DAMAGE MAP")}</h3><div class="damage-map"><div class="damage-map-stage"><img class="damage-map-image" src="${htmlEscape(damageMapImageUrl)}" alt="Vehicle damage map" />${markDots}</div></div><div class="legend"><span><i></i>Impact</span><span><i></i>Broken</span><span><i></i>Scratch</span><span><i></i>Dent</span></div></div><div class="box"><h3>${text("Damage Details تفاصيل الأضرار", "Damage Details")}</h3><table class="damage-table"><thead><tr><th>No.</th><th>Damage Type</th><th>Affected Part</th><th>Notes</th></tr></thead><tbody>${damageRows}</tbody></table></div></section>
+    ${buildVehicleEntryTechnicalDeclarationSummaryHtml(entry, language)}
+    <section class="lower"><div class="box"><h3>${text("6. محتويات المركبة VEHICLE CONTENTS", "6. VEHICLE CONTENTS")}</h3><table class="contents-table"><tr><td>Keys<br/><b>${htmlEscape(contents.keys_count || "-")}</b></td><td>Personal Items<br/><b>${yn(contents.personal_items)}</b></td></tr><tr><td>Registration Card<br/><b>${contents.registration_card ? '<span class="check">✓</span>' : '-'}</b></td><td>Number Plates<br/><b>${contents.front_plate || contents.rear_plate ? '<span class="check">✓</span>' : '-'}</b></td></tr><tr><td>Spare Tire<br/><b>${contents.spare_tire ? '<span class="check">✓</span>' : '-'}</b></td><td>Fuel Level<br/><b>${htmlEscape(pdfControlledLabel(contents.fuel_level || "-", "fuelLevel", language))}</b></td></tr><tr><td>Tools & Jack<br/><b>${contents.tools_jack ? '<span class="check">✓</span>' : '-'}</b></td><td>Fire Extinguisher<br/><b>${contents.fire_extinguisher ? '<span class="check">✓</span>' : '-'}</b></td></tr></table></div><div class="box"><h3>${text("7. صور المركبة عند الدخول VEHICLE PHOTOS AT ENTRY", "7. VEHICLE PHOTOS AT ENTRY")}</h3><div class="photos">${photoCells}</div></div><div class="box"><h3>${text("8. الإقرار DECLARATION", "8. DECLARATION")}</h3><div class="declaration">${english ? "" : `<p>${htmlEscape(entry.declaration_ar || VEHICLE_ENTRY_DECLARATION_AR)}</p>`}<p class="en">${htmlEscape(entry.declaration_en || VEHICLE_ENTRY_DECLARATION_EN)}</p></div></div></section>
+    <section class="sign-row"><div class="sig"><h4>${text("توقيع الشخص الذي أدخل المركبة<br/>Signature of Vehicle Delivered By", "Signature of Vehicle Delivered By")}</h4>${deliveredBySignature?.signature_data_url ? `<img src="${htmlEscape(deliveredBySignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig"><h4>${text("توقيع موظف الاستلام<br/>Signature of Receiver", "Signature of Receiver")}</h4>${receiverSignature?.signature_data_url ? `<img src="${htmlEscape(receiverSignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig stamp"><h4>${text("ختم الشركة<br/>Company Stamp", "Company Stamp")}</h4>${stamp || '<div class="line"></div>'}</div></section>
     <footer class="footer">Note: This is an electronic form and is considered valid without signature if it bears the company stamp. - ${htmlEscape(companyNameEn)} - ${now.getFullYear()}</footer>
   </main></body></html>`;
 }

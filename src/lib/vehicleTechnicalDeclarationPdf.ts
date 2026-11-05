@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { buildVehicleTechnicalDeclarationHtml, type VehicleTechnicalDeclarationForm } from "./vehicleTechnicalDeclaration";
+import { buildVehicleTechnicalDeclarationHtml, TECHNICAL_GARAGE_NAME, type VehicleTechnicalDeclarationForm } from "./vehicleTechnicalDeclaration";
 
 function safeHtml(form: VehicleTechnicalDeclarationForm): string {
   return DOMPurify.sanitize(buildVehicleTechnicalDeclarationHtml(form), {
@@ -98,7 +98,22 @@ export async function downloadTechnicalDeclarationPdf(form: VehicleTechnicalDecl
   ]);
   const { iframe, page } = await prepareHiddenPage(form);
   try {
-    const canvas = await html2canvas(page, { scale: 2, backgroundColor: "#ffffff", logging: false });
+    const embeddedFontStyle = page.querySelector('style[data-technical-font="embedded"]');
+    if (!embeddedFontStyle) throw new Error("Embedded declaration font unavailable");
+    // Let the browser shape inline text at the same baseline as preview/print.
+    // html2canvas's manual text painter shifts filled values through the ruled
+    // underlines in this fixed official form. No export-only position offsets.
+    const canvas = await html2canvas(page, {
+      scale: 2, backgroundColor: "#ffffff", logging: false, foreignObjectRendering: true,
+      onclone: async (clonedDoc, clonedPage) => {
+        // copyStyles deliberately drops STYLE nodes in html2canvas 1.4.1.
+        // Restore the same self-contained font inside the serialized page.
+        clonedPage.prepend(embeddedFontStyle.cloneNode(true));
+        const faces = await clonedDoc.fonts.load('700 11pt TemoTechnicalArabic', TECHNICAL_GARAGE_NAME);
+        if (!faces.length) throw new Error("Embedded declaration font could not load");
+        await clonedDoc.fonts.ready;
+      },
+    });
     const pdf = new JsPDF({ unit: "mm", format: "a4", orientation: "portrait", compress: true });
     pdf.setProperties({ title: `Vehicle Technical Declaration ${entryNumber}`, subject: "Vehicle Technical Declaration" });
     pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, 210, 297, undefined, "FAST");

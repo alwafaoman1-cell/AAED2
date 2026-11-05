@@ -4,6 +4,8 @@
 
 @layer base {
   :root {
+    --document-paper: 0 0% 100%;
+    --document-ink: 0 0% 0%;
     --background: 222 20% 10%;
     --foreground: 210 20% 92%;
 

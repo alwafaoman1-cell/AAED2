@@ -16,7 +16,7 @@ import { queryKeys } from "@/lib/queryKeys";
 import { confirmVehicleEntryWorkOrderLink } from "@/lib/vehicleEntryService";
 import "@/lib/i18n/vehicleEntryLinks";
 import {hasConfirmedVehicleEntryWorkOrderLink} from "@/lib/vehicleEntryWorkOrderLink";
-import { advanceVehicleVisit, getVehicleVisitBillingKind, getVehicleVisitDetail, getVehicleVisitDocumentUrl, getVehicleVisitNextBlocker, listVehicleVisitStaff, reconcileVehicleVisitCustody, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
+import { advanceVehicleVisit, canReconcileVehicleVisitCustody, getVehicleVisitBillingKind, getVehicleVisitDetail, getVehicleVisitDocumentUrl, getVehicleVisitNextBlocker, listVehicleVisitStaff, reconcileVehicleVisitCustody, type PersistedVisitStage, type VisitStage } from "@/lib/vehicleVisitLifecycle";
 
 const ORDER: PersistedVisitStage[] = ["arrived", "approved", "in_progress", "ready", "delivered"];
 function localDateTime() {
@@ -68,12 +68,7 @@ export function VehicleVisitControlPanel({ entryId }: { entryId: string }) {
       ? `/work-orders/${encodeURIComponent(order.order_number)}` : null;
   const cancelBlocker = claim && !["cancelled", "rejected"].includes(claim.status)
     ? "cancelClaimFirst" : order && order.status !== "delivered" ? "closeWorkOrderFirst" : null;
-  const canReconcileCustody = canManage && visit?.reviewReason === "custody_conflict"
-    && entry?.vehicle_location === "داخل الورشة" && !visit.hasFinalHandover
-    && !["cancelled", "rejected"].includes(claim?.status)
-    && !claim?.vehicle_delivered_at && !claim?.delivered_at
-    && order?.status !== "delivered" && !order?.vehicle_delivered_at
-    && !(visit.releases || []).some((release: any) => release.status === "signed" && !release.returned_at);
+  const canReconcileCustody = canManage && canReconcileVehicleVisitCustody(visit);
 
   const displayError = (error: Error) => {
     const code = error.message?.match(/VEHICLE_VISIT_[A-Z_]+/)?.[0];

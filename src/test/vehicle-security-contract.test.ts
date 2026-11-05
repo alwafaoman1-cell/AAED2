@@ -53,7 +53,7 @@ describe("vehicle identity guard", () => {
     expect(identity).toContain("input.reactivateArchived && existing.archived");
     expect(identity).toContain("patch.archived = false");
     expect(identity).toContain("patch.archived_at = null");
-    expect(identity).toContain("patch.deleted_at = null");
+    expect(identity).not.toContain("patch.deleted_at = null");
     expect(workOrderForm).toContain("reactivateArchived: useExistingVehicle");
     expect(workOrderForm).toContain("بدون إنشاء مركبة مكررة وبدون تغيير المالك المسجل");
   });

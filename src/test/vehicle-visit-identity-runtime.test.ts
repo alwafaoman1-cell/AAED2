@@ -25,6 +25,9 @@ const cloud = vi.hoisted(() => ({
   writes: [] as Array<{ table: string; operation: string; payload: Record<string, any>; filters: Array<[string, any]> }>,
   queries: [] as Array<{ table: string; filters: Array<[string, any]> }>,
   rpcRows: null as null | Record<string, any>[],
+  intakeData: null as any,
+  intakeError: null as any,
+  intakeCalls: [] as any[],
   rpcError: null as any,
   readError: null as any,
   insertError: null as any,
@@ -37,11 +40,16 @@ const cloud = vi.hoisted(() => ({
 vi.mock("@/lib/cloud/createCloudStore", () => ({ getCurrentTenantId: cloud.tenantContext }));
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
-    rpc: vi.fn(async (name: string, args: Record<string, string>) => ({
+    rpc: vi.fn(async (name: string, args: Record<string, any>) => {
+      if (name === "save_vehicle_entry_intake") {
+        cloud.intakeCalls.push(args);
+        return {data:cloud.intakeData,error:cloud.intakeError};
+      }
+      return ({
       data: name === "next_vehicle_entry_number" ? "ENT-2026-TEST" : cloud.rpcRows ?? cloud.tables.vehicles.filter((row) => row.tenant_id === cloud.tenant &&
         row.plate_letters === args.p_letters && row.plate_number === args.p_digits && row.plate_country === args.p_country),
       error: cloud.rpcError,
-    })),
+    });}),
     from: (table: string) => {
       const filters: Array<[string, any]> = [];
       let operation = "read";
@@ -127,6 +135,8 @@ beforeEach(() => {
   cloud.writes = [];
   cloud.queries = [];
   cloud.rpcRows = cloud.rpcError = cloud.readError = cloud.insertError = null;
+  cloud.intakeData = cloud.intakeError = null;
+  cloud.intakeCalls = [];
   cloud.beforeUpdate = cloud.afterRead = null;
   cloud.vehicleUpdateDenied = false;
 });
@@ -151,9 +161,14 @@ describe("new entry archived vehicle regression", () => {
     Object.assign(cloud.tables.vehicles[0], { archived: true, archived_at: "2026-10-01" });
     cloud.vehicleUpdateDenied = true;
     const before = structuredClone(cloud.tables.vehicles);
+    cloud.intakeData = {entry:{id:"saved-entry",tenant_id:TENANT,vehicle_id:VEHICLE,customer_id:VISITOR,status}};
     const saved = await saveVehicleEntry(form);
     expect(saved).toMatchObject({ vehicle_id: VEHICLE, customer_id: VISITOR, status });
-    expect(cloud.tables.vehicle_entries).toHaveLength(1);
+    expect(cloud.intakeCalls).toHaveLength(1);
+    expect(cloud.intakeCalls[0]).toMatchObject({p_entry_id:null,p_form:{vehicle_id:VEHICLE,customer_id:VISITOR,status}});
+    // The browser does not prewrite master/entry rows. Actual commit/archive
+    // behavior is exercised by the authenticated SQL rollback suite.
+    expect(cloud.tables.vehicle_entries).toHaveLength(0);
     expect(cloud.tables.vehicles).toEqual(before);
     expect(cloud.writes.filter((write) => write.table === "vehicles")).toEqual([]);
     expect(cloud.tables.job_orders).toHaveLength(1);
@@ -161,21 +176,23 @@ describe("new entry archived vehicle regression", () => {
     expect(cloud.tables.invoices).toHaveLength(1);
   });
 
-  it("also resolves an archived full plate when it was typed instead of selected", async () => {
+  it("sends a normalized full plate for atomic server resolution when typed instead of selected", async () => {
     const form = newEntry();
     form.vehicle_id = "";
     form.vehicle.plate_number = "AA 1234";
     form.vehicle.plate_letters = "";
     cloud.tables.vehicles[0].archived = true;
+    cloud.intakeData = {entry:{id:"saved-entry",tenant_id:TENANT,vehicle_id:VEHICLE}};
     const saved = await saveVehicleEntry(form);
     expect(saved.vehicle_id).toBe(VEHICLE);
+    expect(cloud.intakeCalls[0].p_form.vehicle).toMatchObject({plate_letters:"AA",plate_number:"1234",plate_country:"OM"});
     expect(cloud.tables.vehicles).toHaveLength(1);
     expect(cloud.writes.filter((write) => write.table === "vehicles")).toEqual([]);
   });
 
   it("never changes the archive or owner if the entry insert is rejected", async () => {
     cloud.tables.vehicles[0].archived = true;
-    cloud.insertError = { code: "23505", message: "duplicate visit" };
+    cloud.intakeError = { code: "23505", message: "duplicate visit" };
     const before = structuredClone(cloud.tables.vehicles);
     await expect(saveVehicleEntry(newEntry())).rejects.toMatchObject({ code: "23505" });
     expect(cloud.tables.vehicle_entries).toEqual([]);
@@ -188,17 +205,21 @@ describe("new entry archived vehicle regression", () => {
     if (reason === "deleted") cloud.tables.vehicles[0].deleted_at = "2026-10-01";
     if (reason === "foreign tenant") cloud.tables.vehicles[0].tenant_id = OTHER_TENANT;
     if (reason === "missing customer") cloud.tables.customers = cloud.tables.customers.filter((customer) => customer.id !== VISITOR);
+    cloud.intakeError = {code:"23514",message:reason === "deleted"?"VEHICLE_INTAKE_VEHICLE_DELETED":"VEHICLE_INTAKE_CUSTOMER_UNAVAILABLE"};
     await expect(saveVehicleEntry(newEntry())).rejects.toThrow();
     expect(cloud.tables.vehicle_entries).toEqual([]);
     expect(cloud.writes).toEqual([]);
   });
 
-  it("does not reuse the new-visit permission to reactivate a historical edit", async () => {
+  it("does not perform client-side reactivation on a historical edit", async () => {
     const form = newEntry();
     form.id = "50000000-0000-4000-8000-000000000001";
     cloud.tables.vehicle_entries.push({ id: form.id, tenant_id: TENANT, vehicle_location: form.vehicle_location });
     cloud.tables.vehicles[0].archived = true;
-    await expect(saveVehicleEntry(form)).rejects.toThrow("archived_vehicle_requires_confirmation");
+    cloud.intakeData = {entry:{id:form.id,tenant_id:TENANT}};
+    await expect(saveVehicleEntry(form)).resolves.toMatchObject({id:form.id});
+    expect(cloud.intakeCalls[0].p_entry_id).toBe(form.id);
+    expect(cloud.tables.vehicles[0].archived).toBe(true);
     expect(cloud.writes).toEqual([]);
   });
 });

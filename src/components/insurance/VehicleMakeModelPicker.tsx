@@ -1,4 +1,6 @@
 import { useState, useMemo } from "react";
+import {useTranslation} from "react-i18next";
+import "@/lib/i18n/vehicleIdentityFields";
 import { Check, ChevronsUpDown, Plus, Car } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -29,6 +31,8 @@ interface Props {
 export default function VehicleMakeModelPicker({
   make, model, plate, year = "", color = "", vin = "", onChange, className, hideFields = [],
 }: Props) {
+  const {t,i18n}=useTranslation();
+  const isEnglish=i18n.language.startsWith("en");
   const hidden = (k: "plate" | "year" | "color" | "vin") => hideFields.includes(k);
   const [openMake, setOpenMake] = useState(false);
   const [openModel, setOpenModel] = useState(false);
@@ -106,28 +110,28 @@ export default function VehicleMakeModelPicker({
     <div className={cn("space-y-3", className)}>
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Car className="h-4 w-4" />
-        <span>بيانات السيارة (اختياري — تُحفظ مع المطالبة حتى دون ربط مركبة)</span>
+        <span>{t("vehicleIdentityFields.title")}</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {/* Make */}
         <div className="space-y-1.5">
-          <Label>الماركة</Label>
+          <Label>{t("vehicleIdentityFields.make")}</Label>
           <Popover open={openMake} onOpenChange={setOpenMake}>
             <PopoverTrigger asChild>
               <Button
-                variant="outline" role="combobox"
+                variant="outline" role="combobox" aria-label={t("vehicleIdentityFields.make")} aria-expanded={openMake}
                 className="w-full justify-between font-normal"
                 style={{ fontFamily: make ? "Inter, sans-serif" : undefined }}
               >
-                {make || "اختر الماركة..."}
+                {make || t("vehicleIdentityFields.chooseMake")}
                 <ChevronsUpDown className="h-4 w-4 opacity-50" />
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-[300px] p-0" align="start">
               <Command shouldFilter={false}>
                 <CommandInput
-                  placeholder="ابحث أو أضف ماركة..."
+                  placeholder={t("vehicleIdentityFields.searchMake")}
                   value={makeQuery}
                   onValueChange={setMakeQuery}
                 />
@@ -139,9 +143,9 @@ export default function VehicleMakeModelPicker({
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent"
                       >
                         <Plus className="h-4 w-4" />
-                        إضافة "{makeQuery}"
+                        {t("vehicleIdentityFields.add",{name:makeQuery})}
                       </button>
-                    ) : "لا توجد نتائج"}
+                    ) : t("vehicleIdentityFields.noResults")}
                   </CommandEmpty>
                   <CommandGroup>
                     {filteredMakes.map((m) => (
@@ -155,15 +159,15 @@ export default function VehicleMakeModelPicker({
                           setMakeQuery("");
                         }}
                       >
-                        <Check className={cn("ml-2 h-4 w-4", make === m.name || make === m.name_ar ? "opacity-100" : "opacity-0")} />
+                        <Check className={cn("me-2 h-4 w-4", make === m.name || make === m.name_ar ? "opacity-100" : "opacity-0")} />
                         <span className="flex-1 font-semibold" style={{ fontFamily: "Inter, sans-serif" }}>{m.name}</span>
-                        {m.name_ar && <span className="text-xs text-muted-foreground">{m.name_ar}</span>}
+                        {!isEnglish && m.name_ar && <span className="text-xs text-muted-foreground">{m.name_ar}</span>}
                       </CommandItem>
                     ))}
                     {showAddMake && (
                       <CommandItem onSelect={handleAddMake} className="text-primary">
-                        <Plus className="ml-2 h-4 w-4" />
-                        إضافة "{makeQuery}" كماركة جديدة
+                        <Plus className="me-2 h-4 w-4" />
+                        {t("vehicleIdentityFields.addMake",{name:makeQuery})}
                       </CommandItem>
                     )}
                   </CommandGroup>
@@ -175,22 +179,22 @@ export default function VehicleMakeModelPicker({
 
         {/* Model */}
         <div className="space-y-1.5">
-          <Label>الموديل {selectedMake && <span className="text-xs text-muted-foreground">({selectedMake.name})</span>}</Label>
+          <Label>{t("vehicleIdentityFields.model")} {selectedMake && <span className="text-xs text-muted-foreground">({selectedMake.name})</span>}</Label>
           <Popover open={openModel} onOpenChange={setOpenModel}>
             <PopoverTrigger asChild>
               <Button
-                variant="outline" role="combobox" disabled={!make}
+                variant="outline" role="combobox" aria-label={t("vehicleIdentityFields.model")} aria-expanded={openModel} disabled={!make}
                 className="w-full justify-between font-normal"
                 style={{ fontFamily: model ? "Inter, sans-serif" : undefined }}
               >
-                {model || (make ? "اختر الموديل..." : "اختر الماركة أولاً")}
+                {model || (make ? t("vehicleIdentityFields.chooseModel") : t("vehicleIdentityFields.makeFirst"))}
                 <ChevronsUpDown className="h-4 w-4 opacity-50" />
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-[300px] p-0" align="start">
               <Command shouldFilter={false}>
                 <CommandInput
-                  placeholder="ابحث أو أضف موديل..."
+                  placeholder={t("vehicleIdentityFields.searchModel")}
                   value={modelQuery}
                   onValueChange={setModelQuery}
                 />
@@ -202,9 +206,9 @@ export default function VehicleMakeModelPicker({
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent"
                       >
                         <Plus className="h-4 w-4" />
-                        إضافة "{modelQuery}"
+                        {t("vehicleIdentityFields.add",{name:modelQuery})}
                       </button>
-                    ) : "لا توجد موديلات"}
+                    ) : t("vehicleIdentityFields.noModels")}
                   </CommandEmpty>
                   <CommandGroup>
                     {filteredModels.map((m) => (
@@ -217,15 +221,15 @@ export default function VehicleMakeModelPicker({
                           setModelQuery("");
                         }}
                       >
-                        <Check className={cn("ml-2 h-4 w-4", model === m.name || model === m.name_ar ? "opacity-100" : "opacity-0")} />
+                        <Check className={cn("me-2 h-4 w-4", model === m.name || model === m.name_ar ? "opacity-100" : "opacity-0")} />
                         <span className="flex-1 font-semibold" style={{ fontFamily: "Inter, sans-serif" }}>{m.name}</span>
-                        {m.name_ar && <span className="text-xs text-muted-foreground">{m.name_ar}</span>}
+                        {!isEnglish && m.name_ar && <span className="text-xs text-muted-foreground">{m.name_ar}</span>}
                       </CommandItem>
                     ))}
                     {showAddModel && (
                       <CommandItem onSelect={handleAddModel} className="text-primary">
-                        <Plus className="ml-2 h-4 w-4" />
-                        إضافة "{modelQuery}" كموديل جديد
+                        <Plus className="me-2 h-4 w-4" />
+                        {t("vehicleIdentityFields.addModel",{name:modelQuery})}
                       </CommandItem>
                     )}
                   </CommandGroup>
@@ -237,7 +241,7 @@ export default function VehicleMakeModelPicker({
 
         {!hidden("plate") && (
           <div className="space-y-1.5">
-            <Label>اللوحة</Label>
+            <Label>{t("vehicleIdentityFields.plate")}</Label>
             <PlateInput
               value={plate}
               onChange={(value) => onChange({ plate: value })}
@@ -250,13 +254,13 @@ export default function VehicleMakeModelPicker({
           <div className="grid grid-cols-2 gap-3">
             {!hidden("year") && (
               <div className="space-y-1.5">
-                <Label>سنة الصنع</Label>
+                <Label>{t("vehicleIdentityFields.year")}</Label>
                 <Input value={year} onChange={(e) => onChange({ year: e.target.value })} placeholder="2024" inputMode="numeric" />
               </div>
             )}
             {!hidden("color") && (
               <div className="space-y-1.5">
-                <Label>اللون</Label>
+                <Label>{t("vehicleIdentityFields.color")}</Label>
                 <VehicleColorSelect value={color} onChange={(v) => onChange({ color: v })} />
               </div>
             )}
@@ -265,12 +269,12 @@ export default function VehicleMakeModelPicker({
 
         {!hidden("vin") && (
           <div className="md:col-span-2 space-y-1.5">
-            <Label>رقم الهيكل (VIN)</Label>
+            <Label>{t("vehicleIdentityFields.vin")}</Label>
             <div className="flex gap-2">
               <Input
                 value={vin}
                 onChange={(e) => onChange({ vin: e.target.value.toUpperCase() })}
-                placeholder="17 خانة"
+                placeholder={t("vehicleIdentityFields.vinLength")}
                 dir="ltr"
                 className="font-mono"
                 maxLength={17}

@@ -2,13 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Check, Download, Eye, Loader2, Printer, Save } from "lucide-react";
+import { ArrowRight, Download, Eye, Loader2, Printer, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import ElectronicSignaturePad from "@/components/ElectronicSignaturePad";
+import VehicleTechnicalDeclarationFields from "@/components/vehicle-entry/VehicleTechnicalDeclarationFields";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -18,74 +15,12 @@ import { queryKeys } from "@/lib/queryKeys";
 import { markClean, markDirty } from "@/lib/unsavedWork";
 import { getVehicleEntry } from "@/lib/vehicleEntryService";
 import {
-  TECHNICAL_GARAGE_NAME, emptyVehicleTechnicalDeclaration, getVehicleTechnicalDeclaration, initialTechnicalDeclarationForm,
-  saveVehicleTechnicalDeclaration, technicalFieldMaxLength, validateTechnicalDeclarationForm, type VehicleTechnicalDeclarationForm,
+  emptyVehicleTechnicalDeclaration, getVehicleTechnicalDeclaration, initialTechnicalDeclarationForm,
+  saveVehicleTechnicalDeclaration, validateTechnicalDeclarationForm, type VehicleTechnicalDeclarationForm,
 } from "@/lib/vehicleTechnicalDeclaration";
 import {
   assertPrintableTechnicalDeclaration, downloadTechnicalDeclarationPdf, openTechnicalDeclarationPreview, printTechnicalDeclaration,
 } from "@/lib/vehicleTechnicalDeclarationPdf";
-
-type FieldKey = keyof VehicleTechnicalDeclarationForm;
-type FieldKind = "text" | "date" | "choice" | "oil" | "chassis" | "checkbox" | "textarea";
-interface Field { key: FieldKey; ar: string; en: string; kind: FieldKind; }
-
-const identityFields: Field[] = [
-  { key: "claim_number", ar: "رقم المطالبة", en: "Claim Number", kind: "text" },
-  { key: "registration_number", ar: "رقم التسجيل / اللوحة", en: "Registration Number", kind: "text" },
-  { key: "make_model", ar: "الماركة والموديل", en: "Make & Model", kind: "text" },
-  { key: "non_gcc_vehicle", ar: "المركبة من خارج دول الخليج", en: "Non GCC Vehicle", kind: "choice" },
-  { key: "towing", ar: "أُحضرت برافعة", en: "Towing", kind: "choice" },
-];
-
-const sections: Array<{ number: number; ar: string; en: string; fields: Field[] }> = [
-  { number: 1, ar: "حالة المحرك", en: "Engine Status", fields: [
-    { key: "cranking", ar: "يدور المحرك", en: "Cranking", kind: "choice" },
-    { key: "engine_oil_level", ar: "مستوى زيت المحرك", en: "Engine Oil Level", kind: "oil" },
-    { key: "radiator_coolant", ar: "سائل تبريد الرادياتير", en: "Radiator Coolant", kind: "choice" },
-    { key: "engine_other_remarks", ar: "ملاحظات أخرى", en: "Other Remarks", kind: "text" },
-  ] },
-  { number: 2, ar: "حالة صندوق التروس", en: "Gear Box Status", fields: [
-    { key: "gear_body_crack", ar: "شقوق ظاهرة في الهيكل", en: "Any Body crack Observed", kind: "choice" },
-    { key: "gear_oil_leak", ar: "تسرب زيت ظاهر", en: "Any oil leak observed", kind: "choice" },
-    { key: "gear_other_remarks", ar: "ملاحظات أخرى", en: "Other Remarks", kind: "text" },
-  ] },
-  { number: 3, ar: "إصلاحات سابقة غير سليمة", en: "Previous Improper Repairs Observed", fields: [
-    { key: "previous_improper_repairs", ar: "هل وُجدت إصلاحات سابقة غير سليمة؟", en: "Previous Improper Repairs Observed", kind: "choice" },
-    { key: "previous_improper_details", ar: "التفاصيل إن وُجدت", en: "If Yes, Details", kind: "textarea" },
-  ] },
-  { number: 4, ar: "لمبات التحذير في لوحة العدادات", en: "Dash board warning lamp", fields: [
-    { key: "airbag_warning", ar: "تحذير الوسائد الهوائية", en: "Air bag warning", kind: "choice" },
-    { key: "engine_warning", ar: "تحذير المحرك", en: "Engine warning", kind: "choice" },
-    { key: "atm_warning", ar: "تحذير ATM", en: "ATM warning", kind: "choice" },
-    { key: "warning_other", ar: "أخرى", en: "Other", kind: "text" },
-  ] },
-  { number: 5, ar: "ملاحظة حالة الشاصي", en: "Chassis Status Observation", fields: [
-    { key: "chassis_status", ar: "حالة الشاصي", en: "Chassis Status", kind: "chassis" },
-    { key: "chassis_damage_lh", ar: "ضرر شاصي يسار LH", en: "Chassis damage LH", kind: "checkbox" },
-    { key: "chassis_damage_rh", ar: "ضرر شاصي يمين RH", en: "Chassis damage RH", kind: "checkbox" },
-    { key: "chassis_replace_lh", ar: "يوصى باستبدال يسار LH", en: "Recommend replace LH", kind: "checkbox" },
-    { key: "chassis_replace_rh", ar: "يوصى باستبدال يمين RH", en: "Recommend replace RH", kind: "checkbox" },
-    { key: "chassis_notes", ar: "تفاصيل إضافية", en: "Additional details", kind: "text" },
-  ] },
-  { number: 6, ar: "تشوهات الهيكل والأرضية", en: "Body & Floor Deformation Observed", fields: [
-    { key: "floor_deformation", ar: "تشوه الأرضية", en: "Floor deformation", kind: "choice" },
-    { key: "body_deformation", ar: "تشوه الهيكل", en: "Body Deformation", kind: "choice" },
-    { key: "body_floor_details", ar: "التفاصيل إن وُجدت", en: "If Yes, Details", kind: "text" },
-  ] },
-  { number: 7, ar: "الإضافات والتعديلات", en: "Any extra accessories/Modification", fields: [
-    { key: "accessories_modification", ar: "إكسسوارات أو تعديلات إضافية", en: "Extra accessories/Modification", kind: "choice" },
-    { key: "ppe", ar: "PPE", en: "PPE", kind: "choice" },
-    { key: "accessories_details", ar: "التفاصيل إن وُجدت", en: "If Yes, Details", kind: "text" },
-  ] },
-  { number: 8, ar: "ملاحظات أخرى", en: "Other Observations and Remarks", fields: [
-    { key: "other_observations", ar: "الملاحظات", en: "Other Observations and Remarks", kind: "textarea" },
-  ] },
-];
-
-const footerFields: Field[] = [
-  { key: "authorized_person", ar: "اسم الموقّع", en: "Signer's name", kind: "text" },
-  { key: "date", ar: "تاريخ التوقيع", en: "Date", kind: "date" },
-];
 
 export default function VehicleTechnicalDeclarationPage() {
   const { id } = useParams<{ id: string }>();
@@ -143,6 +78,8 @@ export default function VehicleTechnicalDeclarationPage() {
     },
     onSuccess: (confirmed) => {
       qc.setQueryData(["vehicle_technical_declaration", id], confirmed);
+      // Intake preview/download consume the hydrated canonical row on the entry.
+      void qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.detail(id) });
       setForm(confirmed.form_data);
       setEditingRevision(confirmed.revision);
       setDirty(false);
@@ -150,69 +87,6 @@ export default function VehicleTechnicalDeclarationPage() {
     },
     onError: (error: Error) => toast.error(error.message),
   });
-
-  function setField(key: FieldKey, value: string | boolean) {
-    setForm((current) => ({
-      ...current,
-      [key]: value,
-      ...(key === "authorized_person" && value !== current.authorized_person ? { signature_data_url: "" } : {}),
-    }));
-    setDirty(true);
-  }
-
-  function setSignerRole(role: "" | "technician" | "report_author") {
-    if (form.signer_role === role) return;
-    const technicianName = entry?.work_order?.technician_name || entry?.converted_work_order?.technician_name || "";
-    setForm((current) => ({
-      ...current,
-      signer_role: role,
-      authorized_person: role === "report_author" ? profile?.full_name || "" : role === "technician" ? technicianName : "",
-      signature_data_url: "",
-    }));
-    setDirty(true);
-  }
-
-  function renderField(field: Field) {
-    const title = label(field.ar, field.en);
-    const fieldId = `technical-${field.key}`;
-    const raw = form[field.key];
-    if (field.kind === "checkbox") {
-      return <label key={field.key} htmlFor={fieldId} className="flex items-center gap-2 rounded-md border border-border p-3 text-sm">
-        <input id={fieldId} type="checkbox" checked={raw === true} disabled={save.isPending}
-          onChange={(event) => setField(field.key, event.target.checked)} className="h-4 w-4 accent-success" />{title}
-      </label>;
-    }
-    let options: Array<{ value: string; text: string }> = [];
-    if (field.kind === "choice") options = [
-      { value: "", text: label("غير محدد", "Not selected") },
-      { value: "yes", text: label("نعم", "Yes") }, { value: "no", text: label("لا", "No") },
-    ];
-    if (field.kind === "oil") options = [
-      { value: "", text: label("غير محدد", "Not selected") },
-      { value: "ok", text: "OK" }, { value: "no", text: label("غير سليم", "No") },
-    ];
-    if (field.kind === "chassis") options = [
-      { value: "", text: label("غير محدد", "Not selected") },
-      { value: "ok", text: "OK" }, { value: "deformed", text: label("متشوه", "Deformed") },
-    ];
-    return <div key={field.key} className="space-y-1.5 min-w-0">
-      <label htmlFor={options.length ? undefined : fieldId} id={options.length ? fieldId : undefined} className="text-sm font-medium">{title}</label>
-      {options.length > 0 ? <div role="group" aria-labelledby={fieldId} className="flex flex-wrap gap-2">
-        {options.map((option) => <Button key={option.value} type="button" size="sm" variant="outline"
-          aria-pressed={String(raw) === option.value} disabled={save.isPending}
-          className={String(raw) === option.value ? "border-success bg-success/10 text-success hover:bg-success/15" : ""}
-          onClick={() => setField(field.key, option.value)}>
-          {String(raw) === option.value && option.value !== "" && <Check size={14} className="me-1" />}{option.text}
-        </Button>)}
-      </div> : field.kind === "textarea" ?
-        <Textarea id={fieldId} value={String(raw)} maxLength={technicalFieldMaxLength(field.key)} rows={3} disabled={save.isPending}
-          onChange={(event) => setField(field.key, event.target.value)} /> :
-        <Input id={fieldId} type={field.kind === "date" ? "date" : "text"} dir={field.kind === "date" ? "ltr" : undefined}
-          value={String(raw)} maxLength={technicalFieldMaxLength(field.key)} disabled={save.isPending}
-          className={identityFields.some((identity) => identity.key === field.key && identity.kind === "text") ? "font-semibold text-destructive" : undefined}
-          onChange={(event) => setField(field.key, event.target.value)} />}
-    </div>;
-  }
 
   async function freshSavedForm(): Promise<VehicleTechnicalDeclarationForm | null> {
     if (!record || dirty || save.isPending) return null;
@@ -281,51 +155,10 @@ export default function VehicleTechnicalDeclarationPage() {
       "نموذج إضافي مرتبط بهذا الدخول فقط. حقول الفحص غير محددة افتراضيًا؛ احفظ قبل المعاينة أو الطباعة. لا يُدرج توقيع إلا بعد التقاطه من الموقّع.",
       "An additional form for this entry only. Inspection choices are blank by default; save before preview or printing. A signature appears only after the signer provides it.",
     )}</p>
-    <Card className="p-4 md:p-5 space-y-4">
-      <h2 className="font-semibold">{label("بيانات المركبة والمطالبة", "Vehicle & Claim Details")}</h2>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{identityFields.map(renderField)}</div>
-    </Card>
-    <div className="grid gap-4 lg:grid-cols-2">
-      {sections.map((section) => <Card key={section.number} className="p-4 md:p-5 space-y-4">
-        <h2 className="font-semibold">{section.number}. {label(section.ar, section.en)}</h2>
-        <div className="grid gap-3 sm:grid-cols-2">{section.fields.map(renderField)}</div>
-      </Card>)}
-    </div>
-    <Card className="p-4 md:p-5 space-y-4">
-      <h2 className="font-semibold">{label("بيانات الاعتماد والطباعة", "Workshop & Print Details")}</h2>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="space-y-1.5"><label htmlFor="technical-garage-name" className="text-sm font-medium">{label("اسم الورشة", "Garage Name")}</label>
-          <Input id="technical-garage-name" value={TECHNICAL_GARAGE_NAME} readOnly className="bg-muted font-semibold" /></div>
-        {footerFields.map(renderField)}
-      </div>
-      <div className="space-y-2">
-        <p id="technical-signer-role" className="text-sm font-medium">{label("صفة الموقّع", "Signer role")}</p>
-        <div role="group" aria-labelledby="technical-signer-role" className="flex flex-wrap gap-2">
-          {([
-            ["report_author", label("منشئ التقرير", "Report author")],
-            ["technician", label("الفني", "Technician")],
-            ["", label("غير محدد", "Not selected")],
-          ] as const).map(([role, title]) => <Button key={role} type="button" size="sm" variant="outline"
-            aria-pressed={form.signer_role === role} disabled={save.isPending}
-            className={form.signer_role === role ? "border-success bg-success/10 text-success hover:bg-success/15" : ""}
-            onClick={() => setSignerRole(role)}>{form.signer_role === role && role && <Check size={14} className="me-1" />}{title}</Button>)}
-        </div>
-      </div>
-      <ElectronicSignaturePad value={form.signature_data_url} compactOutput disabled={save.isPending}
-        title={label("توقيع الموقّع على التقرير", "Report signer's signature")}
-        description={label("يوقّع الشخص المذكور أعلاه بنفسه؛ لا يُنشئ النظام توقيعًا تلقائيًا.", "The named person signs here; the system never creates a signature automatically.")}
-        clearLabel={label("مسح التوقيع", "Clear signature")}
-        savedLabel={label("التوقيع جاهز للحفظ مع النموذج.", "Signature is ready to save with the form.")}
-        emptyLabel={label("يمكن تركه فارغًا للتوقيع على الورقة المطبوعة.", "Leave blank if the paper will be signed by hand.")}
-        onChange={(value) => {
-          if (value.length > 9000) {
-            setField("signature_data_url", "");
-            toast.error(label("التوقيع كبير جدًا؛ امسحه وأعده بخط أبسط.", "Signature image is too large; clear and redraw it more simply."));
-            return;
-          }
-          setField("signature_data_url", value);
-        }} />
-    </Card>
+    <VehicleTechnicalDeclarationFields value={form} disabled={save.isPending}
+      reportAuthorName={profile?.full_name || ""}
+      technicianName={entry.work_order?.technician_name || entry.converted_work_order?.technician_name || ""}
+      onChange={(next) => { setForm(next); setDirty(true); }} />
     <AlertDialog open={leaveOpen} onOpenChange={setLeaveOpen}>
       <AlertDialogContent dir={isAr ? "rtl" : "ltr"}><AlertDialogHeader>
         <AlertDialogTitle>{label("تعديلات غير محفوظة", "Unsaved changes")}</AlertDialogTitle>

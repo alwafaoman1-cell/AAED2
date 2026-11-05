@@ -1,5 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { VEHICLE_COLORS, findVehicleColor } from "@/lib/vehicleColors";
+import {useTranslation} from "react-i18next";
+import "@/lib/i18n/vehicleIdentityFields";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -10,20 +12,22 @@ interface Props {
 }
 
 /** قائمة منسدلة بكل ألوان السيارات مع معاينة لونية */
-export default function VehicleColorSelect({ value, onChange, placeholder = "اختر اللون", className }: Props) {
+export default function VehicleColorSelect({ value, onChange, placeholder, className }: Props) {
+  const {t,i18n}=useTranslation();
+  const isEnglish=i18n.language.startsWith("en");
   const current = findVehicleColor(value);
   return (
     <Select value={value || ""} onValueChange={onChange}>
-      <SelectTrigger className={cn("w-full", className)}>
-        <SelectValue placeholder={placeholder}>
+      <SelectTrigger aria-label={t("vehicleIdentityFields.color")} className={cn("w-full", className)}>
+        <SelectValue placeholder={placeholder || t("vehicleIdentityFields.chooseColor")}>
           {value && (
             <span className="inline-flex items-center gap-2">
               <span
                 className="inline-block h-3.5 w-3.5 rounded-full border border-border shrink-0"
                 style={{ backgroundColor: current?.hex || "#999" }}
               />
-              <span>{current?.ar || value}</span>
-              {current?.en && <span className="text-[10px] text-muted-foreground">({current.en})</span>}
+              <span>{(isEnglish?current?.en:current?.ar) || value}</span>
+              {!isEnglish && current?.en && <span className="text-xs text-muted-foreground">({current.en})</span>}
             </span>
           )}
         </SelectValue>
@@ -36,8 +40,8 @@ export default function VehicleColorSelect({ value, onChange, placeholder = "ا�
                 className="inline-block h-3.5 w-3.5 rounded-full border border-border shrink-0"
                 style={{ backgroundColor: c.hex }}
               />
-              <span>{c.ar}</span>
-              <span className="text-[10px] text-muted-foreground">({c.en})</span>
+              <span>{isEnglish?c.en:c.ar}</span>
+              {!isEnglish && <span className="text-xs text-muted-foreground">({c.en})</span>}
             </span>
           </SelectItem>
         ))}

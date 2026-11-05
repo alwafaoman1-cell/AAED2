@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { buildVehicleEntryHtml } from "@/lib/vehicleEntryService";
 
@@ -35,14 +35,31 @@ describe("vehicle entry receipt contract", () => {
     expect(sidebar).toContain('path: "/vehicle-entry"');
   });
 
-  it("uses shared query keys and duplicate-safe vehicle resolution", () => {
+  it("uses shared query keys and an atomic, verified intake save without identity prewrites", () => {
     const queryKeys = read("src/lib/queryKeys.ts");
     const service = read("src/lib/vehicleEntryService.ts");
     expect(queryKeys).toContain("vehicleEntries");
     expect(queryKeys).toContain('["vehicle_entries"]');
-    expect(service).toContain("next_vehicle_entry_number");
-    expect(service).toContain("ensureVehicleForCustomer");
-    expect(service).toContain("vehicle_entry_damage_marks");
+    const saveStart = service.indexOf("export async function saveVehicleEntry(");
+    const saveBody = service.slice(saveStart, service.indexOf("export async function cancelVehicleEntry", saveStart));
+    expect(saveStart).toBeGreaterThan(-1);
+    expect(saveBody).toContain('rpc("save_vehicle_entry_intake"');
+    expect(saveBody.match(/\.rpc\(/g)).toHaveLength(1);
+    for (const field of ["p_entry_id", "p_expected_updated_at", "p_form", "p_technical", "p_technical_revision"]) expect(saveBody).toContain(field);
+    expect(saveBody).toContain("result.entry.tenant_id !== tenantId");
+    expect(saveBody).toContain("result.entry.id !== form.id");
+    expect(saveBody).toContain("result.technical?.id");
+    expect(saveBody).not.toContain("ensureVehicleForCustomer");
+    expect(saveBody).not.toContain("ensureVehicleForVisit");
+    expect(saveBody).not.toContain("saveDamageMarks(");
+    expect(saveBody).not.toContain(".from(");
+    const migrations = readdirSync(join(root, "supabase/migrations")).filter((name) => name.endsWith("_atomic_vehicle_intake_with_technical_declaration.sql"));
+    expect(migrations).toHaveLength(1);
+    const atomicSql = read(`supabase/migrations/${migrations[0]}`).toLowerCase();
+    expect(atomicSql).toContain("save_vehicle_entry_intake");
+    for (const table of ["vehicle_entries", "vehicle_entry_damage_marks", "vehicle_technical_declarations"]) expect(atomicSql).toContain(table);
+    expect(atomicSql).toContain("for update");
+    expect(atomicSql).toContain("vehicle_intake_vehicle_deleted");
     expect(service).toContain("uploadVehicleEntryFiles");
     expect(service).toContain("saveVehicleEntrySignature");
     expect(service).toContain("convertVehicleEntryToClaim");
@@ -100,28 +117,47 @@ describe("vehicle entry receipt contract", () => {
 
   it("supports interactive damage map and signatures in the form", () => {
     const form = read("src/pages/vehicle-entry/VehicleEntryForm.tsx");
-    expect(form).toContain("function DamageMap");
-    expect(form).toContain("onPointerDown");
-    expect(form).toContain("function SignaturePad");
-    expect(form).toContain("toDataURL");
-    expect(form).toContain("saveVehicleEntrySignature");
-    expect(form).toContain("uploadVehicleEntryFiles");
+    const controller = read("src/hooks/useVehicleEntryEditor.ts");
+    const condition = read("src/components/vehicle-entry/VehicleEntryConditionStep.tsx");
+    const review = read("src/components/vehicle-entry/VehicleEntryReviewStep.tsx");
+    const drawing = read("src/components/vehicle-entry/VehicleEntryDrawingTools.tsx");
+    expect(form).toContain("useVehicleEntryEditor");
+    expect(form).toContain("<VehicleEntryConditionStep");
+    expect(form).toContain("<VehicleEntryReviewStep");
+    expect(condition).toContain("<DamageMap");
+    expect(condition).toContain("onAdd={addDamageAt}");
+    expect(drawing).toContain("function DamageMap");
+    expect(drawing).toContain("onPointerDown");
+    expect(drawing).toContain("onKeyDown");
+    expect(drawing).toContain("function SignaturePad");
+    expect(drawing).toContain('toDataURL("image/png")');
+    expect(review).toContain('handleSignature("delivered_by", dataUrl)');
+    expect(review).toContain('handleSignature("receiver", dataUrl)');
+    expect(controller).toContain("saveVehicleEntrySignature");
+    expect(controller).toContain("uploadVehicleEntryFiles");
   });
 
   it("keeps vehicle entry officer, delivery source, staged photos, and editable declaration cloud-backed", () => {
-    const form = read("src/pages/vehicle-entry/VehicleEntryForm.tsx");
+    const form = read("src/components/vehicle-entry/VehicleEntryIdentityStep.tsx");
+    const review = read("src/components/vehicle-entry/VehicleEntryReviewStep.tsx");
+    const controller = read("src/hooks/useVehicleEntryEditor.ts");
     const service = read("src/lib/vehicleEntryService.ts");
     expect(form).toContain("InsuranceCompanyAutocomplete");
-    expect(form).toContain("useInsuranceEmployees");
-    expect(form).toContain('chooseDeliveredBy("owner")');
-    expect(form).toContain('chooseDeliveredBy("driver")');
-    expect(form).toContain('chooseDeliveredBy("tow")');
-    expect(form).toContain("العميل أحضر المركبة / Customer");
-    expect(form).toContain("ENTRY_PHOTO_SLOTS");
-    expect(form).toContain("pendingPhotos");
-    expect(form).toContain("تم تجهيز");
-    expect(form).toContain("form.declaration_ar");
-    expect(form).toContain("form.declaration_en");
+    expect(controller).toContain("useInsuranceEmployees");
+    expect(form).toContain('type: "owner"');
+    expect(form).toContain('type: "driver"');
+    expect(form).toContain('type: "tow"');
+    expect(form).toContain("chooseDeliveredBy(type)");
+    expect(form).toContain('key: "customerBrought"');
+    expect(review).toContain("ENTRY_PHOTO_SLOTS");
+    expect(review).toContain("pendingPhotos");
+    expect(review).toContain("stageEntryPhoto(activePhotoCategory");
+    expect(review).toContain("removePendingPhoto(slot.key)");
+    expect(review).toContain("vehicleIntakeWizard.views.stagedPhotos");
+    expect(review).toContain("form.declaration_ar");
+    expect(review).toContain("form.declaration_en");
+    expect(review).toContain("additionalPhotos");
+    expect(review).toContain("documents");
     expect(service).toContain("declaration_ar: cleanText(form.declaration_ar)");
     expect(service).toContain("declaration_en: cleanText(form.declaration_en)");
   });
@@ -171,7 +207,7 @@ describe("vehicle entry receipt contract", () => {
       vehicle_entry_signatures: [],
       declaration_ar: "إقرار مخصص محفوظ",
       declaration_en: "Saved custom declaration",
-    });
+    }, "ar");
     expect(html).toContain("<svg");
     expect(html).toContain("ENT-2026-00058");
     expect(html).toContain("إقرار مخصص محفوظ");
@@ -181,14 +217,16 @@ describe("vehicle entry receipt contract", () => {
   it("allows issuing an intake form for paper signing without inventing electronic signatures", () => {
     const service = read("src/lib/vehicleEntryService.ts");
     const saveStart = service.indexOf("export async function saveVehicleEntry");
-    const saveBody = service.slice(saveStart, service.indexOf("async function saveDamageMarks"));
+    const saveBody = service.slice(saveStart, service.indexOf("export async function cancelVehicleEntry", saveStart));
     const issueStart = service.indexOf("export async function issueVehicleEntry");
     const issueBody = service.slice(issueStart, service.indexOf("async function insertVehicleEntryAudit"));
     expect(saveBody).not.toContain("assertVehicleEntryCanBeIssued");
     expect(issueBody).not.toContain("vehicle_entry_signatures");
     expect(issueBody).toContain('status: "Issued"');
     expect(issueBody).toContain('.is("deleted_at", null)');
-    expect(read("src/pages/vehicle-entry/VehicleEntryForm.tsx")).toContain('t("vehicleEntry.paperSignatureOption")');
+    const review = read("src/components/vehicle-entry/VehicleEntryReviewStep.tsx");
+    expect(review).toContain('t("vehicleIntakeWizard.paperSignature")');
+    expect(review).toContain("disabled={!form.id}");
   });
 
   it("supports a secure one-time customer signature page backed by the canonical entry signature", () => {

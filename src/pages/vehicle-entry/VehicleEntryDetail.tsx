@@ -53,6 +53,7 @@ export default function VehicleEntryDetail() {
   const { user, hasRole } = useAuth();
   const { i18n, t } = useTranslation();
   const [printing, setPrinting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [printingSticker, setPrintingSticker] = useState(false);
   const [customerSignatureLink, setCustomerSignatureLink] = useState<string | null>(null);
@@ -118,32 +119,51 @@ export default function VehicleEntryDetail() {
 
   const entry = detail.data;
 
-  function printEntry() {
-    if (!entry) return;
+  async function freshEntryHtml() {
+    const [refreshed] = await Promise.all([detail.refetch(), getTemplateSettingsAsync()]);
+    if (refreshed.error) throw refreshed.error;
+    if (!refreshed.data) throw new Error(t("vehicleEntry.pdfSourceMissing"));
+    return { html: buildVehicleEntryHtml(refreshed.data), entry: refreshed.data };
+  }
+
+  async function printEntry() {
+    if (!entry || printing) return;
     setPrinting(true);
     try {
-      void openAndPrintWindow(buildVehicleEntryHtml(entry));
+      const fresh = await freshEntryHtml();
+      await openAndPrintWindow(fresh.html);
+    } catch (error: any) {
+      toast.error(error?.message || t("vehicleEntry.pdfDownloadFailed"));
     } finally {
       setPrinting(false);
     }
   }
 
-  function previewEntry() {
-    if (!entry) return;
-    openSanitizedPdfWindow(buildVehicleEntryHtml(entry));
+  async function previewEntry() {
+    if (!entry || previewing) return;
+    // Reserve the user-initiated popup before awaiting the cloud read.
+    const preview = window.open("", "_blank");
+    if (!preview) { toast.error(t("vehicleEntry.pdfDownloadFailed")); return; }
+    preview.opener = null;
+    setPreviewing(true);
+    try {
+      const fresh = await freshEntryHtml();
+      if (!preview.closed) openSanitizedPdfWindow(fresh.html, preview);
+    } catch (error: any) {
+      preview.close();
+      toast.error(error?.message || t("vehicleEntry.pdfDownloadFailed"));
+    } finally { setPreviewing(false); }
   }
 
   async function downloadEntry() {
     if (!entry || downloadingPdf) return;
     setDownloadingPdf(true);
     try {
-      // Refresh signed Storage URLs and company settings before rendering.
-      const [refreshed] = await Promise.all([detail.refetch(), getTemplateSettingsAsync()]);
-      if (refreshed.error) throw refreshed.error;
-      if (!refreshed.data) throw new Error(t("vehicleEntry.pdfSourceMissing"));
+      // Identical fresh canonical data for preview, print and download.
+      const fresh = await freshEntryHtml();
       await downloadSanitizedPdf(
-        buildVehicleEntryHtml(refreshed.data),
-        refreshed.data.entry_number || "vehicle-entry",
+        fresh.html,
+        fresh.entry.entry_number || "vehicle-entry",
       );
     } catch (error: any) {
       toast.error(error?.message || t("vehicleEntry.pdfDownloadFailed"));
@@ -225,7 +245,7 @@ export default function VehicleEntryDetail() {
           <Badge variant="outline">{t(presence === "in_workshop" ? "vehicleEntry.workshopTab" : presence === "with_customer" ? "vehicleEntry.customerTab" : "vehicleEntry.reviewLocation")}</Badge>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={previewEntry} className="gap-2"><FileText size={16} /> معاينة</Button>
+          <Button variant="outline" disabled={previewing} onClick={previewEntry} className="gap-2"><FileText size={16} /> معاينة</Button>
           <Button variant="outline" disabled={printing} onClick={printEntry} className="gap-2"><Printer size={16} /> طباعة</Button>
           <Button variant="outline" disabled={downloadingPdf} onClick={() => void downloadEntry()} className="gap-2">
             {downloadingPdf ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}

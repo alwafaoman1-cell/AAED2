@@ -7,6 +7,20 @@ import {
 } from "@/lib/vehicleTechnicalDeclaration";
 
 describe("vehicle technical declaration", () => {
+  it("uses the available signer column for the complete report author without shrinking or truncating it", () => {
+    const name = "TEMO Document Preview Tester";
+    const html = buildVehicleTechnicalDeclarationHtml({...emptyVehicleTechnicalDeclaration, authorized_person:name});
+    expect(html).toContain(name);
+    expect(html).toContain(".footer-row .write-line{width:100%;min-width:0}");
+    expect(html).not.toContain(".footer-row .write-line{width:58mm}");
+  });
+  it("keeps the official form's preview text baselines in the raster download", () => {
+    const source = readFileSync(new URL("../lib/vehicleTechnicalDeclarationPdf.ts", import.meta.url), "utf8");
+    expect(source).toContain("foreignObjectRendering: true");
+    expect(source).toContain("clonedPage.prepend(embeddedFontStyle.cloneNode(true))");
+    expect(source).toContain("clonedDoc.fonts.load");
+    expect(source).not.toMatch(/translateY|top:\s*-\d|marginTop:\s*-/);
+  });
   it("prefills only known entry identity; inspection answers stay unselected", () => {
     const form = initialTechnicalDeclarationForm({
       claim: { claim_number: "C/123" },
@@ -49,11 +63,16 @@ describe("vehicle technical declaration", () => {
       cranking: "yes", engine_oil_level: "no", chassis_status: "deformed",
       chassis_damage_lh: true, claim_number: '<img src=x onerror="alert(1)">',
     });
-    const tick = '[<span class="tick">✓</span>]';
+    const tick = '[<span class="tick" role="img" aria-label="Checked"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8L6 12L14 3" fill="none" stroke="#14532d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>]';
     expect(html).toContain(`Cranking: &nbsp;&nbsp;&nbsp; Yes ${tick} / No [ ]`);
     expect(html).toContain(`Engine Oil Level: OK [ ] / No ${tick}`);
     expect(html).toContain(`Chassis Status: OK [ ] / Deformed ${tick}`);
     expect(html).not.toContain("[X]");
+    expect(html).toContain('data:font/woff;base64,');
+    expect(html).toContain('font-family:TemoTechnicalArabic,serif');
+    // The rasterizer serializes .page, not the document head. The embedded
+    // Arabic font must travel inside that same preview/export root.
+    expect(html.indexOf('data-technical-font="embedded"')).toBeGreaterThan(html.indexOf('<div class="page">'));
     expect(html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
     expect(html).not.toContain('<img src=x onerror="alert(1)">');
   });

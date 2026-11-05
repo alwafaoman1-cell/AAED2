@@ -1,0 +1,149 @@
+import i18n from '@/i18n';
+
+const ar={
+  title:'دخول واستلام المركبة',editTitle:'تعديل نموذج الزيارة',step:'المرحلة {{current}} من 4',
+  stages:['نوع الخدمة والزيارة','العميل والمركبة','الفحص والإقرار الفني','الصور والمراجعة'],
+  channelTitle:'اختر نوع الخدمة',insurance:'تأمين',cash:'زبون كاش',channelHint:'يحدد مسار الزيارة دون خلط فواتير الكاش والتأمين.',
+  purposeTitle:'اختر نوع زيارة المركبة',workshop:'دخول للورشة',inspection:'فحص ومعاينة واستلام',
+  workshopHint:'تبقى داخل الورشة حتى تسجيل خروج فعلي.',inspectionHint:'تدخل للفحص؛ تسجل مع العميل بعد تأكيد خروجها مؤقتًا، وليس بمجرد اختيار هذا النوع.',
+  changeChannel:'تغيير نوع الخدمة',next:'التالي',previous:'السابق',back:'رجوع للمركز',save:'حفظ وتأكيد الدخول',saveEdit:'حفظ التعديلات',draft:'حفظ مسودة',saving:'جارٍ تأكيد الحفظ…',
+  customerTitle:'عميل هذه الزيارة',customerHint:'الهاتف وكود العميل يحددان عميل الزيارة. اختيار مركبة قديمة لا يغيّر العميل أو ملكية المركبة.',
+  customerSearch:'البحث بالهاتف أو كود العميل',customerName:'اسم العميل',phone:'رقم الهاتف',code:'كود العميل',alternatePhone:'هاتف إضافي',idNumber:'رقم البطاقة',address:'العنوان',notes:'ملاحظات',
+  vehicleTitle:'المركبة',vehicleSearch:'البحث باللوحة أو رقم الهيكل VIN',existingVehicle:'استخدام هذه المركبة',vehicleSelected:'تم اختيار المركبة مع إبقاء عميل الزيارة كما هو.',
+  customerSelected:'تم اختيار العميل.',clearVehicle:'إلغاء الاختيار والبحث من جديد',vehicleHint:'يُعاد استخدام سجل المركبة نفسه دون نقل ملكيتها أو تكرارها.',
+  arrival:'تاريخ ووقت الوصول',arrivalDate:'تاريخ الوصول',arrivalTime:'وقت الوصول',receiver:'الموظف المستلم',bay:'الباي / الساحة',location:'الموقع الفعلي',inside:'داخل الورشة',withCustomer:'مع العميل',centerStatus:'مرحلة المركز',newStage:'المركبات الواصلة',statusHint:'المرحلة والموقع يعتمدان من مركز دورة المركبة؛ إصدار المستند لا يعني تسليم المركبة.',
+  insuranceTitle:'بيانات التأمين',insurer:'شركة التأمين',insuranceOfficer:'موظف التأمين',noOfficer:'بدون موظف محدد',claimNumber:'رقم المطالبة',policyNumber:'رقم الوثيقة',policeNumber:'رقم تقرير الشرطة',lpo:'رقم أمر الإصلاح',surveyor:'اسم المعاين',surveyorPhone:'هاتف المعاين',
+  deliveredBy:'الشخص الذي أحضر المركبة',customerBrought:'العميل أحضر المركبة',driver:'سائق',tow:'رافعة',personName:'اسم الشخص',towCompany:'شركة الرافعة',towPlate:'لوحة الرافعة',
+  conditionTitle:'حالة المركبة عند الدخول — الإقرار الفني',conditionHint:'يحفظ الإقرار الفني مرة واحدة ويرتبط بنموذج الدخول. يمكن فتحه وتنزيل PDF من صفحته المعتادة.',
+  technicalLink:'فتح الإقرار الفني',damageMap:'خريطة الأضرار والتفاصيل',damageHint:'العلامات والمحتويات القديمة محفوظة ولا تستبدل عند الانتقال بين المراحل.',addDamage:'إضافة ضرر',damageNumber:'رقم الضرر',damageType:'نوع الضرر',part:'الجزء',description:'الوصف',action:'الإجراء المتوقع',removeDamage:'حذف علامة الضرر',noDamage:'لا توجد أضرار مسجلة.',
+  contents:'محتويات المركبة',keys:'عدد المفاتيح',registrationCard:'بطاقة التسجيل',frontPlate:'اللوحة الأمامية',rearPlate:'اللوحة الخلفية',spareTire:'الإطار الاحتياطي',tools:'العدة والرافعة',extinguisher:'طفاية الحريق',triangle:'مثلث التحذير',personalItems:'أغراض داخل المركبة',partsInside:'قطع داخل المركبة',fuelLevel:'مستوى الوقود',
+  photos:'صور الدخول',documents:'المستندات',photoHint:'تحفظ الصور في المصدر الحالي نفسه دون نسخة إضافية.',choosePhoto:'اختيار صورة',removePhoto:'إزالة الصورة المختارة',front:'الواجهة الأمامية',rear:'الواجهة الخلفية',right:'الجهة اليمنى',left:'الجهة اليسرى',plate:'رقم اللوحة',odometer:'قراءة العداد',vin:'رقم الهيكل VIN',mainDamage:'الضرر الرئيسي',
+  uploadDocument:'رفع مستند',saveBeforeDocuments:'اختر الصور قبل الحفظ؛ رفع مستند إضافي متاح بعد تأكيد السجل.',emptyDocuments:'لا توجد مرفقات إضافية.',
+  declaration:'الإقرار',declarationArabic:'نص الإقرار بالعربية',declarationEnglish:'نص الإقرار بالإنجليزية',signatures:'التوقيعات الاختيارية',paperSignature:'التوقيع الإلكتروني غير إلزامي؛ يمكن التوقيع بعد الطباعة.',customerSignature:'توقيع مسلّم المركبة',receiverSignature:'توقيع موظف الاستلام',
+  review:'مراجعة الزيارة قبل التأكيد',reviewHint:'لن تُنشأ مطالبة أو فاتورة أو أمر عمل تلقائيًا.',required:'أكمل البيانات المطلوبة قبل الانتقال.',phoneOrCodeRequired:'اختر عميلًا بكوده أو أدخل رقم هاتف صالحًا. لا يمكن الاعتماد على الاسم وحده.',technicalInvalid:'راجع بيانات الإقرار الفني.',
+  saved:'تأكد حفظ الزيارة في السحابة.',draftSaved:'تأكد حفظ المسودة في السحابة.',saveFailed:'تعذر تأكيد حفظ الزيارة.',loading:'جارٍ تحميل الزيارة…',archivedReuse:'مركبة مؤرشفة: سيستخدم السجل نفسه لهذه الزيارة دون تغيير العميل السابق.',
+  extracted:'طُبقت البيانات على النموذج فقط؛ راجعها قبل الحفظ.',extraction:'المسح ورفع المستند',noAutoSave:'لا تحفظ نتائج القراءة تلقائيًا.',
+  VEHICLE_INTAKE_STALE:'تغيّر السجل في جلسة أخرى. أعد فتحه قبل الحفظ.',VEHICLE_INTAKE_CUSTOMER_REQUIRED:'اختر عميلًا بالهاتف أو الكود.',VEHICLE_INTAKE_CUSTOMER_AMBIGUOUS:'رقم الهاتف يطابق أكثر من عميل؛ اختر الكود الصحيح.',
+  VEHICLE_INTAKE_PHONE_CONFLICT:'الهاتف مرتبط بعميل آخر؛ اختر العميل الصحيح دون دمج السجلات.',VEHICLE_INTAKE_VEHICLE_DELETED:'المركبة محذوفة وليست مؤرشفة فقط؛ تحتاج استعادة صريحة من الإدارة.',VEHICLE_INTAKE_VEHICLE_CONFLICT:'اللوحة ورقم الهيكل يشيران إلى سجلين مختلفين. راجع المركبة قبل الحفظ.',
+  VEHICLE_INTAKE_LINK_CONFLICT:'الرابط بالمطالبة أو أمر العمل يحتاج مراجعة.',VEHICLE_INTAKE_TECHNICAL_STALE:'تغير الإقرار الفني في صفحة أخرى؛ أعد فتحه قبل الحفظ.',VEHICLE_INTAKE_FORBIDDEN:'ليست لديك صلاحية حفظ هذه الزيارة.',VEHICLE_INTAKE_CLOSED:'الزيارة مغلقة؛ أنشئ زيارة جديدة بدل تغيير تاريخها.',
+};
+const en:Record<keyof typeof ar,string|string[]>={
+  title:'Vehicle Entry & Receipt',editTitle:'Edit visit form',step:'Step {{current}} of 4',stages:['Service and visit type','Customer and vehicle','Inspection and technical declaration','Photos and review'],
+  channelTitle:'Choose service channel',insurance:'Insurance',cash:'Cash customer',channelHint:'Keeps the visit channel separate from cash and insurance invoicing.',purposeTitle:'Choose the vehicle visit type',workshop:'Workshop admission',inspection:'Inspection and collection',workshopHint:'Stays in the workshop until an actual exit is recorded.',inspectionHint:'Enters for inspection; customer custody is recorded only after confirming its temporary exit.',changeChannel:'Change service channel',next:'Next',previous:'Previous',back:'Back to center',save:'Save and confirm entry',saveEdit:'Save changes',draft:'Save draft',saving:'Confirming save…',
+  customerTitle:'Customer for this visit',customerHint:'Phone and customer code identify the visitor. Selecting an existing vehicle never changes the customer or transfers ownership.',customerSearch:'Search by phone or customer code',customerName:'Customer name',phone:'Phone number',code:'Customer code',alternatePhone:'Additional phone',idNumber:'ID number',address:'Address',notes:'Notes',vehicleTitle:'Vehicle',vehicleSearch:'Search by plate or VIN',existingVehicle:'Use this vehicle',vehicleSelected:'Vehicle selected; visit customer unchanged.',customerSelected:'Customer selected.',clearVehicle:'Clear selection and search again',vehicleHint:'Reuse the same vehicle record without transferring ownership or creating a duplicate.',
+  arrival:'Arrival date and time',arrivalDate:'Arrival date',arrivalTime:'Arrival time',receiver:'Receiving employee',bay:'Bay / yard',location:'Actual location',inside:'In workshop',withCustomer:'With customer',centerStatus:'Center stage',newStage:'Arrived vehicles',statusHint:'Stage and custody are controlled by the vehicle center; issuing a document is not vehicle delivery.',insuranceTitle:'Insurance information',insurer:'Insurance company',insuranceOfficer:'Insurance officer',noOfficer:'No officer selected',claimNumber:'Claim number',policyNumber:'Policy number',policeNumber:'Police report number',lpo:'Repair order number',surveyor:'Surveyor name',surveyorPhone:'Surveyor phone',
+  deliveredBy:'Person who brought the vehicle',customerBrought:'Customer',driver:'Driver',tow:'Tow truck',personName:'Person name',towCompany:'Towing company',towPlate:'Tow plate',conditionTitle:'Vehicle condition at entry — technical declaration',conditionHint:'One saved technical declaration is linked to this entry and remains available on its normal PDF page.',technicalLink:'Open technical declaration',damageMap:'Damage map and details',damageHint:'Existing marks and contents are preserved across wizard steps.',addDamage:'Add damage',damageNumber:'Damage number',damageType:'Damage type',part:'Part',description:'Description',action:'Expected action',removeDamage:'Remove damage mark',noDamage:'No damage recorded.',
+  contents:'Vehicle contents',keys:'Number of keys',registrationCard:'Registration card',frontPlate:'Front plate',rearPlate:'Rear plate',spareTire:'Spare tyre',tools:'Tools and jack',extinguisher:'Fire extinguisher',triangle:'Warning triangle',personalItems:'Items in vehicle',partsInside:'Parts in vehicle',fuelLevel:'Fuel level',photos:'Entry photos',documents:'Documents',photoHint:'Photos use the existing media source without another stored copy.',choosePhoto:'Choose photo',removePhoto:'Remove selected photo',front:'Front view',rear:'Rear view',right:'Right side',left:'Left side',plate:'Plate number',odometer:'Odometer',vin:'VIN',mainDamage:'Main damage',uploadDocument:'Upload document',saveBeforeDocuments:'Choose photos before saving; additional documents can be uploaded after the record is confirmed.',emptyDocuments:'No additional attachments.',declaration:'Declaration',declarationArabic:'Arabic declaration text',declarationEnglish:'English declaration text',signatures:'Optional signatures',paperSignature:'Electronic signature is optional; the printed document can be signed instead.',customerSignature:'Vehicle handover signature',receiverSignature:'Receiving employee signature',review:'Review before confirmation',reviewHint:'No claim, invoice or work order will be created automatically.',required:'Complete the required fields before continuing.',phoneOrCodeRequired:'Select a customer by code or enter a valid phone. A name alone is not an identity.',technicalInvalid:'Review the technical declaration fields.',saved:'Visit save confirmed in the cloud.',draftSaved:'Draft save confirmed in the cloud.',saveFailed:'Visit save could not be confirmed.',loading:'Loading visit…',archivedReuse:'Archived vehicle: the same record will be reused without changing the previous customer.',extracted:'Applied to this form only; review before saving.',extraction:'Scanner and document upload',noAutoSave:'Extraction results are never saved automatically.',
+  VEHICLE_INTAKE_STALE:'The visit changed in another session. Reopen it before saving.',VEHICLE_INTAKE_CUSTOMER_REQUIRED:'Select a customer by phone or code.',VEHICLE_INTAKE_CUSTOMER_AMBIGUOUS:'This phone matches multiple customers. Select the correct code.',VEHICLE_INTAKE_PHONE_CONFLICT:'This phone belongs to another customer. Select the correct record; no merging was performed.',VEHICLE_INTAKE_VEHICLE_DELETED:'This vehicle was deleted, not only archived. Explicit administrator restoration is required.',VEHICLE_INTAKE_VEHICLE_CONFLICT:'Plate and VIN identify different records. Review the vehicle before saving.',VEHICLE_INTAKE_LINK_CONFLICT:'Review the linked claim or work order.',VEHICLE_INTAKE_TECHNICAL_STALE:'The technical declaration changed elsewhere. Reopen it before saving.',VEHICLE_INTAKE_FORBIDDEN:'You do not have permission to save this visit.',VEHICLE_INTAKE_CLOSED:'This visit is closed. Create a new visit instead of rewriting its history.',
+};
+for(const [language,resources] of [['ar',ar],['en',en]] as const)i18n.addResourceBundle(language,'translation',{vehicleIntakeWizard:resources},true,false);
+
+for (const [language, resources] of Object.entries({
+  ar: {
+    VEHICLE_INTAKE_CUSTOMER_UNAVAILABLE: 'العميل المختار لم يعد متاحًا لهذه الورشة. ابحث بالهاتف أو كود العميل واختر السجل الصحيح؛ لم يُحفظ شيء.',
+    VEHICLE_INTAKE_CUSTOMER_RESTORE_REQUIRED: 'الهاتف أو الكود مرتبط بعميل محذوف. اطلب استعادته من الإدارة أو اختر عميل الزيارة الصحيح؛ لن ننشئ نسخة مكررة.',
+    VEHICLE_INTAKE_CUSTOMER_IDENTITY_CONFLICT: 'الهاتف والكود لا يطابقان العميل المختار. أعد اختيار عميل الزيارة؛ لم نغيّر بيانات العميل السابق.',
+    VEHICLE_VISIT_ALREADY_OPEN: 'توجد زيارة مفتوحة لهذه المركبة. افتحها من مركز دورة المركبة وتحقق من حفظ المحاولة السابقة قبل إعادة الإدخال.',
+  },
+  en: {
+    VEHICLE_INTAKE_CUSTOMER_UNAVAILABLE: 'The selected customer is no longer available in this workshop. Search by phone or customer code and select the correct record. Nothing was saved.',
+    VEHICLE_INTAKE_CUSTOMER_RESTORE_REQUIRED: 'This phone or code belongs to a deleted customer. Ask an administrator to restore it or select the correct visitor. No duplicate will be created.',
+    VEHICLE_INTAKE_CUSTOMER_IDENTITY_CONFLICT: 'The phone and code do not match the selected customer. Reselect the visitor. The previous customer was not changed.',
+    VEHICLE_VISIT_ALREADY_OPEN: 'This vehicle already has an open visit. Open it in the vehicle center and check the previous save before trying again.',
+  },
+})) i18n.addResourceBundle(language, 'translation', { vehicleIntakeWizard: resources }, true, false);
+
+// Extracted view labels live here so controller/wizard keys can evolve independently.
+const viewAr = {
+  arrivalMethod: 'طريقة الوصول', arrivalOwner: 'العميل أحضر المركبة', arrivalDriver: 'سائق أحضر المركبة', arrivalTow: 'وصلت بواسطة رافعة',
+  customerType: 'نوع العميل', individual: 'فرد', company: 'شركة', notProvided: 'غير مسجل',
+  customerSearchError: 'تعذر البحث عن العملاء. أعد المحاولة؛ لن يُختَر عميل تلقائيًا.',
+  vehicleSearchError: 'تعذر البحث عن المركبات. أعد المحاولة؛ لن تُختَر مركبة تلقائيًا.',
+  noCustomers: 'لا يوجد عميل مطابق. راجع الهاتف أو كود العميل.', noVehicles: 'لا توجد مركبة مطابقة. راجع اللوحة والحروف والدولة أو رقم الهيكل.',
+  vehicleSearchHint: 'البحث يستخدم اللوحة بحروفها ودولتها أو رقم الهيكل؛ عميل الزيارة مستقل عن المالك المسجل.',
+  selectedVehicle: 'المركبة المختارة', registeredOwner: 'المالك المسجل — للقراءة فقط', deletedVehicle: 'مركبة محذوفة: تحتاج استعادة صريحة من الإدارة.',
+  printHighlight: 'لون تمييز اللوحة والماركة ورقم الهيكل في الطباعة', chooseHighlight: 'اختيار لون التمييز: {{color}}',
+  red: 'أحمر', blue: 'أزرق', green: 'أخضر', dark: 'داكن',
+  managedInCenter: 'تُعرض المرحلة من مركز دورة المركبة', openCenter: 'فتح مركز دورة المركبة', locationUnconfirmed: 'الموقع غير مؤكد؛ راجع المركز',
+  linkedInsurance: 'الزيارة مرتبطة بمطالبة تأمين. نوع الخدمة مقفل؛ عميل الزيارة لا يغيّر الطرف المالي للمطالبة.',
+  chooseOfficer: 'اختر موظف التأمين من الشركة', insuranceNotes: 'ملاحظات التأمين',
+  visitorDetailsHint: 'يمكن تعبئة بيانات مسلّم المركبة من عميل هذه الزيارة. لا يعني ذلك تغيير المالك المسجل.',
+  personSource: 'تعبئة بيانات الشخص من', manualSource: 'إدخال أو تعديل يدوي', customerSource: 'بيانات عميل هذه الزيارة',
+  driverName: 'اسم السائق', towDriverName: 'اسم سائق الرافعة', customerPersonName: 'اسم مسلّم المركبة',
+  addPhoto: 'إضافة صورة: {{category}}', replacePhoto: 'استبدال الصورة: {{category}}', removeStagedPhoto: 'إزالة الصورة المختارة: {{category}}',
+  stagedPhotos: 'عدد الصور المجهزة: {{count}}. سترفع عند حفظ النموذج.', additionalPhotos: 'صور إضافية', emptyPhotos: 'لا توجد صور إضافية.',
+  mediaImage: 'صورة', mediaDocument: 'مستند', entryPhoto: 'صورة دخول', damagePhoto: 'صورة ضرر', attachment: 'مرفق', otherCategory: 'مرفق إضافي',
+  openAttachment: 'فتح المرفق: {{name}}', unavailableAttachment: 'رابط المعاينة غير متاح حاليًا.', uploading: 'جارٍ رفع الملفات…',
+  declarationHint: 'نص الإقرار المحفوظ هو المستخدم في المعاينة والطباعة؛ لا تتغير اللغة الأخرى تلقائيًا.',
+  saveBeforeSignature: 'احفظ النموذج أولًا لإضافة توقيع اختياري.', clear: 'مسح', saveSignature: 'حفظ التوقيع',
+  clearSignature: 'مسح {{title}}', saveNamedSignature: 'حفظ {{title}}', signatureCanvas: 'مساحة رسم: {{title}}',
+  signatureHelp: 'ارسم بالماوس أو اللمس؛ حفظ التوقيع اختياري.',
+  damageMapLabel: 'إضافة علامة ضرر للمركبة؛ مفتاح الإدخال أو المسافة يضيفان علامة في الوسط', damageMapImage: 'خريطة أضرار المركبة',
+  damageMapHelp: 'اضغط أو المس موضع الضرر. يمكن استخدام مفتاح الإدخال أو المسافة لإضافة علامة في الوسط.',
+  clearMarkLocations: 'مسح مواقع العلامات فقط', markDescription: 'الضرر {{number}}: {{description}}', visibleDamage: 'ضرر ظاهر', impactDamage: 'صدمة',
+  extractionHint: 'راجع الحقول المستخرجة وحدد ما تريد تطبيقه؛ لا تُخمن الحقول الناقصة ولا تحفظ الزيارة تلقائيًا.',
+  extractionButton: 'قراءة صورة أو مستند', documentStaged: 'سيُرفق المستند عند حفظ النموذج؛ لم تتغير بيانات الزيارة.',
+  existingVehicleFound: 'توجد مركبة مطابقة. اخترها من البحث وراجع هويتها؛ لن يتم ربطها تلقائيًا.',
+  extractionCustomerLocked: 'لم تتغير بيانات العميل المختار. راجع بيانات المستند واختر العميل الصحيح بالهاتف أو الكود عند الحاجة.',
+  extractionVehicleLocked: 'لم تتغير هوية المركبة المختارة. راجع بيانات المستند واستخدم البحث لتغيير المركبة عند الحاجة.',
+  extractionInsuranceSkipped: 'لم تطبق بيانات التأمين على زيارة كاش. اختر نوع الخدمة من المرحلة الأولى إذا لزم.',
+  extractionNoChanges: 'لم تطبق حقول جديدة على الزيارة. راجع المستند وأكمل البيانات يدويًا عند الحاجة.',
+} as const;
+const viewEn: Record<keyof typeof viewAr, string> = {
+  arrivalMethod: 'Arrival method', arrivalOwner: 'Customer brought the vehicle', arrivalDriver: 'Driver brought the vehicle', arrivalTow: 'Arrived by tow truck',
+  customerType: 'Customer type', individual: 'Individual', company: 'Company', notProvided: 'Not recorded',
+  customerSearchError: 'Customer search failed. Retry; no customer will be selected automatically.',
+  vehicleSearchError: 'Vehicle search failed. Retry; no vehicle will be selected automatically.',
+  noCustomers: 'No matching customer. Check the phone or customer code.', noVehicles: 'No matching vehicle. Check the plate, letters, country or VIN.',
+  vehicleSearchHint: 'Search uses the complete plate and country or VIN. The visit customer is independent of the registered owner.',
+  selectedVehicle: 'Selected vehicle', registeredOwner: 'Registered owner — read-only', deletedVehicle: 'Deleted vehicle: explicit administrator restoration is required.',
+  printHighlight: 'Print highlight color for the plate, make and VIN', chooseHighlight: 'Use highlight color: {{color}}',
+  red: 'Red', blue: 'Blue', green: 'Green', dark: 'Dark',
+  managedInCenter: 'Stage is supplied by the Vehicle Lifecycle Center', openCenter: 'Open Vehicle Lifecycle Center', locationUnconfirmed: 'Location unconfirmed; review in center',
+  linkedInsurance: 'This visit is linked to an insurance claim. Its service channel is locked; the visit customer does not change the claim financial party.',
+  chooseOfficer: 'Choose an employee from the insurance company', insuranceNotes: 'Insurance notes',
+  visitorDetailsHint: 'Handover details can use the customer for this visit. This does not change the registered owner.',
+  personSource: 'Fill person details from', manualSource: 'Enter or edit manually', customerSource: 'Customer for this visit',
+  driverName: 'Driver name', towDriverName: 'Tow driver name', customerPersonName: 'Person handing over the vehicle',
+  addPhoto: 'Add photo: {{category}}', replacePhoto: 'Replace photo: {{category}}', removeStagedPhoto: 'Remove selected photo: {{category}}',
+  stagedPhotos: '{{count}} photos staged. They will upload when the form is saved.', additionalPhotos: 'Additional photos', emptyPhotos: 'No additional photos.',
+  mediaImage: 'Image', mediaDocument: 'Document', entryPhoto: 'Entry photo', damagePhoto: 'Damage photo', attachment: 'Attachment', otherCategory: 'Additional attachment',
+  openAttachment: 'Open attachment: {{name}}', unavailableAttachment: 'A preview link is not currently available.', uploading: 'Uploading files…',
+  declarationHint: 'The saved declaration is used for preview and print. Text in the other language is not changed automatically.',
+  saveBeforeSignature: 'Save the form before adding an optional signature.', clear: 'Clear', saveSignature: 'Save signature',
+  clearSignature: 'Clear {{title}}', saveNamedSignature: 'Save {{title}}', signatureCanvas: 'Drawing area: {{title}}',
+  signatureHelp: 'Draw with a mouse or touch. Saving a signature is optional.',
+  damageMapLabel: 'Add a vehicle damage mark; Enter or Space adds a mark at the center', damageMapImage: 'Vehicle damage map',
+  damageMapHelp: 'Click or touch the damage location. Enter or Space adds a mark at the center.',
+  clearMarkLocations: 'Clear mark locations only', markDescription: 'Damage {{number}}: {{description}}', visibleDamage: 'Visible damage', impactDamage: 'Impact',
+  extractionHint: 'Review and select the extracted fields before applying them. Missing fields are not guessed and the visit is never saved automatically.',
+  extractionButton: 'Read an image or document', documentStaged: 'The document will be linked when the form is saved. Visit details were not changed.',
+  existingVehicleFound: 'A matching vehicle exists. Select it in search and review its identity; it will not be linked automatically.',
+  extractionCustomerLocked: 'The selected customer was not changed. Review the document and choose the correct customer by phone or code if needed.',
+  extractionVehicleLocked: 'The selected vehicle identity was not changed. Review the document and use search if a different vehicle is needed.',
+  extractionInsuranceSkipped: 'Insurance fields were not applied to a cash visit. Change the service channel in the first step if needed.',
+  extractionNoChanges: 'No new fields were applied to the visit. Review the document and complete details manually if needed.',
+};
+for (const [language, views] of [['ar', viewAr], ['en', viewEn]] as const) {
+  i18n.addResourceBundle(language, 'translation', { vehicleIntakeWizard: { views } }, true, false);
+}
+
+const controllerAr = {
+  invalidImage: 'اختر ملف صورة صالحًا.', filesSaved: 'تم رفع الملفات وربطها بالزيارة.', filesFailed: 'تعذر رفع الملفات. أعد المحاولة.',
+  saveBeforeFiles: 'احفظ الزيارة أولًا قبل رفع ملفات إضافية.', signatureSaved: 'تم حفظ التوقيع.', signatureFailed: 'تعذر حفظ التوقيع. أعد المحاولة.',
+  saveBeforeSignature: 'احفظ الزيارة أولًا قبل إضافة توقيع اختياري.', partialPhotos: 'حُفظت الزيارة، لكن لم تُرفع كل الصور. احتفظ بالصور وأعد المحاولة.',
+  documentPending: 'المستند بانتظار الربط بالزيارة عند الحفظ.', linkRetry: 'تعذر تأكيد ربط المستند. أعد المحاولة دون إنشاء نسخة مكررة.',
+  tenantMissing: 'تعذر تحديد الورشة الحالية. حدّث الصفحة قبل المتابعة.', documentLinked: 'تم تأكيد ربط المستند بالزيارة.',
+  documentNotLinked: 'حُفظت الزيارة، لكن لم يُؤكد ربط المستند بعد.', damageDefault: 'صدمة', visibleDamageDefault: 'ضرر ظاهر',
+} as const;
+const controllerEn: Record<keyof typeof controllerAr, string> = {
+  invalidImage: 'Choose a valid image file.', filesSaved: 'Files uploaded and linked to the visit.', filesFailed: 'Files could not be uploaded. Please retry.',
+  saveBeforeFiles: 'Save the visit before uploading additional files.', signatureSaved: 'Signature saved.', signatureFailed: 'The signature could not be saved. Please retry.',
+  saveBeforeSignature: 'Save the visit before adding an optional signature.', partialPhotos: 'The visit was saved, but some photos did not upload. Keep the photos and retry.',
+  documentPending: 'The document will be linked to the visit when saved.', linkRetry: 'The document link could not be confirmed. Retry without creating a duplicate.',
+  tenantMissing: 'The current workshop could not be identified. Refresh the page before continuing.', documentLinked: 'Document link to the visit confirmed.',
+  documentNotLinked: 'The visit was saved, but the document link is not yet confirmed.', damageDefault: 'Impact', visibleDamageDefault: 'Visible damage',
+};
+for (const [language, resources] of [['ar', controllerAr], ['en', controllerEn]] as const) {
+  i18n.addResourceBundle(language, 'translation', { vehicleIntakeWizard: resources }, true, false);
+}
