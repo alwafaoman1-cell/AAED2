@@ -2,6 +2,7 @@
 -- Source components were rehearsed against actual Production and rolled back.
 -- No operational DML, historical backfill, renumbering or blanket push.
 
+;
 -- COMPONENT supabase/migrations/20261101082501_reports_invoice_settlement_discount_receivables.sql SHA256 f81340b38fa3437d62b05be47b1f1d42e4339e5baec586e867f6020e282dfea3
 -- Keep the reports-center invoice read model's column contract unchanged.
 -- A cleared insurance settlement discount closes part of the receivable but
@@ -116,6 +117,7 @@ where s.doc_type = 'invoice'
   and lower(coalesce(s.status, 'issued')) not in ('draft', 'cancelled', 'deleted')
   and nullif(to_jsonb(s)->>'deleted_at', '') is null;
 
+;
 -- COMPONENT supabase/migrations/20261101083908_reports_insurance_statement_settlement_discount.sql SHA256 5d75568b131e1b009a2c157184ead134a1667ca8b0a8bee004c75b381364462a
 -- Settlement discounts are a non-cash credit on the insurer statement.
 -- Cash receipts remain cash only; balances include the approved adjustment.
@@ -709,6 +711,7 @@ select jsonb_build_object(
 );
 $$;
 
+;
 -- COMPONENT supabase/migrations/20261101084659_reports_center_summary_settlement_discount.sql SHA256 6dc5000203cd6425011db425e16dc9721a64a4a626ab46dc8a6e90fa44ea0712
 -- The report summary's receivable is the invoice-cohort balance after cleared
 -- cash and approved insurer settlement discounts; paid remains cash only.
@@ -998,6 +1001,7 @@ select jsonb_build_object(
 );
 $$;
 
+;
 -- COMPONENT supabase/migrations/20261101085816_monthly_vehicle_settlement_cost_release.sql SHA256 22329361f564d17f498aaa2e18363230542fb8f10088eef218ef87abd3972834
 -- Release lifetime direct costs when an approved insurance settlement discount
 -- extinguishes the final receivable. Discounts remain non-cash and never inflate
@@ -1382,6 +1386,7 @@ $function$;
 revoke all on function public.monthly_vehicle_profitability_rpc(date,date,text,text,integer,integer) from public, anon;
 grant execute on function public.monthly_vehicle_profitability_rpc(date,date,text,text,integer,integer) to authenticated;
 
+;
 -- COMPONENT supabase/migrations/20261104043300_reports_summary_payment_period_and_receivable_parity.sql SHA256 8b1398eff6cfa79194440ae6da6f7b099ac381f4bd98d65390042c4dfd6ee246
 -- Read-model only: no table, sequence, invoice, payment or journal mutations.
 -- Version matches the Development migration ledger returned by apply_migration.
@@ -1651,6 +1656,7 @@ select jsonb_build_object(
 );
 $$;
 
+;
 -- COMPONENT supabase/migrations/20261104043915_monthly_vehicle_parent_eligibility_guard.sql SHA256 b27ce192f729c9408ced8205dc17d36025f230b43fdefd60b32d27a9d8688653
 -- Read-model only. Preserve approved settlement cost release and all financial dates.
 -- Version matches the Development ledger returned by apply_migration.
@@ -2038,6 +2044,7 @@ begin
 end;
 $function$
 
+;
 -- COMPONENT supabase/migrations/20261104044624_accounting_guard_null_tenant_and_supplier_permission.sql SHA256 75917f1fdfbac29b87472bab0f304d598a10e1cb81875988170b5b3f1a7f4a4c
 -- Authorization guards only. No operational row/number/posting changes.
 -- Version aligned to the confirmed Development migration ledger.
@@ -2286,6 +2293,7 @@ CREATE OR REPLACE FUNCTION public.reserve_receipt_number_rpc(p_tenant_id uuid)
  SET search_path TO 'public', 'pg_temp'
 AS $function$ declare v_user_id uuid := auth.uid(); v_year integer := extract(year from current_timestamp at time zone 'Asia/Muscat')::integer; v_prefix text; v_padding integer; v_settings jsonb; v_next_from_settings bigint; v_highest_receipt bigint; v_highest_deposit bigint; v_floor bigint; v_allocated bigint; begin if v_user_id is null or p_tenant_id is null or p_tenant_id is distinct from public.get_user_tenant_id() then raise exception 'RECEIPT_TENANT_DENIED' using errcode = '42501'; end if; select value into v_settings from public.tenant_settings where tenant_id = p_tenant_id and key = 'alwafa_voucher_settings_v1'; v_prefix := upper(coalesce(nullif(trim(v_settings->>'receiptPrefix'), ''), 'RCV')); if v_prefix !~ '^[A-Z0-9]{1,10}$' then raise exception 'INVALID_RECEIPT_PREFIX' using errcode = '22023'; end if; v_padding := greatest(3, least(10, coalesce((v_settings->>'numberPadding')::integer, 4))); v_next_from_settings := greatest(1, coalesce((v_settings->>'receiptNextNumber')::bigint, 1)); select coalesce(max(split_part(receipt_number, '-', 3)::bigint), 0) into v_highest_receipt from public.accounting_receipts where tenant_id = p_tenant_id and receipt_number ~ ('^' || v_prefix || '-' || v_year::text || '-[0-9]+$'); select coalesce(max(split_part(entry->>'receiptNumber', '-', 3)::bigint), 0) into v_highest_deposit from public.tenant_settings settings, jsonb_array_elements(case when jsonb_typeof(settings.value) = 'array' then settings.value else '[]'::jsonb end) entry where settings.tenant_id = p_tenant_id and settings.key = 'alwafa_deposits_v1' and entry->>'receiptNumber' ~ ('^' || v_prefix || '-' || v_year::text || '-[0-9]+$'); v_floor := greatest(v_next_from_settings, v_highest_receipt + 1, v_highest_deposit + 1); insert into public.receipt_number_sequences (tenant_id, receipt_year, prefix, next_number) values (p_tenant_id, v_year, v_prefix, v_floor + 1) on conflict (tenant_id, receipt_year, prefix) do update set next_number = greatest(public.receipt_number_sequences.next_number, v_floor) + 1, updated_at = now() returning next_number - 1 into v_allocated; return v_prefix || '-' || v_year::text || '-' || lpad(v_allocated::text, v_padding, '0'); end; $function$;
 
+;
 -- COMPONENT supabase/migrations/20261105105822_production_rls_scalar_uid_verified.sql SHA256 eebdea27bbd1a9513a147db0aab5dec066ce693d86e219dc76f385b9da9251d4
 -- Production counterpart, explicitly authorized 2026-11-05.
 -- Independently verify the Production connection and exact catalogue fingerprints.
@@ -2330,6 +2338,7 @@ begin
 end;
 $rls_candidate$;
 
+;
 -- COMPONENT supabase/migrations/20261105110041_production_profiles_select_policy_planning.sql SHA256 9f775c03573bc5d61ff72bd419fa16dfb433becb2de1fedfb6f0a03e75f1a0d2
 -- Explicitly authorized Production counterpart; preserve the existing catalogue checks.
 -- Preserve the working restrictive profile SELECT policy and self-update safety.
@@ -2359,6 +2368,7 @@ begin
 end;
 $profile_recursion_guard$;
 
+;
 -- COMPONENT supabase/migrations/20261105105823_production_verified_redundant_indexes.sql SHA256 cd3f13bc553233e9e0d5a0b1eb1a8665989278b13ce6789b8e03bc1b4f392a9c
 -- Production counterpart, explicitly authorized 2026-11-05.
 -- Independently verify the Production connection and exact catalogue fingerprints.
@@ -2423,6 +2433,7 @@ begin
 end;
 $duplicate_index_candidate$;
 
+;
 -- COMPONENT supabase/migrations/20261105110112_production_document_active_profile_gate.sql SHA256 94195474f1a95f40e49b15575ccefa2933c0c48ffd94678fbf76790f1a8e1197
 -- Production counterpart with transaction ownership left to the migration runner.
 -- Same verified active-profile guard; no data writes and no internal commit.
@@ -2454,6 +2465,7 @@ as $function$
   end;
 $function$;
 
+;
 -- COMPONENT supabase/migrations/20261104123558_profiles_rls_update_identity_without_self_recursion.sql SHA256 5c9ec4acb4dd92886cba59c8f765d7c383d5a47f380f9e6653c1f9d807902dc8
 -- Remove the actual profiles UPDATE -> profiles SELECT policy recursion edge.
 -- Schema/policy-only: no profile, user, role, tenant or operational row is changed.
@@ -2530,6 +2542,7 @@ using (public.get_user_role() <> 'customer'::public.app_role or user_id = (selec
 comment on function app_private.profile_update_identity(uuid) is
   'Internal old-row identity for profiles UPDATE RLS; scoped to self/same-tenant admin. Avoids recursive policy SubLinks. Not a public API.';
 
+;
 -- COMPONENT supabase/migrations/20261104124329_expense_work_order_lookup_rls_parity_and_private_dedupe_acl.sql SHA256 0c732a89cf96f021d4daec829344d970b3112e14582bdb5cee8313a5f00be25e
 -- Enforce the existing job_orders SELECT policy in its definer search API.
 -- No new business permission; preserve staff lookup, bounds, joins and output.
@@ -2556,6 +2569,7 @@ end $lookup_guard$;
 -- Revoke unnecessary browser grants including TRUNCATE (not governed by RLS).
 revoke all on table public.message_idempotency_keys from public,anon,authenticated;
 
+;
 -- COMPONENT supabase/migrations/20261105110304_production_signup_isolation_verified.sql SHA256 57b5cda84e9521861bc56f6b5e6a1a413f01cc157579bb7a2f837c29bfe7fc5d
 -- Production source is byte-equivalent after CRLF normalization, verified read-only.
 -- Preserve the original reviewed hash, trigger binding and the tested fixed body.
@@ -2620,6 +2634,7 @@ $function$;
 
 revoke all on function public.handle_new_user() from public, anon, authenticated;
 
+;
 -- COMPONENT supabase/migrations/20261104130809_profiles_browser_authority_fields_guard.sql SHA256 7a5d4625760a3acc552ef4254f3282f6d8e649cace801a1c4004c284fedfd8b0
 -- Browser-editable profile details are not a platform/account-management API.
 -- Prevent self platform escalation (proved on Development) and reactivation.
@@ -2667,6 +2682,7 @@ revoke all on function public.guard_profile_authority_fields() from public,anon,
 create trigger trg_profile_authority_fields before insert or update on public.profiles
 for each row execute function public.guard_profile_authority_fields();
 
+;
 -- COMPONENT supabase/migrations/20261105082707_active_profile_identity_gate.sql SHA256 462b2fda174926c5da86bb8b0a307e198fc45dd2f37549bad43e860b779698d7
 -- Resolve authorization from an active database profile, never stale role rows.
 -- No user/profile/tenant/role records, grants, invoice numbers or postings change.
@@ -2737,6 +2753,7 @@ as $function$
   );
 $function$;
 
+;
 -- COMPONENT supabase/migrations/20261105082709_consolidate_role_scoped_permissive_policies.sql SHA256 7c891d717bbf67e9fa3434a219b3b87bb1e203c106ba641023d0316a18459f02
 -- Development-verified equivalent RLS command projection. No row/grant changes.
 
@@ -3219,6 +3236,7 @@ create policy "rls_whatsapp_templates_update" on public."whatsapp_templates" as 
 
 create policy "rls_whatsapp_templates_delete" on public."whatsapp_templates" as permissive for delete to authenticated using (((tenant_id = get_user_tenant_id())));
 
+;
 -- COMPONENT supabase/migrations/20261105094638_vehicle_entry_claim_inspection_link.sql SHA256 66b445bc78398208e5e12e2cf86de56b9516b57104fdadea883e59afc6e196b3
 -- New, explicit visit-scoped inspections only. No historical relinking/backfill.
 -- Reuse the established DR allocator/report table and the claim's UUID pointer.
@@ -3385,6 +3403,7 @@ revoke all on function app_private.guard_entry_inspection_identity() from public
 create trigger guard_entry_inspection_identity before update on public.inspections
   for each row execute function app_private.guard_entry_inspection_identity();
 
+;
 -- COMPONENT supabase/migrations/20261105094929_guard_entry_inspection_first_link.sql SHA256 a15b22a18ed7d213b1079cbb1bef48b7a4932206287e8ff418a7aaddcd4b486a
 -- Guard first attachment/insert as well as later edits. Historical unlinked
 -- reports cannot acquire visit identity in a later transaction.
@@ -3432,6 +3451,7 @@ drop trigger guard_entry_inspection_identity on public.inspections;
 create trigger guard_entry_inspection_identity before insert or update on public.inspections
   for each row execute function app_private.guard_entry_inspection_identity();
 
+;
 -- COMPONENT supabase/migrations/20261105095546_restrict_entry_inspection_link_creation.sql SHA256 014355259aa9ddbb8b5244c5dc425cd28b4a937af803cb73efba1dd021a5a2ce
 -- First linkage is an atomic server-writer operation, never a browser-editable
 -- JSON/timestamp privilege. current_user is the database execution role (not JWT
