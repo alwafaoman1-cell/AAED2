@@ -19,6 +19,7 @@ import "@/lib/i18n/supervisorEntry";
 import "@/lib/i18n/supervisorWorkspace";
 import {hasUnsavedWork} from "@/lib/unsavedWork";
 import {AlertDialog,AlertDialogAction,AlertDialogCancel,AlertDialogContent,AlertDialogDescription,AlertDialogFooter,AlertDialogHeader,AlertDialogTitle} from "@/components/ui/alert-dialog";
+import { useSupervisorTheme } from "@/hooks/useSupervisorTheme";
 
 const EntryForm = lazy(() => import("@/pages/vehicle-entry/VehicleEntryForm"));
 const ReleasePage = lazy(() => import("@/pages/vehicle-entry/VehicleInspectionReleasePage"));
@@ -27,6 +28,7 @@ const Messages = lazy(() => import("@/components/supervisor/SupervisorVisitMessa
 
 export default function SupervisorEntryWorkspace({ view = "form" }: { view?: "form" | "complete" | "release" | "technical" }) {
   useRealtimeSync();
+  useSupervisorTheme();
   const { t, i18n } = useTranslation();
   const navigate=useNavigate();
   const [entryBusy,setEntryBusy]=useState(false);

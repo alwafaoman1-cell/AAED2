@@ -29,7 +29,7 @@ export function SupervisorActionPanel({ selection, onClose }: { selection: Super
   const canExpense = useCan("Expenses", "Add/Edit/Delete");
   const canStages = useCan("Work Orders", "Status & delivery");
   const canOrder = useCan("Work Orders", "Create/Edit");
-  const allowed = action === "expense" || action === "expenseHistory" ? canExpense : action === "stages" ? canStages
+  const allowed = action === "expense" || action === "expenseHistory" ? canExpense : action === "stages" || action === "location" ? canStages
     : action === "messages" ? hasRole("admin", "manager", "insurance", "supervisor") : canOrder;
   function requestClose() {
     if (pending) return;
@@ -47,10 +47,10 @@ export function SupervisorActionPanel({ selection, onClose }: { selection: Super
     ]);
   }
   return <><Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
-    <DialogContent dir={i18n.dir()} className="inset-0 flex h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-3 overflow-y-auto rounded-none p-4 text-sm sm:rounded-none [&>button:last-child]:hidden" onInteractOutside={(event) => event.preventDefault()} onEscapeKeyDown={(event) => { event.preventDefault(); requestClose(); }}>
+    <DialogContent dir={i18n.dir()} className={`${action === "stages" || action === "location" ? "max-h-[92dvh] w-[calc(100%-1rem)] max-w-3xl rounded-xl" : "inset-0 h-dvh w-screen max-w-none translate-x-0 translate-y-0 rounded-none sm:rounded-none"} flex flex-col gap-3 overflow-y-auto p-3 text-sm md:p-4 [&>button:last-child]:hidden`} onInteractOutside={(event) => event.preventDefault()} onEscapeKeyDown={(event) => { event.preventDefault(); requestClose(); }}>
       <DialogHeader className="shrink-0 border-b border-border pb-3 text-start">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <DialogTitle className="text-lg">{t(action === "expense" && !row ? "generalExpense" : action)}</DialogTitle>
+          <DialogTitle className="text-base">{t(action === "expense" && !row ? "generalExpense" : action === "location" ? "locationAction" : action)}</DialogTitle>
           <Button variant="outline" className="min-h-11 min-w-11" disabled={pending} onClick={requestClose}>{t("close")}</Button>
         </div>
         <DialogDescription>{row ? `${row.number} · ${row.plate}` : t("expenseHelp")}</DialogDescription>
@@ -63,7 +63,7 @@ export function SupervisorActionPanel({ selection, onClose }: { selection: Super
             supervisorContext={editingExpense.expense_scope === "work_order" && typeof editingExpense.work_order_id === "string" ? {workOrderId:editingExpense.work_order_id} : {}}
             onSaved={()=>{setEditingExpense(null);void qc.invalidateQueries({queryKey:["expense_management"]});}}
             onCancel={()=>{if(hasUnsavedWork())setConfirmDiscard(true);else setEditingExpense(null);}} /> : <SupervisorExpenseHistory onEdit={setEditingExpense} />)}
-          {action === "stages" && row && <SupervisorStagesPanel row={row} />}
+          {(action === "stages" || action === "location") && row && <SupervisorStagesPanel row={row} initialLocation={action === "location"} />}
           {action === "messages" && row && <SupervisorVisitMessages entryId={row.entryId} claimId={row.claimId} />}
           {(action === "parts" || action === "photos" || action === "qr") && row && <SupervisorOrderTools action={action} row={row} onClose={requestClose} />}
         </Suspense>}

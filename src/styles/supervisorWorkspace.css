@@ -1,0 +1,58 @@
+/* Screen-only and route-scoped: documents and the rest of the ERP keep their tokens. */
+@media screen {
+  /* Scope on body rather than html: tenant brand colors are inline on html.
+     Local inheritance wins without !important or changing saved branding. */
+  :root[data-workspace="supervisor"] body {
+    --background: 218 18% 11%;
+    --foreground: 214 20% 92%;
+    --card: 218 16% 15%;
+    --card-foreground: 214 20% 92%;
+    --popover: 218 16% 15%;
+    --popover-foreground: 214 20% 92%;
+    --primary: 214 46% 72%;
+    --primary-foreground: 222 24% 13%;
+    --secondary: 218 15% 21%;
+    --secondary-foreground: 214 20% 90%;
+    --muted: 218 15% 19%;
+    --muted-foreground: 214 14% 72%;
+    --accent: 218 19% 24%;
+    --accent-foreground: 214 20% 94%;
+    --success: 151 40% 67%;
+    --success-foreground: 222 24% 13%;
+    --destructive: 0 70% 74%;
+    --destructive-foreground: 222 24% 13%;
+    --warning: 38 70% 70%;
+    --warning-foreground: 222 24% 13%;
+    --info: 206 62% 72%;
+    --border: 218 14% 28%;
+    --input: 218 14% 32%;
+    --ring: 214 46% 72%;
+  }
+
+  :root.light[data-workspace="supervisor"] body {
+    --background: 214 22% 96%;
+    --foreground: 220 24% 18%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 24% 18%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 24% 18%;
+    --primary: 215 39% 35%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 22% 93%;
+    --secondary-foreground: 220 24% 22%;
+    --muted: 214 20% 94%;
+    --muted-foreground: 217 16% 38%;
+    --accent: 214 26% 92%;
+    --accent-foreground: 220 24% 20%;
+    --success: 151 48% 28%;
+    --success-foreground: 0 0% 100%;
+    --destructive: 0 60% 39%;
+    --destructive-foreground: 0 0% 100%;
+    --warning: 30 66% 31%;
+    --warning-foreground: 0 0% 100%;
+    --info: 206 62% 33%;
+    --border: 214 19% 84%;
+    --input: 214 19% 78%;
+    --ring: 215 39% 35%;
+  }
+}

@@ -4,10 +4,11 @@ import { getLinkedVehicleVisit, getVehicleVisitBillingKind, listVehicleVisitCent
 import { fetchWorkOrderFromCloudByIdentifier, fetchWorkOrderListPage, type WorkOrder } from "@/lib/workOrdersStore";
 import { isInsuranceWorkOrder } from "@/lib/workOrderType";
 import { supabase } from "@/integrations/supabase/client";
+import type { SupervisorMilestone } from "@/lib/supervisorVisitTiming";
 
 export type SupervisorChannel = "all" | "cash" | "insurance";
 export type SupervisorTab = VehicleCenterTab | "legacy";
-export type SupervisorAction = "expense" | "stages" | "photos" | "parts" | "qr" | "messages";
+export type SupervisorAction = "expense" | "stages" | "location" | "photos" | "parts" | "qr" | "messages";
 export const SUPERVISOR_PAGE_SIZE = 20;
 // Parent-approved additive center contract; dataset parity is a release gate.
 export const SUPERVISOR_CENTER_CHANNEL_SUPPORTED = true;
@@ -93,9 +94,24 @@ export function supervisorEntryPath(row: SupervisorVehicle, edit = false): strin
 
 export function supervisorCanOpenAction(row: SupervisorVehicle, action: SupervisorAction): boolean {
   if (action === "messages") return Boolean(row.entryId || row.claimId);
-  if (action === "stages") return Boolean(row.entryId);
+  if (action === "stages" || action === "location") return Boolean(row.entryId);
   if (action === "expense") return Boolean(row.entryId || row.workOrderId);
   return Boolean(row.workOrderId);
+}
+
+/** One bounded, tenant-scoped history projection for the VISIBLE page only. */
+export async function listSupervisorMilestones(tenantId: string, entryIds: string[]): Promise<SupervisorMilestone[]> {
+  const ids = [...new Set(entryIds)];
+  if (!tenantId || ids.length > SUPERVISOR_PAGE_SIZE) throw new Error("SUPERVISOR_TIMING_SCOPE_INVALID");
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from("vehicle_visit_transitions").select("tenant_id,entry_id,from_stage,to_stage,occurred_at,revision")
+    .eq("tenant_id", tenantId).in("entry_id", ids).in("to_stage", ["approved", "delivered", "cancelled"])
+    .order("revision", { ascending: false }).limit(501);
+  if (error) throw error;
+  if (!Array.isArray(data) || data.length >= 501 || data.some(event => event.tenant_id !== tenantId || !ids.includes(event.entry_id))) {
+    throw new Error("SUPERVISOR_TIMING_UNCONFIRMED");
+  }
+  return data as SupervisorMilestone[];
 }
 
 export async function listSupervisorVisits(input: { tab: VehicleCenterTab; page: number; filters: VehicleCenterFilters & { channel?: SupervisorChannel } }) {

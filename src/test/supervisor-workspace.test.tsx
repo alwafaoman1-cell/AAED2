@@ -10,6 +10,7 @@ import type { VehicleVisitItem } from "@/lib/vehicleVisitLifecycle";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { buildPartsRequestMessage, buildSupplierPartsRequest } from "@/lib/partsWhatsApp";
 import { SupervisorPartsMessenger } from "@/components/supervisor/SupervisorPartsMessenger";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 
 const mocks = vi.hoisted(() => ({ page: vi.fn(), legacy: vi.fn(), linked: vi.fn(), read: vi.fn(), from: vi.fn(), send: vi.fn(), can: true }));
 vi.mock("@/lib/vehicleVisitLifecycle", () => ({
@@ -154,9 +155,15 @@ describe("supervisor identities and source contracts", () => {
 
 function renderWorkspace() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(<QueryClientProvider client={qc}><MemoryRouter><SupervisorApp /></MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={qc}><MemoryRouter><ThemeProvider><SupervisorApp /></ThemeProvider></MemoryRouter></QueryClientProvider>);
 }
 describe("supervisor active-tab loading", () => {
+  it("uses the real application theme controller instead of an unprovided third-party context", async () => {
+    localStorage.setItem("alwafa_theme_v1", "light"); renderWorkspace();
+    await waitFor(() => expect(document.documentElement.classList.contains("light")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Display theme" }));
+    await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true));
+  });
   it("loads only active visits initially and terminal/legacy data only when selected", async () => {
     renderWorkspace();
     await waitFor(() => expect(mocks.page).toHaveBeenCalledTimes(1));

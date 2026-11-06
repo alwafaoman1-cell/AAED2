@@ -1,6 +1,15 @@
 import i18n from "@/i18n";
 
 const en = {
+  arrivalAge: "Since arrival / inspection", approvalAge: "Since repair approval", visitTiming: "Visit duration",
+  days: "{{count}} days", day: "1 day", today: "Today", clockStopped: "Stopped", over25: "Over 25 days — priority review",
+  clockUnconfirmed: "Date not confirmed", clockReview: "Review dates", approvalNotRecorded: "No approval date", arrivalNotRecorded: "No confirmed arrival",
+  timingLegend: "0–15 days: green · 16–25: red · over 25: priority review. Work duration starts at recorded approval, not order creation.",
+  timingFailed: "Some milestone dates could not be confirmed. Missing durations are not shown as zero.",
+  moreActions: "More actions", updateStage: "Update stage", visitDetails: "Visit details", advancedActions: "Earlier stage / cancellation",
+  stageGuide: "Confirm the next milestone here. Actual custody is changed separately with its release/return record.",
+  optionalDetails: "Notes and additional requirements (optional)", approveHere: "Review insurance approval", approvalHelp: "Use the existing claim approval, without leaving this workspace.",
+  clearFilters: "Clear filters", filtersActive: "Active filters", theme: "Display theme", darkTheme: "Dark", lightTheme: "Light",
   reverseSourceFirst:"The linked records document a later milestone. Review the actual work-order or claim status and recorded dates before reversing this visit. A stage change cannot erase repair or delivery evidence.",
   reviewSource:"Review linked work-order status",
   locationAction:"Actual location / temporary release & return",
@@ -32,6 +41,15 @@ const en = {
   expenseEmpty: "No matching vouchers.", expenseAmount: "Amount (OMR)", expenseDescription: "Description", expenseDate: "Date", expenseOperating: "Workshop operating expense", expenseLinked: "Work-order expense",
 } as const;
 const ar: Record<keyof typeof en, string> = {
+  arrivalAge: "من الوصول / المعاينة", approvalAge: "من اعتماد الإصلاح", visitTiming: "مدة الزيارة",
+  days: "{{count}} يوم", day: "يوم واحد", today: "اليوم", clockStopped: "متوقف", over25: "أكثر من 25 يومًا — متابعة عاجلة",
+  clockUnconfirmed: "التاريخ غير مؤكد", clockReview: "راجع التواريخ", approvalNotRecorded: "لا يوجد تاريخ اعتماد", arrivalNotRecorded: "لا يوجد وصول مؤكد",
+  timingLegend: "0–15 يومًا: أخضر · 16–25: أحمر · أكثر من 25: متابعة عاجلة. مدة العمل تبدأ من الاعتماد المسجل، لا من إنشاء الأمر.",
+  timingFailed: "تعذر تأكيد بعض تواريخ المراحل. المدة غير المعروفة لا تُعرض صفرًا.",
+  moreActions: "إجراءات أخرى", updateStage: "تحديث المرحلة", visitDetails: "تفاصيل الزيارة", advancedActions: "مرحلة سابقة / إلغاء",
+  stageGuide: "أكد المرحلة التالية من هنا. الموقع الفعلي يتغير بشكل مستقل بمحضر الخروج أو العودة.",
+  optionalDetails: "ملاحظات ومتطلبات إضافية (اختياري)", approveHere: "مراجعة اعتماد التأمين", approvalHelp: "اعتماد المطالبة نفسه، دون مغادرة مساحة المشرف.",
+  clearFilters: "مسح الفلاتر", filtersActive: "فلاتر مفعلة", theme: "مظهر التطبيق", darkTheme: "داكن", lightTheme: "فاتح",
   reverseSourceFirst:"السجلات المرتبطة توثّق مرحلة أحدث. راجع حالة أمر العمل أو المطالبة وتواريخها المسجلة أولًا قبل الرجوع. تغيير المرحلة لا يمحو دليل الإصلاح أو التسليم.",
   reviewSource:"مراجعة حالة أمر العمل المرتبط",
   locationAction:"الموقع الفعلي / الخروج المؤقت والعودة",

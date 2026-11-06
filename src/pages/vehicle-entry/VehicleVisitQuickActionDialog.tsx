@@ -244,7 +244,7 @@ export function VehicleVisitQuickActionDialog({ row, open, onOpenChange, workspa
               )}
               {locationTarget === "in_workshop" && presence !== "in_workshop" && (
                 row._claimOnly && claim?.id && !["cancelled", "rejected"].includes(claim.status)
-                  ? <Button variant="outline" asChild><Link to={`/insurance/${claim.id}?visitAction=arrival`}>{t("vehicleVisit.recordArrivalInClaim")}</Link></Button>
+                  ? <Button variant="outline" asChild><Link to={workspace === "supervisor" ? `/supervisor/entry/new?claim=${encodeURIComponent(claim.id)}` : `/insurance/${claim.id}?visitAction=arrival`}>{t("vehicleVisit.recordArrivalInClaim")}</Link></Button>
                   : canReturn
                     ? <div className="space-y-2 rounded-lg border p-3">
                       <p className="text-sm">{t("vehicleCenterUpgrade:returnHint")}</p>

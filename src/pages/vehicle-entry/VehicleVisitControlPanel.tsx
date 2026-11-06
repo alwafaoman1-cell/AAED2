@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { VehicleEntryInspectionAction } from "@/components/vehicle-entry/VehicleEntryInspectionAction";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,11 +28,13 @@ function localDateTime() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
-export function VehicleVisitControlPanel({ entryId, supervisor = false, onRequestWorkOrderStatus, onRequestHandover }: {
+export function VehicleVisitControlPanel({ entryId, supervisor = false, onRequestWorkOrderStatus, onRequestHandover, onRequestClaimApproval, supervisorActions }: {
   entryId: string;
   supervisor?: boolean;
   onRequestWorkOrderStatus?: () => void;
   onRequestHandover?: () => void;
+  onRequestClaimApproval?: () => void;
+  supervisorActions?: ReactNode;
 }) {
   const { t, i18n } = useTranslation();
   const { user, profile, hasRole } = useAuth();
@@ -212,12 +214,22 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
     { label: t("vehicleVisit.insuranceInvoices"), value: String(visit.insuranceInvoices.length), href: claim?.id ? `/insurance/${claim.id}` : "" },
     { label: t("vehicleVisit.handover"), value: visit.handovers.find((row: any) => row.status === "finalized" && row.work_order_id === order?.id)?.receipt_number || "—", href: safeOrderLink && order?.order_number ? `/work-orders/${encodeURIComponent(order.order_number)}/delivery` : "" },
   ];
+  const referenceCards = <div className={`grid grid-cols-2 gap-2 ${supervisor ? "sm:grid-cols-3" : "md:grid-cols-3 xl:grid-cols-5"}`}>
+    {refs.map((ref) => <div key={ref.label} className="min-w-0 rounded-lg border border-border p-3">
+      <div className="text-xs text-muted-foreground">{ref.label}</div>
+      {ref.href && ref.value ? <Link className="block truncate font-semibold text-primary hover:underline" to={ref.href}>{ref.value}</Link> : <div className="truncate font-semibold">{ref.value || "—"}</div>}
+    </div>)}
+  </div>;
+  const optionalFields = <>
+    <label className="block text-sm">{t("vehicleVisit.notes")}<Textarea rows={2} value={notes} maxLength={2000} onChange={(event) => setNotes(event.target.value)} /></label>
+    <label className="block text-sm">{t("vehicleVisit.requirements")}<Textarea rows={2} value={requirements} maxLength={2000} onChange={(event) => setRequirements(event.target.value)} /></label>
+  </>;
 
   return <Card className={`space-y-4 p-4 ${supervisor ? "[&_button]:min-h-11 [&_input]:min-h-11 [&_summary]:min-h-11 [&_select]:min-h-11" : ""}`} dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h2 className="flex items-center gap-2 text-lg font-bold"><ClipboardList className="h-5 w-5" />{t("vehicleVisit.operationalFile")}</h2>
-        <p className="text-sm text-muted-foreground">{t("vehicleVisit.subtitle")}</p>
+        <h2 className={`flex items-center gap-2 ${supervisor ? "text-base" : "text-lg"} font-bold`}><ClipboardList className="h-5 w-5" aria-hidden="true" />{t(supervisor ? "vehicleVisit.stage" : "vehicleVisit.operationalFile")}</h2>
+        <p className="text-xs leading-5 text-muted-foreground">{t(supervisor ? "supervisorWorkspace:stageGuide" : "vehicleVisit.subtitle")}</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <Badge variant="secondary">{stageLabel(visit.operationalStage)}</Badge>
@@ -230,12 +242,15 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
       {linkMutation.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" aria-hidden="true"/>}{t("vehicleEntryLinks.confirm")} · <bdi className="ms-1">{order.order_number}</bdi>
     </Button>}
     {canReconcileCustody && <Button variant="outline" onClick={() => setCustodyOpen(true)}>{t("vehicleVisit.reviewCustody")}</Button>}
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
-      {refs.map((ref) => <div key={ref.label} className="min-w-0 rounded-lg border border-border p-3">
-        <div className="text-xs text-muted-foreground">{ref.label}</div>
-        {ref.href && ref.value ? <Link className="block truncate font-semibold text-primary hover:underline" to={ref.href}>{ref.value}</Link> : <div className="truncate font-semibold">{ref.value || "—"}</div>}
-      </div>)}
-    </div>
+    {supervisor && <ol className="grid grid-cols-5 gap-1 rounded-lg bg-muted/50 p-2" aria-label={t("vehicleVisit.stage")}>
+      {ORDER.map((value, index) => <li key={value} aria-current={visit.operationalStage === value ? "step" : undefined}
+        className={`min-w-0 rounded-md p-1 text-center text-xs ${visit.operationalStage === value ? "bg-primary/10 font-bold text-primary" : "text-muted-foreground"}`}>
+        <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full border border-current tabular-nums">{index + 1}</span>{stageLabel(value)}
+      </li>)}
+    </ol>}
+    {supervisor ? <details className="rounded-lg border border-border p-2 text-sm">
+      <summary className="cursor-pointer py-2 text-xs font-medium">{t("supervisorWorkspace:visitDetails")}</summary>{referenceCards}
+    </details> : referenceCards}
     {!supervisor && (visit.documentFiles.length > 0 || visit.expenses.length > 0 || visit.cashInvoices.length > 0 || visit.insuranceInvoices.length > 0) &&
       <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer font-semibold">{t("vehicleVisit.operationalFile")} · {t("vehicleVisit.documents")} / {t("vehicleVisit.expenses")}</summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -251,23 +266,37 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
       </details>}
     <div className="flex flex-wrap gap-2">
       {!supervisor && <VehicleEntryInspectionAction entry={visit.entry} />}
-      {canAdvance && next && <Button variant="outline" disabled={Boolean(nextBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(next); }}><ArrowRight className="me-2 h-4 w-4" />{t("vehicleVisit.next")}: {stageLabel(next)}</Button>}
-      {canManage && current && previous && <Button variant="outline" disabled={Boolean(reverseBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
-      {canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && current &&
+      {canAdvance && next && <Button variant={supervisor ? "default" : "outline"} disabled={Boolean(nextBlocker) || mutation.isPending} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(next); }}><ArrowRight className="me-2 h-4 w-4 rtl:rotate-180" aria-hidden="true" />{t("vehicleVisit.next")}: {stageLabel(next)}</Button>}
+      {!supervisor && canManage && current && previous && <Button variant="outline" disabled={Boolean(reverseBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
+      {!supervisor && canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && current &&
         <Button variant="outline" disabled={Boolean(cancelBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget("cancelled"); }}>{t("vehicleVisit.cancel")}</Button>}
       {next === "delivered" && !visit.hasFinalHandover && order?.order_number && (supervisor
         ? <Button variant="outline" disabled={!onRequestHandover} onClick={onRequestHandover}>{t("vehicleVisit.signedHandoverRequired")}</Button>
         : <Link className="text-sm text-primary underline" to={`/work-orders/${encodeURIComponent(order.order_number)}/delivery`}>{t("vehicleVisit.signedHandoverRequired")}</Link>)}
     </div>
-    {canManage && reverseBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/40 p-3 text-sm">
+    {supervisorActions}
+    {!supervisor && canManage && reverseBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/40 p-3 text-sm">
       <p>{t("supervisorWorkspace:reverseSourceFirst")}</p>
-      {supervisor && onRequestWorkOrderStatus && <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("supervisorWorkspace:reviewSource")}</Button>}
     </div>}
-    {canAdvance && nextBlocker && <div role="status" className="text-sm text-warning">{t(`vehicleVisit.${nextBlocker}`)}{prerequisiteHref && <>{" "}{supervisor && ["workOrderStatusInvalid", "finishWorkFirst"].includes(nextBlocker) && onRequestWorkOrderStatus
+    {canAdvance && nextBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm">{t(`vehicleVisit.${nextBlocker}`)}{prerequisiteHref && <>{" "}{supervisor && nextBlocker === "claimApprovalRequired"
+      ? <Button variant="outline" disabled={!onRequestClaimApproval} onClick={onRequestClaimApproval}>{t("supervisorWorkspace:approveHere")}</Button>
+      : supervisor && ["workOrderStatusInvalid", "finishWorkFirst"].includes(nextBlocker) && onRequestWorkOrderStatus
       ? <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("vehicleVisit.openPrerequisite")}</Button>
       : <Link to={prerequisiteHref} className="inline-flex min-h-11 items-center font-semibold underline">{t("vehicleVisit.openPrerequisite")}</Link>}</>}</div>}
-    {canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && cancelBlocker &&
+    {!supervisor && canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && cancelBlocker &&
       <p className="text-sm text-muted-foreground">{t(`vehicleVisit.${cancelBlocker}`)}</p>}
+    {supervisor && canManage && current && <details className="rounded-lg border border-border p-2 text-sm">
+      <summary className="cursor-pointer py-2 text-xs font-medium">{t("supervisorWorkspace:advancedActions")}</summary>
+      <div className="space-y-2 pt-2">
+        <div className="flex flex-wrap gap-2">
+          {previous && <Button variant="outline" disabled={Boolean(reverseBlocker) || mutation.isPending} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}>{t("vehicleVisit.back")}</Button>}
+          {!visit.reviewReason && current !== "cancelled" && current !== "delivered" && <Button variant="outline" disabled={Boolean(cancelBlocker) || mutation.isPending} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget("cancelled"); }}>{t("vehicleVisit.cancel")}</Button>}
+        </div>
+        {reverseBlocker && <p role="status" className="text-xs leading-5 text-muted-foreground">{t("supervisorWorkspace:reverseSourceFirst")}</p>}
+        {reverseBlocker && onRequestWorkOrderStatus && <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("supervisorWorkspace:reviewSource")}</Button>}
+        {cancelBlocker && <p className="text-xs text-muted-foreground">{t(`vehicleVisit.${cancelBlocker}`)}</p>}
+      </div>
+    </details>}
     {visit.reviewReason && <p className="text-sm text-muted-foreground">{t("vehicleVisit.reviewBlocked")}</p>}
     <details className="rounded-lg border border-border p-3" onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-semibold">{t("vehicleVisit.history")}{!supervisor || historyQuery.isSuccess ? ` (${transitions.length})` : ""}</summary>
@@ -284,7 +313,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
     </details>
 
     <Dialog open={Boolean(target)} onOpenChange={(open) => { if (!open && !mutation.isPending) setTarget(null); }}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto" dir={i18n.dir()}>
         <DialogHeader><DialogTitle>{t("vehicleVisit.transition")}: {stageLabel(target)}</DialogTitle><DialogDescription>{t("vehicleVisit.subtitle")}</DialogDescription></DialogHeader>
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (!mutation.isPending) mutation.mutate(); }}>
           <label className="block text-sm">{t("vehicleVisit.occurredAt")}<Input type="datetime-local" required value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} /></label>
@@ -293,8 +322,9 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
               {(staff.data || []).map((person) => <SelectItem key={person.user_id} value={person.user_id}>{person.full_name || person.user_id}</SelectItem>)}
             </SelectContent></Select>
           </label>
-          <label className="block text-sm">{t("vehicleVisit.notes")}<Textarea value={notes} maxLength={2000} onChange={(event) => setNotes(event.target.value)} /></label>
-          <label className="block text-sm">{t("vehicleVisit.requirements")}<Textarea value={requirements} maxLength={2000} onChange={(event) => setRequirements(event.target.value)} /></label>
+          {supervisor ? <details className="space-y-2 rounded-lg border border-border p-2">
+            <summary className="cursor-pointer py-2 text-xs font-medium">{t("supervisorWorkspace:optionalDetails")}</summary>{optionalFields}
+          </details> : optionalFields}
           {target === "approved" && billingKind === "cash" && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={customerApproved} onChange={(event) => setCustomerApproved(event.target.checked)} />{t("vehicleVisit.customerApproved")}</label>}
           {(target === "cancelled" || (current && target && ORDER.indexOf(target) < ORDER.indexOf(current))) && <label className="block text-sm">{t("vehicleVisit.reason")}<Textarea required value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} /></label>}
           {target === "ready" && order?.status !== "completed" && <p className="text-sm text-warning">{t("vehicleVisit.finishWorkFirst")}</p>}
