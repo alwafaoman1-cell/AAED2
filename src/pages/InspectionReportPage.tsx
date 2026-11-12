@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowRight, Printer, Download, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { inspectionsStore } from "@/lib/inspectionsStore";
+import { inspectionsStore, type InspectionRecord } from "@/lib/inspectionsStore";
+import { useTranslation } from "react-i18next";
 import { insuranceInspectionStore } from "@/lib/insuranceInspectionStore";
 import { getInspectionHtml } from "@/lib/pdfGenerator";
 import { buildInsuranceInspectionHtml, generateInsuranceInspectionPdfBlob } from "@/lib/insuranceInspectionPdf";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
 import { toast } from "sonner";
 import { printPdfBlob } from "@/lib/safePdfWindow";
+import { PDF_HTML_SANDBOX, sanitizePdfHtml } from "@/lib/safeHtml";
 
 /**
  * صفحة كاملة لتقرير الفحص — الافتراضي بدلاً من النوافذ المنبثقة.
@@ -17,22 +19,57 @@ import { printPdfBlob } from "@/lib/safePdfWindow";
  * - زر رجوع ذكي: يستخدم history إن وُجد، وإلا يعود لقائمة الفحص.
  */
 export default function InspectionReportPage() {
+  const { i18n } = useTranslation();
+  const isArabic = i18n.language?.startsWith("ar") ?? true;
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [reportState, setReportState] = useState<{ id?: string; record?: InspectionRecord; loading: boolean; error: string | null }>({ loading: true, error: null });
 
-  // Re-render when either store changes (live sync with last saved data)
+  // Direct links load exactly one full record, never the entire inspection list.
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    const u1 = inspectionsStore.subscribe(() => setTick(t => t + 1));
+    let cancelled = false;
+    let loading = false;
+    let invalidated = false;
+    const load = async () => {
+      if (loading) return;
+      loading = true;
+      invalidated = false;
+      setReportState({ id, loading: true, error: null });
+      try {
+        const record = id ? await inspectionsStore.loadById(id) : undefined;
+        if (record?.kind === "insurance" && !record.details?.insuranceInspectionReport) {
+          // Legacy reports may still live in the cloud settings archive. Await
+          // that explicit detail read before displaying a minimal fallback.
+          await insuranceInspectionStore.load(record.id);
+        }
+        if (!cancelled && !invalidated) setReportState({ id, record, loading: false, error: null });
+      } catch (error: any) {
+        if (!cancelled && !invalidated) setReportState({ id, loading: false, error: error?.message || "Could not load report" });
+      } finally {
+        loading = false;
+        if (!cancelled && invalidated) void load();
+      }
+    };
+    const u1 = inspectionsStore.subscribe(() => {
+      if (cancelled || !id) return;
+      const record = inspectionsStore.getById(id);
+      if (!record?.details) {
+        invalidated = true;
+        setReportState({ id, loading: true, error: null });
+        void load();
+      } else if (!loading) {
+        setReportState({ id, record, loading: false, error: null });
+      }
+    }, { loadSummaries: false });
     const u2 = insuranceInspectionStore.subscribe(() => setTick(t => t + 1));
-    return () => { u1?.(); u2?.(); };
-  }, []);
+    void load();
+    return () => { cancelled = true; u1(); u2(); };
+  }, [id, reload]);
 
-  const ins = useMemo(
-    () => { void tick; return inspectionsStore.getAll().find(i => i.id === id); },
-    [id, tick]
-  );
+  const ins = reportState.id === id && !reportState.loading && !reportState.error ? reportState.record : undefined;
   const isInsurance = ins?.kind === "insurance";
   const insurancePayload = useMemo(
     () => { void tick; return ins && isInsurance ? insuranceInspectionStore.get(ins.id) : undefined; },
@@ -74,13 +111,14 @@ export default function InspectionReportPage() {
       status: ins.status,
     });
   }, [ins, isInsurance, insurancePayload]);
+  const safeHtml = useMemo(() => html ? sanitizePdfHtml(html) : "", [html]);
 
   const createPdf = async (download: boolean) => {
     if (!ins) throw new Error("التقرير غير موجود");
     return insurancePayload
       ? generateInsuranceInspectionPdfBlob(insurancePayload, `Inspection_${ins.id}`, download)
       : generatePdfFromHtml({
-          htmlContent: html,
+          htmlContent: safeHtml,
           fileName: `Inspection_${ins.id}`,
           download,
           margins: DEFAULT_MARGINS,
@@ -120,8 +158,7 @@ export default function InspectionReportPage() {
   };
 
   const handleRefresh = () => {
-    setTick(t => t + 1);
-    toast.success("تم تحديث البيانات");
+    setReload(value => value + 1);
   };
 
   // Format last-saved time (only available for insurance inspections we tracked)
@@ -140,8 +177,13 @@ export default function InspectionReportPage() {
         <Button variant="ghost" size="sm" onClick={handleBack} className="gap-1">
           <ArrowRight size={14} /> رجوع
         </Button>
-        <div className="text-center py-16 text-muted-foreground">
-          لم يتم العثور على تقرير الفحص <span className="font-mono">{id}</span>
+        <div role={reportState.error ? "alert" : "status"} className="text-center py-16 text-muted-foreground">
+          {reportState.id !== id || reportState.loading
+            ? (isArabic ? "جارٍ تحميل تقرير الفحص..." : "Loading inspection report...")
+            : reportState.error
+              ? `${isArabic ? "تعذر تحميل التقرير" : "Could not load report"}: ${reportState.error}`
+              : <>{isArabic ? "لم يتم العثور على تقرير الفحص" : "Inspection report not found"} <span className="font-mono">{id}</span></>}
+          {reportState.error && <Button variant="outline" size="sm" onClick={handleRefresh} className="mx-2">{isArabic ? "إعادة المحاولة" : "Retry"}</Button>}
         </div>
       </div>
     );
@@ -185,7 +227,7 @@ export default function InspectionReportPage() {
             <Button variant="ghost" size="sm" onClick={handleRefresh} className="gap-1" title="تحديث من آخر بيانات محفوظة">
               <RefreshCw size={14} /> تحديث
             </Button>
-            <Button variant="outline" size="sm" onClick={handlePrint} className="gap-1">
+            <Button variant="outline" size="sm" onClick={handlePrint} disabled={busy} className="gap-1">
               <Printer size={14} /> طباعة
             </Button>
             <Button size="sm" onClick={handleDownload} disabled={busy} className="gradient-gold text-primary-foreground gap-1">
@@ -199,7 +241,8 @@ export default function InspectionReportPage() {
         <iframe
           id="ins-report-frame"
           title={`Inspection ${ins.id}`}
-          srcDoc={html}
+          srcDoc={safeHtml}
+          sandbox={PDF_HTML_SANDBOX}
           className="w-full bg-white"
           style={{ height: "calc(100vh - 220px)", minHeight: 600, border: 0 }}
         />

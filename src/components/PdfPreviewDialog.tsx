@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,10 +18,12 @@ import {
   FileCode2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
 import WhatsAppShareButton from "@/components/whatsapp/WhatsAppShareButton";
 import { buildHtmlWithPageMarginStyle, detectOrientation } from "@/lib/pdfLayoutSettings";
 import { getPdfPageDiagnostics, preparePagedPdfDocument, waitForPdfAssets } from "@/lib/pdfDocumentRenderer";
+import { PDF_HTML_SANDBOX, sanitizePdfHtml } from "@/lib/safeHtml";
+import { downloadPdfBlob } from "@/lib/pdfFileDownload";
+import { useTranslation } from "react-i18next";
 
 interface PdfPreviewDialogProps {
   open: boolean;
@@ -29,6 +31,7 @@ interface PdfPreviewDialogProps {
   htmlContent: string;
   title: string;
   fileName?: string;
+  /** Archive only after an explicit PDF download/print, never on preview/open. */
   autoSave?: () => Promise<{ url: string; path: string } | null>;
   onSaved?: (info: { url: string; path: string }) => void;
   /** رقم هاتف المستلم لأزرار المشاركة (يُستخرج تلقائياً للبادئة) */
@@ -61,6 +64,7 @@ export default function PdfPreviewDialog({
   recipientPhone,
   recipientName,
 }: PdfPreviewDialogProps) {
+  const { t, i18n } = useTranslation();
   const [fullscreen, setFullscreen] = useState(false);
   const [savedUrl, setSavedUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -74,7 +78,12 @@ export default function PdfPreviewDialog({
   const [frameHeight, setFrameHeight] = useState(A4_PORTRAIT_H);
   const [oversizedPages, setOversizedPages] = useState(0);
 
-  const savedKeyRef = useRef<string>("");
+  const archiveContext = useMemo(() => ({ title, htmlContent }), [title, htmlContent]);
+  const archiveSessionRef = useRef<{
+    context: typeof archiveContext;
+    saved: boolean;
+    pending: Promise<void> | null;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const previewFrameRef = useRef<HTMLIFrameElement>(null);
   const pageOffsetsRef = useRef<number[]>([0]);
@@ -84,7 +93,10 @@ export default function PdfPreviewDialog({
   const orientation = detectOrientation(htmlContent);
   const PREVIEW_WIDTH = orientation === "landscape" ? A4_LANDSCAPE_W : A4_PORTRAIT_W;
   const PREVIEW_PAGE_HEIGHT = orientation === "landscape" ? A4_LANDSCAPE_H : A4_PORTRAIT_H;
-  const previewHtml = buildHtmlWithPageMarginStyle(htmlContent, orientation);
+  const previewHtml = useMemo(
+    () => sanitizePdfHtml(buildHtmlWithPageMarginStyle(htmlContent, orientation)),
+    [htmlContent, orientation],
+  );
 
   const measurePreview = useCallback(() => {
     const frame = previewFrameRef.current;
@@ -157,25 +169,43 @@ export default function PdfPreviewDialog({
     return () => ro.disconnect();
   }, [open, PREVIEW_WIDTH]);
 
-  // حفظ تلقائي للأرشيف — مستقل عن توليد PDF حتى لا يبطّئ المعاينة
+  // Opening, browsing and changing callbacks must never write to the archive.
+  // A fresh session also prevents an older export from saving a newly viewed doc.
   useEffect(() => {
-    if (!open || !autoSave) return;
-    const key = `${title}::${htmlContent.length}`;
-    if (savedKeyRef.current === key) return;
-    savedKeyRef.current = key;
+    const session = open ? { context: archiveContext, saved: false, pending: null } : null;
+    archiveSessionRef.current = session;
     setSavedUrl(null);
+    setSaving(false);
+    return () => {
+      if (archiveSessionRef.current === session) archiveSessionRef.current = null;
+    };
+  }, [open, archiveContext]);
+
+  const archiveAfterExport = useCallback((session: typeof archiveSessionRef.current): Promise<void> => {
+    if (!autoSave || !session || archiveSessionRef.current !== session || session.context !== archiveContext || session.saved) return Promise.resolve();
+    if (session.pending) return session.pending;
     setSaving(true);
-    autoSave()
+    session.pending = Promise.resolve()
+      .then(() => archiveSessionRef.current === session ? autoSave() : null)
       .then((res) => {
+        if (archiveSessionRef.current !== session) return;
         if (res?.url) {
+          session.saved = true;
           setSavedUrl(res.url);
-          onSaved?.(res);
           toast.success("تم حفظ المستند في الأرشيف");
+          try { onSaved?.(res); } catch (error) { console.warn("archive onSaved failed", error); }
         }
       })
-      .catch((e) => console.warn("autoSave failed", e))
-      .finally(() => setSaving(false));
-  }, [open, htmlContent, autoSave, title, onSaved]);
+      .catch((error) => {
+        console.warn("archive after export failed", error);
+        // Do not fail the export; a later explicit command can retry archiving.
+      })
+      .finally(() => {
+        session.pending = null;
+        if (archiveSessionRef.current === session) setSaving(false);
+      });
+    return session.pending;
+  }, [archiveContext, autoSave, onSaved]);
 
   // تتبّع الصفحة الحالية أثناء التمرير
   useEffect(() => {
@@ -200,7 +230,6 @@ export default function PdfPreviewDialog({
       setPdfBlob(null);
       setZoom(FIT_ZOOM);
       setCurrentPage(1);
-      savedKeyRef.current = "";
     }
   }, [open]);
 
@@ -230,9 +259,13 @@ export default function PdfPreviewDialog({
 
   const ensurePdfBlob = useCallback(async () => {
     if (pdfBlob) return pdfBlob;
+    const session = archiveSessionRef.current;
     setPdfGenerating(true);
     setError(null);
     try {
+      // HTML preview needs no raster/PDF engines. Fetch them only for an
+      // explicit print/download, not when a list imports this closed dialog.
+      const { generatePdfFromHtml, DEFAULT_MARGINS } = await import("@/lib/htmlToPdf");
       const blob = await generatePdfFromHtml({
         htmlContent: previewHtml,
         fileName: safeName,
@@ -241,21 +274,24 @@ export default function PdfPreviewDialog({
         orientation,
         footer: { enabled: false },
       });
-      setPdfBlob(blob);
+      if (archiveSessionRef.current === session) setPdfBlob(blob);
       return blob;
     } catch (e: any) {
       console.error("PDF generation failed", e);
       const message = e?.message || "فشل إنشاء ملف PDF";
-      setError(message);
-      toast.error(message);
+      if (archiveSessionRef.current === session) {
+        setError(message);
+        toast.error(message);
+      }
       throw e;
     } finally {
-      setPdfGenerating(false);
+      if (archiveSessionRef.current === session) setPdfGenerating(false);
     }
   }, [previewHtml, pdfBlob, safeName, orientation]);
 
   // اطبع نفس ملف PDF المستخدم في التنزيل لضمان تطابق الطباعة والتنزيل.
   const handlePrint = async () => {
+    const archiveSession = archiveSessionRef.current;
     let url: string | null = null;
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -281,6 +317,7 @@ export default function PdfPreviewDialog({
         }, 300);
       };
       document.body.appendChild(iframe);
+      void archiveAfterExport(archiveSession);
     } catch (e) {
       console.error(e);
       toast.error("تعذّرت طباعة ملف PDF");
@@ -296,18 +333,21 @@ export default function PdfPreviewDialog({
   };
 
   const handleDownload = async () => {
+    const archiveSession = archiveSessionRef.current;
+    let blob: Blob;
     try {
-      const blob = await ensurePdfBlob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${safeName}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      blob = await ensurePdfBlob();
     } catch {
       // handled in ensurePdfBlob
+      return;
+    }
+    try {
+      downloadPdfBlob(blob, `${safeName}.pdf`);
+      void archiveAfterExport(archiveSession);
+    } catch {
+      const message = t("pdfDownload.saveFailed");
+      setError(message);
+      toast.error(message);
     }
   };
 
@@ -325,7 +365,7 @@ export default function PdfPreviewDialog({
     toast.success("تم تصدير بيانات المستند بصيغة HTML");
   };
 
-  const zoomLabel = zoom === FIT_ZOOM ? "ملاءمة" : `${Math.round(zoom * 100)}%`;
+  const zoomLabel = zoom === FIT_ZOOM ? (i18n.language?.startsWith("en") ? "Fit" : "ملاءمة") : `${Math.round(zoom * 100)}%`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -466,6 +506,7 @@ export default function PdfPreviewDialog({
                   key={`${title}-${htmlContent.length}`}
                   ref={previewFrameRef}
                   title={title}
+                  sandbox={PDF_HTML_SANDBOX}
                   srcDoc={previewHtml}
                   onLoad={handlePreviewLoad}
                   className="block bg-white shadow-lg ring-1 ring-black/10"

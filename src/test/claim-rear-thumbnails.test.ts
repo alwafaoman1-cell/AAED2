@@ -6,7 +6,7 @@ const { from, resolveUrls } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { from } }));
-vi.mock("@/lib/vehicleMediaUrls", () => ({ resolveVehicleMediaUrls: resolveUrls }));
+vi.mock("@/lib/vehicleThumbnailUrls", () => ({ resolveVehicleThumbnailUrls: resolveUrls }));
 
 import { getClaimRearThumbnailUrls, getEntryRearThumbnailUrls, selectClaimRearPhotos, type RearPhotoRow } from "@/lib/vehicleRearThumbnails";
 
@@ -56,7 +56,7 @@ describe("insurance claim rear thumbnails", () => {
     query.order.mockReturnValue(query);
     query.range.mockResolvedValue({ data: rows, error: null });
     from.mockReturnValue(query);
-    resolveUrls.mockImplementation(async (selected: RearPhotoRow[]) => selected.map((row) => ({ ...row, url: `https://signed/${row.id}` })));
+    resolveUrls.mockImplementation(async (_tenantId: string, selected: RearPhotoRow[]) => selected.map((row) => ({ ...row, url: `https://signed/${row.id}` })));
 
     const urls = await getClaimRearThumbnailUrls("tenant-1", [{ id: "claim-1", vehicle_id: "vehicle-1" }]);
 
@@ -68,7 +68,7 @@ describe("insurance claim rear thumbnails", () => {
     expect(query.in).toHaveBeenCalledWith("vehicle_id", ["vehicle-1"]);
     expect(query.is).toHaveBeenCalledWith("deleted_at", null);
     expect(query.order).toHaveBeenCalledWith("uploaded_at", { ascending: false, nullsFirst: false });
-    expect(resolveUrls).toHaveBeenCalledWith([rows[1]]);
+    expect(resolveUrls).toHaveBeenCalledWith("tenant-1", [rows[1]]);
     expect(urls).toEqual({ "claim-1": "https://signed/own" });
     expect((query as Record<string, unknown>).insert).toBeUndefined();
   });
@@ -79,12 +79,12 @@ describe("insurance claim rear thumbnails", () => {
     for (const method of [query.select, query.eq, query.in, query.is, query.order]) method.mockReturnValue(query);
     query.range.mockResolvedValue({ data: [rows[1]], error: null });
     from.mockReturnValue(query);
-    resolveUrls.mockImplementation(async (selected: RearPhotoRow[]) => selected.map((row) => ({ ...row, url: `https://signed/${row.id}` })));
+    resolveUrls.mockImplementation(async (_tenantId: string, selected: RearPhotoRow[]) => selected.map((row) => ({ ...row, url: `https://signed/${row.id}` })));
 
     const urls = await getEntryRearThumbnailUrls("tenant-1", ["entry-1", "entry-1"]);
 
     expect(query.in).toHaveBeenCalledWith("vehicle_entry_id", ["entry-1"]);
-    expect(resolveUrls).toHaveBeenCalledWith([rows[1]]);
+    expect(resolveUrls).toHaveBeenCalledWith("tenant-1", [rows[1]]);
     expect(urls).toEqual({ "entry-1": "https://signed/old" });
     expect(urls["entry-2"]).toBeUndefined();
   });

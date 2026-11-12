@@ -5,10 +5,11 @@ import { notifyListeners } from "@/lib/notifyListeners";
 const memoryCache = new Map<string, unknown>();
 const memoryCacheMeta = new Map<string, number>();
 const memoryCacheVersions = new Map<string, number>();
-const pendingReads = new Map<string, Promise<unknown>>();
+const pendingReads = new Map<string, Promise<void>>();
+const readInvalidations = new Map<string, number>();
+// Absence is cacheable only after a successful read, never as a caller's default.
+const MISSING_SETTING = Symbol("missingCloudSetting");
 const CACHE_TTL_MS = 30_000;
-let allSettingsLoadedAt = 0;
-let pendingAllSettings: Promise<void> | null = null;
 let activeTenantId: string | null = null;
 let settingsGeneration = 0;
 const scopeListeners = new Set<() => void>();
@@ -16,6 +17,7 @@ const scopeListeners = new Set<() => void>();
 type SettingListener = (value: unknown) => void;
 const settingListeners = new Map<string, Set<SettingListener>>();
 let tenantSettingsChannel: ReturnType<typeof supabase.channel> | null = null;
+let tenantSettingsChannelVersion = 0;
 
 function isAuthPage(): boolean {
   return typeof window !== "undefined" && /^\/(auth|reset-password)(\/|$)/.test(window.location.pathname);
@@ -33,10 +35,15 @@ function ensureTenantScope(tenantId: string | null | undefined, force = false) {
   memoryCacheMeta.clear();
   memoryCacheVersions.clear();
   pendingReads.clear();
-  allSettingsLoadedAt = 0;
-  pendingAllSettings = null;
+  readInvalidations.clear();
+  if (tenantSettingsChannel) {
+    const channel = tenantSettingsChannel;
+    tenantSettingsChannel = null;
+    void supabase.removeChannel(channel);
+  }
   activeTenantId = nextTenantId;
   scopeListeners.forEach((listener) => listener());
+  ensureTenantSettingsChannel();
 }
 
 /** Stores use this to discard snapshots belonging to a prior login/tenant. */
@@ -64,126 +71,108 @@ export interface CloudSettingRecord<T = unknown> {
   updated_at: string;
 }
 
-async function loadAllCloudSettings(): Promise<void> {
-  if (isAuthPage()) return;
-  const tenantId = await getCurrentTenantId();
-  if (!tenantId) return;
-  ensureTenantScope(tenantId);
-  if (Date.now() - allSettingsLoadedAt < CACHE_TTL_MS) return;
-  if (pendingAllSettings) return pendingAllSettings;
+function cachedValue<T>(cacheKey: string, fallback: T): T {
+  const value = memoryCache.get(cacheKey);
+  return memoryCache.has(cacheKey) && value !== MISSING_SETTING ? value as T : fallback;
+}
 
-  const generation = settingsGeneration;
-  const request = (async () => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData.session || generation !== settingsGeneration || activeTenantId !== tenantId) return;
-    const { data, error } = await supabase
-      .from("tenant_settings")
-      .select("tenant_id,key,value,version")
-      .eq("tenant_id", tenantId);
-    if (error) throw error;
-    if (generation !== settingsGeneration || activeTenantId !== tenantId) return;
-    const now = Date.now();
-    (data || []).forEach((row) => {
-      if (!row?.key) return;
-      if ((row as any).tenant_id && (row as any).tenant_id !== tenantId) return;
-      const cacheKey = scopedKey(row.key, tenantId);
-      const version = Number(row.version || 0);
-      if (version < (memoryCacheVersions.get(cacheKey) ?? 0)) return;
-      memoryCache.set(cacheKey, row.value);
-      memoryCacheMeta.set(cacheKey, now);
-      memoryCacheVersions.set(cacheKey, version);
-    });
-    allSettingsLoadedAt = now;
-  })();
-  pendingAllSettings = request;
-
-  try {
-    await request;
-  } finally {
-    if (pendingAllSettings === request) pendingAllSettings = null;
-  }
+function isResolvedReadScopeCurrent(tenantId: string | null, startedTenant: string | null, generation: number): boolean {
+  // Concurrent cold reads may share the first tenant adoption, but a delayed
+  // tenant lookup must never restore a scope invalidated by logout/switching.
+  return generation === settingsGeneration || (
+    startedTenant === null && tenantId !== null && activeTenantId === tenantId && settingsGeneration === generation + 1
+  );
 }
 
 /** Read a tenant setting from Supabase. Falls back only to in-memory session cache. */
 export async function readCloudSetting<T>(key: string, fallback: T): Promise<T> {
-  const tenantId = isAuthPage() ? activeTenantId : await getCurrentTenantId();
-  if (tenantId) ensureTenantScope(tenantId);
+  if (isAuthPage()) return cachedValue(scopedKey(key), fallback);
+  const startedTenant = activeTenantId;
+  const startedGeneration = settingsGeneration;
+  let tenantId: string | null;
+  try {
+    tenantId = await getCurrentTenantId();
+  } catch {
+    return startedGeneration === settingsGeneration ? cachedValue(scopedKey(key, startedTenant), fallback) : fallback;
+  }
+  if (!isResolvedReadScopeCurrent(tenantId, startedTenant, startedGeneration)) return fallback;
+  ensureTenantScope(tenantId);
+  if (!tenantId) return fallback;
   const generation = settingsGeneration;
   const cacheKey = scopedKey(key, tenantId);
-  if (isAuthPage()) return memoryCache.has(cacheKey) ? (memoryCache.get(cacheKey) as T) : fallback;
-  if (!tenantId) return fallback;
+  const isCurrent = () => generation === settingsGeneration && activeTenantId === tenantId;
 
   const cachedAt = memoryCacheMeta.get(cacheKey) ?? 0;
   if (memoryCache.has(cacheKey) && Date.now() - cachedAt < CACHE_TTL_MS) {
-    return memoryCache.get(cacheKey) as T;
+    return cachedValue(cacheKey, fallback);
   }
 
   const pending = pendingReads.get(cacheKey);
   if (pending) {
     try {
-      const value = await pending;
-      return generation === settingsGeneration ? value as T : fallback;
+      await pending;
     } catch {
-      return generation === settingsGeneration && memoryCache.has(cacheKey) ? (memoryCache.get(cacheKey) as T) : fallback;
+      // A failed read does not confirm absence or refresh the cached timestamp.
     }
+    return isCurrent() ? cachedValue(cacheKey, fallback) : fallback;
   }
 
+  const invalidation = readInvalidations.get(cacheKey) ?? 0;
+  readInvalidations.set(cacheKey, invalidation);
   const readPromise = (async () => {
-    try {
-      await loadAllCloudSettings();
-      if (generation !== settingsGeneration) return fallback;
-      if (memoryCache.has(cacheKey)) return memoryCache.get(cacheKey);
-    } catch {
-      if (generation !== settingsGeneration) return fallback;
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (generation !== settingsGeneration) return fallback;
-      if (!sessionData.session) {
-        if (memoryCache.has(cacheKey)) return memoryCache.get(cacheKey);
-        return fallback;
-      }
-      const { data, error } = await supabase
-        .from("tenant_settings")
-        .select("value,version")
-        .eq("key", key)
-        .eq("tenant_id", tenantId)
-        .maybeSingle();
-      if (error) throw error;
-      if (generation !== settingsGeneration) return fallback;
-      if (data) {
-        const version = Number(data.version || 0);
-        if (version >= (memoryCacheVersions.get(cacheKey) ?? 0)) {
-          memoryCache.set(cacheKey, data.value);
-          memoryCacheMeta.set(cacheKey, Date.now());
-          memoryCacheVersions.set(cacheKey, version);
-          return data.value;
-        }
-        return memoryCache.get(cacheKey);
-      }
-    }
-    return fallback;
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (!isCurrent() || invalidation !== readInvalidations.get(cacheKey)) return;
+    if (sessionError) throw sessionError;
+    if (!sessionData.session) return;
+    const cachedVersion = memoryCacheVersions.get(cacheKey);
+    const { data, error } = await supabase
+      .from("tenant_settings")
+      .select("value,version")
+      .eq("tenant_id", tenantId)
+      .eq("key", key)
+      .maybeSingle();
+    if (error) throw error;
+    if (!isCurrent() || invalidation !== readInvalidations.get(cacheKey)) return;
+    const version = Number(data?.version || 0);
+    if (data && version < (memoryCacheVersions.get(cacheKey) ?? 0)) return;
+    // An absent snapshot has no row version: do not let it erase a confirmed
+    // write or Realtime insert that completed while this request was in flight.
+    if (!data && cachedVersion !== memoryCacheVersions.get(cacheKey)) return;
+    memoryCache.set(cacheKey, data ? data.value : MISSING_SETTING);
+    memoryCacheMeta.set(cacheKey, Date.now());
+    memoryCacheVersions.set(cacheKey, version);
   })();
 
   pendingReads.set(cacheKey, readPromise);
   try {
-    const value = await readPromise;
-    return generation === settingsGeneration ? value as T : fallback;
+    await readPromise;
   } catch {
-    if (generation === settingsGeneration && memoryCache.has(cacheKey)) return memoryCache.get(cacheKey) as T;
-    return fallback;
+    // Keep a previous confirmed value available, but leave failures retryable.
   } finally {
     if (pendingReads.get(cacheKey) === readPromise) pendingReads.delete(cacheKey);
   }
+  return isCurrent() ? cachedValue(cacheKey, fallback) : fallback;
 }
 
 /** Bypass the short-lived cache after a rejected optimistic write. */
 export async function readCloudSettingFresh<T>(key: string, fallback: T, options: { requireConfirmed?: boolean } = {}): Promise<T> {
+  const startedTenant = activeTenantId;
+  const startedGeneration = settingsGeneration;
   const tenantId = await getCurrentTenantId();
+  if (!isResolvedReadScopeCurrent(tenantId, startedTenant, startedGeneration)) {
+    if (options.requireConfirmed) throw new Error("CLOUD_SETTING_SESSION_CHANGED_DURING_READ");
+    return fallback;
+  }
   if (!tenantId) {
+    ensureTenantScope(null);
     if (options.requireConfirmed) throw new Error("CLOUD_SETTING_TENANT_REQUIRED");
     return fallback;
   }
   ensureTenantScope(tenantId);
   const generation = settingsGeneration;
+  const cacheKey = scopedKey(key, tenantId);
+  const invalidation = readInvalidations.get(cacheKey) ?? 0;
+  readInvalidations.set(cacheKey, invalidation);
   const { data, error } = await supabase.from("tenant_settings")
     .select("value,version")
     .eq("tenant_id", tenantId)
@@ -194,14 +183,17 @@ export async function readCloudSettingFresh<T>(key: string, fallback: T, options
     if (options.requireConfirmed) throw new Error("CLOUD_SETTING_SESSION_CHANGED_DURING_READ");
     return fallback;
   }
-  const cacheKey = scopedKey(key, tenantId);
+  if (invalidation !== readInvalidations.get(cacheKey)) {
+    if (options.requireConfirmed) throw new Error("CLOUD_SETTING_STALE_READ");
+    return cachedValue(cacheKey, fallback);
+  }
   const version = Number(data?.version || 0);
   if (version < (memoryCacheVersions.get(cacheKey) ?? 0)) {
     if (options.requireConfirmed) throw new Error("CLOUD_SETTING_STALE_READ");
-    return (memoryCache.get(cacheKey) ?? fallback) as T;
+    return cachedValue(cacheKey, fallback) ?? fallback;
   }
   const value = (data?.value ?? fallback) as T;
-  memoryCache.set(cacheKey, value);
+  memoryCache.set(cacheKey, data ? data.value : MISSING_SETTING);
   memoryCacheMeta.set(cacheKey, Date.now());
   memoryCacheVersions.set(cacheKey, version);
   return value;
@@ -406,24 +398,47 @@ export async function mutateCloudObjectSetting<T extends object>(
   throw new Error("STORE_CONCURRENT_UPDATE_RETRY_EXHAUSTED");
 }
 
-/** Subscribe to live tenant setting changes. */
-export function subscribeCloudSetting<T>(
-  key: string,
-  cb: (value: T) => void,
-): () => void {
-  if (isAuthPage()) return () => {};
+function invalidateSettingRead(cacheKey: string): void {
+  readInvalidations.set(cacheKey, (readInvalidations.get(cacheKey) ?? 0) + 1);
+  memoryCache.delete(cacheKey);
+  memoryCacheMeta.delete(cacheKey);
+  memoryCacheVersions.delete(cacheKey);
+  pendingReads.delete(cacheKey);
+}
 
-  if (!tenantSettingsChannel) {
+function ensureTenantSettingsChannel(): void {
+  if (!tenantSettingsChannel && activeTenantId && settingListeners.size > 0 && !isAuthPage()) {
+    const tenantId = activeTenantId;
+    const generation = settingsGeneration;
+    const channelVersion = ++tenantSettingsChannelVersion;
     tenantSettingsChannel = supabase
-      .channel("tenant_settings")
+      // The SDK reuses a channel with the same topic until async removal ends.
+      .channel(`tenant_settings:${tenantId}:${generation}:${channelVersion}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "tenant_settings" },
         (payload) => {
-          const row = (payload.new ?? payload.old) as { tenant_id?: string; key?: string; value?: unknown; version?: number } | null;
-          if (!activeTenantId || row?.tenant_id !== activeTenantId) return;
+          if (!tenantSettingsChannel || channelVersion !== tenantSettingsChannelVersion || generation !== settingsGeneration || activeTenantId !== tenantId) return;
+          const deleted = payload.eventType === "DELETE";
+          const row = (deleted ? payload.old : payload.new) as { tenant_id?: string; key?: string; value?: unknown; version?: number } | null;
+          if (deleted) {
+            if (row?.tenant_id && row.tenant_id !== tenantId) return;
+            if (row?.tenant_id && row.key) {
+              const cacheKey = scopedKey(row.key, tenantId);
+              if (row.version !== undefined && Number(row.version) < (memoryCacheVersions.get(cacheKey) ?? 0)) return;
+              invalidateSettingRead(cacheKey);
+            } else {
+              // Under RLS a DELETE can contain only its primary key. Treat it
+              // as invalidation, never as an empty value for every subscriber.
+              new Set([...memoryCache.keys(), ...readInvalidations.keys(), ...pendingReads.keys()])
+                .forEach(invalidateSettingRead);
+            }
+            return;
+          }
+          if (row?.tenant_id !== tenantId) return;
           if (row?.key && row.value !== undefined) {
-            const cacheKey = scopedKey(row.key, row.tenant_id || activeTenantId);
+            const cacheKey = scopedKey(row.key, tenantId);
+            if (!memoryCache.has(cacheKey) && !readInvalidations.has(cacheKey) && !settingListeners.has(row.key)) return;
             const version = Number(row.version || 0);
             if (version < (memoryCacheVersions.get(cacheKey) ?? 0)) return;
             memoryCache.set(cacheKey, row.value);
@@ -436,6 +451,14 @@ export function subscribeCloudSetting<T>(
       )
       .subscribe();
   }
+}
+
+/** Subscribe to live tenant setting changes. */
+export function subscribeCloudSetting<T>(
+  key: string,
+  cb: (value: T) => void,
+): () => void {
+  if (isAuthPage()) return () => {};
 
   let listeners = settingListeners.get(key);
   if (!listeners) {
@@ -444,6 +467,7 @@ export function subscribeCloudSetting<T>(
   }
   const listener: SettingListener = (value) => cb(value as T);
   listeners.add(listener);
+  ensureTenantSettingsChannel();
   return () => {
     const current = settingListeners.get(key);
     if (!current) return;

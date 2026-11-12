@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { readExpenseCategoryRows, invalidateExpenseCategoryRows } from "@/lib/expenses/expenseCategoryReader";
 
 /** Read-only compatibility view for legacy expense forms. The canonical source is expense_categories. */
 export interface FinanceCategory {
@@ -66,7 +67,7 @@ export const expenseCategoriesStore = {
   getAll(): FinanceCategory[] {
     if (!started) {
       started = true;
-      queueMicrotask(() => { void expenseCategoriesStore.refresh().catch((error) => console.warn("[expense categories] initial read failed", error)); });
+      queueMicrotask(() => { void expenseCategoriesStore.refresh(false).catch((error) => console.warn("[expense categories] initial read failed", error)); });
     }
     return rows;
   },
@@ -76,7 +77,7 @@ export const expenseCategoriesStore = {
     expenseCategoriesStore.getAll();
     return () => { listeners.delete(listener); };
   },
-  async refresh(): Promise<void> {
+  async refresh(force = true): Promise<void> {
     started = true;
     const version = ++requestVersion;
     const currentTenantId = await getCurrentTenantId();
@@ -84,15 +85,11 @@ export const expenseCategoriesStore = {
     if (!currentTenantId) { clear(); return; }
     watchTenant(currentTenantId);
     const readVersion = requestVersion;
-    const { data, error } = await supabase.from("expense_categories")
-      .select("id,name,name_ar,name_en,description,description_ar,description_en,color,active,is_active,created_at")
-      .eq("tenant_id", currentTenantId);
+    if (force) await invalidateExpenseCategoryRows(currentTenantId);
+    let data: Record<string, unknown>[];
+    try { data = await readExpenseCategoryRows(currentTenantId); }
+    catch (error) { if (readVersion === requestVersion) { rows = []; notify(); } throw error; }
     if (readVersion !== requestVersion || await getCurrentTenantId() !== currentTenantId) return;
-    if (error) {
-      rows = [];
-      notify();
-      throw new Error(error.message || "تعذر قراءة تصنيفات المصروفات");
-    }
     rows = (data || []).map((row) => toFinanceCategory(row as Record<string, unknown>))
       .filter((row) => row.id && row.name);
     notify();
@@ -108,6 +105,6 @@ if (typeof window !== "undefined") {
     if (userId === activeUserId) return;
     activeUserId = userId;
     clear();
-    setTimeout(() => { void expenseCategoriesStore.refresh().catch((error) => console.warn("[expense categories] auth refresh failed", error)); }, 0);
+    if (started && userId) setTimeout(() => { void expenseCategoriesStore.refresh().catch((error) => console.warn("[expense categories] auth refresh failed", error)); }, 0);
   });
 }

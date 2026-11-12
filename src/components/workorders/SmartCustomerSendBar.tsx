@@ -1,10 +1,11 @@
 // شريط إرسال ذكي للعميل — 3 رسائل سريعة (حالة فقط / صورة فقط / كلاهما)
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Image as ImgIcon, Bell, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
-import { buildCustomerPortalUrl, ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
+import { buildCustomerPortalUrl } from "@/lib/customerPortalTokens";
+import { useWorkOrderPortalToken } from "@/hooks/useWorkOrderPortalToken";
 
 interface Props {
   jobOrderId: string;          // cloud uuid
@@ -15,21 +16,8 @@ interface Props {
 }
 
 export default function SmartCustomerSendBar({ jobOrderId, orderNumber, status, customerName, customerPhone }: Props) {
-  const [token, setToken] = useState<string | null>(null);
+  const portal=useWorkOrderPortalToken(jobOrderId);
   const [busy, setBusy] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const data = await ensureCustomerPortalToken(jobOrderId);
-      if (mounted) setToken(data?.token || null);
-    })();
-    return () => { mounted = false; };
-  }, [jobOrderId]);
-
-  function trackUrl() {
-    return buildCustomerPortalUrl(token);
-  }
 
   async function send(kind: "status" | "photo" | "both") {
     if (!customerPhone) { toast.error("لا يوجد رقم هاتف للعميل"); return; }
@@ -44,7 +32,8 @@ export default function SmartCustomerSendBar({ jobOrderId, orderNumber, status, 
       } else {
         msg = `${greet}تم إضافة صورة وتحديث الحالة لأمر العمل ${orderNumber}.\nالحالة الحالية: *${status}*`;
       }
-      const link = trackUrl();
+      const token=portal.data?.token||(await portal.ensure()).token;
+      const link = buildCustomerPortalUrl(token);
       if (link) msg += `\n\n🔗 تابع التفاصيل: ${link}`;
       await sendWhatsAppMessage({
         message: msg,

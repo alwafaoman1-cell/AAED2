@@ -9,6 +9,7 @@ import {
 } from "@/lib/expenses/expenseDuplicateGuard";
 import { nextExpenseVoucherNumber } from "@/lib/expenseVoucherNumbering";
 import { deriveExpenseTotals } from "@/lib/expenses/expenseTotals";
+import { readExpenseCategoryRows, invalidateExpenseCategoryRows } from "@/lib/expenses/expenseCategoryReader";
 
 export type ExpenseScope = "work_order" | "operating";
 export type WorkOrderChannel = "cash" | "insurance";
@@ -120,12 +121,8 @@ export function normalizeLegacyExpenseAmounts<T extends Record<string, any>>(row
 }
 
 export async function listExpenseCategories(tenantId: string, includeInactive = true) {
-  let q = (supabase.from("expense_categories") as any).select("*").eq("tenant_id", tenantId)
-    .order("level").order("sort_order").order("name_en");
-  if (!includeInactive) q = q.eq("is_active", true);
-  const { data, error } = await q;
-  if (error) fail(error);
-  return (data || []).map(normalizeExpenseCategoryRow);
+  const rows = await readExpenseCategoryRows(tenantId);
+  return rows.filter((row) => includeInactive || row.is_active === true).map(normalizeExpenseCategoryRow);
 }
 
 export async function getExpenseCategory(tenantId: string, id: string) {
@@ -140,22 +137,25 @@ export async function saveExpenseCategory(tenantId: string, userId: string, valu
     ? (supabase.from("expense_categories") as any).update(payload).eq("tenant_id", tenantId).eq("id", id)
     : (supabase.from("expense_categories") as any).insert(payload);
   const { data, error } = await query.select("*").single();
-  if (error) fail(error); return data as ExpenseCategoryRow;
+  if (error) fail(error); await invalidateExpenseCategoryRows(tenantId); return data as ExpenseCategoryRow;
 }
 
 export async function disableExpenseCategory(tenantId: string, id: string, userId: string) {
   const { data, error } = await (supabase.from("expense_categories") as any).update({ is_active: false, active: false, updated_by: userId })
     .eq("tenant_id", tenantId).eq("id", id).select("*").single();
-  if (error) fail(error); return data as ExpenseCategoryRow;
+  if (error) fail(error); await invalidateExpenseCategoryRows(tenantId); return data as ExpenseCategoryRow;
 }
 
 export async function deleteExpenseCategory(tenantId: string, id: string) {
   const { error } = await (supabase.from("expense_categories") as any).delete().eq("tenant_id", tenantId).eq("id", id);
   if (error) fail(error);
+  await invalidateExpenseCategoryRows(tenantId);
 }
 
 export async function listCategoryAudit(tenantId: string, categoryId?: string) {
-  let q = (supabase as any).from("expense_category_audit_logs").select("*").eq("tenant_id", tenantId)
+  // This list shows identity/action/time only; full before/after snapshots can
+  // be much larger than the categories themselves and are not rendered here.
+  let q = (supabase as any).from("expense_category_audit_logs").select("id,created_at,action,category_id,user_id").eq("tenant_id", tenantId)
     .order("created_at", { ascending: false }).limit(100);
   if (categoryId) q = q.eq("category_id", categoryId);
   const { data, error } = await q; if (error) fail(error); return data || [];

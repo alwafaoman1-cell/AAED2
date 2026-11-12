@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
+import { resolveVehicleThumbnailUrls } from "@/lib/vehicleThumbnailUrls";
 
 export interface ClaimRearPhotoTarget {
   id: string;
@@ -67,10 +67,10 @@ async function loadRearPhotos(
   return rows;
 }
 
-async function signSelectedPhotos(selected: Record<string, RearPhotoRow>): Promise<Record<string, string>> {
+async function signSelectedPhotos(tenantId: string, selected: Record<string, RearPhotoRow>): Promise<Record<string, string>> {
   const ids = Object.keys(selected);
   if (!ids.length) return {};
-  const signed = await resolveVehicleMediaUrls(ids.map((id) => selected[id]));
+  const signed = await resolveVehicleThumbnailUrls(tenantId, ids.map((id) => selected[id]));
   return Object.fromEntries(ids.map((id, index) => [id, signed[index].url]).filter(([, url]) => !!url));
 }
 
@@ -81,7 +81,7 @@ export async function getClaimRearThumbnailUrls(
   const vehicleIds = Array.from(new Set(claims.map((claim) => claim.vehicle_id).filter((id): id is string => !!id)));
   if (!tenantId || !vehicleIds.length) return {};
   const rows = await loadRearPhotos(tenantId, "vehicle_id", vehicleIds);
-  return signSelectedPhotos(selectClaimRearPhotos(claims, rows));
+  return signSelectedPhotos(tenantId, selectClaimRearPhotos(claims, rows));
 }
 
 /** Entry photos are matched by visit ID, so a later visit cannot replace the current visit's thumbnail. */
@@ -93,5 +93,5 @@ export async function getEntryRearThumbnailUrls(tenantId: string, entryIds: stri
   for (const row of rows) {
     if (row.vehicle_entry_id && !selected[row.vehicle_entry_id]) selected[row.vehicle_entry_id] = row;
   }
-  return signSelectedPhotos(selected);
+  return signSelectedPhotos(tenantId, selected);
 }

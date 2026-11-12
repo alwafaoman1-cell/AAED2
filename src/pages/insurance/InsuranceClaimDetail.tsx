@@ -238,6 +238,7 @@ export default function InsuranceClaimDetail() {
 
   // Linked inspection (from inspection module)
   const [linkedInspection, setLinkedInspection] = useState<InspectionRecord | null>(null);
+  const inspectionLinkRequest = useRef(0);
   const [showInspectionPicker, setShowInspectionPicker] = useState(false);
   const [showNewInspection, setShowNewInspection] = useState(false);
   const [inspectionsBefore, setInspectionsBefore] = useState<string[]>([]);
@@ -330,7 +331,11 @@ export default function InsuranceClaimDetail() {
     queryFn: () => loadClaimInspection(id!, existing!.inspection_id!),
     enabled: Boolean(!isNew && id && existing?.inspection_id), retry: false,
   });
-  useEffect(() => { setLinkedInspection(null); }, [id]);
+  useEffect(() => {
+    inspectionLinkRequest.current += 1;
+    setLinkedInspection(null);
+    return () => { inspectionLinkRequest.current += 1; };
+  }, [id]);
   useEffect(() => {
     if (persistedInspection.data) setLinkedInspection(persistedInspection.data);
   }, [persistedInspection.data]);
@@ -604,15 +609,32 @@ export default function InsuranceClaimDetail() {
   const removePart = (i: number) => setNeededParts((p) => p.filter((_, idx) => idx !== i));
 
   // ── Inspection import ──
-  const applyInspection = (ins: InspectionRecord) => {
-    setLinkedInspection(ins);
-    if (ins.damageType) {
-      setNotes((n) => {
-        const tag = `[فحص ${ins.id}] نوع الضرر: ${ins.damageType}`;
-        return n.includes(ins.id) ? n : (n ? `${n}\n${tag}` : tag);
-      });
+  const applyInspection = async (summary: InspectionRecord): Promise<boolean> => {
+    const request = ++inspectionLinkRequest.current;
+    try {
+      // Picker/getAll rows are summaries. Hydrate only the explicitly attached
+      // record before the claim PDF consumes item marks and annotated images.
+      let ins = await inspectionsStore.loadById(summary.id);
+      if (!ins) throw new Error(i18n.language.startsWith("ar") ? "لم يتم العثور على تقرير الفحص" : "Inspection report not found");
+      if (ins.kind === "insurance" && !ins.details?.insuranceInspectionReport) {
+        const legacyReport = await insuranceInspectionStore.load(ins.id);
+        if (legacyReport) ins = { ...ins, details: { ...ins.details, insuranceInspectionReport: legacyReport } };
+      }
+      if (request !== inspectionLinkRequest.current) return false;
+      const attached = ins;
+      setLinkedInspection(attached);
+      if (attached.damageType) {
+        setNotes((n) => {
+          const tag = `[فحص ${attached.id}] نوع الضرر: ${attached.damageType}`;
+          return n.includes(attached.id) ? n : (n ? `${n}\n${tag}` : tag);
+        });
+      }
+      toast.success(`تم ربط تقرير الفحص ${attached.id}`);
+      return true;
+    } catch (error: any) {
+      if (request === inspectionLinkRequest.current) toast.error(error?.message || (i18n.language.startsWith("ar") ? "تعذر تحميل تقرير الفحص" : "Could not load inspection report"));
+      return false;
     }
-    toast.success(`تم ربط تقرير الفحص ${ins.id}`);
   };
 
   const openNewInspection = () => {
@@ -627,7 +649,7 @@ export default function InsuranceClaimDetail() {
     const all = inspectionsStore.getAll();
     const beforeSet = new Set(inspectionsBefore);
     const created = all.find((i) => !beforeSet.has(i.id));
-    if (created) applyInspection(created);
+    if (created) void applyInspection(created);
     setInspectionsBefore([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showNewInspection]);
@@ -3663,10 +3685,12 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       {/* Inspection picker dialog */}
       <InspectionPickerDialog
         open={showInspectionPicker}
-        onOpenChange={setShowInspectionPicker}
-        onPick={(ins) => {
-          applyInspection(ins);
-          setShowInspectionPicker(false);
+        onOpenChange={(open) => {
+          if (!open) inspectionLinkRequest.current += 1;
+          setShowInspectionPicker(open);
+        }}
+        onPick={async (ins) => {
+          if (await applyInspection(ins)) setShowInspectionPicker(false);
         }}
       />
 
@@ -3981,18 +4005,19 @@ function OwnerAutocomplete({ value, onChange, onSelect, customers }: OwnerAutoPr
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Inspection picker dialog — pulls inspections from the local store
+// Inspection picker dialog — displays cloud-backed inspection summaries
 // (same data shown on the Inspection page) so the user can attach one.
 // ════════════════════════════════════════════════════════════════════════
 interface PickerProps {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onPick: (ins: InspectionRecord) => void;
+  onPick: (ins: InspectionRecord) => void | Promise<void>;
 }
 
 function InspectionPickerDialog({ open, onOpenChange, onPick }: PickerProps) {
   const [search, setSearch] = useState("");
   const [tick, setTick] = useState(0);
+  const [pickingId, setPickingId] = useState<string | null>(null);
 
   useEffect(() => inspectionsStore.subscribe(() => setTick((t) => t + 1)), []);
 
@@ -4037,7 +4062,12 @@ function InspectionPickerDialog({ open, onOpenChange, onPick }: PickerProps) {
               list.map((ins) => (
                 <button
                   key={ins.id}
-                  onClick={() => onPick(ins)}
+                  disabled={pickingId !== null}
+                  aria-busy={pickingId === ins.id}
+                  onClick={async () => {
+                    setPickingId(ins.id);
+                    try { await onPick(ins); } finally { setPickingId(null); }
+                  }}
                   className="w-full text-right p-3 rounded-lg border border-border hover:border-primary hover:bg-secondary/40 transition-all"
                 >
                   <div className="flex items-center justify-between gap-2 mb-1">

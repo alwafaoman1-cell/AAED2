@@ -4,6 +4,7 @@ import { getVehicleEntry, getVehicleEntryPresence, getVehicleVisitBillingKind, l
 import { getPrivateDocumentUrl } from "@/lib/documentExtraction/persistence";
 import {workshopDateTime} from "@/lib/workshopDateTime";
 import {hasConfirmedVehicleEntryWorkOrderLink} from "@/lib/vehicleEntryWorkOrderLink";
+import {isVehicleVisitAwaitingArrival} from "@/lib/vehicleVisitIntake";
 
 export const VISIT_STAGES = ["arrived", "approved", "in_progress", "ready", "delivered", "cancelled", "needs_review"] as const;
 export type VisitStage = typeof VISIT_STAGES[number];
@@ -50,7 +51,7 @@ export interface VehicleVisitItem {
   hasSignedTemporaryRelease?: boolean;
 }
 
-export const VEHICLE_CENTER_TABS = ["in_workshop", "with_customer", "delivered", "cancelled", "needs_review"] as const;
+export const VEHICLE_CENTER_TABS = ["in_workshop", "awaiting_arrival", "with_customer", "delivered", "cancelled", "needs_review"] as const;
 export type VehicleCenterTab = typeof VEHICLE_CENTER_TABS[number];
 export interface VehicleCenterFilters {
   channel?: "all" | "cash" | "insurance";
@@ -85,11 +86,12 @@ export interface VehicleCenterPage {
 /** Terminal operational evidence wins over a historical review warning.
  * A claim alone is never proof of an arrival, inspection or temporary exit. */
 export function getVehicleCenterTab(visit: VehicleVisitItem): VehicleCenterTab {
-  if (visit.entry?._claimOnly) return "needs_review";
   if (visit.operationalStage === "delivered" || visit.operationalStage === "cancelled") return visit.operationalStage;
+  if (visit.entry?._claimOnly) return "needs_review";
   if (visit.reviewReason) return "needs_review";
   const presence = getVehicleEntryPresence(visit.entry);
   if (presence === "in_workshop") return "in_workshop";
+  if (isVehicleVisitAwaitingArrival(visit.entry)) return "awaiting_arrival";
   return presence === "with_customer" && visit.hasSignedTemporaryRelease ? "with_customer" : "needs_review";
 }
 
@@ -101,7 +103,7 @@ export async function listVehicleVisitCenterPage(request: VehicleCenterPageReque
   if (request.filters?.channel && !["all", "cash", "insurance"].includes(request.filters.channel)) throw new Error("VEHICLE_CENTER_INVALID_REQUEST");
   const page = Math.max(1, Math.trunc(request.page || 1));
   const pageSize = Math.max(1, Math.min(100, Math.trunc(request.pageSize || 30)));
-  const { data, error } = await supabase.rpc("vehicle_visit_center_page_v1" as any, {
+  const { data, error } = await supabase.rpc("vehicle_visit_center_page_v3" as any, {
     p_tenant_id: tenantId, p_tab: request.tab, p_page: page, p_page_size: pageSize,
     p_filters: request.filters || {},
   } as any);
@@ -142,13 +144,15 @@ export async function listVehicleVisitCenterPage(request: VehicleCenterPageReque
 }
 
 /** Explicit all-matching export, bounded per request and fail-closed on drift/limits. */
-export async function listAllMatchingVehicleCenter(request: Omit<VehicleCenterPageRequest, "page" | "pageSize">): Promise<VehicleVisitItem[]> {
+export async function listAllMatchingVehicleCenter(request: Omit<VehicleCenterPageRequest, "page" | "pageSize"> & { expectedScopeToken?: string }): Promise<VehicleVisitItem[]> {
+  const { expectedScopeToken, ...query } = request;
   const items: VehicleVisitItem[] = [];
   const seen = new Set<string>();
   let expectedTotal: number | undefined;
   let expectedScope: string | undefined;
   for (let page = 1; ; page++) {
-    const result = await listVehicleVisitCenterPage({ ...request, page, pageSize: 100 });
+    const result = await listVehicleVisitCenterPage({ ...query, page, pageSize: 100 });
+    if (expectedScopeToken && result.scopeToken !== expectedScopeToken) throw new Error("VEHICLE_CENTER_EXPORT_CHANGED");
     expectedTotal ??= result.total;
     expectedScope ??= result.scopeToken;
     if (result.total !== expectedTotal || result.scopeToken !== expectedScope) throw new Error("VEHICLE_CENTER_EXPORT_CHANGED");
@@ -199,7 +203,8 @@ export function resolveVehicleVisit(entry: any, workflow: VehicleVisitWorkflow |
   if (linkedClaim && (!claim || claim.vehicle_id !== entry.vehicle_id)) reviewReason ||= "claim_link_conflict";
   if (order && ((linkedClaim && (order.work_order_type !== "insurance" || order.claim_id !== linkedClaim))
     || (!linkedClaim && order.work_order_type === "insurance"))) reviewReason ||= "work_order_channel_conflict";
-  if (getVehicleVisitBillingKind(entry) === "insurance" && !linkedClaim) reviewReason ||= "insurance_claim_required";
+  // Preparing an insurance intake is valid before claim/approval/billing.
+  // Approval/start guards still require the correctly linked approved claim.
   if ((entry.status === "Cancelled" || ["cancelled", "rejected"].includes(claim?.status))
     && order && order.status !== "delivered") reviewReason ||= "cancelled_with_active_work_order";
   if (entry.work_order_id && entry.converted_work_order_id && entry.work_order_id !== entry.converted_work_order_id) reviewReason ||= "work_order_link_conflict";
@@ -216,7 +221,7 @@ export function resolveVehicleVisit(entry: any, workflow: VehicleVisitWorkflow |
     reviewReason = "delivery_without_signed_handover";
   if (workflow?.stage === "delivered" && !hasFinalHandover) reviewReason ||= "delivery_without_signed_handover";
   if (getVehicleEntryPresence(entry) === "with_customer" && !hasFinalHandover && !hasSignedTemporaryRelease
-    && !claim?.cancelled_handover_signed_at) reviewReason ||= "exit_without_signed_release";
+    && !claim?.cancelled_handover_signed_at && !isVehicleVisitAwaitingArrival(entry)) reviewReason ||= "exit_without_signed_release";
   // A legacy entry with no persisted workflow is a read-only projection. Never
   // rewrite or advance its history simply because the dashboard was opened.
   let stage: PersistedVisitStage = workflow?.stage || "arrived";
@@ -256,9 +261,11 @@ function omanDateTime(value: string | null | undefined): { date: string; time: s
 
 /** Read-only stage projection: a claim does not become a signed entry or handover. */
 export function deriveClaimOnlyStage(claim: any, order: any | null): VisitStage {
+  // Cancellation is a claim fact, not proof of physical arrival or delivery.
+  // Keep the missing-entry warning and action guards; never invent a receipt.
+  if (["cancelled", "rejected"].includes(claim.status)) return "cancelled";
   if (!claim.vehicle_id || (order && (order.claim_id !== claim.id || order.vehicle_id !== claim.vehicle_id
     || order.work_order_type !== "insurance"))) return "needs_review";
-  if (["cancelled", "rejected"].includes(claim.status)) return order ? "needs_review" : "cancelled";
   const delivered = Boolean(claim.delivered_at || claim.vehicle_delivered_at || order?.vehicle_delivered_at
     || order?.status === "delivered");
   if (delivered) return claim.vehicle_presence_status === "with_customer" ? "delivered" : "needs_review";
@@ -339,6 +346,7 @@ export function getVehicleVisitNextBlocker(
       || order?.vehicle_presence_status === "with_customer" || claim?.vehicle_presence_status === "with_customer") ? "workshopPresenceRequired"
     : next === "in_progress" && order && !["received", "inspection", "waiting_parts", "in_progress"].includes(order.status) ? "workOrderStatusInvalid"
     : next === "ready" && order?.status !== "completed" ? "finishWorkFirst"
+    : next === "delivered" && order && !["completed", "delivered"].includes(order.status) ? "deliveryWorkOrderConflict"
     : next === "delivered" && (!hasFinalHandover || order?.status !== "delivered" || !order?.vehicle_delivered_at) ? "signedHandoverRequired"
     : null;
 }
@@ -650,7 +658,7 @@ export async function getLinkedVehicleVisit(source: "claim" | "work_order", id: 
   }
   const [entryResult, workflowResult, handoverResult, releaseResult] = await Promise.all([
     supabase.from("vehicle_entries" as any).select(
-      "id,entry_number,arrival_date,arrival_time,vehicle_id,vehicle_location,status,insurance_company_id,insurance_snapshot,insurance_claim_id,converted_claim_id,work_order_id,converted_work_order_id,claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,vehicle_id,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,vehicle_id,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,vehicle_id,status,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,vehicle_id,status,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at)"
+      "id,entry_number,arrival_date,arrival_time,vehicle_id,vehicle_location,vehicle_condition,status,insurance_company_id,insurance_snapshot,insurance_claim_id,converted_claim_id,work_order_id,converted_work_order_id,claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,vehicle_id,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,vehicle_id,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,vehicle_id,status,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,vehicle_id,status,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at)"
     ).eq("tenant_id", tenantId).eq("id", entryId).is("deleted_at", null).maybeSingle(),
     supabase.from("vehicle_visit_workflows" as any).select("entry_id,tenant_id,vehicle_id,stage,revision,review_reason,changed_at,changed_by")
       .eq("tenant_id", tenantId).eq("entry_id", entryId).maybeSingle(),
@@ -744,4 +752,12 @@ export async function reconcileVehicleVisitCustody(entryId: string, reason: stri
     p_reason: reason.trim(),
   } as any);
   if (error) throw error;
+}
+
+export async function registerVehicleVisitArrival(entryId:string,expectedUpdatedAt:string,occurredAt:string):Promise<void>{
+  if(!expectedUpdatedAt||!Number.isFinite(Date.parse(occurredAt)))throw new Error("VEHICLE_VISIT_TIME_INVALID");
+  const {data,error}=await supabase.rpc("register_vehicle_visit_arrival" as any,{p_entry_id:entryId,p_expected_updated_at:expectedUpdatedAt,p_occurred_at:occurredAt} as any);
+  if(error)throw error;
+  const row=data as any;
+  if(row?.id!==entryId||row?.vehicle_location!=="داخل الورشة"||row?.vehicle_condition?.arrival_confirmation!=="confirmed")throw new Error("VEHICLE_VISIT_SAVE_NOT_CONFIRMED");
 }

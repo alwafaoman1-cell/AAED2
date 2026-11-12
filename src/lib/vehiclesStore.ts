@@ -600,53 +600,9 @@ function ensureVehiclesCloudSync() {
   // returning to the tab.
 }
 
-// ---------- push archive state to cloud ----------
-async function pushArchiveStateToCloud(v: Vehicle) {
-  try {
-    const tenantId = await getCurrentTenantId();
-    if (!tenantId) return;
-    const np = normPlate(v.plate);
-    if (!np) return;
-    const cloudId = KNOWN_CLOUD.get(np);
-    const payload = {
-      archived: !!v.archived,
-      archived_at: v.archived ? (v.archivedAt || new Date().toISOString()) : null,
-      archived_reason: v.archived ? (v.archivedReason || null) : null,
-    };
-    if (cloudId) {
-      const { error } = await supabase.from("vehicles").update(payload).eq("id", cloudId);
-      if (error) console.warn("[pushArchiveStateToCloud]", error);
-    } else {
-      // No matching cloud row — try by split plate within tenant.
-      const { extractPlateLetters, extractPlateDigits } = await import("@/lib/plateUtils");
-      const L = extractPlateLetters(v.plate);
-      const D = extractPlateDigits(v.plate);
-      const { error } = await supabase.from("vehicles")
-        .update(payload).eq("tenant_id", tenantId)
-        .eq("plate_letters", L).eq("plate_number", D);
-      if (error) console.warn("[pushArchiveStateToCloud:byPlate]", error);
-    }
-  } catch (e) {
-    console.warn("[pushArchiveStateToCloud] exception", e);
-  }
-}
-
-// Diff listener — push archive changes only.
-let _lastVehSnap = new Map(vehiclesStore.getAll().map((v) => [v.id, v]));
-vehiclesStore.subscribe(() => {
-  const current = vehiclesStore.getAll();
-  const currMap = new Map(current.map((v) => [v.id, v]));
-  for (const v of current) {
-    const prev = _lastVehSnap.get(v.id);
-    if (!prev) continue;
-    if (!!prev.archived !== !!v.archived ||
-        (prev.archivedAt || "") !== (v.archivedAt || "") ||
-        (prev.archivedReason || "") !== (v.archivedReason || "")) {
-      pushArchiveStateToCloud(v);
-    }
-  }
-  _lastVehSnap = currMap;
-});
+// Cloud hydration, realtime reads and failed-write reconciliation are reads,
+// not user commands. The confirmed mutation handler above is the only legacy
+// write path; never echo a snapshot/archive diff back into either data source.
 
 if (typeof window !== "undefined") {
   let lastUid: string | null = null;

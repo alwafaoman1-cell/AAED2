@@ -4,6 +4,7 @@ import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
 import { buildTechnicalDeclarationConditionSummary } from "@/lib/vehicleTechnicalDeclaration";
+import {inspectionReleaseDisplayValue} from './inspectionReleaseOptions';
 
 export interface InspectionReleaseForm {
   inspection_summary: string;
@@ -40,6 +41,7 @@ export interface InspectionReleaseRecord {
   signed_at: string | null;
   released_at: string | null;
   returned_at: string | null;
+  updated_at?: string;
 }
 
 export const emptyInspectionReleaseForm: InspectionReleaseForm = {
@@ -123,32 +125,85 @@ export async function listInspectionReleases(entryId: string): Promise<Inspectio
 }
 
 export async function markInspectionVehicleReturned(releaseId: string): Promise<InspectionReleaseRecord> {
+  const before=await getInspectionReleaseById(releaseId);
   const { data, error } = await supabase.rpc("mark_vehicle_inspection_return" as any, {
     p_release_id: releaseId,
   } as any);
   if (error) throw error;
   if (!data || typeof data !== "object" || !(data as any).returned_at) throw new Error("لم يتم تأكيد عودة المركبة في السحابة");
-  return data as unknown as InspectionReleaseRecord;
+  const verified=await getInspectionReleaseById(releaseId);
+  if(verified.tenant_id!==before.tenant_id||!verified.returned_at||verified.returned_at!==(data as any).returned_at)throw new Error('INSPECTION_RELEASE_RETURN_UNCONFIRMED');
+  return verified;
+}
+
+export async function getInspectionReleaseById(releaseId:string):Promise<InspectionReleaseRecord>{
+  const tenantId=await getCurrentTenantId();
+  if(!tenantId)throw new Error('INSPECTION_RELEASE_TENANT_REQUIRED');
+  const {data,error}=await supabase.from('vehicle_inspection_releases' as any).select('*').eq('tenant_id',tenantId).eq('id',releaseId).single();
+  if(error)throw error;
+  const record=data as unknown as InspectionReleaseRecord|null;
+  if(!record||record.id!==releaseId||record.tenant_id!==tenantId||await getCurrentTenantId()!==tenantId)throw new Error('INSPECTION_RELEASE_READ_UNCONFIRMED');
+  return record;
+}
+
+export function inspectionReleaseSignatureMethod(record:InspectionReleaseRecord|null|undefined):'paper'|'electronic'{
+  return record?.entry_snapshot?.release_acknowledgement?.method==='paper'?'paper':'electronic';
+}
+
+export async function finalizeInspectionReleasePaper(releaseId:string,expectedUpdatedAt:string,releasedAt:string,paperConfirmed:boolean):Promise<InspectionReleaseRecord>{
+  if(!paperConfirmed||!expectedUpdatedAt||!Number.isFinite(Date.parse(releasedAt)))throw new Error('INSPECTION_RELEASE_PAPER_EVIDENCE_REQUIRED');
+  const before=await getInspectionReleaseById(releaseId);
+  const {data,error}=await supabase.rpc('finalize_vehicle_inspection_release_paper' as any,{
+    p_release_id:releaseId,p_expected_updated_at:expectedUpdatedAt,p_released_at:releasedAt,p_paper_confirmed:true,
+  } as any);
+  if(error)throw error;
+  if(!(data as any)?.id||(data as any).id!==releaseId)throw new Error('INSPECTION_RELEASE_EXIT_UNCONFIRMED');
+  const saved=await getInspectionReleaseById(releaseId);
+  if(saved.tenant_id!==before.tenant_id||saved.vehicle_entry_id!==before.vehicle_entry_id||saved.status!=='signed'||saved.returned_at
+    ||saved.signature_data_url||inspectionReleaseSignatureMethod(saved)!=='paper'||saved.entry_snapshot?.release_acknowledgement?.confirmed!==true
+    ||Date.parse(saved.released_at||'')!==Date.parse(releasedAt))throw new Error('INSPECTION_RELEASE_EXIT_UNCONFIRMED');
+  return saved;
+}
+
+export function normalizeInspectionReleaseForm(form:InspectionReleaseForm):InspectionReleaseForm{
+  return Object.fromEntries(Object.keys(emptyInspectionReleaseForm).map(key=>{
+    const limit=key==='notes'?1500:['pending_action','exit_condition','contents_handed_over'].includes(key)?1000:key==='keys_handed_over'?100:['recipient_id_number','recipient_phone','recipient_relation'].includes(key)?80:['recipient_name','staff_name'].includes(key)?160:2000;
+    return [key,String(form[key as keyof InspectionReleaseForm]??'').trim().slice(0,limit)];
+  })) as unknown as InspectionReleaseForm;
 }
 
 export async function saveInspectionRelease(entryId: string, form: InspectionReleaseForm): Promise<InspectionReleaseRecord> {
+  const tenantId=await getCurrentTenantId();
+  if(!tenantId)throw new Error('INSPECTION_RELEASE_TENANT_REQUIRED');
+  const expected=normalizeInspectionReleaseForm(form);
   const { data, error } = await supabase.rpc("save_vehicle_inspection_release" as any, {
     p_vehicle_entry_id: entryId,
-    p_form: form,
+    p_form: expected,
   } as any);
   if (error) throw error;
   if (!data || typeof data !== "object" || !(data as any).id) throw new Error("لم يتم تأكيد حفظ محضر المعاينة في السحابة");
-  return data as unknown as InspectionReleaseRecord;
+  const saved=data as unknown as InspectionReleaseRecord;
+  if(saved.tenant_id!==tenantId||saved.vehicle_entry_id!==entryId||saved.status!=='draft')throw new Error('INSPECTION_RELEASE_SAVE_UNCONFIRMED');
+  const verified=await getInspectionReleaseById(saved.id);
+  if(verified.tenant_id!==tenantId||verified.vehicle_entry_id!==entryId||verified.status!=='draft'
+    ||Object.keys(expected).some(key=>verified.form_data?.[key as keyof InspectionReleaseForm]!==expected[key as keyof InspectionReleaseForm]))throw new Error('INSPECTION_RELEASE_SAVE_UNCONFIRMED');
+  return verified;
 }
 
 export async function createInspectionReleaseLink(releaseId: string): Promise<{ url: string; expires_at: string }> {
+  const before=await getInspectionReleaseById(releaseId);
   const { data, error } = await supabase.rpc("create_vehicle_inspection_release_link" as any, {
     p_release_id: releaseId,
     p_expires_hours: 168,
   } as any);
   if (error) throw error;
   const response = data as any;
-  if (!response?.token || !response?.expires_at) throw new Error("تعذر إنشاء رابط التوقيع");
+  if (!/^[a-f0-9]{64}$/.test(response?.token||'')||response.release_id!==releaseId||!response.expires_at||!(new Date(response.expires_at).getTime()>Date.now())) throw new Error("تعذر إنشاء رابط التوقيع");
+  const verified=await getInspectionReleaseById(releaseId);
+  if(verified.tenant_id!==before.tenant_id||verified.vehicle_entry_id!==before.vehicle_entry_id||verified.status!=='awaiting_signature')throw new Error('INSPECTION_RELEASE_LINK_UNCONFIRMED');
+  const {data:publicRecord,error:publicError}=await supabase.rpc('get_vehicle_inspection_release_for_signature' as any,{p_token:response.token} as any);
+  if(publicError)throw publicError;
+  if(!(publicRecord as any)|| (publicRecord as any).error ||(publicRecord as any).release_number!==verified.release_number||(publicRecord as any).signed!==false)throw new Error('INSPECTION_RELEASE_LINK_UNCONFIRMED');
   return {
     url: `${window.location.origin}/vehicle-entry/inspection-release/sign/${encodeURIComponent(response.token)}`,
     expires_at: response.expires_at,
@@ -166,12 +221,15 @@ export async function createInspectionReleaseViewLink(releaseId: string): Promis
 }
 
 export async function reopenInspectionRelease(releaseId: string): Promise<InspectionReleaseRecord> {
+  const before=await getInspectionReleaseById(releaseId);
   const { data, error } = await supabase.rpc("reopen_vehicle_inspection_release" as any, {
     p_release_id: releaseId,
   } as any);
   if (error) throw error;
   if (!data || typeof data !== "object" || !(data as any).id) throw new Error("لم يتم تأكيد إلغاء رابط التوقيع");
-  return data as unknown as InspectionReleaseRecord;
+  const verified=await getInspectionReleaseById(releaseId);
+  if(verified.tenant_id!==before.tenant_id||verified.vehicle_entry_id!==before.vehicle_entry_id||verified.status!=='draft')throw new Error('INSPECTION_RELEASE_REOPEN_UNCONFIRMED');
+  return verified;
 }
 
 function escapeHtml(value: unknown): string {
@@ -211,20 +269,21 @@ export function buildInspectionReleaseHtml(
   const insurance = snapshot.insurance || {};
   const condition = snapshot.condition || {};
   const contents = snapshot.contents || {};
-  const form = release.form_data || emptyInspectionReleaseForm;
+  const form = Object.fromEntries(Object.entries(release.form_data || emptyInspectionReleaseForm).map(([key,value])=>[key,inspectionReleaseDisplayValue(key as keyof InspectionReleaseForm,String(value||''),language)])) as unknown as InspectionReleaseForm;
   const marks = Array.isArray(snapshot.damage_marks) ? snapshot.damage_marks : [];
   const selected = photos.filter((photo) => release.photo_media_ids?.includes(photo.id) && (photo.url || photo.public_url));
   const plate = [vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ");
   const heading = en ? "VEHICLE INSPECTION & TEMPORARY RELEASE" : "محضر معاينة وفحص وتسليم مؤقت للمركبة";
   const field = (ar: string, english: string, value: unknown) => row(en ? english : ar, value);
   const section = (ar: string, english: string) => `<h2>${en ? english : ar}</h2>`;
+  const paperSigned=release.status==='signed'&&inspectionReleaseSignatureMethod(release)==='paper';
   const status = release.status === "signed"
-    ? (en ? "Signed — Temporary release" : "موقّع — خروج مؤقت")
+    ? (paperSigned?(en?'Paper signature acknowledged — temporary exit recorded':'توقيع ورقي معتمد — خروج مؤقت مسجل'):(en ? "Signed — Temporary release" : "موقّع — خروج مؤقت"))
     : (en ? "Draft / Not signed" : "مسودة / غير موقّع");
   const logo = settings.logoUrl ? `<img class="logo" src="${escapeHtml(settings.logoUrl)}" alt="" />` : "";
   const photoHtml = selected.map((photo) => `<figure><img src="${escapeHtml(photo.url || photo.public_url)}" alt="" /><figcaption>${escapeHtml(photo.category || photo.file_name || "")}</figcaption></figure>`).join("");
   const markRows = marks.map((mark: any) => `<tr><td>${text(mark.mark_number)}</td><td>${text(mark.vehicle_part)}</td><td>${text(mark.damage_type)}</td><td>${text(mark.description || mark.notes)}</td></tr>`).join("");
-  const signature = release.status === "signed" && release.signature_data_url?.startsWith("data:image/png;base64,")
+  const signature = paperSigned?`<p>${en?'Signature on the retained paper original':'التوقيع على الأصل الورقي المحفوظ'}</p>`:release.status === "signed" && release.signature_data_url?.startsWith("data:image/png;base64,")
     ? `<img class="signature" src="${escapeHtml(release.signature_data_url)}" alt="" />` : "";
   const company = en ? settings.companyNameEn : settings.companyName;
   return `<!doctype html><html lang="${language}" dir="${en ? "ltr" : "rtl"}"><head><meta charset="utf-8" />

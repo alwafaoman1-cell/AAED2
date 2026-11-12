@@ -50,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPermissionsRole((p?.role as any) ?? null);
     // Do not start company-settings reads on logout or before tenant resolution.
     if (p?.tenant_id) {
-      import("@/lib/pdfGenerator").then((m) => m.loadTemplateSettingsFromCloud()).catch(() => {});
+      import("@/lib/pdfTemplateSettings").then((m) => m.loadTemplateSettingsFromCloud()).catch(() => {});
     }
   }, []);
 

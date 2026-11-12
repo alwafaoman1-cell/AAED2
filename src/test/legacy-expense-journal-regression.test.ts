@@ -107,10 +107,10 @@ describe("legacy expense journal reconciliation", () => {
     expect(journal.entries).toHaveLength(0);
   });
 
-  it("requires confirmed cloud hydration before an automatic expense reconciliation", () => {
+  it("never starts automatic historical expense reconciliation from navigation", () => {
     const bridge = readFileSync(resolve(process.cwd(), "src/lib/accountingBridge.ts"), "utf8");
-    expect(bridge).toContain("if (!expensesStore.isHydrated()) return;");
-    expect(bridge).toContain("await journalStore.refreshConfirmed();");
-    expect(bridge).not.toContain("  syncExpensesToJournal();");
+    expect(bridge).not.toContain("syncExpensesToJournal");
+    expect(bridge).not.toContain("expensesStore.subscribe");
+    expect(bridge).not.toContain("postExpense(");
   });
 });

@@ -61,9 +61,9 @@ describe('visit editor identity and wizard',()=>{
     expect(result.current.form.delivered_by).toEqual(before);
     act(()=>result.current.patchVehicle({make:'Dodge'}));expect(result.current.form.delivered_by).toEqual(before);
   });
-  it('requires customer phone/code and retains inspection inside until an actual exit',()=>{
+  it('requires customer phone/code and prepares an inspection with customer custody until actual arrival',()=>{
     const {result}=renderHook(()=>useVehicleEntryEditor());
-    expect(result.current.purpose).toBe('inspection');expect(result.current.form.vehicle_location).toBe('داخل الورشة');
+    expect(result.current.purpose).toBe('inspection');expect(result.current.form.vehicle_location).toBe('مع العميل');
     act(()=>result.current.goNext());expect(result.current.step).toBe(2);
     act(()=>result.current.patchCustomer({name:'Name only'}));act(()=>result.current.patchVehicle({plate_number:'24680',make:'Dodge'}));expect(result.current.canSave).toBe(false);
     act(()=>result.current.patchCustomer({phone:'99112233'}));expect(result.current.canSave).toBe(true);

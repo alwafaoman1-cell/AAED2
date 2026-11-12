@@ -39,7 +39,10 @@ describe("accounting core contract", () => {
     expect(unifiedRevenue).toContain("totalRevenue: sales.totalRevenue + insSubtotal");
     expect(monthlyReport).toContain("Claim approval/estimate journals are not actual revenue");
     expect(accountingPage).toContain("estimates/claim approvals are never included");
-    expect(accountingPage).toContain('if (entry.source === "insurance_claim") return false;');
+    const recentActivity = readFileSync(resolve(process.cwd(), "src/components/accounting/RecentAccountingEntries.tsx"), "utf8");
+    expect(recentActivity).toContain('if (entry.source === "insurance_claim") return false;');
+    expect(accountingPage).toContain("fetchExpenseDashboardSummary");
+    expect(accountingPage).not.toContain("journalStore.getAll()");
   });
 
   it("keeps estimated work-order costs outside actual cost and profit", () => {

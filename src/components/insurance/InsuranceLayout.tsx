@@ -17,6 +17,7 @@ function shouldHide(pathname: string) {
     "/insurance/companies",
     "/insurance/work-orders",
     "/insurance/accounting",
+    "/insurance/settlement-discounts",
     "/insurance/estimates",
     "/insurance/independent-estimates",
     "/insurance/documents",

@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/queryKeys";
 import { Plus, Trash2, Link as LinkIcon, Wallet, Package, Car, Shield, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,7 +14,7 @@ import { nextWorkOrderNumber } from "@/lib/numbering";
 import { customersStore } from "@/lib/customersStore";
 import CustomerPhoneLookup from "@/components/customers/CustomerPhoneLookup";
 import VehicleMakeModelPicker from "@/components/insurance/VehicleMakeModelPicker";
-import { getExpensesForWorkOrder } from "@/lib/expensesStore";
+import { getExpensesForWorkOrder, type ExpenseRecord } from "@/lib/expensesStore";
 import { getCustomerDepositBalance, getVehicleDepositBalance } from "@/lib/depositsStore";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -94,6 +96,7 @@ const empty: WorkOrder = {
 };
 
 interface Props {
+  linkedExpenseVouchers?: readonly ExpenseRecord[];
   onClose: () => void;
   onSaved?: (workOrder: WorkOrder) => void;
   initial?: WorkOrder | null;
@@ -131,8 +134,9 @@ function visitPrefillFields(prefillVisit: unknown): Partial<WorkOrder> {
   };
 }
 
-export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit }: Props) {
+export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit, linkedExpenseVouchers }: Props) {
   const { i18n } = useTranslation();
+  const queryClient = useQueryClient();
   const isEdit = !!initial;
   const prefillVehicleKey = vehiclePrefillFields(prefillVehicle);
   const prefillVisitKey = visitPrefillFields(prefillVisit);
@@ -478,8 +482,8 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
 
   // ===== Linked vouchers (read-only summary in edit mode) =====
   const linkedVouchers = useMemo(
-    () => isEdit && initial ? getExpensesForWorkOrder(initial) : [],
-    [isEdit, initial]
+    () => isEdit && initial ? linkedExpenseVouchers ?? getExpensesForWorkOrder(initial) : [],
+    [isEdit, initial, linkedExpenseVouchers]
   );
   const linkedVouchersTotal = linkedVouchers.reduce((sum, v) => sum + (Number(v.amount) || 0), 0);
 
@@ -596,7 +600,9 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
           customerRelationshipToVehicle: prev.customerRelationshipToVehicle || 'delivered_by',
         }));
       }
-      void import("@/lib/vehiclesStore").then((m) => m.refreshVehiclesFromCloud()).catch(() => {});
+      // Identity is already confirmed in public.vehicles. Refresh canonical,
+      // page-scoped readers instead of copying the registry into legacy settings.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.vehicles.all });
     } catch (error: any) {
       if (String(error?.message || "").includes("vin_candidate_requires_user_confirmation")) {
         toast.error("تم العثور على مركبة محتملة عبر VIN فقط. يجب تأكيد استخدام المركبة الموجودة قبل الحفظ.");
@@ -670,7 +676,7 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
       vehicleId: resolvedVehicleId,
       depositApplied: deposit,
       totalCost: finalTotal,
-      receivedAt: form.receivedAt || new Date().toISOString(),
+      receivedAt: form.receivedAt || (isEdit ? undefined : new Date().toISOString()),
     };
     try {
       const saved = await saveWorkOrderToCloud({ ...payload, id: targetOrderNumber });

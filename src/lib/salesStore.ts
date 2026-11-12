@@ -1280,7 +1280,7 @@ export function cryptoRandom() {
   return createUuid();
 }
 
-export function statusLabel(status: SalesDocStatus): { ar: string; en: string; cls: string } {
+export function statusLabel(status: SalesDocStatus | string): { ar: string; en: string; cls: string } {
   const map: Record<SalesDocStatus, { ar: string; en: string; cls: string }> = {
     draft:     { ar: "مسودة", en: "Draft", cls: "bg-muted text-muted-foreground" },
     sent:      { ar: "مرسلة", en: "Sent", cls: "bg-info/15 text-info" },
@@ -1292,5 +1292,11 @@ export function statusLabel(status: SalesDocStatus): { ar: string; en: string; c
     cancelled: { ar: "ملغاة", en: "Cancelled", cls: "bg-muted text-muted-foreground line-through" },
     converted: { ar: "محولة لفاتورة", en: "Converted", cls: "bg-success/15 text-success" },
   };
-  return map[status];
+  // Display compatibility is not a collection-state rewrite. Older/imported
+  // rows can expose issuance states; never infer paid/unpaid or mutate them.
+  if (Object.prototype.hasOwnProperty.call(map, status)) return map[status as SalesDocStatus];
+  if (status === "issued") return { ar: "صادرة", en: "Issued", cls: "bg-info/15 text-info" };
+  if (status === "credited") return { ar: "صدر إشعار دائن", en: "Credited", cls: "bg-muted text-muted-foreground" };
+  const raw = typeof status === "string" && status ? status : "—";
+  return { ar: `حالة غير معروفة: ${raw}`, en: `Unknown status: ${raw}`, cls: "bg-warning/15 text-warning" };
 }

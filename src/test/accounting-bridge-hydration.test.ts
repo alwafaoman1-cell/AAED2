@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 const state = vi.hoisted(() => ({
   hydrated: false,
@@ -50,7 +51,7 @@ describe("accounting bridge startup", () => {
     state.refreshJournal.mockClear();
   });
 
-  it("does not post from an empty journal cache while cloud hydration is pending", async () => {
+  it("never installs navigation-triggered posting or archive reconciliation, even after hydration", async () => {
     const { startAccountingBridge } = await import("@/lib/accountingBridge");
     startAccountingBridge();
     await Promise.resolve();
@@ -58,25 +59,35 @@ describe("accounting bridge startup", () => {
     expect(state.refreshJournal).not.toHaveBeenCalled();
 
     state.hydrated = true;
+    expect(state.expenseListener).toBeNull();
     state.expenseListener?.();
-    await vi.waitFor(() => expect(state.refreshJournal).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(state.refreshJournal).not.toHaveBeenCalled();
     expect(state.postExpense).not.toHaveBeenCalled();
-
-    state.resolveJournal?.();
-    await vi.waitFor(() => expect(state.postExpense).toHaveBeenCalledTimes(1));
   });
 
-  it("drops a stale reconciliation after the tenant scope changes", async () => {
+  it("remains read-only on repeated startup and tenant changes", async () => {
     const { startAccountingBridge } = await import("@/lib/accountingBridge");
     startAccountingBridge();
     await Promise.resolve();
     state.hydrated = true;
-    state.expenseListener?.();
-    await vi.waitFor(() => expect(state.refreshJournal).toHaveBeenCalledTimes(1));
-
+    startAccountingBridge();
     state.scopeVersion += 1;
-    state.resolveJournal?.();
+    startAccountingBridge();
     await Promise.resolve();
     expect(state.postExpense).not.toHaveBeenCalled();
+    expect(state.refreshJournal).not.toHaveBeenCalled();
+    expect(state.expenseListener).toBeNull();
+  });
+
+  it("keeps layouts and the compatibility facade free of vehicle mutation subscriptions", () => {
+    const layout = readFileSync("src/components/AppLayout.tsx", "utf8");
+    const bridge = readFileSync("src/lib/accountingBridge.ts", "utf8");
+    expect(layout).not.toContain("startAccountingBridge");
+    expect(bridge).not.toMatch(/syncVehicleArchive|archiveVehicleByPlate|subscribeWorkOrders|vehiclesStore\.(update|remove)|postExpense\(/);
+    const vehicles = readFileSync("src/lib/vehiclesStore.ts", "utf8");
+    expect(vehicles).not.toContain("pushArchiveStateToCloud");
+    expect(vehicles).not.toContain("_lastVehSnap");
+    expect(vehicles).toContain("vehiclesStore.setMutationHandler");
   });
 });

@@ -10030,6 +10030,14 @@ export type Database = {
       }
     }
     Functions: {
+      register_vehicle_visit_arrival: {
+        Args: {p_entry_id:string;p_expected_updated_at:string;p_occurred_at:string}
+        Returns: Json
+      }
+      work_orders_summary_page_rpc: {
+        Args: { p_tenant_id: string; p_page?: number; p_page_size?: number; p_search?: string; p_filters?: Json }
+        Returns: Json
+      }
       create_vehicle_inspection_release_view_link: {
         Args: { p_release_id: string; p_expires_hours?: number }
         Returns: Json

@@ -4,13 +4,14 @@ import { Car } from "lucide-react";
 interface VehicleRearThumbnailProps {
   url?: string | null;
   alt: string;
+  size?: "sm" | "card";
 }
 
 /** A small, read-only view of the entry's existing rear photo. */
-export function VehicleRearThumbnail({ url, alt }: VehicleRearThumbnailProps) {
+export function VehicleRearThumbnail({ url, alt, size = "sm" }: VehicleRearThumbnailProps) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [url]);
-  const className = "h-11 w-11 shrink-0 rounded-md border border-border bg-muted object-cover";
+  const className = `${size === "card" ? "h-16 w-16" : "h-11 w-11"} shrink-0 rounded-md border border-border bg-muted object-cover`;
 
   return url && !failed ? (
     <img src={url} alt={alt} loading="lazy" decoding="async" onError={() => setFailed(true)} className={className} />

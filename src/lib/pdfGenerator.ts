@@ -6,7 +6,10 @@ import type { DocType } from "./printTemplates/schema";
 import QRCode from "qrcode";
 import { openSanitizedPdfWindow } from "./safePdfWindow";
 import { buildPublicUrl } from "./publicAccessSettingsStore";
-import { readCloudSetting, subscribeCloudSetting, writeCloudSetting } from "./cloudSettings";
+import { getTemplateSettings, STAMP_SIZE_PX, type PdfTemplateSettings } from "./pdfTemplateSettings";
+import { escapeHtml, safePdfImageSrc } from "./safeHtml";
+// Compatibility API: all callers share the lightweight module's one cache.
+export * from "./pdfTemplateSettings";
 
 /** رابط تتبع عام آمن. المفتاح يجب أن يكون tracking_token وليس رقم الأمر أو UUID الداخلي. */
 export function getTrackingUrl(trackingToken?: string): string {
@@ -118,226 +121,30 @@ interface InspectionData {
   notes?: string;
 }
 
-// Stamp & signature configuration
-export type StampPosition = "bottom-right" | "bottom-left" | "bottom-center" | "watermark-center";
-export type StampSize = "sm" | "md" | "lg";
-
-// Template settings are stored in Supabase tenant_settings.
-export interface PdfTemplateSettings {
-  companyName: string;
-  companyNameEn: string;
-  commercialReg: string;
-  vatNumber: string;
-  phone: string;
-  email: string;
-  address: string;
-  addressEn?: string;
-  vatRate: number;
-  /** تفعيل/تعطيل الضريبة على المستندات افتراضياً */
-  taxEnabled?: boolean;
-  /** اسم الضريبة (يظهر في الفاتورة) */
-  taxName?: string;
-  taxNameEn?: string;
-  /** إذا true: السعر شامل الضريبة (Inclusive)، وإلا فالضريبة تضاف فوق السعر */
-  taxInclusive?: boolean;
-  /** عملة العرض (مثل: ر.ع، SAR، AED) */
-  currencySymbol?: string;
-  /** كود العملة الدولي للمستندات الإنجليزية */
-  currencyCode?: string;
-  /** عدد الخانات العشرية (الأصفار بعد الفاصلة) */
-  decimals?: number;
-  /** بادئة الدولة الافتراضية لأرقام الهواتف (بدون +)، مثل 968 */
-  defaultCountryCode?: string;
-  logoUrl?: string;
-  primaryColor: string;
-  showWatermark: boolean;
-  footerText: string;
-
-  // ===== Stamp & signature =====
-  stampUrl?: string;            // ختم الورشة
-  signatureUrl?: string;        // التوقيع
-  responsibleName?: string;     // اسم المسؤول النصي تحت التوقيع
-  stampEnabled: boolean;        // التشغيل العام للختم/التوقيع
-  stampPosition: StampPosition; // الموضع
-  stampSize: StampSize;         // الحجم
-  // التشغيل/الإيقاف لكل نوع مستند
-  stampOnInvoice: boolean;
-  stampOnQuote: boolean;
-  stampOnVoucher: boolean;
-  stampOnReport: boolean;
-  stampOnWorkOrder: boolean;
-  stampOnInspection: boolean;
-}
-
-const DEFAULT_SETTINGS: PdfTemplateSettings = {
-  companyName: "شركة الوفاء للأعمال المتكاملة",
-  companyNameEn: "Alwafa Integrated Services",
-  commercialReg: "XXXXXXXXXX",
-  vatNumber: "OM1XXXXXXXXX",
-  phone: "+968 9XXX XXXX",
-  email: "info@alwafa.om",
-  address: "مسقط، سلطنة عمان",
-  addressEn: "Muscat, Sultanate of Oman",
-  vatRate: 5,
-  taxEnabled: true,
-  taxName: "ضريبة القيمة المضافة",
-  taxNameEn: "VAT",
-  taxInclusive: false,
-  currencySymbol: "ر.ع",
-  currencyCode: "OMR",
-  decimals: 3,
-  defaultCountryCode: "968",
-  primaryColor: "#d4a537",
-  showWatermark: true,
-  footerText: "",
-  stampEnabled: false,
-  stampPosition: "bottom-center",
-  stampSize: "md",
-  stampOnInvoice: true,
-  stampOnQuote: true,
-  stampOnVoucher: true,
-  stampOnReport: true,
-  stampOnWorkOrder: false,
-  stampOnInspection: false,
-  responsibleName: "",
-};
-
-export const DEFAULT_PDF_TEMPLATE_SETTINGS: PdfTemplateSettings = { ...DEFAULT_SETTINGS };
-
-export const STAMP_SIZE_PX: Record<StampSize, number> = { sm: 100, md: 150, lg: 200 };
-
-// In-memory cache + listeners so async cloud loads can notify open screens.
-const CLOUD_KEY = "company_template_settings_v1";
-let templateCache: PdfTemplateSettings | null = null;
-let templateSettingsLoadedFromCloud = false;
-const templateListeners = new Set<() => void>();
-type TemplateAssetField = "logoUrl" | "stampUrl" | "signatureUrl";
-type TemplateIdentityField =
-  | "companyName"
-  | "companyNameEn"
-  | "commercialReg"
-  | "vatNumber"
-  | "phone"
-  | "email"
-  | "address";
-
-interface SaveTemplateSettingsOptions {
-  clearAssetFields?: TemplateAssetField[];
-}
-
-export function getTemplateSettings(): PdfTemplateSettings {
-  if (templateCache) return templateCache;
-  templateCache = { ...DEFAULT_SETTINGS };
-  void loadTemplateSettingsFromCloud();
-  return templateCache;
-}
-
-export async function getTemplateSettingsAsync(): Promise<PdfTemplateSettings> {
-  await loadTemplateSettingsFromCloud();
-  return getTemplateSettings();
-}
-
-export function subscribeTemplateSettings(cb: () => void): () => void {
-  templateListeners.add(cb);
-  return () => { templateListeners.delete(cb); };
-}
-
-function mergeTemplateSettingsForSave(
-  incoming: PdfTemplateSettings,
-  existing?: Partial<PdfTemplateSettings> | null,
-  options: SaveTemplateSettingsOptions = {},
-): PdfTemplateSettings {
-  const clearAssets = new Set(options.clearAssetFields || []);
-  const next = { ...DEFAULT_SETTINGS, ...(existing || {}), ...incoming } as PdfTemplateSettings;
-  for (const field of ["companyName", "companyNameEn", "commercialReg", "vatNumber", "phone", "email", "address"] as TemplateIdentityField[]) {
-    const value = incoming[field];
-    if ((value === undefined || value === "" || value === DEFAULT_SETTINGS[field]) && existing?.[field]) {
-      next[field] = existing[field] as string;
-    }
-  }
-  for (const field of ["logoUrl", "stampUrl", "signatureUrl"] as const) {
-    if (clearAssets.has(field)) {
-      delete next[field];
-      continue;
-    }
-    if (!incoming[field] && existing?.[field]) next[field] = existing[field];
-  }
-  return next;
-}
-
-export async function saveTemplateSettings(
-  settings: PdfTemplateSettings,
-  options: SaveTemplateSettingsOptions = {},
-): Promise<PdfTemplateSettings> {
-  const existing = await readCloudSetting<Partial<PdfTemplateSettings> | null>(CLOUD_KEY, null).catch(() => null);
-  const incomingUsesDefaultIdentity =
-    settings.companyName === DEFAULT_SETTINGS.companyName &&
-    settings.companyNameEn === DEFAULT_SETTINGS.companyNameEn &&
-    settings.commercialReg === DEFAULT_SETTINGS.commercialReg &&
-    settings.vatNumber === DEFAULT_SETTINGS.vatNumber &&
-    settings.phone === DEFAULT_SETTINGS.phone &&
-    settings.email === DEFAULT_SETTINGS.email &&
-    settings.address === DEFAULT_SETTINGS.address;
-  if (!existing && !templateSettingsLoadedFromCloud && incomingUsesDefaultIdentity) {
-    throw new Error("company_settings_not_loaded_refusing_default_overwrite");
-  }
-  const next = mergeTemplateSettingsForSave(settings, existing, options);
-  templateCache = { ...next };
-  templateListeners.forEach((cb) => { try { cb(); } catch (_error) { void _error; } });
-  await writeCloudSetting(CLOUD_KEY, next).catch((error) => {
-    console.warn("[pdfGenerator] Supabase template write failed", error);
-    throw error;
-  });
-  return next;
-}
-
-/** Load company/template settings from cloud and merge into local cache.
- *  Call after sign-in and once at app startup. Safe to call multiple times. */
-export async function loadTemplateSettingsFromCloud(): Promise<void> {
-  try {
-    const cloud = await readCloudSetting<Partial<PdfTemplateSettings> | null>(CLOUD_KEY, null);
-    if (cloud && typeof cloud === "object") {
-      const merged = { ...DEFAULT_SETTINGS, ...cloud } as PdfTemplateSettings;
-      templateCache = merged;
-      templateSettingsLoadedFromCloud = true;
-      templateListeners.forEach((cb) => { try { cb(); } catch (_error) { void _error; } });
-    } else {
-      return;
-    }
-  } catch { /* offline / not signed in — keep local */ }
-}
-
-
-if (typeof window !== "undefined") {
-  subscribeCloudSetting<Partial<PdfTemplateSettings>>(CLOUD_KEY, (value) => {
-    templateCache = { ...DEFAULT_SETTINGS, ...value } as PdfTemplateSettings;
-    templateSettingsLoadedFromCloud = true;
-    templateListeners.forEach((cb) => { try { cb(); } catch (_error) { void _error; } });
-  });
-}
 
 // Bilingual label helper
 const bi = (ar: string, en: string) =>
   `<span class="bi"><span class="ar">${ar}</span><span class="en">${en}</span></span>`;
 
 function getBaseStyles(s: PdfTemplateSettings) {
+  s = { ...s, primaryColor: safePdfColor(s.primaryColor) };
   return `
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Noto Sans Arabic','Inter','Segoe UI',Tahoma,sans-serif;direction:rtl;color:#1a1a2e;background:#f8f9fa;padding:0}
     .page{width:210mm;min-height:297mm;margin:8mm auto;background:white;padding:12mm 12mm 15mm;box-shadow:0 2px 20px rgba(0,0,0,0.1);position:relative;overflow:visible}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${s.primaryColor};padding-bottom:10px;margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${safePdfColor(s.primaryColor)};padding-bottom:10px;margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
     .company-info h1{font-size:17px;font-weight:700;color:#1a1a2e;margin-bottom:2px}
     .company-info .en-name{font-size:11.5px;color:#444;font-weight:600;margin-bottom:4px;font-family:'Inter',sans-serif;letter-spacing:0.3px}
     .company-info .details{font-size:8.8px;color:#888;line-height:1.55}
     .company-info .details .en-line{font-family:'Inter',sans-serif;direction:ltr;text-align:right;display:block}
-    .doc-badge{background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor,-15)});color:white;padding:8px 16px;border-radius:7px;text-align:center;min-width:145px}
+    .doc-badge{background:linear-gradient(135deg,${safePdfColor(s.primaryColor)},${adjustColor(s.primaryColor,-15)});color:white;padding:8px 16px;border-radius:7px;text-align:center;min-width:145px}
     .doc-badge .label-ar{font-size:11px;opacity:0.95;font-weight:600}
     .doc-badge .label-en{font-size:9px;opacity:0.85;font-family:'Inter',sans-serif;letter-spacing:0.5px;text-transform:uppercase}
     .doc-badge .number{font-size:17px;font-weight:700;direction:ltr;font-family:'Inter',sans-serif;margin:3px 0}
     .doc-badge .date{font-size:9.5px;opacity:0.85;font-family:'Inter',sans-serif;direction:ltr}
 
-    .section-title{font-size:12.5px;font-weight:600;color:${s.primaryColor};border-right:3px solid ${s.primaryColor};padding-right:9px;margin:14px 0 8px 0;display:flex;align-items:baseline;gap:10px;break-after:avoid;page-break-after:avoid}
+    .section-title{font-size:12.5px;font-weight:600;color:${safePdfColor(s.primaryColor)};border-right:3px solid ${safePdfColor(s.primaryColor)};padding-right:9px;margin:14px 0 8px 0;display:flex;align-items:baseline;gap:10px;break-after:avoid;page-break-after:avoid}
     .section-title .en{font-size:10px;color:#888;font-weight:500;font-family:'Inter',sans-serif;text-transform:uppercase;letter-spacing:0.8px}
 
     .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px 22px;margin-bottom:12px}
@@ -365,9 +172,9 @@ function getBaseStyles(s: PdfTemplateSettings) {
     .totals-row{display:flex;justify-content:space-between;align-items:center;padding:7px 14px;font-size:11.5px;gap:10px}
     .totals-row:not(:last-child){border-bottom:1px solid #eee}
     .totals-row .amount{font-family:'Inter',sans-serif;font-weight:600;direction:ltr}
-    .totals-row.total{background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor,-15)});color:white;font-weight:700;font-size:13.5px;line-height:1.3;min-height:48px;padding-top:10px;padding-bottom:12px}
+    .totals-row.total{background:linear-gradient(135deg,${safePdfColor(s.primaryColor)},${adjustColor(s.primaryColor,-15)});color:white;font-weight:700;font-size:13.5px;line-height:1.3;min-height:48px;padding-top:10px;padding-bottom:12px}
 
-    .notes-box{margin-top:12px;padding:9px 12px;background:#f8f9fa;border-radius:8px;border-right:3px solid ${s.primaryColor};font-size:10.3px;color:#555;line-height:1.55;break-inside:avoid;page-break-inside:avoid}
+    .notes-box{margin-top:12px;padding:9px 12px;background:#f8f9fa;border-radius:8px;border-right:3px solid ${safePdfColor(s.primaryColor)};font-size:10.3px;color:#555;line-height:1.55;break-inside:avoid;page-break-inside:avoid}
     .notes-box .label-en{display:block;font-size:9px;color:#999;font-family:'Inter',sans-serif;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
 
     .footer,.pdf-flow-footer{position:static!important;margin-top:3mm;text-align:center;font-size:7.2px;color:#8a94a6;border-top:1px solid #e5e7eb;padding-top:1.4mm;line-height:1.3;break-inside:avoid;page-break-inside:avoid;clear:both}
@@ -402,10 +209,15 @@ function adjustColor(hex: string, amount: number): string {
   return `#${(r << 16 | g << 8 | b).toString(16).padStart(6, '0')}`;
 }
 
+// This setting is interpolated in CSS, not in an HTML text context.
+function safePdfColor(value: string): string {
+  return /^#[\da-f]{6}$/i.test(value) ? value : "#d4a537";
+}
+
 function wrapHtml(title: string, styles: string, body: string): string {
   // ضمان عدم ظهور أرقام عربية هندية في أي مكان من المستند بعد التوليد
   const enforced = toEnglishDigits(body);
-  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>${toEnglishDigits(title)}</title><style>${styles}</style></head><body>${enforced}</body></html>`;
+  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>${escapeHtml(toEnglishDigits(title))}</title><style>${styles}</style></head><body>${enforced}</body></html>`;
 }
 
 // Currency formatter — English digits, OMR-style with configurable decimals + symbol
@@ -413,7 +225,7 @@ const omr = (n: number) => {
   const s = getTemplateSettings();
   const d = Math.max(0, Math.min(6, s.decimals ?? 3));
   const v = (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
-  return `<span class="currency">${toEnglishDigits(v)} ${s.currencyCode || "OMR"}</span>`;
+  return `<span class="currency">${toEnglishDigits(v)} ${escapeHtml(s.currencyCode || "OMR")}</span>`;
 };
 
 /** Centralized money formatter for UI — respects currency + decimals from settings */
@@ -426,37 +238,37 @@ export function formatMoney(n: number, opts?: { withSymbol?: boolean }): string 
 
 function headerHtml(s: PdfTemplateSettings, docLabelAr: string, docLabelEn: string, docNumber: string, docDate: string, badgeStyle = "") {
   const logoBlock = s.logoUrl
-    ? `<img src="${s.logoUrl}" alt="logo" style="max-height:62px;max-width:140px;object-fit:contain;margin-bottom:8px;display:block;" />`
+    ? `<img src="${safePdfImageSrc(s.logoUrl)}" alt="logo" style="max-height:62px;max-width:140px;object-fit:contain;margin-bottom:8px;display:block;" />`
     : '';
   return `
     <div class="header">
       <div class="company-info">
         ${logoBlock}
-        <h1>${s.companyName}</h1>
-        <div class="en-name">${s.companyNameEn}</div>
+        <h1>${escapeHtml(s.companyName)}</h1>
+        <div class="en-name">${escapeHtml(s.companyNameEn)}</div>
         <div class="details">
-          السجل التجاري / CR: ${s.commercialReg}<br/>
-          الرقم الضريبي / VAT: ${s.vatNumber}<br/>
-          ${s.phone} • ${s.email}<br/>
-          ${s.address}${s.addressEn ? `<span class="en-line">${s.addressEn}</span>` : ''}
+          السجل التجاري / CR: ${escapeHtml(s.commercialReg)}<br/>
+          الرقم الضريبي / VAT: ${escapeHtml(s.vatNumber)}<br/>
+          ${escapeHtml(s.phone)} • ${escapeHtml(s.email)}<br/>
+          ${escapeHtml(s.address)}${s.addressEn ? `<span class="en-line">${escapeHtml(s.addressEn)}</span>` : ''}
         </div>
       </div>
       <div class="doc-badge" ${badgeStyle ? `style="${badgeStyle}"` : ''}>
-        <div class="label-ar">${docLabelAr}</div>
-        <div class="label-en">${docLabelEn}</div>
-        <div class="number">${docNumber}</div>
-        <div class="date">${docDate}</div>
+        <div class="label-ar">${escapeHtml(docLabelAr)}</div>
+        <div class="label-en">${escapeHtml(docLabelEn)}</div>
+        <div class="number">${escapeHtml(docNumber)}</div>
+        <div class="date">${escapeHtml(docDate)}</div>
       </div>
     </div>`;
 }
 
 function footerHtml(s: PdfTemplateSettings) {
   if (s.footerText) {
-    return `<div class="footer">${s.footerText}</div>`;
+    return `<div class="footer">${escapeHtml(s.footerText)}</div>`;
   }
   return `<div class="footer">
-    ${s.companyName} • جميع الحقوق محفوظة © ${new Date().getFullYear()}
-    <span class="en">${s.companyNameEn} • All Rights Reserved © ${new Date().getFullYear()}</span>
+    ${escapeHtml(s.companyName)} • جميع الحقوق محفوظة © ${new Date().getFullYear()}
+    <span class="en">${escapeHtml(s.companyNameEn)} • All Rights Reserved © ${new Date().getFullYear()}</span>
   </div>`;
 }
 
@@ -470,16 +282,16 @@ export function pdfSignatureStampSectionHtml(options: {
   signatureTitle?: string;
   stampTitle?: string;
 }): string {
-  const signatureTitle = options.signatureTitle || "التوقيع / SIGNATURE";
-  const stampTitle = options.stampTitle || "ختم الشركة / COMPANY STAMP";
+  const signatureTitle = escapeHtml(options.signatureTitle || "التوقيع / SIGNATURE");
+  const stampTitle = escapeHtml(options.stampTitle || "ختم الشركة / COMPANY STAMP");
   const signature = options.signatureUrl
-    ? `<img src="${options.signatureUrl}" alt="signature" />`
+    ? `<img src="${safePdfImageSrc(options.signatureUrl)}" alt="signature" />`
     : `<div class="pdf-signature-line"></div>`;
   const responsible = options.responsibleName
-    ? `<div style="font-size:10px;color:#555;font-weight:600;margin-top:2mm;text-align:center;">${options.responsibleName}</div>`
+    ? `<div style="font-size:10px;color:#555;font-weight:600;margin-top:2mm;text-align:center;">${escapeHtml(options.responsibleName)}</div>`
     : "";
   const stamp = options.stampUrl
-    ? `<img src="${options.stampUrl}" alt="Company Stamp" />`
+    ? `<img src="${safePdfImageSrc(options.stampUrl)}" alt="Company Stamp" />`
     : "";
   return `<section class="pdf-signature-stamp pdf-keep no-break">
     <div class="pdf-signature-box">
@@ -527,19 +339,19 @@ export function stampSignatureHtml(
 
   const size = STAMP_SIZE_PX[s.stampSize] || 150;
   const stampImg = s.stampUrl
-    ? `<img src="${s.stampUrl}" alt="ختم" style="max-width:${size}px;max-height:${size}px;object-fit:contain;display:block;" />`
+    ? `<img src="${safePdfImageSrc(s.stampUrl)}" alt="ختم" style="max-width:${size}px;max-height:${size}px;object-fit:contain;display:block;" />`
     : "";
   const sigImg = s.signatureUrl
-    ? `<img src="${s.signatureUrl}" alt="توقيع" style="max-width:${size}px;max-height:${Math.round(size * 0.55)}px;object-fit:contain;display:block;" />`
+    ? `<img src="${safePdfImageSrc(s.signatureUrl)}" alt="توقيع" style="max-width:${size}px;max-height:${Math.round(size * 0.55)}px;object-fit:contain;display:block;" />`
     : "";
   const respName = s.responsibleName
-    ? `<div style="font-size:10px;color:#555;font-weight:600;margin-top:4px;text-align:center;">${s.responsibleName}</div>`
+    ? `<div style="font-size:10px;color:#555;font-weight:600;margin-top:4px;text-align:center;">${escapeHtml(s.responsibleName)}</div>`
     : "";
 
   // Watermark behind content
   if (s.stampPosition === "watermark-center" && s.stampUrl) {
     return `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-12deg);opacity:0.12;pointer-events:none;z-index:0;">
-      <img src="${s.stampUrl}" alt="ختم" style="max-width:${size * 1.6}px;max-height:${size * 1.6}px;object-fit:contain;" />
+      <img src="${safePdfImageSrc(s.stampUrl)}" alt="ختم" style="max-width:${size * 1.6}px;max-height:${size * 1.6}px;object-fit:contain;" />
     </div>`;
   }
 
@@ -577,32 +389,32 @@ export function getInvoiceHtml(data: InvoiceData): string {
   const itemsHtml = data.items.map((item, i) => `
     <tr>
       <td style="text-align:center;color:#888;">${i + 1}</td>
-      <td>${item.description}</td>
-      <td style="text-align:center;">${item.quantity}</td>
+      <td>${escapeHtml(item.description)}</td>
+      <td style="text-align:center;">${escapeHtml(item.quantity)}</td>
       <td style="text-align:center;">${omr(item.unitPrice)}</td>
       <td style="text-align:center;font-weight:600;">${omr(item.total)}</td>
     </tr>`).join('');
 
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'فاتورة ضريبية', 'TAX INVOICE', data.invoiceNumber, data.date)}
 
     <div style="margin:8px 0 12px;display:flex;gap:10px;">
       <div style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;background:#f9fafb;">
         <div style="font-size:9px;color:#6b7280;font-weight:700;letter-spacing:0.4px;margin-bottom:4px;">العميل · CUSTOMER</div>
-        <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:2px;">${data.customerName || '—'}</div>
-        <div style="font-size:9.5px;color:#4b5563;direction:ltr;text-align:right;font-family:'Inter',sans-serif;">${data.customerPhone || ''}</div>
+        <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:2px;">${escapeHtml(data.customerName || '—')}</div>
+        <div style="font-size:9.5px;color:#4b5563;direction:ltr;text-align:right;font-family:'Inter',sans-serif;">${escapeHtml(data.customerPhone || '')}</div>
       </div>
       <div style="flex:1.2;border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;background:#f9fafb;">
         <div style="font-size:9px;color:#6b7280;font-weight:700;letter-spacing:0.4px;margin-bottom:4px;">المركبة · VEHICLE</div>
-        <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:2px;">${data.vehicleInfo || '—'}</div>
-        <div style="font-size:9.5px;color:#4b5563;">رقم اللوحة: <span style="font-family:monospace;font-weight:700;color:#111827;">${data.plateNumber || '—'}</span></div>
+        <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:2px;">${escapeHtml(data.vehicleInfo || '—')}</div>
+        <div style="font-size:9.5px;color:#4b5563;">رقم اللوحة: <span style="font-family:monospace;font-weight:700;color:#111827;">${escapeHtml(data.plateNumber || '—')}</span></div>
       </div>
     </div>
 
     ${data.paymentTerms ? `
     <div style="margin:0 0 10px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:10px;color:#1e3a8a;">
-      <strong>شروط الدفع · Payment Terms:</strong> ${data.paymentTerms}
+      <strong>شروط الدفع · Payment Terms:</strong> ${escapeHtml(data.paymentTerms)}
     </div>` : ''}
 
     ${data.reference ? `
@@ -621,7 +433,7 @@ export function getInvoiceHtml(data: InvoiceData): string {
 
     <div class="totals-box">
       <div class="totals-row"><span>${bi('المجموع الفرعي', 'Subtotal')}</span><span class="amount">${omr(data.subtotal)}</span></div>
-      <div class="totals-row"><span>${bi(`ضريبة القيمة المضافة (${s.vatRate}%)`, `VAT (${s.vatRate}%)`)}</span><span class="amount">${omr(data.vat)}</span></div>
+      <div class="totals-row"><span>${bi(`ضريبة القيمة المضافة (${escapeHtml(s.vatRate)}%)`, `VAT (${escapeHtml(s.vatRate)}%)`)}</span><span class="amount">${omr(data.vat)}</span></div>
       <div class="totals-row total"><span>${bi('الإجمالي', 'Grand Total')}</span><span class="amount">${omr(data.total)}</span></div>
       ${(data.paidTotal || 0) > 0 ? `
       <div class="totals-row" style="color:#059669;"><span>${bi('المدفوع', 'Paid')}</span><span class="amount">${omr(data.paidTotal!)}</span></div>
@@ -631,10 +443,10 @@ export function getInvoiceHtml(data: InvoiceData): string {
 
     ${data.paidVia ? `
     <div style="margin-top:14px;padding:10px 14px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;font-size:11px;color:#065f46;text-align:center;font-weight:700;">
-      ✓ تم الدفع عبر: ${data.paidVia} &nbsp;·&nbsp; Paid via: ${data.paidVia}
+      ✓ تم الدفع عبر: ${escapeHtml(data.paidVia)} &nbsp;·&nbsp; Paid via: ${escapeHtml(data.paidVia)}
     </div>` : ''}
 
-    ${data.notes ? `<div class="notes-box"><span class="label-en">Notes</span><strong>ملاحظات:</strong> ${data.notes}</div>` : ''}
+    ${data.notes ? `<div class="notes-box"><span class="label-en">Notes</span><strong>ملاحظات:</strong> ${escapeHtml(data.notes)}</div>` : ''}
 
     <div style="margin-top:50px;display:flex;justify-content:space-between;">
       <div style="text-align:center;width:200px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">توقيع العميل<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Customer Signature</span></div></div>
@@ -653,16 +465,11 @@ export function generateInvoicePdf(data: InvoiceData) {
 }
 
 // ===== WORK ORDER =====
-const escapeWorkOrderText = (value: unknown): string => String(value ?? "")
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/"/g, "&quot;")
-  .replace(/'/g, "&#039;");
+const escapeWorkOrderText = escapeHtml;
 
 function workOrderHeaderHtml(s: PdfTemplateSettings, data: WorkOrderData, isInsurance: boolean): string {
   const logo = s.logoUrl
-    ? `<img class="wo-logo" src="${escapeWorkOrderText(s.logoUrl)}" alt="Company logo" />`
+    ? `<img class="wo-logo" src="${safePdfImageSrc(s.logoUrl)}" alt="Company logo" />`
     : "";
   return `<header class="wo-header">
     <section class="wo-company">
@@ -782,12 +589,12 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
 
   const styles = `${getBaseStyles(s)}
     .wo-document{color:#142033}.wo-main-page{font-size:10.4px;line-height:1.55;padding:10mm 11mm 11mm;overflow-wrap:anywhere}
-    .wo-header{display:grid;grid-template-columns:minmax(0,1fr) 58mm;gap:8mm;align-items:start;border-bottom:2px solid ${s.primaryColor};padding-bottom:5mm;margin-bottom:5mm;break-inside:avoid}
+    .wo-header{display:grid;grid-template-columns:minmax(0,1fr) 58mm;gap:8mm;align-items:start;border-bottom:2px solid ${safePdfColor(s.primaryColor)};padding-bottom:5mm;margin-bottom:5mm;break-inside:avoid}
     .wo-company{display:flex;gap:4mm;align-items:flex-start;min-width:0}.wo-logo{width:22mm;height:22mm;object-fit:contain;flex:0 0 22mm}.wo-company-copy{min-width:0}
     .wo-company h1{font-size:16px;line-height:1.35;margin:0;color:#101d35}.wo-company-en{font-family:'Inter',sans-serif;font-size:10.5px;font-weight:700;line-height:1.35;margin-top:1mm;white-space:normal;word-spacing:1px}
     .wo-company-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5mm 4mm;margin-top:2mm;font-family:'Inter','Noto Sans Arabic',sans-serif;font-size:7.8px;line-height:1.4;color:#536078}
-    .wo-number-card{border:1px solid #c9d2df;border-top:4px solid ${s.primaryColor};border-radius:4px;padding:3mm 4mm;text-align:center;min-height:30mm;display:flex;flex-direction:column;justify-content:center}
-    .wo-document-title{font-size:10px;font-weight:800}.wo-document-title span{font-family:'Inter',sans-serif;font-size:8px;color:#68758b}.wo-number-card>strong{font-family:'Inter',sans-serif;font-size:21px;line-height:1.15;margin:1.5mm 0;letter-spacing:.4px;color:#0b1730}.wo-type{font-size:8px;font-weight:700;color:${s.primaryColor}}.wo-number-card time{font-family:'Inter',sans-serif;font-size:8px;color:#64748b;margin-top:1mm}
+    .wo-number-card{border:1px solid #c9d2df;border-top:4px solid ${safePdfColor(s.primaryColor)};border-radius:4px;padding:3mm 4mm;text-align:center;min-height:30mm;display:flex;flex-direction:column;justify-content:center}
+    .wo-document-title{font-size:10px;font-weight:800}.wo-document-title span{font-family:'Inter',sans-serif;font-size:8px;color:#68758b}.wo-number-card>strong{font-family:'Inter',sans-serif;font-size:21px;line-height:1.15;margin:1.5mm 0;letter-spacing:.4px;color:#0b1730}.wo-type{font-size:8px;font-weight:700;color:${safePdfColor(s.primaryColor)}}.wo-number-card time{font-family:'Inter',sans-serif;font-size:8px;color:#64748b;margin-top:1mm}
     .wo-summary-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:4mm;margin-bottom:4mm}.wo-summary-grid>section{border:1px solid #dce2ea;border-radius:4px;overflow:hidden;break-inside:avoid}.wo-summary-grid h2{background:#f4f6f9;color:#13223a;padding:2mm 3mm;font-size:10px}.wo-summary-grid h2 span{font-family:'Inter',sans-serif;font-size:8px;color:#6b778c}.wo-summary-grid dl{padding:1.5mm 3mm}.wo-summary-grid dl>div{display:grid;grid-template-columns:42% 58%;gap:2mm;padding:1.2mm 0;border-bottom:1px solid #edf0f4}.wo-summary-grid dl>div:last-child{border:0}.wo-summary-grid dt{font-size:8px;color:#68758b}.wo-summary-grid dd{font-size:9.5px;font-weight:700;margin:0;min-width:0}.wo-emphasis{color:#a61b1b;font-size:11px!important;font-family:'Inter',sans-serif}
     .wo-order-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #dce2ea;border-radius:4px;margin-bottom:3mm;overflow:hidden;break-inside:avoid}.wo-order-meta>div{padding:2mm 3mm;border-left:1px solid #e2e7ee;min-width:0}.wo-order-meta>div:nth-child(3n){border-left:0}.wo-order-meta span{display:block;font-size:7.8px;color:#68758b}.wo-order-meta strong{display:block;font-size:9.4px;margin-top:.7mm}
     .wo-table{font-size:9px;margin:2mm 0 3mm}.wo-table thead th{font-size:8.5px;padding:2mm 2.5mm;background:#142542}.wo-table tbody td{padding:1.8mm 2.5mm;vertical-align:top}.wo-index,.wo-center{text-align:center;width:10mm}.wo-empty{text-align:center;color:#8490a2;padding:4mm!important}.wo-diagnosis,.wo-agreement-note{border:1px solid #dce2ea;background:#fafbfc;border-radius:4px;padding:2.5mm 3mm;margin:2mm 0 3mm;line-height:1.6}.wo-diagnosis strong{display:block;font-size:8.5px;color:#667287}.wo-diagnosis p{margin-top:1mm}
@@ -814,17 +621,17 @@ export function getInspectionHtml(data: InspectionData): string {
   const s = getTemplateSettings();
   const statusEn = data.status === 'مكتمل' ? 'Completed' : data.status === 'قيد التنفيذ' ? 'In Progress' : data.status;
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'تقرير فحص ومعاينة', 'INSPECTION REPORT', data.inspectionId, data.date)}
 
     ${sectionTitle('معلومات الفحص', 'Inspection Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('رقم أمر العمل:', 'Work Order No.')}<span class="value">${data.workOrderId}</span></div>
-      <div class="info-row">${lbl('العميل:', 'Customer')}<span class="value">${data.customerName}</span></div>
-      <div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${data.vehicleInfo}</span></div>
-      <div class="info-row">${lbl('نوع الضرر:', 'Damage Type')}<span class="value">${data.damageType}</span></div>
-      <div class="info-row">${lbl('عدد الصور:', 'Photos Count')}<span class="value">${data.photoCount} ${bi('صورة', 'photos')}</span></div>
-      <div class="info-row">${lbl('الحالة:', 'Status')}<span class="value"><span class="status-badge ${data.status === 'مكتمل' ? 'status-completed' : 'status-progress'}">${data.status}<span class="en">${statusEn}</span></span></span></div>
+      <div class="info-row">${lbl('رقم أمر العمل:', 'Work Order No.')}<span class="value">${escapeHtml(data.workOrderId)}</span></div>
+      <div class="info-row">${lbl('العميل:', 'Customer')}<span class="value">${escapeHtml(data.customerName)}</span></div>
+      <div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${escapeHtml(data.vehicleInfo)}</span></div>
+      <div class="info-row">${lbl('نوع الضرر:', 'Damage Type')}<span class="value">${escapeHtml(data.damageType)}</span></div>
+      <div class="info-row">${lbl('عدد الصور:', 'Photos Count')}<span class="value">${escapeHtml(data.photoCount)} ${bi('صورة', 'photos')}</span></div>
+      <div class="info-row">${lbl('الحالة:', 'Status')}<span class="value"><span class="status-badge ${data.status === 'مكتمل' ? 'status-completed' : 'status-progress'}">${escapeHtml(data.status)}<span class="en">${escapeHtml(statusEn)}</span></span></span></div>
     </div>
 
     ${sectionTitle('تفاصيل الأضرار', 'Damage Details')}
@@ -837,7 +644,7 @@ export function getInspectionHtml(data: InspectionData): string {
     </div>
 
     ${data.notes
-      ? `<div class="notes-box"><span class="label-en">Inspector Notes</span><strong>ملاحظات الفاحص:</strong> ${data.notes}</div>`
+      ? `<div class="notes-box"><span class="label-en">Inspector Notes</span><strong>ملاحظات الفاحص:</strong> ${escapeHtml(data.notes)}</div>`
       : `<div class="notes-box"><span class="label-en">Inspector Notes</span><strong>ملاحظات الفاحص:</strong> تم فحص السيارة وتوثيق الأضرار الموضحة أعلاه. / Vehicle inspected and damages documented above.</div>`}
 
     <div style="margin-top:50px;display:flex;justify-content:space-between;">
@@ -863,21 +670,21 @@ export function getQuoteHtml(data: InvoiceData & { quoteNumber: string }): strin
   const itemsHtml = data.items.map((item, i) => `
     <tr>
       <td style="text-align:center;color:#888;">${i + 1}</td>
-      <td>${item.description}</td>
-      <td style="text-align:center;">${item.quantity}</td>
+      <td>${escapeHtml(item.description)}</td>
+      <td style="text-align:center;">${escapeHtml(item.quantity)}</td>
       <td style="text-align:center;">${omr(item.unitPrice)}</td>
       <td style="text-align:center;font-weight:600;">${omr(item.total)}</td>
     </tr>`).join('');
 
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'عرض سعر', 'PRICE QUOTATION', data.quoteNumber, data.date, 'background:linear-gradient(135deg,#2d6a4f,#1b4332);')}
 
     ${sectionTitle('معلومات العميل', 'Customer Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${data.customerName}</span></div>
-      <div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${data.vehicleInfo}</span></div>
-      <div class="info-row">${lbl('رقم اللوحة:', 'Plate Number')}<span class="value">${data.plateNumber}</span></div>
+      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${escapeHtml(data.customerName)}</span></div>
+      <div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${escapeHtml(data.vehicleInfo)}</span></div>
+      <div class="info-row">${lbl('رقم اللوحة:', 'Plate Number')}<span class="value">${escapeHtml(data.plateNumber)}</span></div>
     </div>
 
     ${sectionTitle('تفاصيل العرض', 'Quotation Details')}
@@ -891,7 +698,7 @@ export function getQuoteHtml(data: InvoiceData & { quoteNumber: string }): strin
 
     <div class="totals-box">
       <div class="totals-row"><span>${bi('المجموع الفرعي', 'Subtotal')}</span><span class="amount">${omr(data.subtotal)}</span></div>
-      <div class="totals-row"><span>${bi(`ضريبة القيمة المضافة (${s.vatRate}%)`, `VAT (${s.vatRate}%)`)}</span><span class="amount">${omr(data.vat)}</span></div>
+      <div class="totals-row"><span>${bi(`ضريبة القيمة المضافة (${escapeHtml(s.vatRate)}%)`, `VAT (${escapeHtml(s.vatRate)}%)`)}</span><span class="amount">${omr(data.vat)}</span></div>
       <div class="totals-row total"><span>${bi('الإجمالي', 'Grand Total')}</span><span class="amount">${omr(data.total)}</span></div>
     </div>
 
@@ -941,17 +748,17 @@ export function getDepositReceiptHtml(data: DepositReceiptData): string {
   const scopeLabelEn = data.scope === "vehicle" ? "Vehicle-linked Deposit" : "General Customer Deposit";
 
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'سند قبض عربون', 'DEPOSIT RECEIPT', data.receiptNumber, data.date, 'background:linear-gradient(135deg,#2d6a4f,#1b4332);')}
 
     ${sectionTitle('بيانات العربون', 'Deposit Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${data.customerName}</span></div>
-      ${data.customerPhone ? `<div class="info-row">${lbl('رقم الهاتف:', 'Phone')}<span class="value" style="direction:ltr;font-family:'Inter',sans-serif;">${data.customerPhone}</span></div>` : ''}
-      ${data.plateNumber ? `<div class="info-row">${lbl('رقم اللوحة:', 'Plate No.')}<span class="value">${data.plateNumber}</span></div>` : ''}
-      ${data.vehicleInfo ? `<div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${data.vehicleInfo}</span></div>` : ''}
+      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${escapeHtml(data.customerName)}</span></div>
+      ${data.customerPhone ? `<div class="info-row">${lbl('رقم الهاتف:', 'Phone')}<span class="value" style="direction:ltr;font-family:'Inter',sans-serif;">${escapeHtml(data.customerPhone)}</span></div>` : ''}
+      ${data.plateNumber ? `<div class="info-row">${lbl('رقم اللوحة:', 'Plate No.')}<span class="value">${escapeHtml(data.plateNumber)}</span></div>` : ''}
+      ${data.vehicleInfo ? `<div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${escapeHtml(data.vehicleInfo)}</span></div>` : ''}
       <div class="info-row">${lbl('نوع العربون:', 'Deposit Type')}<span class="value">${scopeLabel} <span style="color:#999;font-family:'Inter',sans-serif;font-size:9px;">/ ${scopeLabelEn}</span></span></div>
-      <div class="info-row">${lbl('طريقة الدفع:', 'Payment Method')}<span class="value">${data.paymentMethod}</span></div>
+      <div class="info-row">${lbl('طريقة الدفع:', 'Payment Method')}<span class="value">${escapeHtml(data.paymentMethod)}</span></div>
     </div>
 
     <div style="margin:24px 0;padding:24px;background:linear-gradient(135deg,#2d6a4f,#1b4332);color:white;border-radius:12px;text-align:center;">
@@ -959,10 +766,10 @@ export function getDepositReceiptHtml(data: DepositReceiptData): string {
       <div style="font-size:32px;font-weight:700;font-family:'Inter',sans-serif;direction:ltr;">${data.amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} OMR</div>
     </div>
 
-    ${data.notes ? `<div class="notes-box"><span class="label-en">Notes</span><strong>ملاحظات:</strong> ${data.notes}</div>` : ''}
+    ${data.notes ? `<div class="notes-box"><span class="label-en">Notes</span><strong>ملاحظات:</strong> ${escapeHtml(data.notes)}</div>` : ''}
 
     <div class="notes-box" style="margin-top:14px;background:#fff8e1;border-right-color:#d4a537;">
-      <strong>تنويه:</strong> هذا المبلغ يُعتبر عربوناً ${data.scope === "vehicle" ? `مرتبطاً بالسيارة (${data.plateNumber || ""})` : "عاماً للعميل"} ويُخصم من الفاتورة النهائية لاحقاً.
+      <strong>تنويه:</strong> هذا المبلغ يُعتبر عربوناً ${data.scope === "vehicle" ? `مرتبطاً بالسيارة (${escapeHtml(data.plateNumber || "")})` : "عاماً للعميل"} ويُخصم من الفاتورة النهائية لاحقاً.
       <span style="display:block;color:#999;font-family:'Inter',sans-serif;font-size:9px;margin-top:3px;">Notice: This amount is considered a ${data.scope === "vehicle" ? "vehicle-linked" : "general customer"} deposit and will be deducted from the final invoice.</span>
     </div>
 
@@ -1011,13 +818,13 @@ export function getAdvancedDocHtml(data: AdvancedDocData): string {
 
   // Apply template variations
   const tplStyles = data.template === "modern"
-    ? `.header{background:linear-gradient(135deg,${s.primaryColor}15,transparent);padding:18px;border-radius:10px;border-bottom:none;}thead th{background:${s.primaryColor};}`
+    ? `.header{background:linear-gradient(135deg,${safePdfColor(s.primaryColor)}15,transparent);padding:18px;border-radius:10px;border-bottom:none;}thead th{background:${safePdfColor(s.primaryColor)};}`
     : data.template === "classic"
-    ? `.header{border-bottom:4px double ${s.primaryColor};}thead th{background:#2c2c2c;}.totals-row.total{background:#2c2c2c;}`
+    ? `.header{border-bottom:4px double ${safePdfColor(s.primaryColor)};}thead th{background:#2c2c2c;}.totals-row.total{background:#2c2c2c;}`
     : "";
 
   const customFieldsHtml = data.customFields.filter(f => f.value).map(f => `
-    <div class="info-row"><span class="label">${f.label}</span><span class="value">${f.value}</span></div>
+    <div class="info-row"><span class="label">${escapeHtml(f.label)}</span><span class="value">${escapeHtml(f.value)}</span></div>
   `).join('');
 
   const itemsHtml = data.items.filter(i => i.description.trim()).map((item, i) => {
@@ -1026,24 +833,24 @@ export function getAdvancedDocHtml(data: AdvancedDocData): string {
     const lineTotal = afterDisc; // VAT shown separately in totals — never add to line
     return `<tr>
       <td style="text-align:center;color:#888;">${i + 1}</td>
-      <td>${item.description}</td>
-      <td style="text-align:center;">${item.quantity}</td>
+      <td>${escapeHtml(item.description)}</td>
+      <td style="text-align:center;">${escapeHtml(item.quantity)}</td>
       <td style="text-align:center;">${omr(item.unitPrice)}</td>
-      <td style="text-align:center;color:#666;">${item.discount}%</td>
-      <td style="text-align:center;color:#666;">${item.tax}%</td>
+      <td style="text-align:center;color:#666;">${escapeHtml(item.discount)}%</td>
+      <td style="text-align:center;color:#666;">${escapeHtml(item.tax)}%</td>
       <td style="text-align:center;font-weight:600;">${omr(lineTotal)}</td>
     </tr>`;
   }).join('');
 
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, docLabelAr, docLabelEn, data.number, data.issueDate)}
 
     ${sectionTitle('معلومات العميل', 'Customer Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${data.customerName}</span></div>
-      ${data.dueDate ? `<div class="info-row">${lbl('تاريخ الاستحقاق:', 'Due Date')}<span class="value">${data.dueDate}</span></div>` : ''}
-      ${data.paymentTerms ? `<div class="info-row" style="grid-column:1/-1">${lbl('شروط الدفع:', 'Payment Terms')}<span class="value">${data.paymentTerms}</span></div>` : ''}
+      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${escapeHtml(data.customerName)}</span></div>
+      ${data.dueDate ? `<div class="info-row">${lbl('تاريخ الاستحقاق:', 'Due Date')}<span class="value">${escapeHtml(data.dueDate)}</span></div>` : ''}
+      ${data.paymentTerms ? `<div class="info-row" style="grid-column:1/-1">${lbl('شروط الدفع:', 'Payment Terms')}<span class="value">${escapeHtml(data.paymentTerms)}</span></div>` : ''}
       ${customFieldsHtml}
     </div>
 
@@ -1065,7 +872,7 @@ export function getAdvancedDocHtml(data: AdvancedDocData): string {
       <div class="totals-row total"><span>${bi('الإجمالي', 'Grand Total')}</span><span class="amount">${omr(data.total)}</span></div>
     </div>
 
-    ${data.notes ? `<div class="notes-box"><span class="label-en">Notes / ملاحظات</span>${data.notes}</div>` : ''}
+    ${data.notes ? `<div class="notes-box"><span class="label-en">Notes / ملاحظات</span>${escapeHtml(data.notes)}</div>` : ''}
 
     <div style="margin-top:50px;display:flex;justify-content:space-between;">
       <div style="text-align:center;width:200px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">توقيع العميل<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Customer Signature</span></div></div>
@@ -1135,11 +942,11 @@ export function getVehicleCardHtml(data: VehicleCardData): string {
       </tr></thead><tbody>
       ${data.workOrders!.map(o => `
         <tr>
-          <td style="font-family:'Inter',sans-serif;font-weight:600;color:${s.primaryColor};">${o.orderNumber}</td>
-          <td style="text-align:center;font-family:'Inter',sans-serif;color:#666;">${o.date}</td>
-          <td>${o.serviceType}${o.description ? `<div style="font-size:9.5px;color:#999;margin-top:2px;">${o.description}</div>` : ''}</td>
-          <td style="color:#555;">${o.technician}</td>
-          <td style="text-align:center;"><span style="font-size:9.5px;padding:2px 8px;border-radius:10px;background:#f0f0f0;color:#555;">${o.status}</span></td>
+          <td style="font-family:'Inter',sans-serif;font-weight:600;color:${safePdfColor(s.primaryColor)};">${escapeHtml(o.orderNumber)}</td>
+          <td style="text-align:center;font-family:'Inter',sans-serif;color:#666;">${escapeHtml(o.date)}</td>
+          <td>${escapeHtml(o.serviceType)}${o.description ? `<div style="font-size:9.5px;color:#999;margin-top:2px;">${escapeHtml(o.description)}</div>` : ''}</td>
+          <td style="color:#555;">${escapeHtml(o.technician)}</td>
+          <td style="text-align:center;"><span style="font-size:9.5px;padding:2px 8px;border-radius:10px;background:#f0f0f0;color:#555;">${escapeHtml(o.status)}</span></td>
           <td style="text-align:center;font-weight:600;">${omr(o.cost)}</td>
         </tr>`).join('')}
       </tbody></table>`;
@@ -1150,17 +957,17 @@ export function getVehicleCardHtml(data: VehicleCardData): string {
       ${data.photoPairs!.map(p => `
         <div style="border:1px solid #eee;border-radius:8px;padding:10px;background:#fafafa;page-break-inside:avoid;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:10.5px;">
-            <strong style="color:${s.primaryColor};">${p.caption || 'مرحلة الإصلاح'}</strong>
-            <span style="color:#888;font-family:'Inter',sans-serif;">${p.workOrderId ? p.workOrderId + ' • ' : ''}${p.date}</span>
+            <strong style="color:${safePdfColor(s.primaryColor)};">${escapeHtml(p.caption || 'مرحلة الإصلاح')}</strong>
+            <span style="color:#888;font-family:'Inter',sans-serif;">${p.workOrderId ? escapeHtml(p.workOrderId) + ' • ' : ''}${escapeHtml(p.date)}</span>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <div>
               <div style="font-size:9.5px;color:#888;margin-bottom:4px;text-align:center;font-weight:600;">قبل / Before</div>
-              <img src="${p.beforeUrl}" style="width:100%;height:140px;object-fit:cover;border-radius:6px;border:1px solid #ddd;" crossorigin="anonymous"/>
+              <img src="${safePdfImageSrc(p.beforeUrl)}" style="width:100%;height:140px;object-fit:cover;border-radius:6px;border:1px solid #ddd;" crossorigin="anonymous"/>
             </div>
             <div>
-              <div style="font-size:9.5px;color:${s.primaryColor};margin-bottom:4px;text-align:center;font-weight:600;">بعد / After</div>
-              <img src="${p.afterUrl}" style="width:100%;height:140px;object-fit:cover;border-radius:6px;border:2px solid ${s.primaryColor};" crossorigin="anonymous"/>
+              <div style="font-size:9.5px;color:${safePdfColor(s.primaryColor)};margin-bottom:4px;text-align:center;font-weight:600;">بعد / After</div>
+              <img src="${safePdfImageSrc(p.afterUrl)}" style="width:100%;height:140px;object-fit:cover;border-radius:6px;border:2px solid ${safePdfColor(s.primaryColor)};" crossorigin="anonymous"/>
             </div>
           </div>
         </div>
@@ -1178,34 +985,34 @@ export function getVehicleCardHtml(data: VehicleCardData): string {
     </tr></thead><tbody>
     ${data.claims!.map(c => `
       <tr>
-        <td style="font-family:'Inter',sans-serif;font-weight:600;">${c.claimNumber}</td>
-        <td>${c.insuranceCompany}</td>
+        <td style="font-family:'Inter',sans-serif;font-weight:600;">${escapeHtml(c.claimNumber)}</td>
+        <td>${escapeHtml(c.insuranceCompany)}</td>
         <td style="text-align:center;">${omr(c.estimatedAmount)}</td>
         <td style="text-align:center;">${c.approvedAmount ? omr(c.approvedAmount) : '-'}</td>
-        <td style="text-align:center;font-size:9.5px;">${c.status}</td>
+        <td style="text-align:center;font-size:9.5px;">${escapeHtml(c.status)}</td>
       </tr>`).join('')}
     </tbody></table>`;
 
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'بطاقة سيارة', 'VEHICLE CARD', data.plate, today)}
 
     ${sectionTitle('معلومات السيارة والمالك', 'Vehicle & Owner Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('رقم اللوحة:', 'Plate Number')}<span class="value">${data.plate}</span></div>
-      <div class="info-row">${lbl('النوع/الموديل:', 'Make/Model')}<span class="value">${data.type}</span></div>
-      <div class="info-row">${lbl('السنة:', 'Year')}<span class="value">${data.year || '-'}</span></div>
-      <div class="info-row">${lbl('اللون:', 'Color')}<span class="value">${data.color || '-'}</span></div>
-      <div class="info-row">${lbl('رقم الهيكل:', 'VIN')}<span class="value" style="font-family:'Inter',sans-serif;font-size:10.5px;">${data.vin || '-'}</span></div>
-      <div class="info-row">${lbl('عداد المسافة:', 'Mileage')}<span class="value">${data.mileage || '-'}</span></div>
-      <div class="info-row">${lbl('المالك:', 'Owner')}<span class="value">${data.owner}</span></div>
-      <div class="info-row">${lbl('الهاتف:', 'Phone')}<span class="value" style="direction:ltr;font-family:'Inter',sans-serif;text-align:right;">${data.ownerPhone || '-'}</span></div>
+      <div class="info-row">${lbl('رقم اللوحة:', 'Plate Number')}<span class="value">${escapeHtml(data.plate)}</span></div>
+      <div class="info-row">${lbl('النوع/الموديل:', 'Make/Model')}<span class="value">${escapeHtml(data.type)}</span></div>
+      <div class="info-row">${lbl('السنة:', 'Year')}<span class="value">${escapeHtml(data.year || '-')}</span></div>
+      <div class="info-row">${lbl('اللون:', 'Color')}<span class="value">${escapeHtml(data.color || '-')}</span></div>
+      <div class="info-row">${lbl('رقم الهيكل:', 'VIN')}<span class="value" style="font-family:'Inter',sans-serif;font-size:10.5px;">${escapeHtml(data.vin || '-')}</span></div>
+      <div class="info-row">${lbl('عداد المسافة:', 'Mileage')}<span class="value">${escapeHtml(data.mileage || '-')}</span></div>
+      <div class="info-row">${lbl('المالك:', 'Owner')}<span class="value">${escapeHtml(data.owner)}</span></div>
+      <div class="info-row">${lbl('الهاتف:', 'Phone')}<span class="value" style="direction:ltr;font-family:'Inter',sans-serif;text-align:right;">${escapeHtml(data.ownerPhone || '-')}</span></div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0 18px;">
-      <div style="padding:12px;background:linear-gradient(135deg,${s.primaryColor}11,${s.primaryColor}05);border-right:3px solid ${s.primaryColor};border-radius:6px;">
+      <div style="padding:12px;background:linear-gradient(135deg,${safePdfColor(s.primaryColor)}11,${safePdfColor(s.primaryColor)}05);border-right:3px solid ${safePdfColor(s.primaryColor)};border-radius:6px;">
         <div style="font-size:9.5px;color:#888;">عدد الزيارات / Visits</div>
-        <div style="font-size:20px;font-weight:700;color:${s.primaryColor};font-family:'Inter',sans-serif;">${data.visits}</div>
+        <div style="font-size:20px;font-weight:700;color:${safePdfColor(s.primaryColor)};font-family:'Inter',sans-serif;">${escapeHtml(data.visits)}</div>
       </div>
       <div style="padding:12px;background:#fafafa;border-right:3px solid #4caf50;border-radius:6px;">
         <div style="font-size:9.5px;color:#888;">إجمالي الإنفاق / Total Spent</div>
@@ -1213,7 +1020,7 @@ export function getVehicleCardHtml(data: VehicleCardData): string {
       </div>
       <div style="padding:12px;background:#fafafa;border-right:3px solid #2196f3;border-radius:6px;">
         <div style="font-size:9.5px;color:#888;">آخر زيارة / Last Visit</div>
-        <div style="font-size:13px;font-weight:600;color:#1a1a2e;font-family:'Inter',sans-serif;">${data.lastVisit}</div>
+        <div style="font-size:13px;font-weight:600;color:#1a1a2e;font-family:'Inter',sans-serif;">${escapeHtml(data.lastVisit)}</div>
       </div>
     </div>
 
@@ -1224,7 +1031,7 @@ export function getVehicleCardHtml(data: VehicleCardData): string {
 
     ${photoPairsHtml}
 
-    ${data.notes ? `<div class="notes-box"><span class="label-en">Notes</span><strong>ملاحظات:</strong> ${data.notes}</div>` : ''}
+    ${data.notes ? `<div class="notes-box"><span class="label-en">Notes</span><strong>ملاحظات:</strong> ${escapeHtml(data.notes)}</div>` : ''}
 
     ${footerHtml(s)}
   </div>`;
@@ -1307,7 +1114,7 @@ export function getInsuranceEstimateHtml(data: InsuranceEstimateData): string {
   // Keep this generator on the stable dedicated estimate layout only.
   const s = getTemplateSettings();
   const customFieldsHtml = data.customFields.filter(f => f.value).map(f => `
-    <div class="info-row"><span class="label">${f.label}</span><span class="value">${f.value}</span></div>
+    <div class="info-row"><span class="label">${escapeHtml(f.label)}</span><span class="value">${escapeHtml(f.value)}</span></div>
   `).join('');
 
   const itemsHtml = data.items.filter(i => i.description.trim()).map((item, i) => {
@@ -1316,51 +1123,51 @@ export function getInsuranceEstimateHtml(data: InsuranceEstimateData): string {
     const lineTotal = afterDisc; // VAT shown separately in totals — never add to line
     return `<tr>
       <td style="text-align:center;color:#888;">${i + 1}</td>
-      <td>${item.description}</td>
-      <td style="text-align:center;">${item.quantity}</td>
+      <td>${escapeHtml(item.description)}</td>
+      <td style="text-align:center;">${escapeHtml(item.quantity)}</td>
       <td style="text-align:center;">${omr(item.unitPrice)}</td>
-      <td style="text-align:center;color:#666;">${item.discount}%</td>
-      <td style="text-align:center;color:#666;">${item.tax}%</td>
+      <td style="text-align:center;color:#666;">${escapeHtml(item.discount)}%</td>
+      <td style="text-align:center;color:#666;">${escapeHtml(item.tax)}%</td>
       <td style="text-align:center;font-weight:600;">${omr(lineTotal)}</td>
     </tr>`;
   }).join('');
 
   const termsHtml = data.customTerms
     ? data.customTerms.split(/\r?\n/).filter(Boolean).map(line =>
-      `<div class="estimate-term" dir="auto"><span class="estimate-bullet">•</span><span>${line}</span></div>`
+      `<div class="estimate-term" dir="auto"><span class="estimate-bullet">•</span><span>${escapeHtml(line)}</span></div>`
     ).join('')
     : [
       'هذا التقدير ساري المفعول لمدة 30 يوماً من تاريخ الإصدار. / This estimate is valid for 30 days.',
       'قد تتغير الأسعار حسب توفر القطع وتاريخ الموافقة. / Prices may change based on parts availability.',
       'يبدأ العمل بعد اعتماد شركة التأمين رسمياً. / Work commences upon official insurance approval.',
-    ].map(line => `<div class="estimate-term" dir="auto"><span class="estimate-bullet">•</span><span>${line}</span></div>`).join('');
+    ].map(line => `<div class="estimate-term" dir="auto"><span class="estimate-bullet">•</span><span>${escapeHtml(line)}</span></div>`).join('');
 
   const body = `<div class="page insurance-estimate-page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'تقدير تكلفة إصلاح', 'REPAIR COST ESTIMATE', data.number, data.issueDate, 'background:linear-gradient(135deg,#1e3a8a,#1e40af);')}
 
     ${sectionTitle('بيانات شركة التأمين', 'Insurance Company Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('شركة التأمين:', 'Insurance Company')}<span class="value">${data.insuranceCompany}${data.insuranceBranchCity ? ` — ${data.insuranceBranchCity}` : ''}</span></div>
-      <div class="info-row">${lbl('رقم المطالبة:', 'Claim No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${data.claimNumber}</span></div>
-      ${data.insuranceCommercialRegistration ? `<div class="info-row">${lbl('السجل التجاري:', 'CR No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${data.insuranceCommercialRegistration}</span></div>` : ''}
-      ${data.insuranceTaxNumber ? `<div class="info-row">${lbl('الرقم الضريبي:', 'VAT No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${data.insuranceTaxNumber}</span></div>` : ''}
-      ${data.insurancePoBox ? `<div class="info-row">${lbl('ص.ب / الرمز البريدي:', 'P.O. Box')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${data.insurancePoBox}</span></div>` : ''}
-      ${data.insuranceAddress ? `<div class="info-row">${lbl('العنوان:', 'Address')}<span class="value">${data.insuranceAddress}</span></div>` : ''}
-      ${data.insurancePhone ? `<div class="info-row">${lbl('الهاتف:', 'Phone')}<span class="value" style="direction:ltr;text-align:right;">${data.insurancePhone}</span></div>` : ''}
-      ${data.policyNumber ? `<div class="info-row">${lbl('رقم البوليصة:', 'Policy No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${data.policyNumber}</span></div>` : ''}
-      ${data.incidentDate ? `<div class="info-row">${lbl('تاريخ التقدير:', 'Incident Date')}<span class="value">${data.incidentDate}</span></div>` : ''}
+      <div class="info-row">${lbl('شركة التأمين:', 'Insurance Company')}<span class="value">${escapeHtml(data.insuranceCompany)}${data.insuranceBranchCity ? ` — ${escapeHtml(data.insuranceBranchCity)}` : ''}</span></div>
+      <div class="info-row">${lbl('رقم المطالبة:', 'Claim No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${escapeHtml(data.claimNumber)}</span></div>
+      ${data.insuranceCommercialRegistration ? `<div class="info-row">${lbl('السجل التجاري:', 'CR No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${escapeHtml(data.insuranceCommercialRegistration)}</span></div>` : ''}
+      ${data.insuranceTaxNumber ? `<div class="info-row">${lbl('الرقم الضريبي:', 'VAT No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${escapeHtml(data.insuranceTaxNumber)}</span></div>` : ''}
+      ${data.insurancePoBox ? `<div class="info-row">${lbl('ص.ب / الرمز البريدي:', 'P.O. Box')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${escapeHtml(data.insurancePoBox)}</span></div>` : ''}
+      ${data.insuranceAddress ? `<div class="info-row">${lbl('العنوان:', 'Address')}<span class="value">${escapeHtml(data.insuranceAddress)}</span></div>` : ''}
+      ${data.insurancePhone ? `<div class="info-row">${lbl('الهاتف:', 'Phone')}<span class="value" style="direction:ltr;text-align:right;">${escapeHtml(data.insurancePhone)}</span></div>` : ''}
+      ${data.policyNumber ? `<div class="info-row">${lbl('رقم البوليصة:', 'Policy No.')}<span class="value" style="font-family:'Inter',sans-serif;direction:ltr;text-align:right;">${escapeHtml(data.policyNumber)}</span></div>` : ''}
+      ${data.incidentDate ? `<div class="info-row">${lbl('تاريخ التقدير:', 'Incident Date')}<span class="value">${escapeHtml(data.incidentDate)}</span></div>` : ''}
     </div>
 
     ${sectionTitle('بيانات المؤمَّن له والمركبة', 'Insured & Vehicle Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('اسم المؤمَّن له:', 'Insured Name')}<span class="value">${data.customerName}</span></div>
-      ${data.vehicleInfo ? `<div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${data.vehicleInfo}</span></div>` : ''}
-      ${data.vehiclePlate ? `<div class="info-row">${lbl('رقم اللوحة:', 'Plate No.')}<span class="value">${data.vehiclePlate}</span></div>` : ''}
+      <div class="info-row">${lbl('اسم المؤمَّن له:', 'Insured Name')}<span class="value">${escapeHtml(data.customerName)}</span></div>
+      ${data.vehicleInfo ? `<div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${escapeHtml(data.vehicleInfo)}</span></div>` : ''}
+      ${data.vehiclePlate ? `<div class="info-row">${lbl('رقم اللوحة:', 'Plate No.')}<span class="value">${escapeHtml(data.vehiclePlate)}</span></div>` : ''}
       ${customFieldsHtml}
     </div>
 
-    ${data.incidentDescription ? `<div class="notes-box"><span class="label-en">Incident Description</span><strong>وصف الحادث:</strong> ${data.incidentDescription}</div>` : ''}
+    ${data.incidentDescription ? `<div class="notes-box"><span class="label-en">Incident Description</span><strong>وصف الحادث:</strong> ${escapeHtml(data.incidentDescription)}</div>` : ''}
 
     ${sectionTitle('تفاصيل الإصلاحات وقطع الغيار المطلوبة', 'Repair & Parts Breakdown')}
     <table><thead><tr>
@@ -1384,7 +1191,7 @@ export function getInsuranceEstimateHtml(data: InsuranceEstimateData): string {
       <span class="label-en">Estimate Terms</span>
       <strong>شروط التقدير:</strong>
       ${termsHtml}
-      ${data.notes ? `<br/><br/><strong>ملاحظات إضافية:</strong> ${data.notes}` : ''}
+      ${data.notes ? `<br/><br/><strong>ملاحظات إضافية:</strong> ${escapeHtml(data.notes)}` : ''}
     </div>
 
     <div class="estimate-signatures">
@@ -1417,28 +1224,28 @@ export function getPaymentVoucherHtml(data: PaymentVoucherData): string {
   if (custom) return custom;
   const s = getTemplateSettings();
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'سند صرف', 'PAYMENT VOUCHER', data.voucherNumber, data.date, 'background:linear-gradient(135deg,#dc2626,#991b1b);')}
 
     ${sectionTitle('بيانات السند', 'Voucher Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('المستفيد:', 'Beneficiary')}<span class="value">${data.beneficiary || '-'}</span></div>
-      <div class="info-row">${lbl('التصنيف:', 'Category')}<span class="value">${data.categoryName}</span></div>
-      <div class="info-row">${lbl('الخزينة:', 'Cashbox')}<span class="value">${data.cashboxName}</span></div>
-      <div class="info-row">${lbl('طريقة الدفع:', 'Payment Method')}<span class="value">${data.paymentMethod}</span></div>
-      <div class="info-row">${lbl('التاريخ:', 'Date')}<span class="value">${data.date}</span></div>
+      <div class="info-row">${lbl('المستفيد:', 'Beneficiary')}<span class="value">${escapeHtml(data.beneficiary || '-')}</span></div>
+      <div class="info-row">${lbl('التصنيف:', 'Category')}<span class="value">${escapeHtml(data.categoryName)}</span></div>
+      <div class="info-row">${lbl('الخزينة:', 'Cashbox')}<span class="value">${escapeHtml(data.cashboxName)}</span></div>
+      <div class="info-row">${lbl('طريقة الدفع:', 'Payment Method')}<span class="value">${escapeHtml(data.paymentMethod)}</span></div>
+      <div class="info-row">${lbl('التاريخ:', 'Date')}<span class="value">${escapeHtml(data.date)}</span></div>
     </div>
 
     <div class="totals-box" style="width:100%;margin-top:20px;">
       <div class="totals-row total"><span>${bi('المبلغ المصروف', 'Amount Paid')}</span><span class="amount">${omr(data.amount)}</span></div>
     </div>
 
-    ${data.description ? `<div class="notes-box"><span class="label-en">Description</span><strong>البيان:</strong> ${data.description}</div>` : ''}
+    ${data.description ? `<div class="notes-box"><span class="label-en">Description</span><strong>البيان:</strong> ${escapeHtml(data.description)}</div>` : ''}
 
     ${data.photo ? `
       ${sectionTitle('صورة الإيصال', 'Receipt Photo')}
       <div style="text-align:center;margin:15px 0;">
-        <img src="${data.photo}" alt="receipt" style="max-width:100%;max-height:400px;border:1px solid #ddd;border-radius:8px;" />
+        <img src="${safePdfImageSrc(data.photo)}" alt="receipt" style="max-width:100%;max-height:400px;border:1px solid #ddd;border-radius:8px;" />
       </div>
     ` : ''}
 
@@ -1478,14 +1285,14 @@ export function getStagePhotosAlbumHtml(data: StagePhotosAlbumData): string {
     const photosHtml = g.photos.map((p, i) => `
       <div style="break-inside:avoid;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden;background:#fafafa;">
         <div style="aspect-ratio:4/3;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;">
-          <img src="${p.dataUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />
+          <img src="${safePdfImageSrc(p.dataUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />
         </div>
         <div style="padding:5px 7px;font-size:9px;line-height:1.4;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
-            <strong style="color:${s.primaryColor};">${p.phaseLabel}</strong>
+            <strong style="color:${safePdfColor(s.primaryColor)};">${escapeHtml(p.phaseLabel)}</strong>
             <span style="color:#999;font-family:'Inter',sans-serif;">#${i + 1}</span>
           </div>
-          ${p.caption ? `<div style="color:#666;margin-top:2px;font-size:8.5px;">${p.caption}</div>` : ''}
+          ${p.caption ? `<div style="color:#666;margin-top:2px;font-size:8.5px;">${escapeHtml(p.caption)}</div>` : ''}
           ${p.uploadedAt ? `<div style="color:#bbb;font-family:'Inter',sans-serif;font-size:8px;margin-top:1px;direction:ltr;text-align:right;">${new Date(p.uploadedAt).toLocaleString()}</div>` : ''}
         </div>
       </div>
@@ -1493,12 +1300,12 @@ export function getStagePhotosAlbumHtml(data: StagePhotosAlbumData): string {
 
     return `
       <div style="margin-top:14px;break-inside:avoid;">
-        <div style="display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,${s.primaryColor},${adjustColor(s.primaryColor,-15)});color:white;padding:7px 12px;border-radius:6px;margin-bottom:8px;font-size:11px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,${safePdfColor(s.primaryColor)},${adjustColor(s.primaryColor,-15)});color:white;padding:7px 12px;border-radius:6px;margin-bottom:8px;font-size:11px;">
           <div>
-            <strong style="font-family:'Inter',sans-serif;letter-spacing:0.3px;">${g.orderId}</strong>
-            ${g.serviceType ? ` <span style="opacity:0.85;font-size:10px;">• ${g.serviceType}</span>` : ''}
+            <strong style="font-family:'Inter',sans-serif;letter-spacing:0.3px;">${escapeHtml(g.orderId)}</strong>
+            ${g.serviceType ? ` <span style="opacity:0.85;font-size:10px;">• ${escapeHtml(g.serviceType)}</span>` : ''}
           </div>
-          <div style="font-size:10px;opacity:0.9;font-family:'Inter',sans-serif;direction:ltr;">${g.orderDate} • ${g.photos.length} photos</div>
+          <div style="font-size:10px;opacity:0.9;font-family:'Inter',sans-serif;direction:ltr;">${escapeHtml(g.orderDate)} • ${escapeHtml(g.photos.length)} photos</div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
           ${photosHtml}
@@ -1508,13 +1315,13 @@ export function getStagePhotosAlbumHtml(data: StagePhotosAlbumData): string {
   }).join('');
 
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, "ألبوم صور المراحل", "STAGE PHOTOS ALBUM", data.vehiclePlate, today)}
 
     <div style="background:#f8f9fa;border-radius:8px;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:11px;">
-      <div><span style="color:#888;">السيارة / Vehicle:</span> <strong>${data.vehicleType || data.vehiclePlate}</strong></div>
-      <div><span style="color:#888;">المالك / Owner:</span> <strong>${data.owner || '-'}</strong></div>
-      <div><span style="color:#888;">إجمالي الصور / Total:</span> <strong>${totalPhotos}</strong> (${data.groups.length} ${data.groups.length === 1 ? 'order' : 'orders'})</div>
+      <div><span style="color:#888;">السيارة / Vehicle:</span> <strong>${escapeHtml(data.vehicleType || data.vehiclePlate)}</strong></div>
+      <div><span style="color:#888;">المالك / Owner:</span> <strong>${escapeHtml(data.owner || '-')}</strong></div>
+      <div><span style="color:#888;">إجمالي الصور / Total:</span> <strong>${totalPhotos}</strong> (${escapeHtml(data.groups.length)} ${data.groups.length === 1 ? 'order' : 'orders'})</div>
     </div>
 
     ${data.groups.length === 0
@@ -1550,20 +1357,20 @@ export function getNeededPartsRequestHtml(data: NeededPartsRequestData): string 
     const partsRows = r.parts.map((p, i) => `
       <tr style="${p.fulfilled ? 'opacity:0.5;text-decoration:line-through;' : ''}">
         <td style="text-align:center;color:#888;width:36px;">${i + 1}</td>
-        <td>${p.name || '-'}</td>
-        <td style="text-align:center;width:70px;font-weight:bold;">${p.quantity}</td>
-        <td style="color:#666;font-size:10.5px;">${p.notes || ''}</td>
+        <td>${escapeHtml(p.name || '-')}</td>
+        <td style="text-align:center;width:70px;font-weight:bold;">${escapeHtml(p.quantity)}</td>
+        <td style="color:#666;font-size:10.5px;">${escapeHtml(p.notes || '')}</td>
         <td style="text-align:center;width:60px;">${p.fulfilled ? '✓' : '—'}</td>
       </tr>
     `).join('');
     return `
       <div style="margin-bottom:18px;border:1px solid #e5e5e5;border-radius:8px;overflow:hidden;">
         <div style="background:#f8f9fa;padding:8px 12px;border-bottom:1px solid #e5e5e5;display:grid;grid-template-columns:repeat(2,1fr);gap:6px 14px;font-size:11px;">
-          <div><strong>أمر العمل / WO:</strong> <span style="font-family:monospace;color:#0070f3;">${r.workOrderId}</span></div>
-          <div><strong>العميل / Customer:</strong> ${r.customer}</div>
-          <div><strong>النوع / Make-Model:</strong> ${r.vehicleType || r.vehicle || '-'}${r.year ? ` — ${r.year}` : ''}</div>
-          <div><strong>اللوحة / Plate:</strong> <span style="font-family:monospace;">${r.plate}</span></div>
-          <div style="grid-column:1 / -1;"><strong>رقم الهيكل / VIN:</strong> <span style="font-family:monospace;letter-spacing:0.5px;">${r.vin || '-'}</span></div>
+          <div><strong>أمر العمل / WO:</strong> <span style="font-family:monospace;color:#0070f3;">${escapeHtml(r.workOrderId)}</span></div>
+          <div><strong>العميل / Customer:</strong> ${escapeHtml(r.customer)}</div>
+          <div><strong>النوع / Make-Model:</strong> ${escapeHtml(r.vehicleType || r.vehicle || '-')}${r.year ? ` — ${escapeHtml(r.year)}` : ''}</div>
+          <div><strong>اللوحة / Plate:</strong> <span style="font-family:monospace;">${escapeHtml(r.plate)}</span></div>
+          <div style="grid-column:1 / -1;"><strong>رقم الهيكل / VIN:</strong> <span style="font-family:monospace;letter-spacing:0.5px;">${escapeHtml(r.vin || '-')}</span></div>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:11px;">
           <thead>
@@ -1585,7 +1392,7 @@ export function getNeededPartsRequestHtml(data: NeededPartsRequestData): string 
   const totalLines = data.rows.reduce((sum, r) => sum + r.parts.length, 0);
 
   const body = `<div class="page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'طلب قطع غيار', 'PARTS REQUEST', data.requestNumber, data.date)}
 
     ${sectionTitle('السيارات التي تحتاج قطع غيار', 'Vehicles Awaiting Parts')}
@@ -1594,7 +1401,7 @@ export function getNeededPartsRequestHtml(data: NeededPartsRequestData): string 
       : groupsHtml}
 
     <div style="margin-top:14px;padding:10px 14px;background:#f0f7ff;border:1px solid #cfe3ff;border-radius:8px;font-size:11.5px;display:flex;justify-content:space-between;">
-      <span><strong>عدد السيارات:</strong> ${data.rows.length}</span>
+      <span><strong>عدد السيارات:</strong> ${escapeHtml(data.rows.length)}</span>
       <span><strong>عدد البنود:</strong> ${totalLines}</span>
       <span><strong>إجمالي القطع:</strong> ${totalParts}</span>
     </div>
@@ -1636,13 +1443,7 @@ export interface CashInvoiceInsuranceStyleData extends AdvancedDocData {
 }
 
 function invoiceRefEscape(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  return toEnglishDigits(String(value))
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  return escapeHtml(toEnglishDigits(String(value ?? "")));
 }
 
 function invoiceRefEnglishLine(value: unknown): string {
@@ -2066,7 +1867,7 @@ export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): strin
     const lineTotal = afterDisc; // VAT shown separately at the bottom (matches screenshot style)
     return `<tr>
       <td class="idx">${i + 1}</td>
-      <td>${item.description}</td>
+      <td>${escapeHtml(item.description)}</td>
       <td class="num">${omr(lineTotal)}</td>
     </tr>`;
   }).join('');
@@ -2075,9 +1876,9 @@ export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): strin
   const bankBlock = (data.insuranceBankName || data.insuranceIban) ? `
     <div class="bank">
       <div class="h">Bank Transfer Details <span class="ar">بيانات التحويل البنكي</span></div>
-      ${data.insuranceBankName ? `<div class="row"><span class="k">Bank / البنك</span><span>${data.insuranceBankName}</span></div>` : ''}
-      ${data.insuranceBankAccountName ? `<div class="row"><span class="k">Account Name / اسم الحساب</span><span>${data.insuranceBankAccountName}</span></div>` : ''}
-      ${data.insuranceIban ? `<div class="row"><span class="k">IBAN</span><span style="letter-spacing:1px;font-weight:700">${data.insuranceIban}</span></div>` : ''}
+      ${data.insuranceBankName ? `<div class="row"><span class="k">Bank / البنك</span><span>${escapeHtml(data.insuranceBankName)}</span></div>` : ''}
+      ${data.insuranceBankAccountName ? `<div class="row"><span class="k">Account Name / اسم الحساب</span><span>${escapeHtml(data.insuranceBankAccountName)}</span></div>` : ''}
+      ${data.insuranceIban ? `<div class="row"><span class="k">IBAN</span><span style="letter-spacing:1px;font-weight:700">${escapeHtml(data.insuranceIban)}</span></div>` : ''}
     </div>` : '';
 
   // ─── Vehicle / claim metadata extraction (from data.vehicleInfo + customFields) ───
@@ -2089,12 +1890,12 @@ export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): strin
     <!-- Top header -->
     <div class="top">
       <div class="left">
-        ${s.logoUrl ? `<img src="${s.logoUrl}" alt="logo"/>` : ''}
-        <div class="name-en">${s.companyNameEn}</div>
-        <div class="name-ar">${s.companyName}</div>
+        ${s.logoUrl ? `<img src="${safePdfImageSrc(s.logoUrl)}" alt="logo"/>` : ''}
+        <div class="name-en">${escapeHtml(s.companyNameEn)}</div>
+        <div class="name-ar">${escapeHtml(s.companyName)}</div>
         <div class="meta">
-          ${s.address}<br/>
-          ${s.phone} • ${s.email}
+          ${escapeHtml(s.address)}<br/>
+          ${escapeHtml(s.phone)} • ${escapeHtml(s.email)}
         </div>
       </div>
       <div class="right">
@@ -2106,21 +1907,21 @@ export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): strin
     <!-- Two-column key-value summary (matches reference) -->
     <div class="summary">
       <div class="col">
-        <div class="row"><span class="k">Invoice number <span class="ar">رقم الفاتورة</span></span><span class="v">${data.invoiceNumber}</span></div>
-        <div class="row"><span class="k">Invoice date <span class="ar">تاريخ الفاتورة</span></span><span class="v">${data.issueDate}</span></div>
-        <div class="row"><span class="k">Vehicle Make <span class="ar">صنع المركبة</span></span><span class="v">${vehMake}</span></div>
-        <div class="row"><span class="k">Model <span class="ar">الموديل</span></span><span class="v">${vehModelParts}</span></div>
-        <div class="row"><span class="k">Reg. No. <span class="ar">رقم اللوحة</span></span><span class="v">${data.vehiclePlate || '—'}</span></div>
-        <div class="row"><span class="k">Claim No. <span class="ar">رقم المطالبة</span></span><span class="v">${data.claimNumber}</span></div>
-        ${data.lpoNumber ? `<div class="row lpo-row"><span class="k"><span class="lpo-tag">LPO</span> <span class="ar">رقم أمر الشراء</span></span><span class="v" style="color:#0284c7;font-weight:800">${data.lpoNumber}</span></div>` : ''}
+        <div class="row"><span class="k">Invoice number <span class="ar">رقم الفاتورة</span></span><span class="v">${escapeHtml(data.invoiceNumber)}</span></div>
+        <div class="row"><span class="k">Invoice date <span class="ar">تاريخ الفاتورة</span></span><span class="v">${escapeHtml(data.issueDate)}</span></div>
+        <div class="row"><span class="k">Vehicle Make <span class="ar">صنع المركبة</span></span><span class="v">${escapeHtml(vehMake)}</span></div>
+        <div class="row"><span class="k">Model <span class="ar">الموديل</span></span><span class="v">${escapeHtml(vehModelParts)}</span></div>
+        <div class="row"><span class="k">Reg. No. <span class="ar">رقم اللوحة</span></span><span class="v">${escapeHtml(data.vehiclePlate || '—')}</span></div>
+        <div class="row"><span class="k">Claim No. <span class="ar">رقم المطالبة</span></span><span class="v">${escapeHtml(data.claimNumber)}</span></div>
+        ${data.lpoNumber ? `<div class="row lpo-row"><span class="k"><span class="lpo-tag">LPO</span> <span class="ar">رقم أمر الشراء</span></span><span class="v" style="color:#0284c7;font-weight:800">${escapeHtml(data.lpoNumber)}</span></div>` : ''}
       </div>
       <div class="col">
-        <div class="row"><span class="k">Invoice to <span class="ar">إلى</span></span><span class="v">${data.insuranceCompany}</span></div>
-        ${data.insuranceAddress ? `<div class="row"><span class="k">Address <span class="ar">العنوان</span></span><span class="v" style="font-weight:500;font-size:10.5px;text-align:left">${data.insuranceAddress}</span></div>` : ''}
-        ${data.insurancePoBox ? `<div class="row"><span class="k">P.O. Box <span class="ar">ص.ب</span></span><span class="v">${data.insurancePoBox}</span></div>` : ''}
-        ${data.insuranceTaxNumber ? `<div class="row"><span class="k"><span class="tax-tag">TAX</span></span><span class="v">${data.insuranceTaxNumber}</span></div>` : ''}
-        ${data.insuranceCommercialRegistration ? `<div class="row"><span class="k">CR No. <span class="ar">السجل التجاري</span></span><span class="v">${data.insuranceCommercialRegistration}</span></div>` : ''}
-        ${data.paymentDueDate ? `<div class="row"><span class="k">Due Date <span class="ar">الاستحقاق</span></span><span class="v">${data.paymentDueDate}</span></div>` : ''}
+        <div class="row"><span class="k">Invoice to <span class="ar">إلى</span></span><span class="v">${escapeHtml(data.insuranceCompany)}</span></div>
+        ${data.insuranceAddress ? `<div class="row"><span class="k">Address <span class="ar">العنوان</span></span><span class="v" style="font-weight:500;font-size:10.5px;text-align:left">${escapeHtml(data.insuranceAddress)}</span></div>` : ''}
+        ${data.insurancePoBox ? `<div class="row"><span class="k">P.O. Box <span class="ar">ص.ب</span></span><span class="v">${escapeHtml(data.insurancePoBox)}</span></div>` : ''}
+        ${data.insuranceTaxNumber ? `<div class="row"><span class="k"><span class="tax-tag">TAX</span></span><span class="v">${escapeHtml(data.insuranceTaxNumber)}</span></div>` : ''}
+        ${data.insuranceCommercialRegistration ? `<div class="row"><span class="k">CR No. <span class="ar">السجل التجاري</span></span><span class="v">${escapeHtml(data.insuranceCommercialRegistration)}</span></div>` : ''}
+        ${data.paymentDueDate ? `<div class="row"><span class="k">Due Date <span class="ar">الاستحقاق</span></span><span class="v">${escapeHtml(data.paymentDueDate)}</span></div>` : ''}
       </div>
     </div>
 
@@ -2151,11 +1952,11 @@ export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): strin
     <!-- Footer area: QR -->
     <div class="footer-area">
       <div class="left">
-        ${data.notes ? `<strong>Notes <span class="ar">ملاحظات</span>:</strong> ${data.notes}` : ''}
+        ${data.notes ? `<strong>Notes <span class="ar">ملاحظات</span>:</strong> ${escapeHtml(data.notes)}` : ''}
       </div>
       ${data.qrDataUrl ? `
         <div class="qr-box">
-          <img src="${data.qrDataUrl}" alt="QR"/>
+          <img src="${safePdfImageSrc(data.qrDataUrl)}" alt="QR"/>
           <div class="lbl">ZATCA / TLV QR</div>
         </div>` : ''}
     </div>
@@ -2169,7 +1970,7 @@ export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): strin
 
     ${stampSignatureHtml(s, "invoice")}
 
-    <div class="doc-footer">${s.companyNameEn} • ${s.companyName} • © ${new Date().getFullYear()}</div>
+    <div class="doc-footer">${escapeHtml(s.companyNameEn)} • ${escapeHtml(s.companyName)} • © ${new Date().getFullYear()}</div>
   </div>`;
 
   return wrapHtml(`Tax Invoice ${data.invoiceNumber}`, styles, body);
@@ -2236,75 +2037,75 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
       .vehicle-delivery-page .footer{margin-top:1.5mm!important;padding-top:.8mm!important;font-size:6.4px!important}
     </style>`;
   const body = `${deliveryCompactStyles}<div class="page vehicle-delivery-page">
-    ${s.showWatermark ? `<div class="watermark">${s.companyNameEn}</div>` : ''}
+    ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
     ${headerHtml(s, 'نموذج خروج وتسليم المركبة', 'VEHICLE EXIT & HANDOVER FORM', data.receiptNumber, data.date, 'background:linear-gradient(135deg,#059669,#047857);')}
 
     <div style="background:#f0fdf4;border:1.5px solid #10b981;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:9px;line-height:1.45;">
       <strong style="color:#047857;">إقرار الخروج والاستلام:</strong>
-      ${data.declarationAr || 'أقرّ أنا الموقّع أدناه بأنني عاينت المركبة واستلمتها من الورشة بالحالة الموضحة.'}
-      <br/><span dir="ltr" style="display:block;text-align:left;color:#334155;margin-top:2px;">${data.declarationEn || ''}</span>
-      ${data.workOrderNumber ? `<br/>أمر العمل المرجعي: <strong>${data.workOrderNumber}</strong>` : ''}
+      ${escapeHtml(data.declarationAr || 'أقرّ أنا الموقّع أدناه بأنني عاينت المركبة واستلمتها من الورشة بالحالة الموضحة.')}
+      <br/><span dir="ltr" style="display:block;text-align:left;color:#334155;margin-top:2px;">${escapeHtml(data.declarationEn || '')}</span>
+      ${data.workOrderNumber ? `<br/>أمر العمل المرجعي: <strong>${escapeHtml(data.workOrderNumber)}</strong>` : ''}
     </div>
 
     ${sectionTitle('بيانات المركبة', 'Vehicle Information')}
     <div class="info-grid">
-      <div class="info-row">${lbl('نوع المركبة:', 'Vehicle')}<span class="value">${data.vehicleType} ${data.model || ''}</span></div>
-      <div class="info-row">${lbl('سنة الصنع:', 'Year')}<span class="value">${data.year || '-'}</span></div>
-      <div class="info-row">${lbl('رقم اللوحة:', 'Plate')}<span class="value">${data.plateNumber}</span></div>
-      <div class="info-row">${lbl('رقم الهيكل:', 'VIN')}<span class="value">${data.vin || '-'}</span></div>
-      <div class="info-row">${lbl('اللون:', 'Color')}<span class="value">${data.color || '-'}</span></div>
-      <div class="info-row">${lbl('قراءة العداد عند التسليم:', 'Mileage Out')}<span class="value">${data.mileageOut || '-'}</span></div>
-      <div class="info-row">${lbl('حالة المركبة عند الخروج:', 'Exit Condition')}<span class="value">${data.vehicleCondition || 'تمت المعاينة / Inspected'}</span></div>
+      <div class="info-row">${lbl('نوع المركبة:', 'Vehicle')}<span class="value">${escapeHtml(data.vehicleType)} ${escapeHtml(data.model || '')}</span></div>
+      <div class="info-row">${lbl('سنة الصنع:', 'Year')}<span class="value">${escapeHtml(data.year || '-')}</span></div>
+      <div class="info-row">${lbl('رقم اللوحة:', 'Plate')}<span class="value">${escapeHtml(data.plateNumber)}</span></div>
+      <div class="info-row">${lbl('رقم الهيكل:', 'VIN')}<span class="value">${escapeHtml(data.vin || '-')}</span></div>
+      <div class="info-row">${lbl('اللون:', 'Color')}<span class="value">${escapeHtml(data.color || '-')}</span></div>
+      <div class="info-row">${lbl('قراءة العداد عند التسليم:', 'Mileage Out')}<span class="value">${escapeHtml(data.mileageOut || '-')}</span></div>
+      <div class="info-row">${lbl('حالة المركبة عند الخروج:', 'Exit Condition')}<span class="value">${escapeHtml(data.vehicleCondition || 'تمت المعاينة / Inspected')}</span></div>
     </div>
 
     ${sectionTitle('بيانات المستلم وعملية الخروج', 'Recipient & Exit Details')}
     <div class="info-grid">
-      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${data.customerName}</span></div>
-      <div class="info-row">${lbl('هاتف العميل:', 'Phone')}<span class="value">${data.customerPhone || '-'}</span></div>
-      <div class="info-row">${lbl('صفة المستلم:', 'Recipient Type')}<span class="value">${recipientType}</span></div>
-      <div class="info-row">${lbl('اسم المستلم:', 'Receiver')}<span class="value">${data.receiverName || data.customerName}</span></div>
-      <div class="info-row">${lbl('هاتف المستلم:', 'Receiver Phone')}<span class="value">${data.receiverPhone || data.customerPhone || '-'}</span></div>
-      <div class="info-row">${lbl('رقم هوية المستلم:', 'Receiver ID')}<span class="value">${data.receiverIdNumber || '-'}</span></div>
-      <div class="info-row">${lbl('العلاقة/الصفة:', 'Relationship')}<span class="value">${data.receiverRelationship || '-'}</span></div>
-      <div class="info-row">${lbl('تاريخ التسليم:', 'Delivery Date')}<span class="value">${data.date}</span></div>
-      <div class="info-row">${lbl('موظف الخروج:', 'Workshop Representative')}<span class="value">${data.workshopRepresentative || '-'}</span></div>
+      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${escapeHtml(data.customerName)}</span></div>
+      <div class="info-row">${lbl('هاتف العميل:', 'Phone')}<span class="value">${escapeHtml(data.customerPhone || '-')}</span></div>
+      <div class="info-row">${lbl('صفة المستلم:', 'Recipient Type')}<span class="value">${escapeHtml(recipientType)}</span></div>
+      <div class="info-row">${lbl('اسم المستلم:', 'Receiver')}<span class="value">${escapeHtml(data.receiverName || data.customerName)}</span></div>
+      <div class="info-row">${lbl('هاتف المستلم:', 'Receiver Phone')}<span class="value">${escapeHtml(data.receiverPhone || data.customerPhone || '-')}</span></div>
+      <div class="info-row">${lbl('رقم هوية المستلم:', 'Receiver ID')}<span class="value">${escapeHtml(data.receiverIdNumber || '-')}</span></div>
+      <div class="info-row">${lbl('العلاقة/الصفة:', 'Relationship')}<span class="value">${escapeHtml(data.receiverRelationship || '-')}</span></div>
+      <div class="info-row">${lbl('تاريخ التسليم:', 'Delivery Date')}<span class="value">${escapeHtml(data.date)}</span></div>
+      <div class="info-row">${lbl('موظف الخروج:', 'Workshop Representative')}<span class="value">${escapeHtml(data.workshopRepresentative || '-')}</span></div>
     </div>
 
     ${data.workSummary ? `${sectionTitle('ملخص الأعمال المنفذة', 'Work Summary')}
-    <div class="notes-box" style="white-space:pre-wrap;">${data.workSummary}</div>` : ''}
+    <div class="notes-box" style="white-space:pre-wrap;">${escapeHtml(data.workSummary)}</div>` : ''}
 
     ${data.partsReplaced ? `${sectionTitle('القطع المستبدلة', 'Parts Replaced')}
-    <div class="notes-box" style="white-space:pre-wrap;">${data.partsReplaced}</div>` : ''}
+    <div class="notes-box" style="white-space:pre-wrap;">${escapeHtml(data.partsReplaced)}</div>` : ''}
 
     ${data.warrantyNotes ? `${sectionTitle('الضمان والملاحظات', 'Warranty & Notes')}
-    <div class="notes-box" style="background:#fef3c7;border-color:#f59e0b;white-space:pre-wrap;">${data.warrantyNotes}</div>` : ''}
+    <div class="notes-box" style="background:#fef3c7;border-color:#f59e0b;white-space:pre-wrap;">${escapeHtml(data.warrantyNotes)}</div>` : ''}
 
-    ${data.satisfactionNotes ? `<div class="notes-box" style="background:#eff6ff;border-color:#3b82f6;white-space:pre-wrap;"><strong>ملاحظات العميل عن الرضا:</strong> ${data.satisfactionNotes}</div>` : ''}
+    ${data.satisfactionNotes ? `<div class="notes-box" style="background:#eff6ff;border-color:#3b82f6;white-space:pre-wrap;"><strong>ملاحظات العميل عن الرضا:</strong> ${escapeHtml(data.satisfactionNotes)}</div>` : ''}
 
     ${data.idPhotoDataUrl ? `
       ${sectionTitle('صورة هوية المستلم', 'Receiver ID')}
       <div style="text-align:center;margin:6px 0;">
-        <img src="${data.idPhotoDataUrl}" alt="id" style="max-width:55%;max-height:180px;border:1px solid #ddd;border-radius:8px;" />
+        <img src="${safePdfImageSrc(data.idPhotoDataUrl)}" alt="id" style="max-width:55%;max-height:180px;border:1px solid #ddd;border-radius:8px;" />
       </div>
     ` : ''}
 
     ${(data.deliveryPhotoUrls || []).length ? `
       ${sectionTitle('صور المركبة عند الخروج', 'Vehicle Photos at Exit')}
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:5px 0;break-inside:avoid;page-break-inside:avoid;">
-        ${(data.deliveryPhotoUrls || []).slice(0, 4).map((url) => `<img src="${url}" alt="exit" style="width:100%;height:58px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;"/>`).join('')}
+        ${(data.deliveryPhotoUrls || []).slice(0, 4).map((url) => `<img src="${safePdfImageSrc(url)}" alt="exit" style="width:100%;height:58px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;"/>`).join('')}
       </div>
     ` : ''}
 
     <div style="margin-top:14px;display:flex;justify-content:space-between;gap:14px;break-inside:avoid;page-break-inside:avoid;">
       <div style="text-align:center;flex:1;">
-        ${data.signatureDataUrl ? `<img src="${data.signatureDataUrl}" alt="sig" style="max-height:32px;display:block;margin:0 auto 3px;" />` : ''}
+        ${data.signatureDataUrl ? `<img src="${safePdfImageSrc(data.signatureDataUrl)}" alt="sig" style="max-height:32px;display:block;margin:0 auto 3px;" />` : ''}
         <div style="border-top:1px solid #444;padding-top:4px;font-size:8.5px;color:#444;font-weight:600;">
           توقيع المستلم<br/><span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;">Receiver Signature</span>
         </div>
       </div>
       <div style="text-align:center;flex:1;">
         <div style="border-top:1px solid #444;padding-top:4px;font-size:8.5px;color:#444;font-weight:600;margin-top:16px;">
-          ${data.workshopRepresentative || 'مندوب الورشة'}<br/><span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;">Workshop Representative</span>
+          ${escapeHtml(data.workshopRepresentative || 'مندوب الورشة')}<br/><span style="font-size:9px;color:#888;font-family:'Inter',sans-serif;">Workshop Representative</span>
         </div>
       </div>
     </div>

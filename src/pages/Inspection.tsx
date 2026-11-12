@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Search, Plus, FileText, Camera, Eye, Edit, Trash2, Link as LinkIcon, X, ShieldCheck, FileSpreadsheet, Images } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import InspectionFormDialog from "@/components/inspection/InspectionFormDialog";
 import PhotoAlbumPdfDialog from "@/components/inspection/PhotoAlbumPdfDialog";
 
 
-import { inspectionsStore, normalizePlate, type InspectionRecord } from "@/lib/inspectionsStore";
+import { inspectionsStore, normalizePlate, type InspectionRecord, type InspectionSummary } from "@/lib/inspectionsStore";
 import { moveToTrash } from "@/lib/trashStore";
 import { canDelete, canEdit } from "@/lib/permissions";
 import { logActivity } from "@/lib/auditLogStore";
@@ -26,6 +27,8 @@ const statusColors: Record<string, string> = {
 const empty: InspectionRecord = { id: "", workOrder: "", customer: "", vehicle: "", date: new Date().toISOString().split("T")[0], damageType: "", photos: 0, status: "قيد الفحص" };
 
 export default function Inspection() {
+  const { i18n } = useTranslation();
+  const isArabic = i18n.language?.startsWith("ar") ?? true;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
@@ -34,17 +37,28 @@ export default function Inspection() {
 
   
   const [preselectOrderId, setPreselectOrderId] = useState<string | undefined>(undefined);
-  const [list, setList] = useState<InspectionRecord[]>(inspectionsStore.getAll());
+  const [list, setList] = useState<InspectionSummary[]>(() => inspectionsStore.getAll());
+  const [listState, setListState] = useState(() => inspectionsStore.getLoadState());
+  const [actionBusy, setActionBusy] = useState(false);
   const [editing, setEditing] = useState<InspectionRecord | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [editForm, setEditForm] = useState<InspectionRecord>(empty);
   const [search, setSearch] = useState("");
   const [woFilter, setWoFilter] = useState<string>("");
-  const [deleting, setDeleting] = useState<InspectionRecord | null>(null);
+  const [deleting, setDeleting] = useState<InspectionSummary | null>(null);
   const allowEdit = canEdit();
   const allowDelete = canDelete();
 
-  useEffect(() => inspectionsStore.subscribe(() => setList([...inspectionsStore.getAll()])), []);
+  useEffect(() => {
+    const sync = () => {
+      setList(inspectionsStore.getAll());
+      setListState(inspectionsStore.getLoadState());
+    };
+    const unsubscribe = inspectionsStore.subscribe(sync);
+    sync();
+    return unsubscribe;
+  }, []);
+  const listReady = listState.ready && !listState.error && !listState.loading;
 
   // التقاط بارامترات الرابط القادمة من /workorders
   useEffect(() => {
@@ -69,7 +83,7 @@ export default function Inspection() {
   const filtered = useMemo(() => {
     // General inspections retain the legacy one-per-plate view. Each insurance
     // damage report is a separately numbered document and must remain visible.
-    const dedupMap = new Map<string, InspectionRecord>();
+    const dedupMap = new Map<string, InspectionSummary>();
     [...list]
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
       .forEach((i) => {
@@ -89,24 +103,36 @@ export default function Inspection() {
   const bulk = useBulkSelection(filtered);
 
 
-  function handleOpenReport(ins: InspectionRecord) {
+  function handleOpenReport(ins: InspectionSummary) {
     navigate(`/inspection/${encodeURIComponent(ins.id)}/report`);
   }
 
-  function openEdit(ins: InspectionRecord) {
+  async function openEdit(ins: InspectionSummary) {
     if (ins.kind === "insurance") {
       navigate(`/inspection/insurance/new?edit=${encodeURIComponent(ins.id)}`);
       return;
     }
-    setEditForm(ins); setEditing(ins); setShowEdit(true);
+    setActionBusy(true);
+    try {
+      const detail = await inspectionsStore.loadById(ins.id);
+      if (!detail) throw new Error(isArabic ? "التقرير غير موجود" : "Report not found");
+      setEditForm(detail); setEditing(detail); setShowEdit(true);
+    } catch (error: any) {
+      toast.error(error?.message || (isArabic ? "تعذر تحميل التقرير" : "Could not load report"));
+    } finally { setActionBusy(false); }
   }
-  function handleSaveEdit() {
-    if (editing) {
+  async function handleSaveEdit() {
+    if (!editing || actionBusy) return;
+    setActionBusy(true);
+    try {
       const changed: string[] = [];
       if (editing.status !== editForm.status) changed.push(`الحالة: ${editing.status} → ${editForm.status}`);
       if (editing.damageType !== editForm.damageType) changed.push(`نوع الضرر`);
       if (editing.photos !== editForm.photos) changed.push(`عدد الصور: ${editing.photos} → ${editForm.photos}`);
-      inspectionsStore.update(editing.id, editForm);
+      await inspectionsStore.updateConfirmed(editing.id, {
+        workOrder: editForm.workOrder, customer: editForm.customer, vehicle: editForm.vehicle,
+        damageType: editForm.damageType, photos: editForm.photos, status: editForm.status,
+      });
       logActivity({
         action: "update",
         entity: "inspection",
@@ -115,13 +141,17 @@ export default function Inspection() {
         description: changed.length > 0 ? changed.join(" • ") : "تحديث بيانات الفحص",
       });
       toast.success("تم التحديث");
-    }
-    setShowEdit(false);
+      setShowEdit(false);
+    } catch (error: any) {
+      toast.error(error?.message || (isArabic ? "تعذر حفظ التقرير" : "Could not save report"));
+    } finally { setActionBusy(false); }
   }
-  function handleDelete() {
-    if (!deleting) return;
-    const r = inspectionsStore.remove(deleting.id);
-    if (r) {
+  async function handleDelete() {
+    if (!deleting || actionBusy) return;
+    setActionBusy(true);
+    try {
+      // The returned trash payload is the complete confirmed record, not a list summary.
+      const r = await inspectionsStore.remove(deleting.id);
       moveToTrash({ type: "inspection", entityId: r.id, label: `${r.customer} - ${r.vehicle}`, payload: r });
       logActivity({
         action: "delete",
@@ -131,8 +161,28 @@ export default function Inspection() {
         description: "نقل للمهملات",
       });
       toast.success("تم النقل للمهملات");
-    }
-    setDeleting(null);
+      setDeleting(null);
+    } catch (error: any) {
+      toast.error(error?.message || (isArabic ? "تعذر حذف التقرير" : "Could not delete report"));
+    } finally { setActionBusy(false); }
+  }
+
+  async function handleBulkDelete() {
+    if (actionBusy || !confirm(`حذف ${bulk.count} تقرير؟`)) return;
+    setActionBusy(true);
+    let removed = 0;
+    try {
+      // Serial hydration bounds image memory and preserves every restore payload.
+      for (const item of bulk.selectedItems) {
+        const record = await inspectionsStore.remove(item.id);
+        moveToTrash({ type: "inspection", entityId: record.id, label: `${record.customer} - ${record.vehicle}`, payload: record });
+        removed += 1;
+      }
+      toast.success(`تم نقل ${removed} تقرير للمهملات`);
+      bulk.clear();
+    } catch (error: any) {
+      toast.error(`${isArabic ? "توقف الحذف؛ تم حذف" : "Deletion stopped; deleted"} ${removed}. ${error?.message || ""}`);
+    } finally { setActionBusy(false); }
   }
 
   function handleOpenNew() {
@@ -154,13 +204,20 @@ export default function Inspection() {
           <Button onClick={() => navigate("/inspection/insurance/new")} variant="outline" className="border-info/40 text-info hover:bg-info/10 gap-2">
             <ShieldCheck size={18} /> فحص تأمين / Insurance
           </Button>
-          <Button onClick={handleOpenNew} className="gradient-gold text-primary-foreground shadow-gold hover:opacity-90 gap-2">
+          <Button onClick={handleOpenNew} disabled={!listReady} className="gradient-gold text-primary-foreground shadow-gold hover:opacity-90 gap-2">
             <Plus size={18} /> فحص عام
           </Button>
         </div>
 
       </div>
 
+      {listState.loading && <p role="status" className="text-sm text-muted-foreground">{isArabic ? "جارٍ تحميل ملخصات الفحص..." : "Loading inspection summaries..."}</p>}
+      {listState.error && <div role="alert" className="text-sm text-destructive">
+        {isArabic ? "تعذر تحميل قائمة الفحوصات كاملة" : "Could not load the complete inspection list"}: {listState.error}
+        <Button variant="outline" size="sm" onClick={() => void inspectionsStore.refresh().catch(() => undefined)} className="mx-2">
+          {isArabic ? "إعادة المحاولة" : "Retry"}
+        </Button>
+      </div>}
       {woFilter && (
         <div className="flex items-center gap-2 p-2 rounded-lg bg-primary/5 border border-primary/20">
           <LinkIcon size={14} className="text-primary" />
@@ -225,20 +282,20 @@ export default function Inspection() {
                 <Button variant="outline" size="sm" className="border-border text-foreground hover:bg-secondary gap-1 text-xs" onClick={() => handleOpenReport(ins)}>
                   <FileText size={14} /> التقرير
                 </Button>
-                {allowEdit && <button onClick={() => openEdit(ins)} className="p-2 rounded-md hover:bg-secondary text-muted-foreground hover:text-info" title="تعديل"><Edit size={14} /></button>}
-                {allowDelete && <button onClick={() => setDeleting(ins)} className="p-2 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="حذف"><Trash2 size={14} /></button>}
+                {allowEdit && <button disabled={actionBusy} onClick={() => void openEdit(ins)} className="p-2 rounded-md hover:bg-secondary text-muted-foreground hover:text-info" title="تعديل"><Edit size={14} /></button>}
+                {allowDelete && <button disabled={actionBusy} onClick={() => setDeleting(ins)} className="p-2 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="حذف"><Trash2 size={14} /></button>}
               </div>
             </div>
           </div>
         ))}
-        {filtered.length === 0 && <div className="text-center py-12 text-muted-foreground"><Search size={40} className="mx-auto mb-3 opacity-30" /><p>لا توجد تقارير</p></div>}
+        {listReady && filtered.length === 0 && <div className="text-center py-12 text-muted-foreground"><Search size={40} className="mx-auto mb-3 opacity-30" /><p>لا توجد تقارير</p></div>}
       </div>
 
       <PhotoAlbumPdfDialog open={showAlbum} onOpenChange={setShowAlbum} />
 
       <InspectionFormDialog
 
-        open={showForm}
+        open={showForm && listReady}
         onOpenChange={(o) => { setShowForm(o); if (!o) setPreselectOrderId(undefined); }}
         preselectOrderId={preselectOrderId}
       />
@@ -257,7 +314,7 @@ export default function Inspection() {
             <Field label="الحالة"><Input value={editForm.status} onChange={e => setEditForm({ ...editForm, status: e.target.value })} className="bg-secondary border-border" /></Field>
           </div>
           <div className="flex gap-2 pt-2">
-            <Button onClick={handleSaveEdit} className="gradient-gold text-primary-foreground flex-1">حفظ</Button>
+            <Button onClick={() => void handleSaveEdit()} disabled={actionBusy} className="gradient-gold text-primary-foreground flex-1">حفظ</Button>
             <Button variant="outline" onClick={() => setShowEdit(false)} className="border-border">إلغاء</Button>
           </div>
         </DialogContent>
@@ -266,7 +323,7 @@ export default function Inspection() {
       <ConfirmDeleteDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
-        onConfirm={handleDelete}
+        onConfirm={() => void handleDelete()}
         title={`حذف تقرير ${deleting?.id || ""}`}
         description="سيتم نقل التقرير لسلة المهملات."
       />
@@ -280,15 +337,7 @@ export default function Inspection() {
           <FileSpreadsheet size={14} /> تصدير
         </Button>
         {allowDelete && (
-          <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={() => {
-            if (!confirm(`حذف ${bulk.count} تقرير؟`)) return;
-            bulk.selectedItems.forEach((r) => {
-              inspectionsStore.remove(r.id);
-              moveToTrash({ type: "inspection", entityId: r.id, label: `${r.customer} - ${r.vehicle}`, payload: r });
-            });
-            toast.success(`تم نقل ${bulk.count} تقرير للمهملات`);
-            bulk.clear();
-          }}>
+          <Button size="sm" variant="destructive" disabled={actionBusy} className="h-8 gap-1" onClick={() => void handleBulkDelete()}>
             <Trash2 size={14} /> حذف
           </Button>
         )}

@@ -190,7 +190,7 @@ export default function AppSidebar() {
       {/* Mobile toggle — مدمج مع شريط الأعلى */}
       <button
         onClick={() => setMobileOpen(!mobileOpen)}
-        className={`fixed top-2 ${isRtl ? "right-3" : "left-3"} z-50 lg:hidden p-2 rounded-lg bg-card border border-border shadow-md`}
+        className="app-mobile-menu-toggle fixed start-3 z-50 lg:hidden p-2 rounded-lg bg-card border border-border shadow-md"
         aria-label="Toggle menu"
       >
         {mobileOpen ? <X size={20} /> : <Menu size={20} />}
@@ -207,7 +207,7 @@ export default function AppSidebar() {
       {/* Sidebar */}
       <aside
         className={`
-          fixed top-0 ${sideClass} h-screen z-40 bg-sidebar border-sidebar-border
+          app-sidebar-safe fixed top-0 ${sideClass} h-[100dvh] z-40 bg-sidebar border-sidebar-border
           flex flex-col transition-all duration-300
           ${collapsed ? "w-[72px]" : "w-[260px]"}
           ${mobileOpen ? "translate-x-0" : `${closedTranslate} lg:translate-x-0`}

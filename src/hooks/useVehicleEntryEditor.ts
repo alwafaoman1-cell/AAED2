@@ -12,6 +12,7 @@ import {isValidE164,toE164} from "@/lib/phoneUtils";
 import {initialTechnicalDeclarationForm,validateTechnicalDeclarationForm,type VehicleTechnicalDeclarationForm} from "@/lib/vehicleTechnicalDeclaration";
 import {getVehicleVisitDetail} from "@/lib/vehicleVisitLifecycle";
 import "@/lib/i18n/vehicleIntakeWizard";
+import { newVehicleVisitLocation } from "@/lib/vehicleVisitIntake";
 import {markDirty,markClean} from "@/lib/unsavedWork";
 import {loadSupervisorIntakeSource} from "@/lib/supervisorIntakeSource";
 export const ENTRY_PHOTO_SLOTS= [
@@ -32,9 +33,11 @@ type PendingEntryPhoto = {
 };
 
 
-export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) {  const { id } = useParams();
+export function useVehicleEntryEditor(options?: { workspace?: "supervisor";sourceClaimId?:string;onSaved?:(id:string)=>void }) {  const { id:routeId } = useParams();
+  const onSaved=options?.onSaved;
+  const id=options?.sourceClaimId?undefined:routeId;
   const [searchParams] = useSearchParams();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const selectedPurpose = searchParams.get("purpose") === "inspection" ? "inspection" : searchParams.get("purpose") === "workshop" ? "workshop" : null;
   const [channel,setChannelState]=useState<"cash"|"insurance"|null>(searchParams.get("channel")==="insurance"?"insurance":searchParams.get("channel")==="cash"?"cash":null);
@@ -51,19 +54,19 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) { 
   const isEdit = !!id;
   const [form, setForm] = useState<VehicleEntryFormState>(() => {
     const initial = defaultVehicleEntryForm();
-    return { ...initial, insurance:{...initial.insurance,is_insurance_related:searchParams.get("channel")==="insurance"}, condition: { ...initial.condition, visit_purpose: selectedPurpose || undefined }, received_by_name: profile?.full_name || "" };
+    return { ...initial, vehicle_location:newVehicleVisitLocation(selectedPurpose), insurance:{...initial.insurance,is_insurance_related:searchParams.get("channel")==="insurance"}, condition: { ...initial.condition, visit_purpose: selectedPurpose || undefined }, received_by_name: profile?.full_name || "" };
   });
   const [saving, setSaving] = useState(false);
   const savedFormBaseline=useRef(JSON.stringify(form));
-  const sourceClaimId = searchParams.get("claim");
+  const sourceClaimId = options?.sourceClaimId || searchParams.get("claim");
   const sourceWorkOrderId = searchParams.get("work_order");
   const editorScope = JSON.stringify([profile?.tenant_id,id || null,options?.workspace || null,
-    options?.workspace === "supervisor" ? sourceClaimId : null,options?.workspace === "supervisor" ? sourceWorkOrderId : null]);
+    sourceClaimId,options?.workspace === "supervisor" ? sourceWorkOrderId : null]);
   const scopeRef=useRef(editorScope);
   scopeRef.current=editorScope;
   useEffect(()=>{scopeRef.current=editorScope;return()=>{if(scopeRef.current===editorScope)scopeRef.current="disposed";}},[editorScope]);
   const [draftScope,setDraftScope]=useState(editorScope);
-  const needsSource = options?.workspace === "supervisor" && !isEdit && Boolean(sourceClaimId || sourceWorkOrderId);
+  const needsSource = (options?.workspace === "supervisor" || Boolean(options?.sourceClaimId)) && !isEdit && Boolean(sourceClaimId || sourceWorkOrderId);
   const sourceKey = JSON.stringify([profile?.tenant_id,sourceClaimId,sourceWorkOrderId]);
   const [hydratedSourceKey,setHydratedSourceKey] = useState<string | null>(null);
   const source = useQuery({
@@ -93,7 +96,7 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) { 
     if(photoInputRef.current) photoInputRef.current.value="";
     if(documentInputRef.current) documentInputRef.current.value="";
     const base=defaultVehicleEntryForm();
-    const fresh:VehicleEntryFormState={...base,received_by_name:profile?.full_name||"",insurance:{...base.insurance,is_insurance_related:searchParams.get("channel")==="insurance"},condition:{...base.condition,visit_purpose:selectedPurpose||undefined}};
+    const fresh:VehicleEntryFormState={...base,vehicle_location:newVehicleVisitLocation(selectedPurpose),received_by_name:profile?.full_name||"",insurance:{...base.insurance,is_insurance_related:searchParams.get("channel")==="insurance"},condition:{...base.condition,visit_purpose:selectedPurpose||undefined}};
     savedFormBaseline.current=JSON.stringify(fresh);
     setForm(fresh);setStep(1);setSaving(false);setUploading(false);
     savingRef.current=false;hydratedId.current=null;hydratedData.current=null;
@@ -104,13 +107,13 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) { 
   useEffect(()=>{
     if(draftScope!==editorScope || !needsSource || !source.data || hydratedSourceKey===sourceKey) return;
     setHydratedSourceKey(sourceKey);
-    if(source.data.existingEntryId){navigate(`/supervisor/entry/${source.data.existingEntryId}/complete`,{replace:true});return;}
+    if(source.data.existingEntryId){if(onSaved)onSaved(source.data.existingEntryId);else navigate(`/supervisor/entry/${source.data.existingEntryId}/complete`,{replace:true});return;}
     if(!source.data.form) return;
-    const initial:VehicleEntryFormState={...source.data.form,received_by_name:profile?.full_name||"",condition:{...source.data.form.condition,visit_purpose:selectedPurpose||undefined}};
+    const initial:VehicleEntryFormState={...source.data.form,vehicle_location:newVehicleVisitLocation(selectedPurpose),received_by_name:profile?.full_name||"",condition:{...source.data.form.condition,visit_purpose:selectedPurpose||undefined}};
     savedFormBaseline.current=JSON.stringify(initial);
     setForm(initial);
     setChannelState(source.data.channel);
-  },[needsSource,source.data,sourceKey,hydratedSourceKey,navigate,profile?.full_name,selectedPurpose,draftScope,editorScope]);
+  },[needsSource,source.data,sourceKey,hydratedSourceKey,navigate,profile?.full_name,selectedPurpose,draftScope,editorScope,onSaved]);
 
   const detail = useQuery({
     queryKey: [...queryKeys.vehicleEntries.detail(id),profile?.tenant_id],
@@ -281,6 +284,7 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) { 
   }
   function setPurpose(next:"workshop"|"inspection") {
     setPurposeState(next); patchCondition({visit_purpose:next});
+    if (!form.id) patch({vehicle_location:newVehicleVisitLocation(next)});
   }
   function goNext() {
     if ((step===1 && (!channel||!purpose)) || (step===2 && !canSave)) {toast.error(t("vehicleIntakeWizard.required"));return;}
@@ -373,7 +377,8 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) { 
             .catch(() => toast.error(t("vehicleIntakeWizard.documentNotLinked")));
         } } },
       );
-      navigate(`${entryBasePath}/${saved.id}${options?.workspace === "supervisor" ? "/complete" : ""}`, { replace: true });
+      if(options?.onSaved)options.onSaved(saved.id);
+      else navigate(`${entryBasePath}/${saved.id}${options?.workspace === "supervisor" ? "/complete" : ""}`, { replace: true });
     } catch (error: any) {
       if(scopeRef.current!==savingScope) return;
       if (error?.savedEntry?.id) {
@@ -498,6 +503,7 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) { 
         uploadedBy: user?.id,
       });
       await qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.detail(form.id) });
+      await qc.invalidateQueries({ queryKey: ["vehicle-intake-receipts", form.id] });
       toast.success(t("vehicleIntakeWizard.filesSaved"));
     } catch (error: any) {
       toast.error(error?.message || t("vehicleIntakeWizard.filesFailed"));
@@ -509,6 +515,10 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) { 
   }
 
   async function handleSignature(role: "delivered_by" | "receiver", dataUrl: string) {
+    if (JSON.stringify(form)!==savedFormBaseline.current || pendingPhotos.length>0 || pendingDocumentFileId) {
+      toast.error(i18n.language.startsWith("en") ? "Save your changes before signing." : "احفظ التعديلات قبل التوقيع.");
+      return;
+    }
     if (!form.id) {
       toast.error(t("vehicleIntakeWizard.saveBeforeSignature"));
       return;
@@ -516,6 +526,7 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor" }) { 
     try {
       await saveVehicleEntrySignature({
         entryId: form.id,
+        revision: form.intake_revision,
         role,
         signatureDataUrl: dataUrl,
         signerName: role === "delivered_by" ? form.delivered_by.full_name : form.received_by_name,

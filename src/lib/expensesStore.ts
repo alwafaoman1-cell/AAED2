@@ -120,6 +120,7 @@ export function normalizeExpenseAccountingFields(e: ExpenseRecord): ExpenseRecor
 let cache: ExpenseRecord[] = [];
 let hydrated = false;
 const listeners = new Set<() => void>();
+const archiveSubscribers = new Set<() => void>();
 let cacheRevision = 0;
 let hydrationRequest = 0;
 let hydrationPromise: Promise<void> | null = null;
@@ -150,7 +151,7 @@ function ensureExpenseStoreSessionWatcher() {
     if (event === "SIGNED_OUT" || userChanged || event === "USER_UPDATED") {
       clearExpenseSessionCache(nextUserId);
     }
-    if (nextUserId && listeners.size > 0 && (event === "SIGNED_IN" || event === "USER_UPDATED")) {
+    if (nextUserId && archiveSubscribers.size > 0 && (event === "SIGNED_IN" || event === "USER_UPDATED")) {
       // Supabase advises against awaiting additional SDK calls in the auth
       // callback. Start the fresh load after the callback has returned.
       setTimeout(() => { void hydrateFromCloud(); }, 0);
@@ -688,11 +689,14 @@ export const expensesStore = {
     invalidateExpenseConsumers();
     return restored;
   },
-  subscribe(cb: () => void): () => void {
+  subscribe(cb: () => void, options: { loadAll?: boolean } = {}): () => void {
     ensureExpenseStoreSessionWatcher();
     listeners.add(cb);
-    if (!hydrated && !hydrationPromise) void hydrateFromCloud();
-    return () => listeners.delete(cb);
+    if (options.loadAll !== false) {
+      archiveSubscribers.add(cb);
+      if (!hydrated && !hydrationPromise) void hydrateFromCloud();
+    }
+    return () => { listeners.delete(cb); archiveSubscribers.delete(cb); };
   },
   isHydrated() {
     return hydrated;

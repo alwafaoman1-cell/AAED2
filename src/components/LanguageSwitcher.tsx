@@ -16,6 +16,7 @@ interface Props {
   variant?: "ghost" | "outline" | "default";
   size?: "sm" | "default" | "icon";
   showLabel?: boolean;
+  compactOnMobile?: boolean;
 }
 
 /**
@@ -26,6 +27,7 @@ export default function LanguageSwitcher({
   variant = "ghost",
   size = "sm",
   showLabel = true,
+  compactOnMobile = false,
 }: Props) {
   const { i18n, t } = useTranslation();
   const current = SUPPORTED_LANGS.find((l) => l.code === i18n.language) ?? SUPPORTED_LANGS[0];
@@ -40,9 +42,12 @@ export default function LanguageSwitcher({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant={variant} size={size} className="gap-2">
-          <Languages size={16} />
-          {showLabel && <span className="text-xs">{current.nativeLabel}</span>}
+        <Button variant={variant} size={size}
+          className={compactOnMobile ? "h-9 w-9 gap-2 px-0 sm:h-8 sm:w-auto sm:px-3" : "gap-2"}
+          aria-label={`${t("lang.switch")}: ${current.nativeLabel}`}
+          title={`${t("lang.switch")}: ${current.nativeLabel}`}>
+          <Languages size={16} aria-hidden="true" />
+          {showLabel && <span className={compactOnMobile ? "hidden text-xs sm:inline" : "text-xs"}>{current.nativeLabel}</span>}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[160px]">

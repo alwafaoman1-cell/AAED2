@@ -41,6 +41,7 @@ import { buildZatcaQrDataUrl } from "@/lib/zatcaQr";
 import UnifiedSendButton from "@/components/UnifiedSendButton";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { PDF_HTML_SANDBOX, safePdfImageSrc, sanitizePdfHtml } from "@/lib/safeHtml";
 
 interface Props {
   type: SalesDocType;
@@ -66,6 +67,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
   const [pdfHtml, setPdfHtml] = useState<string>("");
   const [showPdf, setShowPdf] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string>("");
+  const safePreviewHtml = useMemo(() => sanitizePdfHtml(previewHtml), [previewHtml]);
   const [printLayout, setPrintLayout] = useState<"cash" | "insurance_style">("cash");
   const [activeTab, setActiveTab] = useState("details");
   const [invoiceRevisions, setInvoiceRevisions] = useState<{
@@ -510,7 +512,8 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
             {previewHtml ? (
               <iframe
                 title="invoice-preview"
-                srcDoc={previewHtml}
+                sandbox={PDF_HTML_SANDBOX}
+                srcDoc={safePreviewHtml}
                 className="w-full bg-white"
                 style={{ height: "1100px", border: "0" }}
               />
@@ -714,7 +717,7 @@ export default function SalesDocDetailPage({ type, backRoute, editRoute, listRou
 /** Inject QR image after the totals box in the legacy invoice HTML. */
 function injectQrIntoInvoice(html: string, qrDataUrl: string, isAr: boolean): string {
   if (!qrDataUrl) return html;
-  const qrBlock = `<div style="margin-top:14px;display:flex;justify-content:flex-end;"><div style="text-align:center;"><img src="${qrDataUrl}" style="width:120px;height:120px;border:1px solid #ddd;padding:4px;background:#fff;display:block;"/><div style="font-size:9px;color:#888;margin-top:4px;letter-spacing:0.5px;">${isAr ? "رمز ZATCA" : "ZATCA / TLV QR"}</div></div></div>`;
+  const qrBlock = `<div style="margin-top:14px;display:flex;justify-content:flex-end;"><div style="text-align:center;"><img src="${safePdfImageSrc(qrDataUrl)}" style="width:120px;height:120px;border:1px solid #ddd;padding:4px;background:#fff;display:block;"/><div style="font-size:9px;color:#888;margin-top:4px;letter-spacing:0.5px;">${isAr ? "رمز ZATCA" : "ZATCA / TLV QR"}</div></div></div>`;
   return html.replace('</div>\n  </div>', `${qrBlock}</div>\n  </div>`).replace('</body>', `${''}</body>`);
 }
 

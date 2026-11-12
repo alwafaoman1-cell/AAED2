@@ -60,6 +60,9 @@ describe("vehicle entry one-time signed preview flow", () => {
       }, error: null });
     renderSignaturePage();
     const submit = await screen.findByRole("button", { name: "اعتماد التوقيع الإلكتروني" });
+    const signer = screen.getByRole("textbox");
+    expect((signer as HTMLInputElement).value).toBe("");
+    fireEvent.change(signer, { target: { value: "Actual intake signer" } });
     fireEvent.click(screen.getByRole("checkbox"));
     const canvas = document.querySelector("canvas");
     expect(canvas).not.toBeNull();

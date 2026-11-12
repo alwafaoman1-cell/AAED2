@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
-const mocks = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn(), tenant: vi.fn(), linked: vi.fn(), visit: vi.fn(), link: vi.fn(), viewLink: vi.fn(), send: vi.fn(), bundles: {} as Record<string, any> }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn(), tenant: vi.fn(), linked: vi.fn(), visit: vi.fn(), link: vi.fn(), viewLink: vi.fn(),releaseLink:vi.fn(),release:vi.fn(), send: vi.fn(), bundles: {} as Record<string, any> }));
 vi.mock("@/i18n", () => ({ default: {
   addResourceBundle: (language: string, _namespace: string, resources: object) => { mocks.bundles[language] = { ...mocks.bundles[language], ...resources }; },
   t: (key: string, params: Record<string, string> = {}) => {
@@ -13,7 +13,7 @@ vi.mock("@/lib/cloud/createCloudStore", () => ({ getCurrentTenantId: mocks.tenan
 vi.mock("@/lib/vehicleVisitLifecycle", () => ({ getLinkedVehicleVisit: mocks.linked, getVehicleVisitDetail: mocks.visit }));
 vi.mock("@/lib/vehicleEntryService", () => ({ createVehicleEntryCustomerSignatureLink: mocks.link,
   getVehicleEntryPresence: (entry: any) => entry.vehicle_location === "داخل الورشة" ? "in_workshop" : entry.vehicle_location === "مع العميل" ? "with_customer" : "needs_review" }));
-vi.mock("@/lib/vehicleInspectionRelease", () => ({ createInspectionReleaseViewLink: mocks.viewLink }));
+vi.mock("@/lib/vehicleInspectionRelease", () => ({ createInspectionReleaseViewLink: mocks.viewLink,createInspectionReleaseLink:mocks.releaseLink,getInspectionReleaseById:mocks.release,inspectionReleaseMissingFields:(form:any)=>form.complete===false?['pending_action']:[] }));
 vi.mock("@/lib/systemPreferences", () => ({ readSystemPreferences: async () => ({ defaultCountryCode: "968" }) }));
 vi.mock("@/lib/messaging/messagingService", () => ({ sendUnifiedMessage: mocks.send }));
 import { buildVehicleVisitMessageDraft, loadVehicleVisitMessageContext, prepareVehicleVisitMessage, sendVehicleVisitMessage,
@@ -50,6 +50,31 @@ beforeEach(() => {
 async function context() { return loadVehicleVisitMessageContext({ entryId, claimId }, tenant); }
 
 describe("vehicle visit messages: identity, review and manual delivery", () => {
+  it('prepares a live signature request for the named recipient, not an already completed exit',async()=>{
+    const record={id:id(11),vehicle_entry_id:entryId,tenant_id:tenant,release_number:'QA-TEMP',status:'draft',updated_at:'revision-1',form_data:{recipient_name:'Delegated recipient',recipient_phone:'+96897000008'}};
+    mocks.visit.mockImplementation(async()=>({entry,reviewReason:null,hasFinalHandover:false,releases:[record]}));mocks.release.mockImplementation(async()=>({...record}));
+    mocks.releaseLink.mockImplementation(async()=>{record.status='awaiting_signature';record.updated_at='revision-2';return{url:'https://example.invalid/signature-link',expires_at:'2099-01-01'};});
+    const draft=await prepareVehicleVisitMessage({entryId},'temporary_release_signature','en',tenant);
+    expect(draft.recipientPhone).toBe('96897000008');expect(draft.body).toContain('Delegated recipient');expect(draft.body).toContain('does not record a vehicle exit');
+    expect(mocks.releaseLink).toHaveBeenCalledWith(record.id);expect(mocks.send).not.toHaveBeenCalled();
+    await expect(sendVehicleVisitMessage({...draft,expiresAt:'2000-01-01'},draft.body)).rejects.toMatchObject({code:'VISIT_MESSAGE_STALE'});
+    expect(mocks.send).not.toHaveBeenCalled();
+    await sendVehicleVisitMessage(draft,draft.body);expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({recipientPhone:'96897000008',templateType:'vehicle_visit_temporary_release_signature'}));
+  });
+  it('does not generate signature capabilities before physical arrival or from incomplete reports',async()=>{
+    const current=await context();
+    await expect(prepareVehicleVisitMessage({entryId},'temporary_release_signature','en',tenant)).rejects.toMatchObject({code:'VISIT_MESSAGE_RELEASE_SIGNATURE_REQUIRED'});
+    expect(()=>buildVehicleVisitMessageDraft({...current,signatureRelease:{id:id(11),number:'QA',updatedAt:'r1',status:'awaiting_signature',recipientName:'QA',recipientPhone:'96897000008',complete:true},presence:'with_customer'},'temporary_release_signature','en','https://example.invalid/link')).toThrow('RELEASE_SIGNATURE_REQUIRED');
+    expect(mocks.releaseLink).not.toHaveBeenCalled();
+  });
+  it('rejects a signature message if the report or named recipient changes after review',async()=>{
+    const record={id:id(11),vehicle_entry_id:entryId,tenant_id:tenant,release_number:'QA-TEMP',status:'draft',updated_at:'revision-1',form_data:{recipient_name:'QA recipient',recipient_phone:'+96897000008'}};
+    mocks.visit.mockImplementation(async()=>({entry,reviewReason:null,hasFinalHandover:false,releases:[record]}));mocks.release.mockImplementation(async()=>({...record}));
+    mocks.releaseLink.mockImplementation(async()=>{record.status='awaiting_signature';record.updated_at='revision-2';return{url:'https://example.invalid/signature-link',expires_at:'2099-01-01'};});
+    const draft=await prepareVehicleVisitMessage({entryId},'temporary_release_signature','en',tenant);
+    record.form_data.recipient_phone='+96897000009';
+    await expect(sendVehicleVisitMessage(draft,draft.body)).rejects.toMatchObject({code:'VISIT_MESSAGE_STALE'});expect(mocks.send).not.toHaveBeenCalled();
+  });
   it("loads fresh canonical identity/contact without sending or issuing links", async () => {
     expect(await context()).toMatchObject({ tenantId: tenant, entryId, claimId, customerId, phone: "96897000001", approved: true });
     expect(mocks.visit).toHaveBeenCalledWith(entryId, { includeOperationalFile: false });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { smartBack } from "@/lib/smartBack";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -40,8 +40,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import {
-  getWorkOrderById,
-  subscribeWorkOrders,
   WORK_ORDER_STATUSES,
   STAGE_LABELS,
   deleteWorkOrder,
@@ -52,44 +50,30 @@ import {
   type StagePhoto,
   refreshWorkOrdersFromCloud,
   upsertWorkOrderInCache,
-  fetchWorkOrderFromCloudByIdentifier,
   restoreWorkOrderFromTrash,
   normalizeWorkOrderStatus,
 } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
-import { inspectionsStore } from "@/lib/inspectionsStore";
+import { fetchInspectionSummariesForOrder } from "@/lib/inspectionsStore";
+import { useAuth } from "@/contexts/AuthContext";
 import { getExpensesForWorkOrder, fetchExpensesForWorkOrder, expensesStore, type ExpenseRecord } from "@/lib/expensesStore";
 import { queryKeys } from "@/lib/queryKeys";
 import { Checkbox } from "@/components/ui/checkbox";
 import { canDelete, canEdit, canManageFinance } from "@/lib/permissions";
 import { moveToTrash } from "@/lib/trashStore";
 import { logActivity } from "@/lib/auditLogStore";
-import { getNeededPartsRequestHtml, getWorkOrderHtml } from "@/lib/pdfGenerator";
 import { buildPartsRequestMessage } from "@/lib/partsWhatsApp";
 
-import PdfPreviewDialog from "@/components/PdfPreviewDialog";
-import WorkOrderForm from "@/components/workorders/WorkOrderForm";
-import WorkOrderStatusDialog from "@/components/workorders/WorkOrderStatusDialog";
-import WorkOrderBulkExpenseDialog from "@/components/workorders/WorkOrderBulkExpenseDialog";
-import WorkOrderExpenseDialog from "@/components/workorders/WorkOrderExpenseDialog";
-import ExpensePreviewDialog from "@/components/workorders/ExpensePreviewDialog";
-import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
-import QrLabel from "@/components/workorders/QrLabel";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import NeededPartsManager from "@/components/workorders/NeededPartsManager";
-import SupplementsSection from "@/components/workorders/SupplementsSection";
-import ApprovalHistoryTab from "@/components/workorders/ApprovalHistoryTab";
-import CustomerPortalLink from "@/components/workorders/CustomerPortalLink";
+import { DeferredWorkOrderSection } from "@/components/workorders/DeferredWorkOrderSection";
 import SendStageNotificationButton from "@/components/workorders/SendStageNotificationButton";
 import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
-import SmartCustomerSendBar from "@/components/workorders/SmartCustomerSendBar";
 import { isUuid } from "@/lib/uuid";
-import { extractWorkOrderNumber } from "@/lib/workOrderNumber";
 // PortalNotesPending moved to /messages
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import WhatsAppCenter from "@/components/workorders/WhatsAppCenter";
 import QuickEmailButton from "@/components/QuickEmailButton";
 import { salesStore, statusLabel, type SalesDoc } from "@/lib/salesStore";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
@@ -98,16 +82,31 @@ import { resolveWorkOrderType } from "@/lib/workOrderType";
 import { archiveWorkOrder } from "@/lib/deletePolicy";
 import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import { VehicleVisitBadge } from "@/components/vehicles/VehicleVisitBadge";
-import { classifyWorkOrderCosts, splitVatInclusiveAmount } from "@/lib/workOrderCosting";
+import { splitVatInclusiveAmount } from "@/lib/workOrderCosting";
 import { formatCurrencyEnglish } from "@/lib/formatters/numberFormat";
-import { fetchUnifiedOperationalState, listUnifiedVehicleMedia, type UnifiedMediaRecord } from "@/lib/claimWorkOrderUnified";
+import { listUnifiedVehicleMedia, type UnifiedMediaRecord } from "@/lib/claimWorkOrderUnified";
 import { mergeWorkOrderMedia } from "@/lib/workOrderMedia";
 import { fetchWorkOrderAttachedPhotos } from "@/lib/workOrderAttachedPhotos";
 import { refreshSignedPhotoUrls } from "@/lib/workOrderPhotosStorage";
 import { useWorkOrderFinancials } from "@/hooks/useWorkOrderFinancials";
-import UnifiedAddPaymentDialog from "@/components/payments/UnifiedAddPaymentDialog";
+import { useWorkOrderDetailRecord } from "@/hooks/useWorkOrderDetailRecord";
 import { paymentTargetFromWorkOrderInvoice } from "@/lib/paymentTargets";
 import type { WorkOrderLinkedInvoice } from "@/lib/workOrderFinancials";
+
+const WorkOrderForm = lazy(() => import("@/components/workorders/WorkOrderForm"));
+const SupplementsSection = lazy(() => import("@/components/workorders/SupplementsSection"));
+const ApprovalHistoryTab = lazy(() => import("@/components/workorders/ApprovalHistoryTab"));
+const CustomerPortalLink = lazy(() => import("@/components/workorders/CustomerPortalLink"));
+const SmartCustomerSendBar = lazy(() => import("@/components/workorders/SmartCustomerSendBar"));
+const WorkOrderStatusDialog = lazy(() => import("@/components/workorders/WorkOrderStatusDialog"));
+const WorkOrderBulkExpenseDialog = lazy(() => import("@/components/workorders/WorkOrderBulkExpenseDialog"));
+const WorkOrderExpenseDialog = lazy(() => import("@/components/workorders/WorkOrderExpenseDialog"));
+const StagePhotosDialog = lazy(() => import("@/components/workorders/StagePhotosDialog"));
+const ExpensePreviewDialog = lazy(() => import("@/components/workorders/ExpensePreviewDialog"));
+const WhatsAppCenter = lazy(() => import("@/components/workorders/WhatsAppCenter"));
+const QrLabel = lazy(() => import("@/components/workorders/QrLabel"));
+const PdfPreviewDialog = lazy(() => import("@/components/PdfPreviewDialog"));
+const UnifiedAddPaymentDialog = lazy(() => import("@/components/payments/UnifiedAddPaymentDialog"));
 
 const PHASES: StagePhase[] = ["received", "inspection", "in_progress", "quality", "delivery"];
 
@@ -161,41 +160,21 @@ function workOrderStatusColor(status: string): string {
   return colors[normalized] || statusColors[status] || "bg-muted text-muted-foreground";
 }
 
-const SUPA_STATUS_TO_AR: Record<string, string> = {
-  received: "تحت الفحص",
-  diagnosing: "تحت الفحص",
-  awaiting_parts: "بانتظار قطع الغيار",
-  in_progress: "تحت الإصلاح",
-  quality_check: "ضبط الجودة",
-  ready: "جاهز للتسليم",
-  delivered: "تم التسليم",
-  closed: "مغلق",
-};
-
-Object.assign(SUPA_STATUS_TO_AR, {
-  received: "تحت الفحص",
-  diagnosing: "تحت الفحص",
-  awaiting_parts: "بانتظار قطع الغيار",
-  waiting_parts: "بانتظار قطع الغيار",
-  in_progress: "تحت الإصلاح",
-  quality_check: "ضبط الجودة",
-  ready: "جاهز للتسليم",
-  completed: "جاهز للتسليم",
-  delivered: "تم التسليم",
-  closed: "مغلق",
-});
 
 export default function WorkOrderDetail() {
+  const { profile } = useAuth();
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { i18n } = useTranslation();
   const isEnglish = i18n.language.startsWith("en");
   const label = (ar: string, en: string) => isEnglish ? en : ar;
+  const actionFallback = <div role="status" className="fixed bottom-4 end-4 z-[100] flex items-center gap-2 rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground shadow-lg">
+    <Loader2 className="h-4 w-4 animate-spin" /> {label("جارٍ تحميل الإجراء…", "Loading action…")}
+  </div>;
   const [actionsExpanded, setActionsExpanded] = useState(false);
-  const [order, setOrder] = useState<WorkOrder | undefined>(() => getWorkOrderById(id));
-  const [loadingRemote, setLoadingRemote] = useState(true);
+  const { order, setOrder, loading: loadingRemote, error: loadError, retry: retryLoad } = useWorkOrderDetailRecord(id, profile?.tenant_id);
   const [restoring, setRestoring] = useState(false);
-  const [cloudJobOrderId, setCloudJobOrderId] = useState<string | null>(null);
+  const cloudJobOrderId = order?.cloudId && UUID_RE.test(order.cloudId) ? order.cloudId : null;
   const [unifiedMedia, setUnifiedMedia] = useState<UnifiedMediaRecord[]>([]);
   const [resolvedLegacyPhotos, setResolvedLegacyPhotos] = useState<StagePhoto[]>([]);
   const [attachedPhotos, setAttachedPhotos] = useState<StagePhoto[]>([]);
@@ -227,19 +206,6 @@ export default function WorkOrderDetail() {
     return () => { cancelled = true; };
   }, [cloudJobOrderId, mediaRevision]);
 
-  // Resolve cloud UUID for job_orders (used by Supplements/Reception/Approval sections)
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const candidate = currentOrderCloudId || currentOrderId || id;
-      if (candidate && UUID_RE.test(candidate)) { setCloudJobOrderId(candidate); return; }
-      const woNo = extractWorkOrderNumber(order?.displayNumber || id || "");
-      if (!woNo) { setCloudJobOrderId(null); return; }
-      const { data } = await supabase.from("job_orders").select("id").ilike("order_number", woNo).maybeSingle();
-      if (!cancelled) setCloudJobOrderId((data as any)?.id || null);
-    })();
-    return () => { cancelled = true; };
-  }, [id, currentOrderId, currentOrderCloudId, order?.displayNumber]);
 
   // Detect status/photos changes triggered by the top buttons and prompt auto-send
   useEffect(() => {
@@ -285,16 +251,16 @@ export default function WorkOrderDetail() {
   const [convertPart, setConvertPart] = useState<NeededPart | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<WorkOrderLinkedInvoice | null>(null);
   const [expenseTick, setExpenseTick] = useState(0);
-  const [expensesReady, setExpensesReady] = useState(() => expensesStore.isHydrated());
   const [laborEditOpen, setLaborEditOpen] = useState(false);
   const [laborDraft, setLaborDraft] = useState(0);
   const [savingLabor, setSavingLabor] = useState(false);
   const financialQuery = useWorkOrderFinancials(order);
   const orderExpensesQuery = useQuery({
-    queryKey: [...queryKeys.expenseManagement.all, "work_order", order?.cloudId || order?.id || ""],
-    enabled: !!order,
+    queryKey: [...queryKeys.expenseManagement.all, "work_order", profile?.tenant_id, order?.cloudId || order?.id || ""],
+    enabled: !!profile?.tenant_id && !!order,
     queryFn: () => fetchExpensesForWorkOrder(order!),
   });
+  const expensesReady = orderExpensesQuery.isSuccess;
 
   const allowEdit = canEdit();
   const allowDelete = canDelete();
@@ -302,186 +268,21 @@ export default function WorkOrderDetail() {
 
   useEffect(() => {
     const unsubscribe = expensesStore.subscribe(() => {
-      setExpensesReady(expensesStore.isHydrated());
       setExpenseTick((value) => value + 1);
-    });
-    if (!expensesStore.isHydrated()) {
-      void expensesStore.refresh().finally(() => setExpensesReady(expensesStore.isHydrated()));
-    }
+    }, { loadAll: false });
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    setLoadingRemote(true);
-    const local = getWorkOrderById(id);
-    setOrder(local);
-    const unsub = subscribeWorkOrders(() => setOrder((prev) => getWorkOrderById(id) || prev));
 
-    // Fallback: resolve UUID, current typed numbers and every historical number alias.
-    const isUuid = UUID_RE.test(id);
-    const woMatch = extractWorkOrderNumber(id);
-    if (!local && id && (isUuid || woMatch)) {
-      setLoadingRemote(true);
-      (async () => {
-        const q = supabase
-          .from("job_orders")
-          .select(`
-            id, order_number, status, description, diagnosis,
-            labor_cost, parts_cost, final_total, subtotal, created_at,
-            insurance_claim_number, insurance_company, insurance_approved,
-            work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at, deleted_at,
-            parts_needed, work_items,
-            customer:customers(name, phone),
-            vehicle:vehicles(brand, model, plate_number, year, color, vin, vin_number)
-          `);
-        let { data, error } = isUuid
-          ? await q.eq("id", id).maybeSingle()
-          : await q.ilike("order_number", woMatch!).maybeSingle();
-        if (error || !data) {
-          const baseQuery = supabase
-            .from("job_orders")
-            .select(`
-              id, order_number, status, description, diagnosis,
-              labor_cost, parts_cost, final_total, subtotal, created_at,
-              insurance_claim_number, insurance_company, insurance_approved,
-              work_order_type, claim_id, customer_id, vehicle_id, tracking_token, tracking_expires_at, archived_at, deleted_at,
-              parts_needed, work_items
-            `);
-          const baseResult = isUuid
-            ? await baseQuery.eq("id", id).maybeSingle()
-            : await baseQuery.ilike("order_number", woMatch!).maybeSingle();
-          data = baseResult.data as any;
-          error = baseResult.error as any;
-        }
-        if ((error || !data) && !isUuid && woMatch) {
-          const aliased = await fetchWorkOrderFromCloudByIdentifier(woMatch).catch(() => null);
-          if (aliased) {
-            if (active) {
-              setOrder(aliased);
-              setCloudJobOrderId(aliased.cloudId || null);
-              setLoadingRemote(false);
-            }
-            return;
-          }
-        }
-        if (!error && data) {
-          let claimInfo: { approvedAmount?: number | null; estimatedAmount?: number | null; estimationType?: string | null } | null = null;
-          if ((data as any).claim_id) {
-            const { data: claim } = await supabase
-              .from("insurance_claims")
-              .select("id,approved_amount,estimated_amount,estimation_type")
-              .eq("id", (data as any).claim_id)
-              .maybeSingle();
-            if (claim) {
-              claimInfo = {
-                approvedAmount: (claim as any).approved_amount,
-                estimatedAmount: (claim as any).estimated_amount,
-                estimationType: (claim as any).estimation_type,
-              };
-            }
-          }
-          const costs = classifyWorkOrderCosts({
-            laborCost: (data as any).labor_cost,
-            partsCost: (data as any).parts_cost,
-            finalTotal: (data as any).final_total,
-            subtotal: (data as any).subtotal,
-            claim: claimInfo,
-            partsNeeded: Array.isArray((data as any).parts_needed) ? (data as any).parts_needed : [],
-            workItems: Array.isArray((data as any).work_items) ? (data as any).work_items : [],
-          });
-          let v: any = (data as any).vehicle || {};
-          let c: any = (data as any).customer || {};
-          if (!c.name && (data as any).customer_id) {
-            const { data: customerRow } = await supabase
-              .from("customers")
-              .select("name, phone")
-              .eq("id", (data as any).customer_id)
-              .maybeSingle();
-            c = customerRow || c;
-          }
-          if (!v.plate_number && (data as any).vehicle_id) {
-            const { data: vehicleRow } = await supabase
-              .from("vehicles")
-              .select("brand, model, plate_number, year, color, vin, vin_number")
-              .eq("id", (data as any).vehicle_id)
-              .maybeSingle();
-            v = vehicleRow || v;
-          }
-          const unified = await fetchUnifiedOperationalState({
-            claimId: (data as any).claim_id || null,
-            workOrderId: (data as any).id || null,
-          });
-          const unifiedStatus = unified?.operational_status
-            ? normalizeWorkOrderStatus(SUPA_STATUS_TO_AR[unified.operational_status] || unified.operational_status)
-            : null;
-          const adapted: WorkOrder = {
-            id: (data as any).order_number || (data as any).id,
-            cloudId: (data as any).id,
-            displayNumber: (data as any).order_number || undefined,
-            workOrderType: (data as any).work_order_type || ((data as any).claim_id ? "insurance" : "general_customer"),
-            claimId: (data as any).claim_id || undefined,
-            trackingToken: (data as any).tracking_token || undefined,
-            trackingExpiresAt: (data as any).tracking_expires_at || undefined,
-            archivedAt: (data as any).archived_at || undefined,
-            deletedAt: (data as any).deleted_at || undefined,
-            customer: c.name || "—",
-            phone: c.phone || "",
-            plate: v.plate_number || "—",
-            vehicleType: v.brand || "",
-            model: v.model || "",
-            year: v.year ? String(v.year) : "",
-            vin: v.vin_number || v.vin || "",
-            color: v.color || "",
-            mileage: "",
-            insurance: (data as any).insurance_company || ((data as any).insurance_approved ? "تأمين" : "-"),
-            claimNumber: (data as any).insurance_claim_number || "-",
-            entryDate: (unified?.vehicle_received_at || (data as any).received_at || (data as any).created_at || "").slice(0, 10),
-            technician: "",
-            serviceType: (data as any).insurance_claim_number ? "حادث" : "صيانة",
-            status: unifiedStatus || normalizeWorkOrderStatus(SUPA_STATUS_TO_AR[(data as any).status] || (data as any).status || "تحت الفحص"),
-            totalCost: costs.totalCost,
-            laborCost: costs.laborCost,
-            partsCost: costs.partsCost,
-            insuranceApprovedAmount: costs.insuranceApprovedAmount,
-            insuranceApprovalMode: costs.insuranceApprovalMode,
-            lumpSumNotItemized: costs.lumpSumNotItemized,
-            paintMaterialsCost: costs.paintMaterialsCost,
-            diagnosis: (data as any).diagnosis || (data as any).description || "",
-            description: unified?.operational_notes || (data as any).description || "",
-            photos: [],
-            partsNeeded: Array.isArray(unified?.parts_required) && unified.parts_required.length ? unified.parts_required as any : Array.isArray((data as any).parts_needed) ? (data as any).parts_needed : [],
-            workItems: Array.isArray((data as any).work_items) ? (data as any).work_items : [],
-            receivedAt: unified?.vehicle_received_at || (data as any).received_at || undefined,
-          };
-          const cached = upsertWorkOrderInCache(adapted);
-          if (active) setOrder(cached);
-        }
-        if (active) setLoadingRemote(false);
-      })().catch(() => {
-        if (active) {
-          setOrder(undefined);
-          setLoadingRemote(false);
-        }
-      });
-    } else if (id && (isUuid || woMatch)) {
-      void fetchWorkOrderFromCloudByIdentifier(id).then((fresh) => {
-        if (active) setOrder(fresh || undefined);
-      }).catch(() => {
-        if (active) setOrder(undefined);
-      }).finally(() => {
-        if (active) setLoadingRemote(false);
-      });
-    } else {
-      setLoadingRemote(false);
-    }
-    return () => { active = false; unsub(); };
-  }, [id]);
-
-  const inspections = useMemo(
-    () => (order ? inspectionsStore.getAll().filter((i) => i.workOrder === order.id) : []),
-    [order]
-  );
+  const inspectionOrderId = cloudJobOrderId || order?.cloudId;
+  const inspectionsQuery = useQuery({
+    queryKey: ["inspections", "work_order_summary", profile?.tenant_id, inspectionOrderId],
+    enabled: !!profile?.tenant_id && !!inspectionOrderId,
+    queryFn: () => fetchInspectionSummariesForOrder(profile!.tenant_id, inspectionOrderId!),
+    staleTime: 15_000,
+    retry: false,
+  });
+  const inspections = inspectionsQuery.data || [];
 
   const linkedVouchers = useMemo(() => {
     // The store revision intentionally refreshes this derived external-store view.
@@ -575,6 +376,7 @@ export default function WorkOrderDetail() {
     let cancelled = false;
     setLinkedClaim(null);
     if (!currentOrderId) return;
+    if(order?.resolvedClaim?.id===currentOrderClaimId){setLinkedClaim(order.resolvedClaim);return;}
     (async () => {
       try {
         const tenantId = await getCurrentTenantId();
@@ -625,7 +427,7 @@ export default function WorkOrderDetail() {
       } catch (error) { console.warn("[WorkOrderDetail] linked claim unavailable", error); }
     })();
     return () => { cancelled = true; };
-  }, [currentOrderId, currentOrderCloudId, currentOrderClaimId, currentOrderClaimNumber, cloudJobOrderId]);
+  }, [currentOrderId, currentOrderCloudId, currentOrderClaimId, currentOrderClaimNumber, cloudJobOrderId,order?.resolvedClaim]);
 
   useEffect(() => {
     let cancelled = false;
@@ -679,8 +481,11 @@ export default function WorkOrderDetail() {
         </Button>
         <div className="bg-card border border-border rounded-xl p-12 text-center text-muted-foreground">
           <Car size={40} className="mx-auto mb-3 opacity-40" />
-          <p>{loadingRemote ? "جاري تحميل أمر العمل..." : "لم يتم العثور على أمر العمل"}</p>
+          <p role={loadError ? "alert" : undefined}>{loadError
+            ? label("تعذر تحميل أمر العمل من السحابة. أعد المحاولة؛ لم تُغيّر أي بيانات.", "Could not load the work order from the cloud. Retry; no data was changed.")
+            : label("لم يتم العثور على أمر العمل", "Work order not found")}</p>
           <p className="text-xs font-mono mt-1">{id}</p>
+          {loadError && <Button variant="outline" className="mt-3" onClick={retryLoad}>{label("إعادة المحاولة", "Retry")}</Button>}
         </div>
       </div>
     );
@@ -789,7 +594,12 @@ export default function WorkOrderDetail() {
 
   async function handlePrintWorkOrder() {
     // Pre-build tracking QR into the cache before sync HTML render
-    const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
+    const generator = await import("@/lib/pdfGenerator").catch(() => {
+      toast.error(label("تعذر تحميل أدوات الطباعة. أعد المحاولة.", "Could not load print tools. Please retry."));
+      return null;
+    });
+    if (!generator) return;
+    const { buildTrackingQrDataUrl, getWorkOrderHtml } = generator;
 
     // Fetch customer signature if available (from portal token)
     let effectiveTrackingToken = order!.trackingToken;
@@ -879,12 +689,17 @@ export default function WorkOrderDetail() {
     }
   }
 
-  function handlePrintNeededParts() {
+  async function handlePrintNeededParts() {
     if (partsNeeded.length === 0) {
       toast.error("لا توجد قطع غيار مطلوبة لهذا الأمر");
       return;
     }
-    const html = getNeededPartsRequestHtml({
+    const generator = await import("@/lib/pdfGenerator").catch(() => {
+      toast.error(label("تعذر تحميل أدوات الطباعة. أعد المحاولة.", "Could not load print tools. Please retry."));
+      return null;
+    });
+    if (!generator) return;
+    const html = generator.getNeededPartsRequestHtml({
       requestNumber: `PR-${order!.displayNumber || order!.id}`,
       date: partsRequestDate || new Date().toISOString().slice(0, 10),
       rows: [
@@ -1379,7 +1194,7 @@ export default function WorkOrderDetail() {
 
         {/* Customer-facing links and updates share one compact desktop column. */}
         {cloudJobOrderId ? (
-          <div className="space-y-3">
+          <DeferredWorkOrderSection key={cloudJobOrderId} title={label("روابط العميل والتحديثات","Customer links and updates")}><Suspense fallback={actionFallback}><div className="space-y-3">
             <CustomerPortalLink
               jobOrderId={cloudJobOrderId}
               customerPhone={order.phone}
@@ -1397,7 +1212,7 @@ export default function WorkOrderDetail() {
             <div className="flex justify-end rounded-lg border border-border/60 bg-card px-3 py-2">
               <SendStageNotificationButton jobOrderId={cloudJobOrderId} status={normalizeWorkOrderStatus(order.status)} />
             </div>
-          </div>
+          </div></Suspense></DeferredWorkOrderSection>
         ) : (
           <div className="rounded-xl border border-dashed border-border bg-card p-4 text-center text-xs text-muted-foreground">
             {label("روابط العميل وإرسال التحديثات غير متاحة — هذا الأمر غير مزامن مع السحابة بعد.", "Customer links are unavailable until this work order is synced to the cloud.")}
@@ -1409,12 +1224,12 @@ export default function WorkOrderDetail() {
 
       {/* Supplements — additional work requiring customer approval (placed directly under needed parts) */}
       {cloudJobOrderId ? (
-        <SupplementsSection
+        <DeferredWorkOrderSection key={cloudJobOrderId} title={label("الأعمال الإضافية","Additional work")}><Suspense fallback={actionFallback}><SupplementsSection
           jobOrderId={cloudJobOrderId}
           customerName={order.customer}
           customerPhone={order.phone}
           onPhotosChanged={() => setMediaRevision((value) => value + 1)}
-        />
+        /></Suspense></DeferredWorkOrderSection>
       ) : (
         <div className="bg-card border border-dashed border-border rounded-xl p-4 text-center text-xs text-muted-foreground">
           {label("الأعمال الإضافية ورابط موافقة العميل غير متاحة — هذا الأمر غير مزامن مع السحابة بعد.", "Supplements and customer approval are unavailable until this work order is synced to the cloud.")}
@@ -1422,7 +1237,7 @@ export default function WorkOrderDetail() {
       )}
 
       {/* Approval history (customer signature log) */}
-      {cloudJobOrderId && <ApprovalHistoryTab jobOrderId={cloudJobOrderId} />}
+      {cloudJobOrderId && <DeferredWorkOrderSection key={cloudJobOrderId} title={label("سجل موافقات العميل","Customer approval history")}><Suspense fallback={actionFallback}><ApprovalHistoryTab jobOrderId={cloudJobOrderId} /></Suspense></DeferredWorkOrderSection>}
 
       <section className="min-w-0 rounded-xl border border-border bg-card p-3 sm:p-4" aria-label={label("الصور والمستندات", "Photos and documents")}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1545,13 +1360,20 @@ export default function WorkOrderDetail() {
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <SearchIcon size={16} className="text-primary" />
               {label("الفحوصات المرتبطة", "Linked inspections")}
-              <span className="text-xs text-muted-foreground font-normal">({inspections.length})</span>
+              <span className="text-xs text-muted-foreground font-normal">({inspectionsQuery.isError ? "!" : inspectionsQuery.isSuccess ? inspections.length : "…"})</span>
             </h2>
             <Button size="sm" variant="outline" onClick={openNewInspection} className="gap-1 h-8">
               <FilePlus2 size={12} /> {label("فحص جديد", "New inspection")}
             </Button>
           </div>
-          {inspections.length === 0 ? (
+          {inspectionsQuery.isError ? (
+            <div role="alert" className="text-xs text-destructive">
+              {label("تعذر تحميل ملخص الفحوصات.", "Could not load inspection summaries.")}
+              <Button size="sm" variant="ghost" onClick={() => void inspectionsQuery.refetch()}>{label("إعادة المحاولة", "Retry")}</Button>
+            </div>
+          ) : !inspectionsQuery.isSuccess ? (
+            <p role="status" className="text-xs text-muted-foreground">{label("جارٍ تحميل الفحوصات...", "Loading inspections...")}</p>
+          ) : inspections.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-1">{label("لا توجد فحوصات بعد.", "No inspections yet.")}</p>
           ) : (
             <ul className="space-y-1.5">
@@ -1707,8 +1529,10 @@ export default function WorkOrderDetail() {
           <DialogHeader>
             <DialogTitle>تعديل أمر العمل {displayNo}</DialogTitle>
           </DialogHeader>
+          <Suspense fallback={actionFallback}>
           <WorkOrderForm
             initial={order}
+            linkedExpenseVouchers={linkedVouchers}
             onClose={() => setEditOpen(false)}
             onSaved={(saved) => {
               setEditOpen(false);
@@ -1718,6 +1542,7 @@ export default function WorkOrderDetail() {
               }
             }}
           />
+          </Suspense>
         </DialogContent>
       </Dialog>
 
@@ -1748,7 +1573,8 @@ export default function WorkOrderDetail() {
         </DialogContent>
       </Dialog>
 
-      <WorkOrderStatusDialog
+      <Suspense fallback={actionFallback}>
+      {statusOpen && <WorkOrderStatusDialog
         order={statusOpen ? order : null}
         open={statusOpen}
         onOpenChange={setStatusOpen}
@@ -1756,19 +1582,19 @@ export default function WorkOrderDetail() {
         onRequestHandover={() => navigate(`/work-orders/${encodeURIComponent(order.displayNumber || order.id)}/delivery`, {
           state: { returnTo: `/work-orders/${encodeURIComponent(order.displayNumber || order.id)}` },
         })}
-      />
-      <StagePhotosDialog
+      />}
+      {photosOpen && <StagePhotosDialog
         orderId={photosOpen ? order.id : null}
         open={photosOpen}
         onClose={() => setPhotosOpen(false)}
-      />
-      <WorkOrderBulkExpenseDialog
+      />}
+      {expenseOpen && <WorkOrderBulkExpenseDialog
         order={expenseOpen ? order : null}
         open={expenseOpen}
         onOpenChange={setExpenseOpen}
         onSaved={() => setExpenseTick((value) => value + 1)}
-      />
-      <WorkOrderExpenseDialog
+      />}
+      {convertPart && <WorkOrderExpenseDialog
         order={convertPart ? order : null}
         open={!!convertPart}
         onOpenChange={(open) => !open && setConvertPart(null)}
@@ -1789,35 +1615,35 @@ export default function WorkOrderDetail() {
             toast.error(error?.message || "تم حفظ المصروف لكن تعذر تحديث القطعة المرتبطة");
           });
         }}
-      />
-      <ExpensePreviewDialog
+      />}
+      {previewExpense && <ExpensePreviewDialog
         expense={previewExpense}
         open={!!previewExpense}
         onOpenChange={(o) => !o && setPreviewExpense(null)}
-      />
-      <QrLabel order={qrOpen ? order : null} open={qrOpen} onClose={() => setQrOpen(false)} />
-      <WhatsAppCenter
+      />}
+      {qrOpen && <QrLabel order={order} open={qrOpen} onClose={() => setQrOpen(false)} />}
+      {waOpen && <WhatsAppCenter
         order={waOpen ? order : null}
         open={waOpen}
         onOpenChange={setWaOpen}
         defaultTab={waTab}
-      />
-      <PdfPreviewDialog
+      />}
+      {previewOpen && <PdfPreviewDialog
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         htmlContent={previewHtml}
         title={previewTitle}
-      />
+      />}
 
-      <WorkOrderExpenseDialog
+      {editingExpense && <WorkOrderExpenseDialog
         order={editingExpense ? order : null}
         open={!!editingExpense}
         onOpenChange={(open) => !open && setEditingExpense(null)}
         initialExpense={editingExpense}
         onExpenseSaved={(expense) => setEditingExpense(expense)}
-      />
+      />}
 
-      <UnifiedAddPaymentDialog
+      {paymentInvoice && <UnifiedAddPaymentDialog
         open={!!paymentInvoice}
         onOpenChange={(open) => { if (!open) setPaymentInvoice(null); }}
         initialTarget={paymentTarget}
@@ -1826,7 +1652,8 @@ export default function WorkOrderDetail() {
           setPaymentInvoice(null);
           void financialQuery.refetch();
         }}
-      />
+      />}
+      </Suspense>
 
       <ConfirmDeleteDialog
         open={deleteOpen}

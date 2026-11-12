@@ -8,7 +8,8 @@ describe("WhatsApp Cloud API security contract", () => {
   const messagingService = readFileSync(resolve(root, "src/lib/messaging/messagingService.ts"), "utf8");
   const partsWhatsApp = readFileSync(resolve(root, "src/lib/partsWhatsApp.ts"), "utf8");
   const whatsappShare = readFileSync(resolve(root, "src/lib/whatsappShare.ts"), "utf8");
-  const unifiedSend = readFileSync(resolve(root, "supabase/functions/unified-message-send/index.ts"), "utf8");
+  const unifiedEntrypoint = readFileSync(resolve(root, "supabase/functions/unified-message-send/index.ts"), "utf8");
+  const unifiedSend = readFileSync(resolve(root, "supabase/functions/unified-message-send/handler.ts"), "utf8");
   const metaSend = readFileSync(resolve(root, "supabase/functions/whatsapp-meta-send/index.ts"), "utf8");
   const webhookPath = resolve(root, "supabase/functions/whatsapp-webhook/index.ts");
   const webhook = readFileSync(webhookPath, "utf8");
@@ -95,7 +96,10 @@ describe("WhatsApp Cloud API security contract", () => {
   });
 
   it("uses atomic idempotency protections", () => {
-    expect(unifiedSend).toContain('admin.rpc("reserve_message_idempotency"');
+    expect(unifiedEntrypoint).toContain("Deno.serve(createUnifiedMessageHandler");
+    expect(unifiedSend).toContain('admin.from("message_idempotency_keys").insert');
+    expect(unifiedSend).toContain('error.code !== "23505"');
+    expect(unifiedSend).not.toContain("return reserveIdempotency(admin");
     expect(unifiedSend).toContain("findExistingMessageLog");
     expect(unifiedSend).toContain("duplicate_blocked");
     expect(metaSend).toContain("duplicate: true");

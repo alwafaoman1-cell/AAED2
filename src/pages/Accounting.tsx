@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DollarSign, TrendingUp, TrendingDown, BarChart3, LayoutDashboard, Settings2, BookOpen, ChevronDown, ChevronLeft, ExternalLink, FolderTree, PlusCircle, ReceiptText } from "lucide-react";
 import StatCard from "@/components/StatCard";
@@ -6,27 +6,19 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
-import FinanceSettings from "@/components/accounting/FinanceSettings";
-import JournalLedger from "@/components/accounting/JournalLedger";
-import { journalStore, type JournalEntry } from "@/lib/journalStore";
-import { formatMoney, getTemplateSettings } from "@/lib/pdfGenerator";
+import type { JournalEntry } from "@/lib/journalStore";
+import { formatMoney } from "@/lib/pdfGenerator";
 import { getJournalSourceRoute, JOURNAL_SOURCE_LABEL } from "@/lib/journalSourceLink";
-import { expensesStore } from "@/lib/expensesStore";
-import { salesStore } from "@/lib/salesStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSalesFinancialSummary } from "@/lib/salesDocumentQueries";
-
-const REVENUE_ACCOUNTS = new Set([
-  "إيرادات المبيعات",
-  "إيرادات خدمات الورشة",
-]);
-const EXPENSE_ACCOUNTS = new Set([
-  "مصروف شراء",
-  "مصاريف شحن",
-  "مصاريف تشغيلية",
-  "خصم ممنوح",
-]);
+import { fetchExpenseDashboardSummary } from "@/lib/dashboardReadSummaries";
+import { queryKeys } from "@/lib/queryKeys";
+import { useTranslation } from "react-i18next";
+import "@/lib/i18n/performanceReadSummaries";
+const FinanceSettings = lazy(() => import("@/components/accounting/FinanceSettings"));
+const JournalLedger = lazy(() => import("@/components/accounting/JournalLedger"));
+const RecentAccountingEntries = lazy(() => import("@/components/accounting/RecentAccountingEntries"));
 
 const fmt = (n: number) => formatMoney(n);
 const monthLabel = (ym: string) =>
@@ -39,35 +31,11 @@ interface AccountBreakdown {
   entries: JournalEntry[];
 }
 
-function isLiveAccountingEntry(entry: JournalEntry): boolean {
-  // Legacy insurance claim approval journals represented estimates/approvals,
-  // not issued invoices. Keep them out of actual accounting dashboards.
-  if (entry.source === "insurance_claim") return false;
-
-  if (entry.source === "expense") {
-    const expense = expensesStore.getById(entry.sourceId);
-    return !!expense && !expense.deletedAt && !expense.archivedAt;
-  }
-
-  if (entry.source === "customer_payment" || entry.source === "insurance_payment" || entry.source === "supplier_payment") {
-    return true;
-  }
-
-  if (entry.source === "sales_invoice" || entry.source === "work_order_invoice") {
-    const doc = salesStore.get(entry.sourceId);
-    return !!doc && !doc.isDeleted && doc.status !== "cancelled" && doc.status !== "draft";
-  }
-
-  return true;
-}
-
-function liveAccountingEntries(): JournalEntry[] {
-  return journalStore.getAll().filter(isLiveAccountingEntry);
-}
-
 export default function Accounting() {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { t } = useTranslation();
+  const [recentOpen,setRecentOpen] = useState(false);
   const salesSummaryQuery = useQuery({
     queryKey: ["sales_financial_summary", profile?.tenant_id, "all"],
     queryFn: () => fetchSalesFinancialSummary(profile!.tenant_id),
@@ -77,46 +45,18 @@ export default function Accounting() {
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const [entries, setEntries] = useState<JournalEntry[]>(liveAccountingEntries());
-  useEffect(() => {
-    const refresh = () => setEntries(liveAccountingEntries());
-    const unsubJournal = journalStore.subscribe(refresh);
-    const unsubExpenses = expensesStore.subscribe(refresh);
-    const unsubSales = salesStore.subscribe(refresh);
-    expensesStore.refresh();
-    return () => {
-      unsubJournal();
-      unsubExpenses();
-      unsubSales();
-    };
-  }, []);
+  const expenseSummaryQuery = useQuery({
+    queryKey: [...queryKeys.expenseManagement.all,"dashboard_summary",profile?.tenant_id],
+    queryFn: () => fetchExpenseDashboardSummary(profile!.tenant_id),
+    enabled: Boolean(profile?.tenant_id),staleTime:30_000,refetchOnMount:"always",refetchOnWindowFocus:false,retry:false,
+  });
 
-  const { revenue, expenses, profit, margin, monthly, recent, revenueByAccount, expensesByAccount } = useMemo(() => {
+  const { revenue, expenses, profit, margin, monthly, revenueByAccount, expensesByAccount } = useMemo(() => {
     let revenue = 0;
     let expenses = 0;
     const byMonth = new Map<string, { revenue: number; expenses: number }>();
     const revMap = new Map<string, AccountBreakdown>();
     const expMap = new Map<string, AccountBreakdown>();
-
-    for (const e of entries) {
-      const ym = (e.date || "").slice(0, 7);
-      const slot = byMonth.get(ym) || { revenue: 0, expenses: 0 };
-      if (REVENUE_ACCOUNTS.has(e.creditAccount)) {
-        revenue += e.amount;
-        slot.revenue += e.amount;
-        const r = revMap.get(e.creditAccount) || { account: e.creditAccount, total: 0, count: 0, entries: [] };
-        r.total += e.amount; r.count++; r.entries.push(e);
-        revMap.set(e.creditAccount, r);
-      }
-      if (EXPENSE_ACCOUNTS.has(e.debitAccount)) {
-        expenses += e.amount;
-        slot.expenses += e.amount;
-        const x = expMap.get(e.debitAccount) || { account: e.debitAccount, total: 0, count: 0, entries: [] };
-        x.total += e.amount; x.count++; x.entries.push(e);
-        expMap.set(e.debitAccount, x);
-      }
-      byMonth.set(ym, slot);
-    }
 
     // Actual dashboard source of truth:
     // - revenue from issued/non-cancelled invoices only, excluding VAT
@@ -134,23 +74,11 @@ export default function Accounting() {
       slot.revenue = month.revenue;
       byMonth.set(month.month, slot);
     });
-    revMap.set("فواتير معتمدة", { account: "فواتير معتمدة", total: revenue, count: salesSummaryQuery.data?.invoiceCount ?? 0, entries: [] });
-
-    const actualExpenses = expensesStore
-      .getAll()
-      .filter((expense) => !expense.deletedAt && !expense.archivedAt && !expense.refunded);
-    actualExpenses.forEach((expense) => {
-      const amount = Number(expense.subtotal ?? expense.amount ?? 0);
-      const ym = (expense.date || expense.createdAt || "").slice(0, 7);
-      const slot = byMonth.get(ym) || { revenue: 0, expenses: 0 };
-      expenses += amount;
-      slot.expenses += amount;
-      byMonth.set(ym, slot);
-      const account = expense.categoryName || "سندات صرف فعلية";
-      const x = expMap.get(account) || { account, total: 0, count: 0, entries: [] };
-      x.total += amount; x.count++;
-      expMap.set(account, x);
-    });
+    const revenueLabel=t("performanceRead.issuedInvoices");
+    revMap.set(revenueLabel, { account: revenueLabel, total: revenue, count: salesSummaryQuery.data?.invoiceCount ?? 0, entries: [] });
+    expenses=expenseSummaryQuery.data?.total??0;
+    for(const month of expenseSummaryQuery.data?.monthly||[]) { const slot=byMonth.get(month.month)||{revenue:0,expenses:0};slot.expenses=month.expenses;byMonth.set(month.month,slot); }
+    for(const category of expenseSummaryQuery.data?.categories||[]) { const account=category.account||t("performanceRead.actualVouchers");expMap.set(account,{account,total:category.total,count:category.count,entries:[]}); }
 
     const profit = revenue - expenses;
     const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
@@ -161,20 +89,16 @@ export default function Accounting() {
       .slice(-6)
       .map(([k, v]) => ({ name: monthLabel(k), revenue: v.revenue, expenses: v.expenses, profit: v.revenue - v.expenses }));
 
-    const recent = [...entries]
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .slice(0, 8);
-
     const revenueByAccount = Array.from(revMap.values()).sort((a, b) => b.total - a.total);
     const expensesByAccount = Array.from(expMap.values()).sort((a, b) => b.total - a.total);
 
-    return { revenue, expenses, profit, margin, monthly, recent, revenueByAccount, expensesByAccount };
-  }, [entries, salesSummaryQuery.data]);
+    return { revenue, expenses, profit, margin, monthly, revenueByAccount, expensesByAccount };
+  }, [salesSummaryQuery.data,expenseSummaryQuery.data,t]);
 
-  if (salesSummaryQuery.isPending || salesSummaryQuery.isError) {
+  if (salesSummaryQuery.isPending || salesSummaryQuery.isError || expenseSummaryQuery.isPending || expenseSummaryQuery.isError) {
     return <div className="py-12 text-center text-sm text-muted-foreground">
-      {salesSummaryQuery.isPending ? "جارٍ تحميل ملخص فواتير المبيعات..." : "تعذر تحميل ملخص فواتير المبيعات؛ لم تُعرض أرقام مالية ناقصة."}
-      {salesSummaryQuery.isError && <Button variant="outline" className="ms-3" onClick={() => void salesSummaryQuery.refetch()}>إعادة المحاولة</Button>}
+      {salesSummaryQuery.isError||expenseSummaryQuery.isError?t("performanceRead.failed"):t("performanceRead.loading")}
+      {(salesSummaryQuery.isError||expenseSummaryQuery.isError) && <Button variant="outline" className="ms-3" onClick={() => {void salesSummaryQuery.refetch();void expenseSummaryQuery.refetch();}}>{t("performanceRead.retry")}</Button>}
     </div>;
   }
 
@@ -330,48 +254,16 @@ export default function Accounting() {
           </div>
 
           <div className="bg-card border border-border rounded-xl p-4 shadow-card">
-            <h3 className="text-sm font-semibold text-foreground mb-4">آخر القيود المُرحَّلة</h3>
-            {recent.length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground text-sm">لا توجد قيود بعد</div>
-            ) : (
-              <div className="space-y-2">
-                {recent.map((e) => {
-                  const isRevenue = REVENUE_ACCOUNTS.has(e.creditAccount);
-                  const isExpense = EXPENSE_ACCOUNTS.has(e.debitAccount);
-                  const sign = isRevenue ? "+" : isExpense ? "-" : "";
-                  const cls = isRevenue ? "bg-success/15 text-success" : isExpense ? "bg-destructive/15 text-destructive" : "bg-secondary text-muted-foreground";
-                  const Icon = isRevenue ? TrendingUp : isExpense ? TrendingDown : BookOpen;
-                  const route = getJournalSourceRoute(e.source, e.sourceId);
-                  return (
-                    <div key={e.id} className="flex items-center justify-between p-3 rounded-lg hover:bg-secondary/20">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${cls}`}>
-                          <Icon size={16} />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm text-foreground truncate">{e.description}</p>
-                          <p className="text-[10px] text-muted-foreground font-mono" dir="ltr">{e.date} · {e.id} · {JOURNAL_SOURCE_LABEL[e.source]}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className={`text-sm font-bold font-mono ${isRevenue ? "text-success" : isExpense ? "text-destructive" : "text-foreground"}`} dir="ltr">
-                          {sign}{fmt(e.amount)}
-                        </span>
-                        {route && (
-                          <Button size="sm" variant="outline" className="h-7 gap-1 text-[11px]" onClick={() => navigate(route)} title="فتح المستند">
-                            <ExternalLink size={11} /> فتح
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <Collapsible open={recentOpen} onOpenChange={setRecentOpen}>
+              <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-start text-sm font-semibold">
+                <span>{t("performanceRead.recent")}</span><span className="text-primary">{t("performanceRead.show")}</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>{recentOpen&&<Suspense fallback={<p role="status" className="p-4 text-sm text-muted-foreground">{t("performanceRead.loading")}</p>}><RecentAccountingEntries/></Suspense>}</CollapsibleContent>
+            </Collapsible>
           </div>
         </TabsContent>
 
-        <TabsContent value="journal"><JournalLedger /></TabsContent>
+        <TabsContent value="journal"><Suspense fallback={<p role="status">{t("performanceRead.loading")}</p>}><JournalLedger /></Suspense></TabsContent>
         <TabsContent value="expenses" className="space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
             <button type="button" onClick={() => navigate("/accounting/expenses/new")} className="rounded-xl border border-border bg-card p-5 text-start shadow-card transition-colors hover:border-primary/50 hover:bg-primary/5">
@@ -394,7 +286,7 @@ export default function Accounting() {
             التصنيفات سحابية وموحدة: أي تعديل معتمد هنا يظهر مباشرة في إضافة المصروف. تطبيق قالب الورشة لا يغيّر المصروفات القديمة ولا يعيد تصنيفها تلقائيًا.
           </div>
         </TabsContent>
-        <TabsContent value="settings"><FinanceSettings /></TabsContent>
+        <TabsContent value="settings"><Suspense fallback={<p role="status">{t("performanceRead.loading")}</p>}><FinanceSettings /></Suspense></TabsContent>
       </Tabs>
     </div>
   );

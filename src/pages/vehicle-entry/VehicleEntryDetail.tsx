@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ClipboardCheck, ClipboardList, Copy, Download, Edit, ExternalLink, FileText, Link2, Loader2, MessageCircle, Printer, QrCode, RefreshCw, ShieldCheck, Trash2, Wrench, Shield } from "lucide-react";
+import { ArrowRight, ClipboardList, Copy, Download, Edit, ExternalLink, FileText, Link2, Loader2, MessageCircle, Printer, QrCode, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,9 +11,8 @@ import { queryKeys } from "@/lib/queryKeys";
 import { getTemplateSettingsAsync } from "@/lib/pdfGenerator";
 import {
   buildVehicleEntryHtml,
-  convertVehicleEntryToClaim,
+  currentVehicleEntrySignatures,
   createVehicleEntryCustomerSignatureLink,
-  createWorkOrderFromVehicleEntry,
   getVehicleEntryPresence,
   getVehicleEntryVisitPurpose,
   getVehicleEntry,
@@ -25,6 +24,9 @@ import { downloadSanitizedPdf, openAndPrintWindow, openSanitizedPdfWindow } from
 import { printVehicleEntrySticker } from "@/lib/vehicleEntrySticker";
 import { VehicleVisitControlPanel } from "./VehicleVisitControlPanel";
 import { toast } from "sonner";
+import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
+import VehicleIntakeReceiptPanel from "@/components/vehicle-entry/VehicleIntakeReceiptPanel";
+import { getIntakeReceiptContext, getIntakeReceiptDocument } from "@/lib/vehicleIntakeReceipt";
 
 function fmtDateTime(value?: string | null) {
   if (!value) return "—";
@@ -37,21 +39,14 @@ function fmtDateTime(value?: string | null) {
   });
 }
 
-function cardTitle(ar: string, en: string) {
-  return (
-    <div>
-      <h2 className="text-lg font-bold">{ar}</h2>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{en}</p>
-    </div>
-  );
-}
-
 export default function VehicleEntryDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user, hasRole } = useAuth();
   const { i18n, t } = useTranslation();
+  const english = i18n.language.startsWith("en");
+  const cardTitle = (ar: string, en: string) => <div><h2 className="text-lg font-bold">{english ? en : ar}</h2>{!english && <p className="text-xs uppercase tracking-wide text-muted-foreground">{en}</p>}</div>;
   const [printing, setPrinting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -73,30 +68,6 @@ export default function VehicleEntryDetail() {
       toast.success("تم إصدار استلام المركبة");
     },
     onError: (error: any) => toast.error(error?.message || "تعذر إصدار استلام المركبة"),
-  });
-
-  const workOrderMutation = useMutation({
-    mutationFn: () => createWorkOrderFromVehicleEntry(id!, user?.id),
-    onSuccess: (result: any) => {
-      qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.detail(id) });
-      qc.invalidateQueries({ queryKey: ["vehicle_visit", "detail", id] });
-      qc.invalidateQueries({ queryKey: ["vehicle_visit", "center"] });
-      toast.success(result.existing ? "يوجد أمر عمل مرتبط مسبقًا" : "تم إنشاء أمر العمل");
-      if (result.order_number || result.work_order_id) navigate(`/work-orders/${encodeURIComponent(result.order_number || result.work_order_id)}`);
-    },
-    onError: (error: any) => toast.error(error?.message || "تعذر إنشاء أمر العمل"),
-  });
-
-  const claimMutation = useMutation({
-    mutationFn: () => convertVehicleEntryToClaim(id!, user?.id),
-    onSuccess: (result: any) => {
-      qc.invalidateQueries({ queryKey: queryKeys.vehicleEntries.detail(id) });
-      qc.invalidateQueries({ queryKey: ["vehicle_visit", "detail", id] });
-      qc.invalidateQueries({ queryKey: ["vehicle_visit", "center"] });
-      toast.success(result.existing ? "توجد مطالبة مرتبطة مسبقًا" : "تم إنشاء المطالبة");
-      if (result.claim_id) navigate(`/insurance/${result.claim_id}`);
-    },
-    onError: (error: any) => toast.error(error?.message || "تعذر إنشاء المطالبة"),
   });
 
   const deleteMediaMutation = useMutation({
@@ -123,7 +94,14 @@ export default function VehicleEntryDetail() {
     const [refreshed] = await Promise.all([detail.refetch(), getTemplateSettingsAsync()]);
     if (refreshed.error) throw refreshed.error;
     if (!refreshed.data) throw new Error(t("vehicleEntry.pdfSourceMissing"));
-    return { html: buildVehicleEntryHtml(refreshed.data), entry: refreshed.data };
+    let source = refreshed.data;
+    if ((refreshed.data.vehicle_entry_signatures || []).some((s: any) => s.signature_role === "delivered_by" && s.intake_revision != null && s.intake_revision === refreshed.data.intake_revision)) {
+      const receiptContext = await getIntakeReceiptContext(refreshed.data.id);
+      const signed = receiptContext.receipts.find((r) => r.revision === refreshed.data.intake_revision);
+      if (!signed) throw new Error(t("vehicleEntry.pdfSourceMissing"));
+      source = (await getIntakeReceiptDocument(signed.id)).entry;
+    }
+    return { html: buildVehicleEntryHtml(source), entry: source };
   }
 
   async function printEntry() {
@@ -226,7 +204,7 @@ export default function VehicleEntryDetail() {
   const deliveredBy = entry.delivered_by || entry.delivered_by_snapshot || {};
   const damageMarks = entry.damage_marks || entry.vehicle_entry_damage_marks || [];
   const media = entry.vehicle_media || [];
-  const signatures = entry.vehicle_entry_signatures || [];
+  const signatures = currentVehicleEntrySignatures(entry);
   const auditLogs = entry.vehicle_entry_audit_logs || [];
   const presence = getVehicleEntryPresence(entry);
   const purpose = getVehicleEntryVisitPurpose(entry);
@@ -234,6 +212,7 @@ export default function VehicleEntryDetail() {
 
   return (
     <div className="p-6 space-y-5 max-w-7xl mx-auto" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
+      <VehicleIntakeReceiptPanel entryId={entry.id} revision={entry.intake_revision || 1} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate("/vehicle-entry")}><ArrowRight size={18} /></Button>
@@ -261,9 +240,6 @@ export default function VehicleEntryDetail() {
               <ShieldCheck size={16} /> إصدار
             </Button>
           )}
-          <Button variant="outline" disabled={claimMutation.isPending} onClick={() => claimMutation.mutate()} className="gap-2"><Shield size={16} /> إنشاء/فتح مطالبة</Button>
-          <Button variant="outline" disabled={workOrderMutation.isPending} onClick={() => workOrderMutation.mutate()} className="gap-2"><Wrench size={16} /> إنشاء/فتح أمر عمل</Button>
-          {hasRole("admin", "manager", "insurance", "supervisor") && <Button variant="outline" onClick={() => navigate(`/vehicle-entry/${entry.id}/inspection-release`)} className="gap-2"><ClipboardCheck size={16} /> {i18n.language.startsWith("ar") ? "معاينة وخروج مؤقت" : "Inspection & Temporary Release"}</Button>}
           {hasRole("admin", "manager", "insurance", "supervisor", "technician") && <Button variant="outline" onClick={() => navigate(`/vehicle-entry/${entry.id}/technical-declaration`)} className="gap-2"><ClipboardList size={16} /> {i18n.language.startsWith("ar") ? "الإقرار الفني للمركبة" : "Vehicle Technical Declaration"}</Button>}
           <Button onClick={() => navigate(`/vehicle-entry/${entry.id}/edit`)} className="gap-2"><Edit size={16} /> تعديل</Button>
         </div>
@@ -278,7 +254,7 @@ export default function VehicleEntryDetail() {
         <Card className="p-4 space-y-3">
           {cardTitle("بيانات الاستلام", "Receipt Details")}
           <Info label="رقم الاستلام" value={entry.entry_number} />
-          <Info label="تاريخ ووقت الوصول" value={fmtDateTime(entry.arrival_at || `${entry.arrival_date}T${String(entry.arrival_time || "00:00").slice(0, 5)}:00`)} />
+          <Info label="تاريخ ووقت الوصول" value={entry.vehicle_condition?.arrival_time_precision === "date_only" ? `${entry.arrival_date} — ${vehicleEntryArrivalTime(entry)}` : fmtDateTime(entry.arrival_at || `${entry.arrival_date}T${String(entry.arrival_time || "00:00").slice(0, 5)}:00`)} />
           <Info label="طريقة الوصول" value={entry.arrival_method} />
           <Info label={t("vehicleEntry.purpose")} value={t(purpose === "inspection" ? "vehicleEntry.inspectionPurpose" : purpose === "workshop" ? "vehicleEntry.workshopPurpose" : "vehicleEntry.unknownPurpose")} />
           <Info label={t("vehicleEntry.location")} value={t(presence === "in_workshop" ? "vehicleEntry.workshopTab" : presence === "with_customer" ? "vehicleEntry.customerTab" : "vehicleEntry.reviewLocation")} />
@@ -382,8 +358,8 @@ export default function VehicleEntryDetail() {
         <p className="text-sm leading-7 text-muted-foreground">{entry.declaration_ar || "—"}</p>
         {entry.declaration_en && <p className="text-sm leading-7 text-muted-foreground" dir="ltr">{entry.declaration_en}</p>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-center">
-          <SignatureBox label="توقيع المستلم" signature={signatures.find((s: any) => s.signature_role === "receiver")} />
-          <SignatureBox label="توقيع العميل/المسلم" signature={signatures.find((s: any) => s.signature_role === "delivered_by")} />
+          <SignatureBox label={english ? "Receiving employee signature" : "توقيع المستلم"} signature={signatures.find((s: any) => s.signature_role === "receiver")} />
+          <SignatureBox label={english ? "Vehicle intake signer signature" : "توقيع العميل/المسلم"} signature={signatures.find((s: any) => s.signature_role === "delivered_by")} />
           <SignatureBox label="ختم الورشة" />
         </div>
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">

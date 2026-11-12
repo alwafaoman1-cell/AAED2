@@ -1,5 +1,8 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { useAuth } from "@/contexts/AuthContext";
+import "@/lib/i18n/insuranceSettlements";
 import { buildPublicUrl } from "@/lib/publicAccessSettingsStore";
 import { Search, Download, Eye, Pencil, Plus, Filter, Receipt, AlertTriangle, CheckCircle2, FileSpreadsheet, FolderArchive, Wallet, Columns3, ArrowUpDown, RotateCcw } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -66,6 +69,8 @@ const DEFAULT_VISIBLE_COLUMNS = Object.fromEntries(
 ) as Record<InsuranceInvoiceReportColumnKey, boolean>;
 
 export default function InsuranceAccounting() {
+  const { t } = useTranslation();
+  const { profile } = useAuth();
   const [searchParams] = useSearchParams();
   const { data: invoices, isLoading } = useInsuranceInvoices();
   const { data: claims } = useInsuranceClaims();
@@ -382,7 +387,8 @@ export default function InsuranceAccounting() {
           <h1 className="text-xl md:text-2xl font-bold text-foreground">محاسبة المطالبات</h1>
           <p className="text-xs md:text-sm text-muted-foreground">جميع الفواتير الصادرة لشركات التأمين مع المعاينة والتحميل</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {profile && ["admin", "manager", "insurance", "accountant"].includes(profile.role) && <Button asChild variant="outline"><Link to="/insurance/settlement-discounts">{t("insuranceSettlements.shortTitle")}</Link></Button>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="gap-2">

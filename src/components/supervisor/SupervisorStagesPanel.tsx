@@ -39,7 +39,7 @@ export function SupervisorStagesPanel({ row, initialLocation = false }: { row: S
         : order.isError ? <div role="alert"><p>{t("actionError")}</p><Button variant="outline" className="mt-2 min-h-11" onClick={() => void order.refetch()}>{t("retry")}</Button></div>
           : <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="min-h-11 text-xs" disabled={!canStatus || !order.data} onClick={() => setStatusOpen(true)}>{t("workOrderStatus")}</Button>
-            <Button variant="outline" className="min-h-11 text-xs" disabled={!canStatus || !order.data} onClick={() => setHandoverOpen(true)}>{t("handover")}</Button>
+            {row.visit?.operationalStage==='delivered'&&<Button variant="outline" className="min-h-11 text-xs" disabled={!canStatus || !order.data} onClick={() => setHandoverOpen(true)}>{t("handover")}</Button>}
           </div>}
     </div>;
   return <div className="space-y-3">
@@ -53,7 +53,9 @@ export function SupervisorStagesPanel({ row, initialLocation = false }: { row: S
     </section>}
     {locationOpen && <VehicleVisitQuickActionDialog row={row.visit?.entry || {id:row.entryId,entry_number:row.number}} open
       onOpenChange={setLocationOpen} workspace="supervisor" mode="location"
-      onRequestHandover={canStatus && order.data ? ()=>setHandoverOpen(true) : undefined} />}
+      onRequestHandover={canStatus && order.data ? ()=>{setLocationOpen(false);setHandoverOpen(true);} : undefined}
+      onRequestWorkOrderStatus={canStatus&&order.data?()=>{setLocationOpen(false);setStatusOpen(true);}:undefined}
+      onRequestClaimApproval={row.claimId&&hasRole('admin','manager')?()=>{setLocationOpen(false);setApprovalOpen(true);}:undefined} />}
     <Suspense fallback={<p role="status">{t("loading")}</p>}>
       {statusOpen && order.data && <WorkOrderStatusDialog order={order.data} cloudJobOrderId={order.data.cloudId}
         open onOpenChange={setStatusOpen} onUpdated={() => void confirmedRefresh()}

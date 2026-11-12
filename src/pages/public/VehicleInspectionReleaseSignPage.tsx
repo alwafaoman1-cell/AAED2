@@ -1,3 +1,4 @@
+import { loadVehicleSignatureMedia } from "@/lib/vehicleSignatureMedia";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -6,6 +7,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
+import {inspectionReleaseDisplayValue} from '@/lib/inspectionReleaseOptions';
+import type {InspectionReleaseForm} from '@/lib/vehicleInspectionRelease';
 
 interface PublicRelease {
   release_number: string;
@@ -53,10 +56,7 @@ export default function VehicleInspectionReleaseSignPage() {
       }
       setData(result);
       setError(null);
-      const { data: media, error: mediaError } = await supabase.functions.invoke(
-        "vehicle-entry-signature-media",
-        { body: { token, purpose: "inspection_release" } },
-      );
+      const { data: media, error: mediaError } = await loadVehicleSignatureMedia(token, "inspection_release");
       setPhotos(!mediaError && Array.isArray(media?.media) ? media.media : []);
     } catch {
       setError("unavailable");
@@ -138,6 +138,7 @@ export default function VehicleInspectionReleaseSignPage() {
   const snap = data.entry_snapshot || {};
   const vehicle = snap.vehicle || {};
   const form = data.form_data || {};
+  const field=(name:keyof InspectionReleaseForm)=>inspectionReleaseDisplayValue(name,form[name]||'',isAr?'ar':'en');
   const plate = [vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ");
   const display = (ar: string, en: string, value: unknown) => <div className="rounded border p-3"><small className="text-slate-500">{t(ar, en)}</small><div className="font-semibold break-words">{String(value || "—")}</div></div>;
 
@@ -151,11 +152,11 @@ export default function VehicleInspectionReleaseSignPage() {
         <h2 className="font-bold">{t("المركبة والمستلم", "Vehicle & Recipient")}</h2>
         <div className="grid gap-2 sm:grid-cols-2">{display("اللوحة", "Plate", plate)}{display("المركبة", "Vehicle", [vehicle.make || vehicle.brand, vehicle.model].filter(Boolean).join(" "))}
           {display("اسم المستلم", "Recipient", form.recipient_name)}{display("رقم الهوية", "ID number", form.recipient_id_number)}
-          {display("حالة المركبة عند الخروج", "Condition at exit", form.exit_condition)}{display("المحتويات والمفاتيح", "Contents and keys", `${form.contents_handed_over || "—"} · ${form.keys_handed_over || "—"}`)}</div>
+          {display("حالة المركبة عند الخروج", "Condition at exit", field('exit_condition'))}{display("المحتويات والمفاتيح", "Contents and keys", `${form.contents_handed_over || "—"} · ${form.keys_handed_over || "—"}`)}</div>
       </section>
       <section className="rounded-xl border bg-white p-4 space-y-3"><h2 className="font-bold">{t("ما تم فحصه والإجراء المنتظر", "Inspection and pending action")}</h2>
-        <div className="grid gap-2 sm:grid-cols-2">{display("ملخص المعاينة", "Inspection summary", form.inspection_summary)}{display("ما تم فحصه", "Inspected items", form.inspected_items)}
-          {display("ما لم يُفحص", "Not inspected", form.uninspected_items)}{display("الإجراء المنتظر", "Pending action", form.pending_action)}</div>
+        <div className="grid gap-2 sm:grid-cols-2">{display("ملخص المعاينة", "Inspection summary", field('inspection_summary'))}{display("ما تم فحصه", "Inspected items", field('inspected_items'))}
+          {display("ما لم يُفحص", "Not inspected", field('uninspected_items'))}{display("الإجراء المنتظر", "Pending action", field('pending_action'))}</div>
         {Array.isArray(snap.damage_marks) && snap.damage_marks.length > 0 && <div className="rounded border p-3 text-sm"><strong>{t("الأضرار المسجلة عند الدخول", "Damage recorded at entry")}</strong>
           {snap.damage_marks.map((mark: any) => <div key={mark.mark_number}>#{mark.mark_number} · {mark.vehicle_part || "—"} · {mark.description || mark.notes || "—"}</div>)}</div>}
       </section>

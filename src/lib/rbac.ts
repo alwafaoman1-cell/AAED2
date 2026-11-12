@@ -17,6 +17,13 @@ export interface PermRow {
 
 /** المصفوفة الافتراضية — نسخة موحّدة تُستخدم من صفحة الإعدادات + بقية النظام. */
 export const DEFAULT_PERM_ROWS: PermRow[] = [
+  ...([
+    ["إصدار الوصل", "Issue"], ["تنزيل وطباعة", "Print"], ["التحقق من الوصل", "Verify"],
+    ["تسليم المركبة", "Deliver"], ["إلغاء الوصل", "Cancel"], ["سجل الإصدارات والتدقيق", "History"], ["استثناء زيارة قديمة", "Legacy exception"],
+  ] as const).map(([action, actionEn]): PermRow => ({
+    module: "وصول استلام المركبات", moduleEn: "Vehicle Intake Receipts", action, actionEn,
+    perms: { admin: "Y", manager: "Y", supervisor: ["Issue", "Print", "Verify", "Deliver"].includes(actionEn) ? "Y" : "N", technician: "N", insurance: "N", accountant: "N" },
+  })),
   { module: "لوحة التحكم", moduleEn: "Dashboard", action: "عرض", actionEn: "View",
     perms: { admin: "Y", manager: "Y", supervisor: "Y", technician: "Y", insurance: "Y", accountant: "Y" } },
 

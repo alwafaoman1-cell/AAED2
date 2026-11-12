@@ -29,7 +29,7 @@ beforeEach(() => {
     return subscription;
   });
   mocks.removeChannel.mockClear();
-  const query = { select: () => query, eq: mocks.eq };
+  const query = { select: () => query, eq: (field: string,id: string) => { const result=mocks.eq(field,id);return {order:()=>({order:()=>({order:()=>result})})}; } };
   mocks.from.mockReturnValue(query);
 });
 

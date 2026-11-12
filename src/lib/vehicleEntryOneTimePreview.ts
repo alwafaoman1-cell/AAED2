@@ -51,6 +51,7 @@ export function buildOneTimeEntryPreviewHtml(
   payload: SignedEntryPreviewPayload,
   photos: SignedEntryPhoto[],
   signatureDataUrl: string,
+  signedAt?: string,
 ): string {
   const entry = {
     ...payload,
@@ -62,7 +63,7 @@ export function buildOneTimeEntryPreviewHtml(
       file_name: photo.file_name,
     })),
     vehicle_entry_signatures: [
-      { signature_role: "delivered_by", signature_data_url: signatureDataUrl },
+      { signature_role: "delivered_by", signature_data_url: signatureDataUrl, signed_at: signedAt },
       ...(payload.receiver_signature_data_url
         ? [{ signature_role: "receiver", signature_data_url: payload.receiver_signature_data_url }]
         : []),

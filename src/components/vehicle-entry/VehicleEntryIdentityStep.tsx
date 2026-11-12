@@ -12,6 +12,7 @@ import InsuranceCompanyAutocomplete from "@/components/insurance/InsuranceCompan
 import type { VehicleEntryEditor } from "@/hooks/useVehicleEntryEditor";
 import { Field, Section } from "./VehicleEntryFields";
 import "@/lib/i18n/vehicleIntakeWizard";
+import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 
 // The Arabic values remain the persisted contract; translate display labels only.
 const ARRIVAL_METHODS = [
@@ -33,7 +34,7 @@ export function VehicleEntryIdentityStep({ editor }: { editor: VehicleEntryEdito
   const stage = center?.operationalStage || center?.stage;
   const knownStage = stage && ["arrived", "approved", "in_progress", "ready", "delivered", "cancelled", "needs_review"].includes(stage);
   const stageLabel = !form.id ? t("vehicleIntakeWizard.newStage") : knownStage ? t(`vehicleVisit.${stage}`) : t("vehicleIntakeWizard.views.managedInCenter");
-  const location = !form.id ? "داخل الورشة" : center?.entry?.vehicle_location ?? savedEntry?.vehicle_location ?? form.vehicle_location;
+  const location = !form.id ? form.vehicle_location : center?.entry?.vehicle_location ?? savedEntry?.vehicle_location ?? form.vehicle_location;
   const locationLabel = location === "داخل الورشة" || location === "in_workshop" ? t("vehicleIntakeWizard.inside")
     : location === "مع العميل" || location === "with_customer" ? t("vehicleIntakeWizard.withCustomer") : location || t("vehicleIntakeWizard.views.locationUnconfirmed");
 
@@ -41,7 +42,14 @@ export function VehicleEntryIdentityStep({ editor }: { editor: VehicleEntryEdito
     <Section title={t("vehicleIntakeWizard.arrival")} desc={t("vehicleIntakeWizard.statusHint")}>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <Field label={t("vehicleIntakeWizard.arrivalDate")}><Input type="date" value={form.arrival_date} onChange={(e) => patch({ arrival_date: e.target.value })} /></Field>
-        <Field label={t("vehicleIntakeWizard.arrivalTime")}><Input type="time" value={form.arrival_time} onChange={(e) => patch({ arrival_time: e.target.value })} /></Field>
+        <Field label={t("vehicleIntakeWizard.arrivalTime")}>
+          <Input type="time" value={form.condition.arrival_time_precision === "date_only" ? "" : form.arrival_time} onChange={(e) => {
+            if (e.target.value || form.condition.arrival_time_precision !== "date_only") {
+              patch({ arrival_time: e.target.value, condition: { ...form.condition, arrival_time_precision: "minute" } });
+            }
+          }} />
+          {form.condition.arrival_time_precision === "date_only" && <p className="text-xs text-muted-foreground">{vehicleEntryArrivalTime({ vehicle_condition: form.condition })}</p>}
+        </Field>
         <Field label={t("vehicleIntakeWizard.views.arrivalMethod")}>
           <Select value={form.arrival_method} onValueChange={(value) => { const method = ARRIVAL_METHODS.find((item) => item.value === value); if (method) chooseDeliveredBy(method.type); }}>
             <SelectTrigger aria-label={t("vehicleIntakeWizard.views.arrivalMethod")}><SelectValue /></SelectTrigger>

@@ -20,6 +20,8 @@ import "@/lib/i18n/supervisorWorkspace";
 import {hasUnsavedWork} from "@/lib/unsavedWork";
 import {AlertDialog,AlertDialogAction,AlertDialogCancel,AlertDialogContent,AlertDialogDescription,AlertDialogFooter,AlertDialogHeader,AlertDialogTitle} from "@/components/ui/alert-dialog";
 import { useSupervisorTheme } from "@/hooks/useSupervisorTheme";
+import {isVehicleVisitAwaitingArrival} from '@/lib/vehicleVisitIntake';
+import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 
 const EntryForm = lazy(() => import("@/pages/vehicle-entry/VehicleEntryForm"));
 const ReleasePage = lazy(() => import("@/pages/vehicle-entry/VehicleInspectionReleasePage"));
@@ -47,7 +49,7 @@ export default function SupervisorEntryWorkspace({ view = "form" }: { view?: "fo
     <main className="mx-auto max-w-screen-2xl p-4 pb-16 md:p-6 [&_button]:min-h-11 [&_input]:min-h-11 [&_select]:min-h-11">
       <Can module="Vehicles" action="Create/Edit" fallback={<p role="alert">{t("supervisorEntry:denied")}</p>}>
         <Suspense fallback={loading}>
-          {view === "complete" ? <SupervisorEntryReceipt /> : view === "release" ? <ReleasePage workspace="supervisor" />
+          {view === "complete" ? <SupervisorEntryReceipt /> : view === "release" ? <ReleasePage workspace="supervisor" onBusyChange={setEntryBusy} />
             : view === "technical" ? <TechnicalPage workspace="supervisor" /> : <EntryForm workspace="supervisor" onBusyChange={setEntryBusy} />}
         </Suspense>
       </Can>
@@ -77,7 +79,7 @@ function SupervisorEntryReceipt() {
   const draft = entry.status === "Draft";
   const location = visit.data.operationalStage === "delivered" ? "delivered" : visit.data.reviewReason ? "review"
     : visit.data.entry.vehicle_location === "داخل الورشة" ? "inside"
-      : visit.data.entry.vehicle_location === "مع العميل" && visit.data.hasSignedTemporaryRelease ? "withCustomer" : "review";
+      : visit.data.entry.vehicle_location === "مع العميل" && (visit.data.hasSignedTemporaryRelease||isVehicleVisitAwaitingArrival(visit.data.entry)) ? "withCustomer" : "review";
   const base = `/supervisor/entry/${id}`;
 
   async function pdf(action: "preview" | "print" | "download") {
@@ -106,7 +108,7 @@ function SupervisorEntryReceipt() {
       <Card className="space-y-3 p-4">
         <p className="text-lg font-semibold"><bdi>{[vehicle.plate_letters, vehicle.plate_number].filter(Boolean).join(" ")}</bdi> · {[vehicle.brand || vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(" ")}</p>
         <p className="text-sm">{t("supervisorEntry:customer")}: {customer.name || "—"} · <bdi>{customer.phone || "—"}</bdi></p>
-        <p className="text-sm">{t("supervisorEntry:arrival")}: <bdi>{entry.arrival_date} {String(entry.arrival_time || "").slice(0, 5)}</bdi></p>
+        <p className="text-sm">{t("supervisorEntry:arrival")}: <bdi>{entry.arrival_date} {vehicleEntryArrivalTime(entry)}</bdi></p>
         <p className="flex items-center gap-2 text-sm"><MapPin className="h-4 w-4" aria-hidden="true" />{t("supervisorEntry:location")}: <strong>{t(`supervisorEntry:${location}`)}</strong></p>
         <p className="text-sm">{t("supervisorEntry:stage")}: <strong>{t(`vehicleVisit.${visit.data.operationalStage}`)}</strong></p>
       </Card>

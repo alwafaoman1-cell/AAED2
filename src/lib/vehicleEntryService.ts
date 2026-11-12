@@ -15,7 +15,9 @@ import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import JsBarcode from "jsbarcode";
 import {workshopDateTime} from "@/lib/workshopDateTime";
+import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 import {pdfControlledLabel} from "@/lib/pdfDisplayLabels";
+import { intakeReceiptError } from "@/lib/vehicleIntakeReceiptErrors";
 
 type VehicleEntryMediaKind = "entry_photo" | "damage_photo" | "document";
 type VehicleEntrySignatureRole = "delivered_by" | "receiver" | "override";
@@ -53,6 +55,7 @@ export interface VehicleEntryFormState {
   id?: string;
   entry_number?: string;
   updated_at_before_edit?: string | null;
+  intake_revision?: number;
   technical_declaration?: { form: VehicleTechnicalDeclarationForm; revision: number | null };
   status: VehicleEntryStatus;
   customer_id?: string | null;
@@ -126,6 +129,7 @@ export interface VehicleEntryFormState {
     notes: string;
   };
   condition: {
+    arrival_time_precision?: "date_only" | "minute";
     visit_purpose?: VehicleEntryVisitPurpose;
     flags: string[];
     condition_description: string;
@@ -558,6 +562,7 @@ export function formFromVehicleEntry(row: any): VehicleEntryFormState {
     id: row.id,
     entry_number: row.entry_number,
     updated_at_before_edit: row.updated_at ?? null,
+    intake_revision: row.intake_revision,
     technical_declaration: row.vehicle_technical_declaration ? { form: { ...emptyVehicleTechnicalDeclaration, ...row.vehicle_technical_declaration.form_data }, revision: row.vehicle_technical_declaration.revision } : undefined,
     status: row.status || "Draft",
     customer_id: row.customer_id || null,
@@ -642,6 +647,7 @@ export async function saveVehicleEntry(form: VehicleEntryFormState, _userId?: st
     p_technical_revision: form.technical_declaration?.revision ?? null,
   });
   if (error) {
+    if (String(error.message).includes("CUSTODY_")) throw intakeReceiptError(error);
     const code = String(error.message || "").match(/VEHICLE_(?:INTAKE_[A-Z_]+|VISIT_ALREADY_OPEN)/)?.[0];
     throw Object.assign(new Error(code ? i18n.t(`vehicleIntakeWizard.${code}`, { defaultValue: error.message }) : error.message), { code: code || error.code });
   }
@@ -827,6 +833,7 @@ export async function softDeleteVehicleEntryMedia(entryId: string, mediaId: stri
 
 export async function saveVehicleEntrySignature(args: {
   entryId: string;
+  revision?: number;
   role: VehicleEntrySignatureRole;
   signatureDataUrl: string;
   signerName?: string;
@@ -838,23 +845,14 @@ export async function saveVehicleEntrySignature(args: {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error("تعذر تحديد الورشة الحالية");
   if (!args.signatureDataUrl?.startsWith("data:image/")) throw new Error("التوقيع غير صالح");
-  const { data, error } = await supabase
-    .from("vehicle_entry_signatures" as any)
-    .insert({
-      tenant_id: tenantId,
-      vehicle_entry_id: args.entryId,
-      signature_role: args.role,
-      signer_name: args.signerName || null,
-      signer_phone: args.signerPhone || null,
-      signer_title: args.signerTitle || null,
-      signature_data_url: args.signatureDataUrl,
-      signed_at: new Date().toISOString(),
-      signed_by: args.userId || null,
-      override_reason: args.overrideReason || null,
-    } as any)
-    .select("*")
-    .single();
-  if (error) throw error;
+  if (!args.revision) throw new Error(i18n.language.startsWith("en") ? "Reload the entry before signing." : "أعد تحميل نموذج الدخول قبل التوقيع.");
+  const { data, error } = await supabase.rpc("save_vehicle_entry_staff_signature" as any, {
+    p_entry_id: args.entryId, p_revision: args.revision, p_role: args.role,
+    p_signature: args.signatureDataUrl, p_signer_name: args.signerName || null,
+    p_phone: args.signerPhone || null, p_title: args.signerTitle || null,
+    p_override_reason: args.overrideReason || null,
+  });
+  if (error) throw intakeReceiptError(error);
   await insertVehicleEntryAudit({
     tenantId,
     vehicleEntryId: args.entryId,
@@ -946,7 +944,7 @@ export async function createWorkOrderFromVehicleEntry(entryId: string, userId?: 
     vehicle_entry_id: entryId,
     work_order_type: linkedClaimId ? "insurance" : "general_customer",
     status: "received",
-    vehicle_presence_status: "in_workshop",
+    vehicle_presence_status: entry.vehicle_location === "مع العميل" ? "with_customer" : "in_workshop",
     service_type: "Vehicle Entry",
     description: `Created from vehicle entry ${entry.entry_number}`,
     notes: entry.notes || null,
@@ -1071,7 +1069,7 @@ export async function convertVehicleEntryToClaim(entryId: string, userId?: strin
     estimated_amount: 0,
     estimation_type: "lump_sum",
     status: "pending",
-    vehicle_presence_status: "in_workshop",
+    vehicle_presence_status: entry.vehicle_location === "مع العميل" ? "with_customer" : "in_workshop",
     notes: `Created from vehicle entry ${entry.entry_number}`,
   };
   const { data, error } = await supabase.from("insurance_claims" as any).insert(payload as any).select("id,claim_number").single();
@@ -1116,7 +1114,7 @@ function info(label: string, value: unknown) {
 }
 
 function buildVehicleEntryHtmlLegacy(entry: any) {
-  const settings = getTemplateSettings();
+  const settings = entry.custody_print_settings || getTemplateSettings();
   const customer = entry.customer || entry.customer_snapshot || {};
   const vehicle = entry.vehicle || entry.vehicle_snapshot || {};
   const insurance = entry.insurance_snapshot || {};
@@ -1145,7 +1143,7 @@ function buildVehicleEntryHtmlLegacy(entry: any) {
     @media print{body{background:#fff}.page{margin:0;box-shadow:none}}
   </style></head><body><main class="page">
     <section class="header">
-      <div class="badge"><h1>دخول واستلام مركبة<br/><small>Vehicle Entry & Receipt</small></h1><b>${htmlEscape(entry.entry_number)}</b><p>${htmlEscape(entry.arrival_date)} ${htmlEscape(String(entry.arrival_time || "").slice(0,5))}</p></div>
+      <div class="badge"><h1>دخول واستلام مركبة<br/><small>Vehicle Entry & Receipt</small></h1><b>${htmlEscape(entry.entry_number)}</b><p>${htmlEscape(entry.arrival_date)} ${htmlEscape(vehicleEntryArrivalTime(entry))}</p></div>
       <div class="company"><h2>${htmlEscape(settings.companyName)}</h2><p>${htmlEscape(settings.companyNameEn)}</p><p>${htmlEscape(settings.phone)} · ${htmlEscape(settings.email)}<br/>CR: ${htmlEscape(settings.commercialReg)} · VAT: ${htmlEscape(settings.vatNumber)}</p></div>
       <div class="logo">${logo}</div>
     </section>
@@ -1207,10 +1205,14 @@ function buildVehicleEntryBarcode(value: string) {
   }
 }
 
+export function currentVehicleEntrySignatures(entry: any): any[] {
+  return ((entry.vehicle_entry_signatures || []) as any[]).filter((s) => entry.intake_revision == null || s.intake_revision === entry.intake_revision || (entry.custody_receipt_required === false && entry.intake_revision === 1 && s.intake_revision == null));
+}
+
 export function buildVehicleEntryHtml(entry: any, language: "ar" | "en" = (i18n.language || "ar").slice(0, 2) === "en" ? "en" : "ar") {
   const english = language === "en";
   const text = (arabicOrBilingual: string, en: string) => english ? en : arabicOrBilingual;
-  const settings = getTemplateSettings();
+  const settings = entry.custody_print_settings || getTemplateSettings();
   const customer = entry.customer || entry.customer_snapshot || {};
   const vehicle = entry.vehicle || entry.vehicle_snapshot || {};
   const insurance = entry.insurance_snapshot || {};
@@ -1219,9 +1221,10 @@ export function buildVehicleEntryHtml(entry: any, language: "ar" | "en" = (i18n.
   const contents = entry.vehicle_contents || {};
   const marks = (entry.damage_marks || []) as any[];
   const media = ((entry.vehicle_media || []) as any[]).filter((item) => item.media_type === "image" && (item.url || item.public_url));
-  const signatures = ((entry.vehicle_entry_signatures || []) as any[]);
+  const signatures = currentVehicleEntrySignatures(entry);
   const receiverSignature = signatures.find((signature) => signature.signature_role === "receiver");
   const deliveredBySignature = signatures.find((signature) => signature.signature_role === "delivered_by");
+  const signedClock = (signature: any) => signature?.signed_at ? new Date(signature.signed_at).toLocaleString(language === "en" ? "en-GB" : "ar-OM", { timeZone: "Asia/Muscat", hour12: false }) : "—";
   const plate = formatPlate({ plate_letters: vehicle.plate_letters, plate_number: vehicle.plate_number });
   const companyNameAr = settings.companyName || "شركة الوفاء للأعمال المتكاملة ش.م.م";
   const companyNameEn = settings.companyNameEn || "AL WAFA INTEGRATED BUSINESS CO. L.L.C";
@@ -1229,7 +1232,7 @@ export function buildVehicleEntryHtml(entry: any, language: "ar" | "en" = (i18n.
   const stamp = settings.stampUrl ? `<img src="${htmlEscape(settings.stampUrl)}" alt="Company Stamp" />` : "";
   const now = new Date();
   const arrivalDate = entry.arrival_date || (entry.arrival_at ? String(entry.arrival_at).slice(0, 10) : "");
-  const arrivalTime = String(entry.arrival_time || (entry.arrival_at ? new Date(entry.arrival_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "")).slice(0, 5);
+  const arrivalTime = vehicleEntryArrivalTime({ ...entry, arrival_time: entry.arrival_time || (entry.arrival_at ? new Date(entry.arrival_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "") }, language);
   const photoCategories = ["front_view", "rear_view", "right_side", "left_side", "plate_number", "odometer", "vin", "main_damage"];
   const categoryPhoto = new Map<string, any>();
   media.forEach((item) => {
@@ -1315,7 +1318,7 @@ export function buildVehicleEntryHtml(entry: any, language: "ar" | "en" = (i18n.
     <section class="tri-grid"><div class="box"><h3>${text("4. وصف الحادث والأضرار الظاهرة", "4. Accident Description & Visible Damages")}</h3><p><b>Accident Description</b><br/>${htmlEscape(condition.incident_description || "-")}</p><p><b>Visible Damages</b><br/>${htmlEscape(condition.visible_damage || "-")}</p><p><b>Previous Damages</b><br/>${htmlEscape(condition.previous_damage || "-")}</p><p><b>Additional Notes</b><br/>${htmlEscape(condition.additional_notes || condition.mechanical_notes || "-")}</p></div><div class="box"><h3>${text("5. خريطة الأضرار DAMAGE MAP", "5. DAMAGE MAP")}</h3><div class="damage-map"><div class="damage-map-stage"><img class="damage-map-image" src="${htmlEscape(damageMapImageUrl)}" alt="Vehicle damage map" />${markDots}</div></div><div class="legend"><span><i></i>Impact</span><span><i></i>Broken</span><span><i></i>Scratch</span><span><i></i>Dent</span></div></div><div class="box"><h3>${text("Damage Details تفاصيل الأضرار", "Damage Details")}</h3><table class="damage-table"><thead><tr><th>No.</th><th>Damage Type</th><th>Affected Part</th><th>Notes</th></tr></thead><tbody>${damageRows}</tbody></table></div></section>
     ${buildVehicleEntryTechnicalDeclarationSummaryHtml(entry, language)}
     <section class="lower"><div class="box"><h3>${text("6. محتويات المركبة VEHICLE CONTENTS", "6. VEHICLE CONTENTS")}</h3><table class="contents-table"><tr><td>Keys<br/><b>${htmlEscape(contents.keys_count || "-")}</b></td><td>Personal Items<br/><b>${yn(contents.personal_items)}</b></td></tr><tr><td>Registration Card<br/><b>${contents.registration_card ? '<span class="check">✓</span>' : '-'}</b></td><td>Number Plates<br/><b>${contents.front_plate || contents.rear_plate ? '<span class="check">✓</span>' : '-'}</b></td></tr><tr><td>Spare Tire<br/><b>${contents.spare_tire ? '<span class="check">✓</span>' : '-'}</b></td><td>Fuel Level<br/><b>${htmlEscape(pdfControlledLabel(contents.fuel_level || "-", "fuelLevel", language))}</b></td></tr><tr><td>Tools & Jack<br/><b>${contents.tools_jack ? '<span class="check">✓</span>' : '-'}</b></td><td>Fire Extinguisher<br/><b>${contents.fire_extinguisher ? '<span class="check">✓</span>' : '-'}</b></td></tr></table></div><div class="box"><h3>${text("7. صور المركبة عند الدخول VEHICLE PHOTOS AT ENTRY", "7. VEHICLE PHOTOS AT ENTRY")}</h3><div class="photos">${photoCells}</div></div><div class="box"><h3>${text("8. الإقرار DECLARATION", "8. DECLARATION")}</h3><div class="declaration">${english ? "" : `<p>${htmlEscape(entry.declaration_ar || VEHICLE_ENTRY_DECLARATION_AR)}</p>`}<p class="en">${htmlEscape(entry.declaration_en || VEHICLE_ENTRY_DECLARATION_EN)}</p></div></div></section>
-    <section class="sign-row"><div class="sig"><h4>${text("توقيع الشخص الذي أدخل المركبة<br/>Signature of Vehicle Delivered By", "Signature of Vehicle Delivered By")}</h4>${deliveredBySignature?.signature_data_url ? `<img src="${htmlEscape(deliveredBySignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig"><h4>${text("توقيع موظف الاستلام<br/>Signature of Receiver", "Signature of Receiver")}</h4>${receiverSignature?.signature_data_url ? `<img src="${htmlEscape(receiverSignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>Date: ${htmlEscape(arrivalDate)}</span><span>Time: ${htmlEscape(arrivalTime)}</span></div></div><div class="sig stamp"><h4>${text("ختم الشركة<br/>Company Stamp", "Company Stamp")}</h4>${stamp || '<div class="line"></div>'}</div></section>
+    <section class="sign-row"><div class="sig"><h4>${text("توقيع الشخص الذي أدخل المركبة<br/>Signature of Vehicle Delivered By", "Signature of Vehicle Delivered By")}</h4>${deliveredBySignature?.signature_data_url ? `<img src="${htmlEscape(deliveredBySignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>${htmlEscape(signedClock(deliveredBySignature))}</span></div></div><div class="sig"><h4>${text("توقيع موظف الاستلام<br/>Signature of Receiver", "Signature of Receiver")}</h4>${receiverSignature?.signature_data_url ? `<img src="${htmlEscape(receiverSignature.signature_data_url)}" />` : '<div class="line"></div>'}<div class="sig-meta"><span>${htmlEscape(signedClock(receiverSignature))}</span></div></div><div class="sig stamp"><h4>${text("ختم الشركة<br/>Company Stamp", "Company Stamp")}</h4>${stamp || '<div class="line"></div>'}</div></section>
     <footer class="footer">Note: This is an electronic form and is considered valid without signature if it bears the company stamp. - ${htmlEscape(companyNameEn)} - ${now.getFullYear()}</footer>
   </main></body></html>`;
 }

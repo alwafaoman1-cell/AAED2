@@ -2,7 +2,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useState } from "react";
 import { Printer, X, Lock, Copy, ExternalLink, Download, Shield, Car } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { WorkOrder } from "@/lib/workOrdersStore";
 import { openAndPrintWindow } from "@/lib/safePdfWindow";
 import { getTrackingUrl } from "@/lib/pdfGenerator";
@@ -94,8 +94,8 @@ export default function QrLabel({ order, open, onClose }: Props) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent dir="rtl" className="max-w-sm bg-card border-border">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-bold text-foreground">ملصق QR / QR Label</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-secondary text-muted-foreground"><X size={16} /></button>
+          <DialogTitle className="text-sm font-bold text-foreground">ملصق QR / QR Label</DialogTitle>
+          <button onClick={onClose} aria-label="إغلاق" className="p-1 rounded hover:bg-secondary text-muted-foreground"><X size={16} /></button>
         </div>
         <div className="bg-white text-black rounded-lg p-4 text-center space-y-2">
           <div className="text-[11px] font-bold text-amber-600">شركة الوفاء للأعمال<br/>Alwafa Integrated Services</div>

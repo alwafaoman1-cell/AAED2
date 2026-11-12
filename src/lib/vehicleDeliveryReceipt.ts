@@ -3,6 +3,9 @@ import type { WorkOrder } from "@/lib/workOrdersStore";
 import { supabase } from "@/integrations/supabase/client";
 import { isUuid } from "@/lib/uuid";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
+import { vehicleHandoverWriteError } from "@/lib/i18n/vehicleHandoverLinks";
+import i18n from "@/i18n";
+import { intakeReceiptError } from "@/lib/vehicleIntakeReceiptErrors";
 
 export type VehicleHandoverRecipientType =
   | "customer"
@@ -16,6 +19,8 @@ export type VehicleHandoverStatus = "draft" | "finalized" | "cancelled";
 export type VehicleHandoverSignatureMethod = "electronic" | "paper";
 
 export interface VehicleDeliveryReceiptDraft {
+  custodyReceiptId?: string | null;
+  legacyReceiptReason?: string | null;
   recordId?: string | null;
   receiptNumber?: string | null;
   status?: VehicleHandoverStatus | null;
@@ -80,6 +85,8 @@ function isMissingHandoverTable(error: unknown): boolean {
 function rowToDraft(row: any): VehicleDeliveryReceiptDraft {
   const snapshot = row.snapshot_json && typeof row.snapshot_json === "object" ? row.snapshot_json : {};
   return {
+    custodyReceiptId: snapshot.custodyReceiptId || null,
+    legacyReceiptReason: snapshot.legacyReceiptReason || null,
     recordId: row.id,
     receiptNumber: row.receipt_number,
     status: row.status,
@@ -135,6 +142,10 @@ async function findDeliveryReceiptWorkOrder(ref: DeliveryReceiptWorkOrderRef) {
   return requireActive(byNumber.data as DeliveryReceiptWorkOrderRow | null);
 }
 
+export async function loadVehicleDeliveryVisitId(ref: DeliveryReceiptWorkOrderRef): Promise<string | null> {
+  return (await findDeliveryReceiptWorkOrder(ref))?.vehicle_entry_id || null;
+}
+
 export async function loadVehicleDeliveryReceiptDraft(
   ref: DeliveryReceiptWorkOrderRef,
 ): Promise<VehicleDeliveryReceiptDraft | null> {
@@ -150,7 +161,7 @@ export async function loadVehicleDeliveryReceiptDraft(
     .limit(1)
     .maybeSingle();
   if (!handover.error && handover.data) return rowToDraft(handover.data);
-  if (handover.error && !isMissingHandoverTable(handover.error)) throw handover.error;
+  if (handover.error && !isMissingHandoverTable(handover.error)) throw vehicleHandoverWriteError(handover.error);
 
   // Compatibility read only: old deployments stored the draft in job_orders.metadata.
   const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
@@ -188,7 +199,15 @@ export async function saveVehicleDeliveryReceiptDraft(
   if (!row) throw new Error("أمر العمل غير موجود في Supabase");
 
   const { data: authData } = await supabase.auth.getUser();
-  const deliveredAt = draft.deliveredAt || `${getDeliveredDateInputValue(draft.date)}T12:00:00+04:00`;
+  const deliveryDate = getDeliveredDateInputValue(draft.date);
+  const deliveredAt = draft.deliveredAt || combineDeliveryDateTime(
+    deliveryDate,
+    deliveryDate === getDeliveredDateInputValue() ? getDeliveredTimeInputValue() : "",
+  );
+  if (!/T\d{2}:\d{2}/.test(deliveredAt) || !/(Z|[+-]\d{2}:\d{2})$/.test(deliveredAt)
+    || Number.isNaN(new Date(deliveredAt).getTime())) {
+    throw new Error(i18n.t("vehicleHandoverLinks.timeRequired"));
+  }
   const payload = {
     tenant_id: row.tenant_id,
     work_order_id: row.id,
@@ -233,7 +252,7 @@ export async function saveVehicleDeliveryReceiptDraft(
     ? await supabase.from("vehicle_handover_records" as any).update(payload).eq("id", existingId).eq("status", "draft").select("*").single()
     : await supabase.from("vehicle_handover_records" as any).insert({ ...payload, created_by: authData.user?.id || null }).select("*").single();
   if (!handover.error && handover.data) return rowToDraft(handover.data);
-  if (handover.error && !isMissingHandoverTable(handover.error)) throw handover.error;
+  if (handover.error && !isMissingHandoverTable(handover.error)) throw vehicleHandoverWriteError(handover.error);
 
   // Compatibility fallback until the SSOT migration reaches the target environment.
   const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
@@ -267,7 +286,7 @@ export async function finalizeVehicleDeliveryReceipt(
     throw new Error("يلزم تطبيق ترحيل سجل خروج وتسليم المركبة قبل اعتماد التسليم النهائي");
   }
   const { data, error } = await supabase.rpc("finalize_vehicle_handover" as any, { p_record_id: saved.recordId } as any);
-  if (error) throw error;
+  if (error) throw String(error.message).includes("CUSTODY_") ? intakeReceiptError(error) : vehicleHandoverWriteError(error);
   return rowToDraft(data);
 }
 
@@ -316,10 +335,32 @@ export function getDefaultDeliveryWarrantyNotes(): string {
 }
 
 export function getDeliveredDateInputValue(value?: string | null): string {
-  if (!value) return new Date().toISOString().slice(0, 10);
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10) || new Date().toISOString().slice(0, 10);
-  return parsed.toISOString().slice(0, 10);
+  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = value ? new Date(value) : new Date();
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Muscat", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(parsed);
+  const part = (type: string) => parts.find(item => item.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+export function getDeliveredTimeInputValue(value?: string | null): string {
+  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value !== getDeliveredDateInputValue()) return "";
+  const parsed = value && value.includes("T") ? new Date(value) : new Date();
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Muscat", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).format(parsed);
+}
+
+export function combineDeliveryDateTime(date: string, time: string): string {
+  const value = `${date}T${time}+04:00`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(time)
+    || Number.isNaN(new Date(value).getTime()) || getDeliveredDateInputValue(value) !== date) {
+    throw new Error(i18n.t("vehicleHandoverLinks.timeRequired"));
+  }
+  return value;
 }
 
 export function buildDeliveryReceiptData(order: WorkOrder, draft: VehicleDeliveryReceiptDraft = {}): VehicleDeliveryReceiptData {

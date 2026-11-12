@@ -5,6 +5,7 @@ import { useMemo } from "react";
 
 // خريطة لأسماء المسارات الرئيسية (تظهر بالعربي/الإنجليزي حسب اللغة)
 const LABELS: Record<string, { ar: string; en: string }> = {
+  "vehicle-entry": { ar: "مركز دورة المركبة", en: "Vehicle Operations Center" },
   "work-orders": { ar: "أوامر العمل", en: "Work Orders" },
   inspection: { ar: "الفحص", en: "Inspection" },
   insurance: { ar: "التأمين", en: "Insurance" },
@@ -68,6 +69,7 @@ export default function AutoBreadcrumb() {
   const lang: "ar" | "en" = i18n.language?.startsWith("ar") ? "ar" : "en";
 
   const segments = useMemo(() => pathname.split("/").filter(Boolean), [pathname]);
+  const intakeReceiptVerify = pathname === "/vehicle-entry/receipt/verify";
 
   // لا نعرض الشريط في الجذر (الصفحة الرئيسية)
   if (segments.length === 0) return null;
@@ -91,16 +93,18 @@ export default function AutoBreadcrumb() {
           </Link>
         </li>
         {segments.map((seg, idx) => {
+          if (intakeReceiptVerify && idx === 1) return null;
           const href = "/" + segments.slice(0, idx + 1).join("/");
           const isLast = idx === segments.length - 1;
+          const label = intakeReceiptVerify && isLast ? (lang === "ar" ? "التحقق من وصل الاستلام" : "Verify intake receipt") : labelFor(seg, lang);
           return (
             <li key={href} className="inline-flex items-center gap-1.5">
               <Sep size={12} className="opacity-60" />
               {isLast ? (
-                <span className="font-medium text-foreground">{labelFor(seg, lang)}</span>
+                <span className="font-medium text-foreground">{label}</span>
               ) : (
                 <Link to={href} className="hover:text-foreground transition-colors">
-                  {labelFor(seg, lang)}
+                  {label}
                 </Link>
               )}
             </li>

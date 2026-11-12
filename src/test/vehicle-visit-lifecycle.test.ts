@@ -45,7 +45,7 @@ describe("vehicle visit stage projection", () => {
     expect(deriveClaimOnlyStage(claim, order)).toBe("in_progress");
     expect(deriveClaimOnlyStage({ ...claim, status: "paid" }, null)).toBe("approved");
     expect(deriveClaimOnlyStage({ ...claim, vehicle_presence_status: "with_customer", delivered_at: "2026-10-21T10:00:00Z" }, { ...order, status: "delivered" })).toBe("delivered");
-    expect(deriveClaimOnlyStage({ ...claim, status: "cancelled" }, order)).toBe("needs_review");
+    expect(deriveClaimOnlyStage({ ...claim, status: "cancelled" }, order)).toBe("cancelled");
     expect(deriveClaimOnlyStage(claim, { ...order, vehicle_id: "other" })).toBe("needs_review");
     expect(deriveClaimOnlyStage({ ...claim, vehicle_presence_status: "with_customer" }, order)).toBe("needs_review");
   });
@@ -108,7 +108,7 @@ describe("vehicle visit stage projection", () => {
     const unlinkedInsurance = { ...base, insurance_snapshot: { claim_number: "C/2026/1" } };
     expect(getVehicleVisitBillingKind(unlinkedInsurance)).toBe("insurance");
     expect(resolveVehicleVisit(unlinkedInsurance, null, false)).toMatchObject({
-      stage: "needs_review", reviewReason: "insurance_claim_required",
+      stage: "arrived", reviewReason: null,
     });
     expect(getVehicleVisitBillingKind({ ...base, work_order: { work_order_type: "general_customer" } })).toBe("cash");
   });

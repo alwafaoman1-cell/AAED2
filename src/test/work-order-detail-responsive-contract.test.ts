@@ -37,8 +37,10 @@ describe("work-order detail responsive layout", () => {
 
   it("exposes frequent list actions on desktop and keeps the full menu on smaller screens", () => {
     expect(list).toContain('bg-muted/25 p-1 lg:flex');
-    expect(list).toContain('onClick={() => setEditOrder(order)}');
-    expect(list).toContain('onClick={() => setPhotosOrderId(order.id)}');
+    expect(list).toContain('onClick={() => void openEdit(order)}');
+    expect(list).toContain('onClick={() => void withActionOrder(order, (full) => setPhotosOrderId(full.id))}');
+    expect(list).toContain('resolveWorkOrderListAction(order, tenantId)');
+    expect(list).not.toContain('setEditOrder(order)');
     expect(list).toContain('cursor-pointer lg:hidden');
     expect(list).toContain('<DropdownMenuContent align="end"');
   });

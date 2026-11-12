@@ -6,6 +6,7 @@ import { ENTRY_PHOTO_SLOTS, type VehicleEntryEditor } from "@/hooks/useVehicleEn
 import { Field, Section } from "./VehicleEntryFields";
 import { SignaturePad } from "./VehicleEntryDrawingTools";
 import "@/lib/i18n/vehicleIntakeWizard";
+import { currentVehicleEntrySignatures } from "@/lib/vehicleEntryService";
 
 const PHOTO_LABELS = {
   front_view: "front", rear_view: "rear", right_side: "right", left_side: "left",
@@ -20,6 +21,9 @@ export function VehicleEntryReviewStep({ editor }: { editor: VehicleEntryEditor 
     setActivePhotoCategory, removePendingPhoto, uploading, handleUpload, handleSignature, supplementalEntryMedia } = editor;
   const additionalPhotos = supplementalEntryMedia.filter((media: EntryMedia) => media.media_type === "image" && media.category !== "entry_document");
   const documents = supplementalEntryMedia.filter((media: EntryMedia) => media.media_type !== "image" || media.category === "entry_document");
+  const signatures = currentVehicleEntrySignatures(detail.data || {});
+  const deliveredSignature = signatures.find((s) => s.signature_role === "delivered_by");
+  const receiverSignature = signatures.find((s) => s.signature_role === "receiver");
   function mediaCategory(media: EntryMedia) {
     const photoLabel = PHOTO_LABELS[media.category as keyof typeof PHOTO_LABELS];
     if (photoLabel) return t(`vehicleIntakeWizard.${photoLabel}`);
@@ -82,8 +86,8 @@ export function VehicleEntryReviewStep({ editor }: { editor: VehicleEntryEditor 
     </Section>
     <Section title={t("vehicleIntakeWizard.signatures")} desc={t("vehicleIntakeWizard.paperSignature")}>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <SignaturePad title={t("vehicleIntakeWizard.customerSignature")} disabled={!form.id} onSave={(dataUrl) => void handleSignature("delivered_by", dataUrl)} />
-        <SignaturePad title={t("vehicleIntakeWizard.receiverSignature")} disabled={!form.id} onSave={(dataUrl) => void handleSignature("receiver", dataUrl)} />
+        <div>{deliveredSignature?.signature_data_url && <img className="h-24 max-w-full object-contain" src={deliveredSignature.signature_data_url} alt={t("vehicleIntakeWizard.customerSignature")} />}<SignaturePad title={t("vehicleIntakeWizard.customerSignature")} disabled={!form.id || editor.hasDraftChanges || Boolean(deliveredSignature)} onSave={(dataUrl) => void handleSignature("delivered_by", dataUrl)} /></div>
+        <div>{receiverSignature?.signature_data_url && <img className="h-24 max-w-full object-contain" src={receiverSignature.signature_data_url} alt={t("vehicleIntakeWizard.receiverSignature")} />}<SignaturePad title={t("vehicleIntakeWizard.receiverSignature")} disabled={!form.id || editor.hasDraftChanges || Boolean(receiverSignature)} onSave={(dataUrl) => void handleSignature("receiver", dataUrl)} /></div>
       </div>
     </Section>
   </>;

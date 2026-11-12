@@ -16,10 +16,11 @@ import { listSupervisorLegacyOrders, listSupervisorMilestones, listSupervisorVis
 import { VISIT_STAGES, type VehicleCenterTab, type VisitStage } from "@/lib/vehicleVisitLifecycle";
 import { getEntryRearThumbnailUrls } from "@/lib/vehicleRearThumbnails";
 import "@/lib/i18n/supervisorWorkspace";
+import "@/lib/i18n/vehicleEntryLabels";
 import { useSupervisorTheme } from "@/hooks/useSupervisorTheme";
 
 const SupervisorActionPanel = lazy(() => import("@/components/supervisor/SupervisorActionPanel").then((module) => ({ default: module.SupervisorActionPanel })));
-const tabs: SupervisorTab[] = ["in_workshop", "with_customer", "needs_review", "delivered", "cancelled", "legacy"];
+const tabs: SupervisorTab[] = ["in_workshop", "awaiting_arrival", "with_customer", "needs_review", "delivered", "cancelled", "legacy"];
 
 export default function SupervisorApp() {
   useRealtimeSync();

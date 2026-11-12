@@ -1,4 +1,5 @@
 import { workshopDateTime } from "@/lib/workshopDateTime";
+import { isVehicleVisitAwaitingArrival } from "@/lib/vehicleVisitIntake";
 import type { SupervisorVehicle } from "@/lib/supervisorWorkspace";
 
 export interface SupervisorMilestone {
@@ -64,9 +65,10 @@ export function getSupervisorVisitTiming(row: SupervisorVehicle, milestones: Sup
   const end = !terminal ? now : instant(terminalEvent?.occurred_at || (row.stage === "delivered"
     ? order?.vehicle_delivered_at || claim?.vehicle_delivered_at || claim?.delivered_at : claim?.cancelled_at));
   // Claim-only projections may contain a registration date, but no confirmed arrival.
-  const arrival = row.legacy || row.visit?.entry?._claimOnly ? undefined : row.arrivalDate;
+  const pendingArrival = isVehicleVisitAwaitingArrival(entry);
+  const arrival = row.legacy || row.visit?.entry?._claimOnly || pendingArrival ? undefined : row.arrivalDate;
   return {
-    arrival: clock(arrival, end, now, terminal, terminal && end === null),
+    arrival: clock(arrival, end, now, terminal, pendingArrival || (terminal && end === null)),
     approval: clock(approval, end, now, terminal, !approval && Boolean(row.entryId) && milestones === undefined),
   };
 }

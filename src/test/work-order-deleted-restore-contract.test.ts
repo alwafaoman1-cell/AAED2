@@ -44,8 +44,11 @@ describe("guarded soft-deleted work order restoration", () => {
   it("shows a read-only deleted state with a restore action and delivery link", () => {
     const detail = read("src/pages/WorkOrderDetail.tsx");
     const delivery = read("src/pages/WorkOrderDeliveryPage.tsx");
-    expect(detail).toContain("deleted_at,");
-    expect(detail).toContain("deletedAt: (data as any).deleted_at || undefined");
+    const store = read("src/lib/workOrdersStore.ts");
+    const recordHook = read("src/hooks/useWorkOrderDetailRecord.ts");
+    expect(detail).toContain("useWorkOrderDetailRecord(id, profile?.tenant_id)");
+    expect(recordHook).toContain("fetchWorkOrderFromCloudByIdentifier(id)");
+    expect(store).toContain("deletedAt: r.deleted_at || undefined");
     expect(detail).toContain("if (order.deletedAt) {");
     expect(detail).toContain("استعادة أمر العمل");
     expect(detail).toContain("restoreWorkOrderFromTrash(order)");

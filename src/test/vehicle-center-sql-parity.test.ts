@@ -8,6 +8,8 @@ const base = { id: "entry-1", tenant_id: "tenant-1", vehicle_id: "vehicle-1", st
 const claim = { id: "claim-1", tenant_id: "tenant-1", vehicle_id: base.vehicle_id, status: "approved", vehicle_presence_status: "in_workshop" };
 const order = { id: "order-1", tenant_id: "tenant-1", vehicle_id: base.vehicle_id, status: "received", work_order_type: "cash", vehicle_presence_status: "in_workshop" };
 const fixtures: any[] = [
+  { name: "prepared_inspection_with_customer", entry: { ...base,vehicle_location:'مع العميل',vehicle_condition:{visit_purpose:'inspection',arrival_confirmation:'pending'} } },
+  { name: "arrival_without_financial_action", entry: { ...base,insurance_company_id:'company',vehicle_condition:{visit_purpose:'workshop'} } },
   { name: "new_inspection_inside", entry: { ...base, vehicle_condition: { visit_purpose: "inspection" } } },
   { name: "temporary_exit_paper_no_image", entry: { ...base, vehicle_location: "مع العميل" }, temporary: true },
   { name: "unknown_exit_no_proof", entry: { ...base, vehicle_location: "مع العميل" } },
@@ -49,7 +51,7 @@ describe("SQL/frontend center parity fixtures", () => {
     expect(rows.find((row) => row.name === "temporary_exit_paper_no_image")?.expected.centerTab).toBe("with_customer");
     expect(rows.find((row) => row.name === "client_held_delivery_no_handover")?.expected.centerTab).toBe("delivered");
     if (process.env.VEHICLE_CENTER_WRITE_FIXTURES === "1") {
-      const dir = resolve("output/vehicle-center-projection-trial");
+      const dir = resolve(process.env.VEHICLE_CENTER_FIXTURE_DIR || "output/vehicle-center-projection-trial");
       mkdirSync(dir, { recursive: true });
       writeFileSync(resolve(dir, "parity-fixtures.json"), JSON.stringify(rows));
     }

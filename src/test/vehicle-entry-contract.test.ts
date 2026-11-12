@@ -226,7 +226,7 @@ describe("vehicle entry receipt contract", () => {
     expect(issueBody).toContain('.is("deleted_at", null)');
     const review = read("src/components/vehicle-entry/VehicleEntryReviewStep.tsx");
     expect(review).toContain('t("vehicleIntakeWizard.paperSignature")');
-    expect(review).toContain("disabled={!form.id}");
+    expect(review).toContain("disabled={!form.id || editor.hasDraftChanges");
   });
 
   it("supports a secure one-time customer signature page backed by the canonical entry signature", () => {
@@ -263,10 +263,12 @@ describe("vehicle entry receipt contract", () => {
 
   it("exposes only token-scoped entry images through short-lived signed URLs", () => {
     const publicPage = read("src/pages/public/VehicleEntrySignPage.tsx");
-    const mediaFunction = read("supabase/functions/vehicle-entry-signature-media/index.ts");
+    const mediaFunction = read("supabase/functions/vehicle-entry-signature-media/handler.ts");
     const config = read("supabase/config.toml");
 
-    expect(publicPage).toContain('supabase.functions.invoke(\n      "vehicle-entry-signature-media"');
+    expect(publicPage).toContain("loadVehicleSignatureMedia(token)");
+    expect(read("src/lib/vehicleSignatureMedia.ts")).toContain('supabase.functions.invoke("vehicle-entry-signature-media"');
+    expect(read("supabase/functions/vehicle-entry-signature-media/index.ts")).toContain("Deno.serve(createSignatureMediaHandler");
     expect(publicPage).toContain("صور المركبة عند الدخول / Entry Photos");
     expect(publicPage).toContain('loading="lazy"');
     expect(mediaFunction).toContain('.from("vehicle_entry_signature_links")');

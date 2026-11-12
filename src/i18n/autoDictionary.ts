@@ -43,6 +43,13 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "تحقق من الوصل": "Verify receipt",
+  "إغلاق الكاميرا": "Close camera",
+  "معاينة / تنزيل / طباعة الوصل": "Preview / download / print receipt",
+  "الوصل مع نموذج الدخول": "Receipt with intake form",
+  "إلغاء الوصل": "Cancel receipt",
+  "استرجاع الوصل الصادر": "Retrieve issued receipt",
+  "عرض نموذج الدخول المحفوظ": "View saved intake form",
   "الإقرار الفني للمركبة": "Vehicle Technical Declaration",
   "العودة إلى دخول المركبة": "Back to Vehicle Entry",
   "حفظ النموذج": "Save Declaration",
@@ -1243,6 +1250,9 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "فتح صفحة التوقيع": "Open Signature Page",
   "صور المركبة عند الدخول / Entry Photos": "Vehicle Entry Photos",
   "جارٍ تحميل الصور…": "Loading photos…",
+  "جارٍ قراءة الصورة…": "Reading image…",
+  "قراءة صورة QR": "Read QR image",
+  "تعذر تحميل بعض الصور مؤقتًا. يرجى مراجعة الورشة إذا كانت صورة مطلوبة غير ظاهرة.": "Some photos are temporarily unavailable. Contact the workshop if a required photo is missing.",
   "تعذر تحميل الصور مؤقتًا. بيانات المركبة والتوقيع ما زالت متاحة.": "Photos are temporarily unavailable. Vehicle details and signing remain available.",
   "لا توجد صور مرفوعة على نموذج الدخول.": "No photos are attached to the vehicle entry form.",
   "الصور جزء من توثيق حالة المركبة وقت الدخول، وروابط عرضها مؤقتة ومحمية برابط التوقيع.": "Photos document the vehicle condition at entry. Their viewing links are temporary and protected by the signature link.",

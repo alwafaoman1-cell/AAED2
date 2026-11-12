@@ -29,6 +29,10 @@ beforeEach(() => {
 });
 
 describe("canonical center custody classification", () => {
+  it("keeps a prepared inspection out of the temporary customer-custody tab", () => {
+    const prepared = { ...base, vehicle_location: "مع العميل", vehicle_condition: { visit_purpose: "inspection", arrival_confirmation: "pending" } };
+    expect(getVehicleCenterTab(raw(prepared))).toBe("awaiting_arrival");
+  });
   it("keeps new inspection arrivals inside until an actual signed temporary release", () => {
     const inspected = { ...base, vehicle_condition: { visit_purpose: "inspection" } };
     expect(getVehicleCenterTab(raw(inspected))).toBe("in_workshop");
@@ -59,7 +63,7 @@ describe("canonical center custody classification", () => {
   it.each(["pending", "approved", "cancelled"])("never fabricates a physical visit from a %s claim-only card", (status) => {
     const visit = projectClaimWithoutEntry({ id: "claim-1", vehicle_id: "vehicle-1", status,
       vehicle_presence_status: "with_customer", created_at: "2026-11-01T08:00:00Z" }, null);
-    expect(getVehicleCenterTab(visit)).toBe("needs_review");
+    expect(getVehicleCenterTab(visit)).toBe(status === "cancelled" ? "cancelled" : "needs_review");
   });
 });
 
@@ -69,7 +73,7 @@ describe("bounded cloud paging contract", () => {
     const filters = { search: "AB 123", from: "2026-11-01", to: "2026-11-04", status: "Received",
       technician: "Ali", minDays: 2, stage: "arrived" as const, location: "in_workshop" as const };
     await listVehicleVisitCenterPage({ tab: "in_workshop", filters });
-    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("vehicle_visit_center_page_v1", {
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("vehicle_visit_center_page_v3", {
       p_tenant_id: "tenant-1", p_tab: "in_workshop", p_page: 1, p_page_size: 30, p_filters: filters,
     });
   });

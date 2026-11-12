@@ -1,8 +1,18 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 
 export interface CustomerPortalTokenInfo {
   token: string;
   signed_at?: string | null;
+}
+
+/** A page read must never create a public capability as a side effect. */
+export async function readCustomerPortalToken(jobOrderId: string, tenantId: string): Promise<CustomerPortalTokenInfo | null> {
+  const {data,error}=await supabase.from("customer_portal_tokens" as any).select("token,signed_at")
+    .eq("tenant_id",tenantId).eq("job_order_id",jobOrderId).maybeSingle();
+  if(error)throw error;
+  const row=data as unknown as CustomerPortalTokenInfo|null;
+  return row?.token?{token:String(row.token),signed_at:row.signed_at||null}:null;
 }
 
 function randomHex(bytes = 32): string {
@@ -32,27 +42,20 @@ export function buildWorkOrderSignatureUrl(token?: string | null): string {
  */
 export async function ensureCustomerPortalToken(jobOrderId: string): Promise<CustomerPortalTokenInfo | null> {
   if (!jobOrderId) return null;
-
-  const existing = await supabase
-    .from("customer_portal_tokens" as any)
-    .select("token, signed_at")
-    .eq("job_order_id", jobOrderId)
-    .maybeSingle();
-
-  if ((existing.data as any)?.token) {
-    return {
-      token: String((existing.data as any).token),
-      signed_at: (existing.data as any).signed_at || null,
-    };
-  }
+  const tenantId=await getCurrentTenantId();
+  if(!tenantId)throw new Error("TENANT_NOT_FOUND");
+  const existing=await readCustomerPortalToken(jobOrderId,tenantId);
+  if(existing)return existing;
 
   const orderResult = await supabase
     .from("job_orders" as any)
     .select("tenant_id, tracking_token")
+    .eq("tenant_id",tenantId)
     .eq("id", jobOrderId)
     .maybeSingle();
 
   const order = orderResult.data as any;
+  if(orderResult.error)throw orderResult.error;
   if (!order?.tenant_id) return null;
 
   const preferredToken = order.tracking_token ? String(order.tracking_token) : randomHex();
@@ -77,8 +80,11 @@ export async function ensureCustomerPortalToken(jobOrderId: string): Promise<Cus
   const afterRace = await supabase
     .from("customer_portal_tokens" as any)
     .select("token, signed_at")
+    .eq("tenant_id",tenantId)
     .eq("job_order_id", jobOrderId)
     .maybeSingle();
+
+  if(afterRace.error)throw afterRace.error;
 
   if ((afterRace.data as any)?.token) {
     return {
@@ -87,5 +93,6 @@ export async function ensureCustomerPortalToken(jobOrderId: string): Promise<Cus
     };
   }
 
-  return null;
+  if (inserted.error) throw inserted.error;
+  throw new Error("CUSTOMER_PORTAL_TOKEN_NOT_CONFIRMED");
 }

@@ -17,6 +17,12 @@ const migration = read("supabase/migrations/20261020100000_vehicle_inspection_te
 const triggerGrants = read("supabase/migrations/20261020101000_vehicle_inspection_release_trigger_grants.sql");
 
 describe("vehicle inspection and temporary release", () => {
+  it('prints paper acknowledgement without inventing an electronic signature image',()=>{
+    const release={id:'paper',tenant_id:'tenant',vehicle_entry_id:'entry',release_number:'QA-PAPER',status:'signed',entry_snapshot:{release_acknowledgement:{method:'paper',confirmed:true}},form_data:{...emptyInspectionReleaseForm,recipient_name:'QA Recipient'},photo_media_ids:[],declaration_en:'Paper acknowledgement',declaration_ar:'إقرار ورقي',signature_data_url:null,signer_name:'QA Recipient'} as unknown as InspectionReleaseRecord;
+    const english=buildInspectionReleaseHtml(release,[],'en');expect(english).toContain('Signature on the retained paper original');expect(english).not.toContain('التوقيع على الأصل الورقي');
+    expect(english).not.toContain('<img class="signature"');
+    expect(buildInspectionReleaseHtml(release,[],'ar')).toContain('التوقيع على الأصل الورقي المحفوظ');
+  });
   it("has separate tenant-scoped, immutable signed records and one-time hashed links", () => {
     expect(migration).toContain("create table if not exists public.vehicle_inspection_releases");
     expect(migration).toContain("create table if not exists public.vehicle_inspection_release_links");
@@ -58,10 +64,11 @@ describe("vehicle inspection and temporary release", () => {
     const app = read("src/App.tsx");
     const detail = read("src/pages/vehicle-entry/VehicleEntryDetail.tsx");
     const publicPage = read("src/pages/public/VehicleInspectionReleaseSignPage.tsx");
-    const media = read("supabase/functions/vehicle-entry-signature-media/index.ts");
+    const media = read("supabase/functions/vehicle-entry-signature-media/handler.ts");
     expect(app).toContain('path="/vehicle-entry/:id/inspection-release"');
     expect(app).toContain('path="/vehicle-entry/inspection-release/sign/:token"');
-    expect(detail).toContain("معاينة وخروج مؤقت");
+    expect(detail).toContain('<VehicleVisitControlPanel');
+    expect(read('src/components/vehicle-entry/VehicleVisitLocationPanel.tsx')).toContain('<ReleasePage entryId={visit.entry.id}');
     expect(publicPage).toContain("get_vehicle_inspection_release_for_signature");
     expect(publicPage).toContain("submit_vehicle_inspection_release_signature");
     expect(publicPage).toContain("p_signer_name: signerName.trim()");

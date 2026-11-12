@@ -17,16 +17,22 @@ import { formatDateLatin } from "@/lib/numberUtils";
 import ChequeClearanceDialog from "@/components/insurance/ChequeClearanceDialog";
 import EditClaimPaymentDialog from "@/components/insurance/EditClaimPaymentDialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTranslation } from "react-i18next";
 
 export default function InsurancePayments() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { hasRole } = useAuth();
   const canEditPayments = hasRole("admin", "manager");
   const { data: payments } = useClaimPayments();
   const { data: claims } = useInsuranceClaims();
   const { data: companies } = useInsuranceCompanies();
   const { data: invoices } = useInsuranceInvoices();
-  const overdueList = useOverdueInsuranceAlerts();
+  const overdue = useOverdueInsuranceAlerts();
+  const overdueList = overdue.data;
+  const overdueKnown = overdue.isSuccess && Array.isArray(overdueList) && !overdue.isFetching && overdue.fetchStatus !== "paused";
+  const overdueState = overdue.isError ? "loadError" : overdue.isFetching ? "loading" : overdueKnown ? null : "unknown";
+  const overdueStateLabel = overdueState ? t(`overdueInsuranceAlerts.${overdueState}`) : undefined;
   const [search, setSearch] = useState("");
   const [chequeToClear, setChequeToClear] = useState<ClaimPayment | null>(null);
   const [paymentToEdit, setPaymentToEdit] = useState<ClaimPayment | null>(null);
@@ -48,10 +54,10 @@ export default function InsurancePayments() {
       .filter((p) => p.status === "cleared" && new Date(p.payment_date) >= startOfMonth)
       .reduce((s, p) => s + Number(p.amount), 0);
 
-    const overdueAmount = overdueList.reduce((s, o) => s + o.remaining, 0);
+    const overdueAmount = overdueKnown && overdueList ? overdueList.reduce((s, o) => s + o.remaining, 0) : null;
 
     return { totalInvoiced, totalApproved: totalInvoiced, totalPaid, monthPaid, overdueAmount, remaining: Math.max(0, totalInvoiced - totalPaid - totalSettlementDiscount) };
-  }, [invoices, payments, overdueList]);
+  }, [invoices, payments, overdueList, overdueKnown]);
 
   // Monthly payments chart (last 6 months)
   const monthlyChart = useMemo(() => {
@@ -134,7 +140,7 @@ export default function InsurancePayments() {
         <StatCard title="إجمالي المعتمد" value={`${stats.totalApproved.toLocaleString()} ر.ع`} icon={TrendingUp} variant="info" />
         <StatCard title="إجمالي المدفوع" value={`${stats.totalPaid.toLocaleString()} ر.ع`} icon={DollarSign} variant="success" />
         <StatCard title="مقبوض هذا الشهر" value={`${stats.monthPaid.toLocaleString()} ر.ع`} icon={Clock} variant="gold" />
-        <StatCard title="إجمالي المتأخرات" value={`${stats.overdueAmount.toLocaleString()} ر.ع`} icon={AlertTriangle} variant={stats.overdueAmount > 0 ? "warning" : "success"} />
+        <StatCard title="إجمالي المتأخرات" value={stats.overdueAmount === null ? "—" : `${stats.overdueAmount.toLocaleString()} ${t("overdueInsuranceAlerts.currency")}`} trend={overdueStateLabel} icon={AlertTriangle} variant={stats.overdueAmount === null ? "info" : stats.overdueAmount > 0 ? "warning" : "success"} />
       </div>
 
       {/* Monthly chart + Overdue alerts */}
@@ -165,7 +171,19 @@ export default function InsurancePayments() {
             <AlertTriangle size={16} className="text-destructive" />
             <h2 className="text-base font-semibold">تنبيهات التأخر</h2>
           </div>
-          <OverdueAlertsList overdueList={overdueList} navigate={navigate} />
+          {overdueStateLabel && (
+            <div role={overdue.isError ? "alert" : "status"} className="py-4 text-center text-sm text-muted-foreground">
+              <p>{overdueStateLabel}</p>
+              {overdue.isError && (
+                <Button variant="ghost" size="sm" className="mt-2" disabled={overdue.isFetching} onClick={() => { void overdue.refetch(); }}>
+                  {t("overdueInsuranceAlerts.retry")}
+                </Button>
+              )}
+            </div>
+          )}
+          {overdueList && (overdueKnown || overdueList.length > 0) && (
+            <OverdueAlertsList overdueList={overdueList} navigate={navigate} />
+          )}
         </Card>
       </div>
 

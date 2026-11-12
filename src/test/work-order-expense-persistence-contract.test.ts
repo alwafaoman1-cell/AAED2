@@ -56,7 +56,11 @@ describe("work-order expense persistence and profitability", () => {
   it("keeps the detail screen subscribed and shows actual financial totals", () => {
     const detail = read("src/pages/WorkOrderDetail.tsx");
     expect(detail).toContain("expensesStore.subscribe");
-    expect(detail).toContain("expensesStore.isHydrated()");
+    // The selected order's confirmed cloud result, not the entire expense
+    // archive, determines whether its financial totals are ready.
+    expect(detail).toContain("const expensesReady = orderExpensesQuery.isSuccess");
+    expect(detail).toContain("fetchExpensesForWorkOrder(order!)");
+    expect(detail).toContain("{ loadAll: false }");
     expect(detail).toContain("getExpensesForWorkOrder(order)");
     expect(detail).toContain("تكلفة قطع الغيار الفعلية");
     expect(detail).toContain("إجمالي المنفق على السيارة");

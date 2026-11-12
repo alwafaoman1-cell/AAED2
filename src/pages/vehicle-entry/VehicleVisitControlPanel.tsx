@@ -1,6 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useCallback,useEffect,useRef,useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { VehicleEntryInspectionAction } from "@/components/vehicle-entry/VehicleEntryInspectionAction";
+import { VehicleVisitInlineActions,type VehicleVisitInlineActionHandle } from "@/components/vehicle-entry/VehicleVisitInlineActions";
+import { VehicleVisitLocationPanel, type VehicleVisitLocationHandle } from "@/components/vehicle-entry/VehicleVisitLocationPanel";
+import type { VehicleCenterActionRequest } from "@/lib/vehicleCenterPresentation";
+import {vehicleVisitActionTime} from '@/lib/vehicleVisitIntake';
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowRight, ClipboardList, Loader2, ShieldAlert } from "lucide-react";
@@ -28,19 +32,26 @@ function localDateTime() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
-export function VehicleVisitControlPanel({ entryId, supervisor = false, onRequestWorkOrderStatus, onRequestHandover, onRequestClaimApproval, supervisorActions }: {
+export function VehicleVisitControlPanel({ entryId, supervisor = false, onRequestWorkOrderStatus, onRequestHandover, onRequestClaimApproval, supervisorActions,compact=false,initialAction }: {
   entryId: string;
   supervisor?: boolean;
   onRequestWorkOrderStatus?: () => void;
   onRequestHandover?: () => void;
   onRequestClaimApproval?: () => void;
   supervisorActions?: ReactNode;
+  compact?:boolean;
+  initialAction?:VehicleCenterActionRequest;
 }) {
   const { t, i18n } = useTranslation();
   const { user, profile, hasRole } = useAuth();
+  const inlineActions=useRef<VehicleVisitInlineActionHandle>(null);
+  const locationActions=useRef<VehicleVisitLocationHandle>(null);
+  const initialActionHandled=useRef(false);
   const qc = useQueryClient();
   const [target, setTarget] = useState<PersistedVisitStage | null>(null);
   const [occurredAt, setOccurredAt] = useState(localDateTime);
+  const initialTime=useRef(occurredAt);
+  const beginTransition=useCallback((stage:PersistedVisitStage)=>{const value=localDateTime();initialTime.current=value;setOccurredAt(value);setResponsible(user?.id||'');setTarget(stage);},[user?.id]);
   const [notes, setNotes] = useState("");
   const [reason, setReason] = useState("");
   const [requirements, setRequirements] = useState("");
@@ -53,9 +64,9 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
 
   // Separate cache identity prevents an existing full operational-file query
   // from injecting invoice/expense data into the tablet's lightweight view.
-  const readDetail = () => supervisor ? getVehicleVisitDetail(entryId, { includeOperationalFile: false }) : getVehicleVisitDetail(entryId);
-  const detailKey = supervisor ? ["vehicle_visit", "detail", entryId, "supervisor", profile?.tenant_id] : ["vehicle_visit", "detail", entryId];
-  const detail = useQuery({ queryKey: detailKey, queryFn: readDetail, staleTime: 5_000, refetchOnWindowFocus: "always" });
+  const readDetail = () => supervisor || compact ? getVehicleVisitDetail(entryId, { includeOperationalFile: false }) : getVehicleVisitDetail(entryId);
+  const detailKey = supervisor || compact ? ["vehicle_visit", "detail", entryId, supervisor?"supervisor":"compact", profile?.tenant_id] : ["vehicle_visit", "detail", entryId];
+  const detail = useQuery({ queryKey: detailKey, queryFn: readDetail, staleTime: 5_000, refetchOnWindowFocus: "always",refetchOnMount:initialAction?"always":true });
   const staff = useQuery({ queryKey: ["vehicle_visit", "staff", profile?.tenant_id], queryFn: listVehicleVisitStaff, staleTime: 300_000 });
   const visit = detail.data;
   const entry = visit?.entry;
@@ -70,7 +81,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
   // when expanded (or to recover the previous stage of a cancelled visit).
   const historyQuery = useQuery({
     queryKey: ["vehicle_visit", "transitions", entryId, profile?.tenant_id],
-    enabled: supervisor && Boolean(profile?.tenant_id) && (historyOpen || current === "cancelled"),
+    enabled: (supervisor || compact) && Boolean(profile?.tenant_id) && (historyOpen || current === "cancelled"),
     queryFn: async () => {
       const { data, error } = await supabase.from("vehicle_visit_transitions").select("*")
         .eq("tenant_id", profile!.tenant_id).eq("entry_id", entryId).order("revision", { ascending: false }).limit(500);
@@ -78,7 +89,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
       return (data || []) as VehicleVisitTransition[];
     }, staleTime: 5_000,
   });
-  const transitions = supervisor ? historyQuery.data || [] : visit?.transitions || [];
+  const transitions = supervisor || compact ? historyQuery.data || [] : visit?.transitions || [];
   const next = current ? ORDER[ORDER.indexOf(current) + 1] : undefined;
   const previous = current === "cancelled"
     ? transitions[0]?.from_stage || undefined
@@ -91,6 +102,25 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
     && !entry.work_order_id && !entry.converted_work_order_id;
   const canAdvance = !visit?.reviewReason && Boolean(current) && current !== "cancelled" && current !== "delivered";
   const nextBlocker = getVehicleVisitNextBlocker(next, entry, hasRole, Boolean(visit?.hasFinalHandover));
+  const canOpenHandover=canAdvance&&next==='delivered'&&nextBlocker==='signedHandoverRequired'&&order?.status==='completed'
+    &&safeOrderLink&&hasRole('admin','manager','supervisor')&&(!supervisor||Boolean(onRequestHandover));
+  const canReviewOrder=canAdvance&&['finishWorkFirst','workOrderStatusInvalid','deliveryWorkOrderConflict'].includes(nextBlocker||'')
+    &&safeOrderLink&&hasRole('admin','manager','supervisor','technician')&&(!supervisor||Boolean(onRequestWorkOrderStatus));
+  const handleNext=useCallback(()=>{
+    if(canOpenHandover){if(supervisor)onRequestHandover?.();else inlineActions.current?.openOrderAction('delivery');}
+    else if(canReviewOrder){if(supervisor)onRequestWorkOrderStatus?.();else inlineActions.current?.openOrderAction('status');}
+    else if(next&&!nextBlocker)beginTransition(next);
+  },[canOpenHandover,supervisor,onRequestHandover,canReviewOrder,onRequestWorkOrderStatus,next,nextBlocker,beginTransition]);
+  // A list action only opens the canonical UI after a fresh read. Never submit
+  // a transition, approval, arrival or handover from an effect or a stale card.
+  useEffect(()=>{
+    if(!initialAction||initialActionHandled.current||!visit||detail.isFetching||detail.isError||supervisor)return;
+    initialActionHandled.current=true;
+    if(visit.reviewReason||visit.operationalStage!==initialAction.expectedStage)return;
+    if(initialAction.intent==='arrival')locationActions.current?.openArrival();
+    else if(initialAction.intent==='approval')inlineActions.current?.openApproval();
+    else if(canAdvance)handleNext();
+  },[initialAction,visit,detail.isFetching,detail.isError,supervisor,canAdvance,handleNext]);
   const reverseBlocker = getVehicleVisitReverseBlocker(previous, visit);
   const prerequisiteHref = supervisor ? `/supervisor/entry/${encodeURIComponent(entryId)}/complete` : nextBlocker === "claimApprovalRequired" && claim?.id ? `/insurance/${claim.id}`
     : ["cashWorkOrderRequired", "workOrderRequired", "workshopPresenceRequired"].includes(nextBlocker || "") ? `/vehicle-entry/${entryId}`
@@ -99,6 +129,12 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
   const cancelBlocker = claim && !["cancelled", "rejected"].includes(claim.status)
     ? "cancelClaimFirst" : order && order.status !== "delivered" ? "closeWorkOrderFirst" : null;
   const canReconcileCustody = canManage && canReconcileVehicleVisitCustody(visit);
+  const refreshVisit=async()=>{
+    await Promise.all([qc.invalidateQueries({queryKey:["vehicle_visit"]}),qc.invalidateQueries({queryKey:queryKeys.vehicleEntries.all}),qc.invalidateQueries({queryKey:["job_orders"]}),qc.invalidateQueries({queryKey:["insurance_claims"]})]);
+    const result=await detail.refetch();
+    if(result.error||!result.data)throw result.error||new Error(t("vehicleVisitWorkspace.failed"));
+    return result.data;
+  };
 
   const displayError = (error: Error) => {
     const code = error.message?.match(/VEHICLE_VISIT_[A-Z_]+/)?.[0];
@@ -113,7 +149,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
         entryId,
         revision: visit.workflow?.revision ?? 0,
         stage: target,
-        occurredAt: new Date(occurredAt).toISOString(),
+        occurredAt: vehicleVisitActionTime(occurredAt,initialTime.current),
         notes,
         reason,
         responsibleUserId: responsible || user?.id || "",
@@ -232,7 +268,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
         <p className="text-xs leading-5 text-muted-foreground">{t(supervisor ? "supervisorWorkspace:stageGuide" : "vehicleVisit.subtitle")}</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Badge variant="secondary">{stageLabel(visit.operationalStage)}</Badge>
+        {visit.operationalStage !== "needs_review" && <Badge variant="secondary">{stageLabel(visit.operationalStage)}</Badge>}
         {visit.reviewReason && <Badge variant="destructive">{stageLabel("needs_review")}</Badge>}
       </div>
     </div>
@@ -242,16 +278,16 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
       {linkMutation.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" aria-hidden="true"/>}{t("vehicleEntryLinks.confirm")} · <bdi className="ms-1">{order.order_number}</bdi>
     </Button>}
     {canReconcileCustody && <Button variant="outline" onClick={() => setCustodyOpen(true)}>{t("vehicleVisit.reviewCustody")}</Button>}
-    {supervisor && <ol className="grid grid-cols-5 gap-1 rounded-lg bg-muted/50 p-2" aria-label={t("vehicleVisit.stage")}>
+    {current !== 'cancelled' && <ol className="grid grid-cols-5 gap-1 rounded-lg bg-muted/50 p-2" aria-label={t("vehicleVisit.stage")}>
       {ORDER.map((value, index) => <li key={value} aria-current={visit.operationalStage === value ? "step" : undefined}
         className={`min-w-0 rounded-md p-1 text-center text-xs ${visit.operationalStage === value ? "bg-primary/10 font-bold text-primary" : "text-muted-foreground"}`}>
         <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full border border-current tabular-nums">{index + 1}</span>{stageLabel(value)}
       </li>)}
     </ol>}
-    {supervisor ? <details className="rounded-lg border border-border p-2 text-sm">
+    {supervisor || compact ? <details className="rounded-lg border border-border p-2 text-sm">
       <summary className="cursor-pointer py-2 text-xs font-medium">{t("supervisorWorkspace:visitDetails")}</summary>{referenceCards}
     </details> : referenceCards}
-    {!supervisor && (visit.documentFiles.length > 0 || visit.expenses.length > 0 || visit.cashInvoices.length > 0 || visit.insuranceInvoices.length > 0) &&
+    {!supervisor && !compact && (visit.documentFiles.length > 0 || visit.expenses.length > 0 || visit.cashInvoices.length > 0 || visit.insuranceInvoices.length > 0) &&
       <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer font-semibold">{t("vehicleVisit.operationalFile")} · {t("vehicleVisit.documents")} / {t("vehicleVisit.expenses")}</summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <section><h3 className="text-sm font-semibold">{t("vehicleVisit.documents")}</h3><div className="mt-2 space-y-1">
@@ -264,33 +300,32 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
           <section><h3 className="text-sm font-semibold">{t("vehicleVisit.insuranceInvoices")}</h3><div className="mt-2 space-y-1">{visit.insuranceInvoices.map((invoice: any) => <Link key={invoice.id} to={claim?.id ? `/insurance/${claim.id}` : "#"} className="block rounded border border-border p-2 text-sm text-primary hover:bg-muted/30">{invoice.invoice_number || invoice.id} · {invoice.total ?? "—"}</Link>)}</div></section>
         </div>
       </details>}
+    <VehicleVisitLocationPanel ref={locationActions} visit={visit} onChanged={refreshVisit}/>
+    {!supervisor && <VehicleVisitInlineActions ref={inlineActions} entry={entry} onChanged={refreshVisit} hideDeliveryAction={Boolean(canOpenHandover)}/>}
     <div className="flex flex-wrap gap-2">
       {!supervisor && <VehicleEntryInspectionAction entry={visit.entry} />}
-      {canAdvance && next && <Button variant={supervisor ? "default" : "outline"} disabled={Boolean(nextBlocker) || mutation.isPending} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(next); }}><ArrowRight className="me-2 h-4 w-4 rtl:rotate-180" aria-hidden="true" />{t("vehicleVisit.next")}: {stageLabel(next)}</Button>}
-      {!supervisor && canManage && current && previous && <Button variant="outline" disabled={Boolean(reverseBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
-      {!supervisor && canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && current &&
-        <Button variant="outline" disabled={Boolean(cancelBlocker)} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget("cancelled"); }}>{t("vehicleVisit.cancel")}</Button>}
-      {next === "delivered" && !visit.hasFinalHandover && order?.order_number && (supervisor
-        ? <Button variant="outline" disabled={!onRequestHandover} onClick={onRequestHandover}>{t("vehicleVisit.signedHandoverRequired")}</Button>
-        : <Link className="text-sm text-primary underline" to={`/work-orders/${encodeURIComponent(order.order_number)}/delivery`}>{t("vehicleVisit.signedHandoverRequired")}</Link>)}
+      {canAdvance && next && <Button variant={supervisor ? "default" : "outline"} disabled={(Boolean(nextBlocker)&&!canOpenHandover&&!canReviewOrder) || mutation.isPending} onClick={handleNext}><ArrowRight className="me-2 h-4 w-4 rtl:rotate-180" aria-hidden="true" />{canReviewOrder?t('vehicleVisitWorkspace.reviewOrder'):`${t("vehicleVisit.next")}: ${stageLabel(next)}`}</Button>}
+      {!supervisor && canManage && current && previous && <Button variant="outline" disabled={Boolean(reverseBlocker)} onClick={() => beginTransition(previous)}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
+      {!supervisor && !claim && canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && current &&
+        <Button variant="outline" disabled={Boolean(cancelBlocker)} onClick={() => beginTransition('cancelled')}>{t("vehicleVisit.cancel")}</Button>}
     </div>
     {supervisorActions}
     {!supervisor && canManage && reverseBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/40 p-3 text-sm">
       <p>{t("supervisorWorkspace:reverseSourceFirst")}</p>
     </div>}
-    {canAdvance && nextBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm">{t(`vehicleVisit.${nextBlocker}`)}{prerequisiteHref && <>{" "}{supervisor && nextBlocker === "claimApprovalRequired"
+    {canAdvance && nextBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm">{nextBlocker==='deliveryWorkOrderConflict'?t('vehicleVisitWorkspace.deliveryConflict'):t(`vehicleVisit.${nextBlocker}`)}{supervisor && prerequisiteHref && !canReviewOrder && <>{" "}{supervisor && nextBlocker === "claimApprovalRequired"
       ? <Button variant="outline" disabled={!onRequestClaimApproval} onClick={onRequestClaimApproval}>{t("supervisorWorkspace:approveHere")}</Button>
       : supervisor && ["workOrderStatusInvalid", "finishWorkFirst"].includes(nextBlocker) && onRequestWorkOrderStatus
       ? <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("vehicleVisit.openPrerequisite")}</Button>
       : <Link to={prerequisiteHref} className="inline-flex min-h-11 items-center font-semibold underline">{t("vehicleVisit.openPrerequisite")}</Link>}</>}</div>}
-    {!supervisor && canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && cancelBlocker &&
+    {!supervisor && !claim && canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && cancelBlocker &&
       <p className="text-sm text-muted-foreground">{t(`vehicleVisit.${cancelBlocker}`)}</p>}
     {supervisor && canManage && current && <details className="rounded-lg border border-border p-2 text-sm">
       <summary className="cursor-pointer py-2 text-xs font-medium">{t("supervisorWorkspace:advancedActions")}</summary>
       <div className="space-y-2 pt-2">
         <div className="flex flex-wrap gap-2">
-          {previous && <Button variant="outline" disabled={Boolean(reverseBlocker) || mutation.isPending} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget(previous); }}>{t("vehicleVisit.back")}</Button>}
-          {!visit.reviewReason && current !== "cancelled" && current !== "delivered" && <Button variant="outline" disabled={Boolean(cancelBlocker) || mutation.isPending} onClick={() => { setOccurredAt(localDateTime()); setResponsible(user?.id || ""); setTarget("cancelled"); }}>{t("vehicleVisit.cancel")}</Button>}
+          {previous && <Button variant="outline" disabled={Boolean(reverseBlocker) || mutation.isPending} onClick={() => beginTransition(previous)}>{t("vehicleVisit.back")}</Button>}
+          {!visit.reviewReason && current !== "cancelled" && current !== "delivered" && <Button variant="outline" disabled={Boolean(cancelBlocker) || mutation.isPending} onClick={() => beginTransition('cancelled')}>{t("vehicleVisit.cancel")}</Button>}
         </div>
         {reverseBlocker && <p role="status" className="text-xs leading-5 text-muted-foreground">{t("supervisorWorkspace:reverseSourceFirst")}</p>}
         {reverseBlocker && onRequestWorkOrderStatus && <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("supervisorWorkspace:reviewSource")}</Button>}
@@ -299,12 +334,12 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
     </details>}
     {visit.reviewReason && <p className="text-sm text-muted-foreground">{t("vehicleVisit.reviewBlocked")}</p>}
     <details className="rounded-lg border border-border p-3" onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
-      <summary className="cursor-pointer font-semibold">{t("vehicleVisit.history")}{!supervisor || historyQuery.isSuccess ? ` (${transitions.length})` : ""}</summary>
+      <summary className="cursor-pointer font-semibold">{t("vehicleVisit.history")}{(!supervisor && !compact) || historyQuery.isSuccess ? ` (${transitions.length})` : ""}</summary>
       <div className="mt-3 space-y-2">
-        {supervisor && historyQuery.isPending && <p role="status">{t("supervisorWorkspace:loading")}</p>}
-        {supervisor && historyQuery.isError && <div role="alert"><p>{t("supervisorWorkspace:loadError")}</p><Button variant="outline" onClick={() => void historyQuery.refetch()}>{t("supervisorWorkspace:retry")}</Button></div>}
-        {(!supervisor || historyQuery.isSuccess) && transitions.length === 0 && <p className="text-sm text-muted-foreground">{t("vehicleVisit.noHistory")}</p>}
-        {(!supervisor || !historyQuery.isError) && transitions.map((event) => <div key={event.id} className="rounded-lg bg-muted/50 p-3 text-sm">
+        {(supervisor || compact) && historyOpen && historyQuery.isPending && <p role="status">{t("supervisorWorkspace:loading")}</p>}
+        {(supervisor || compact) && historyQuery.isError && <div role="alert"><p>{t("supervisorWorkspace:loadError")}</p><Button variant="outline" onClick={() => void historyQuery.refetch()}>{t("supervisorWorkspace:retry")}</Button></div>}
+        {((!supervisor && !compact) || historyQuery.isSuccess) && transitions.length === 0 && <p className="text-sm text-muted-foreground">{t("vehicleVisit.noHistory")}</p>}
+        {(!(supervisor || compact) || !historyQuery.isError) && transitions.map((event) => <div key={event.id} className="rounded-lg bg-muted/50 p-3 text-sm">
           <div className="flex flex-wrap justify-between gap-2"><strong>{stageLabel(event.from_stage)} → {stageLabel(event.to_stage)}</strong><time dir="ltr">{new Date(event.occurred_at).toLocaleString(i18n.language)}</time></div>
           <div className="text-xs text-muted-foreground">{event.source} · {event.responsible_user_id || "—"}</div>
           {event.notes && <p>{event.notes}</p>}{event.reason && <p>{t("vehicleVisit.reason")}: {event.reason}</p>}
@@ -322,9 +357,9 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
               {(staff.data || []).map((person) => <SelectItem key={person.user_id} value={person.user_id}>{person.full_name || person.user_id}</SelectItem>)}
             </SelectContent></Select>
           </label>
-          {supervisor ? <details className="space-y-2 rounded-lg border border-border p-2">
+          <details className="space-y-2 rounded-lg border border-border p-2">
             <summary className="cursor-pointer py-2 text-xs font-medium">{t("supervisorWorkspace:optionalDetails")}</summary>{optionalFields}
-          </details> : optionalFields}
+          </details>
           {target === "approved" && billingKind === "cash" && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={customerApproved} onChange={(event) => setCustomerApproved(event.target.checked)} />{t("vehicleVisit.customerApproved")}</label>}
           {(target === "cancelled" || (current && target && ORDER.indexOf(target) < ORDER.indexOf(current))) && <label className="block text-sm">{t("vehicleVisit.reason")}<Textarea required value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} /></label>}
           {target === "ready" && order?.status !== "completed" && <p className="text-sm text-warning">{t("vehicleVisit.finishWorkFirst")}</p>}

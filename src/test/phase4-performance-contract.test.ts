@@ -6,15 +6,16 @@ const root = process.cwd();
 const read = (file: string) => readFileSync(join(root, file), "utf8");
 
 describe("phase 4 performance architecture contracts", () => {
-  it("loads tenant_settings in one bulk request before falling back to single-key reads", () => {
+  it("reads only the requested tenant setting with scoped cache and realtime invalidation", () => {
     const source = read("src/lib/cloudSettings.ts");
 
-    expect(source).toContain("loadAllCloudSettings");
-    expect(source).toContain('.select("tenant_id,key,value,version")');
+    expect(source).not.toContain("loadAllCloudSettings");
+    expect(source).toContain('.select("value,version")');
+    expect(source).toContain('.eq("key", key)');
     expect(source).toContain("scopedKey");
     expect(source).toContain("clearCloudSettingsCache");
-    expect(source).toContain("pendingAllSettings");
-    expect(source).toContain('channel("tenant_settings")');
+    expect(source).toContain("pendingReads");
+    expect(source).toContain('.channel(`tenant_settings:${tenantId}:');
   });
 
   it("uses vehicle_media metadata for Media Studio initial vehicle view instead of recursive storage listing", () => {

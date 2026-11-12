@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type ElementType } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Printer, FileSignature, Trash2, Eraser, FileCheck2, Save, Loader2, CheckCircle2, LockKeyhole } from "lucide-react";
@@ -19,6 +20,8 @@ import {
   finalizeVehicleDeliveryReceipt,
   getDefaultDeliveryWarrantyNotes,
   getDeliveredDateInputValue,
+  getDeliveredTimeInputValue,
+  combineDeliveryDateTime,
   listVehicleHandoverHistory,
   loadVehicleDeliveryReceiptDraft,
   saveVehicleDeliveryReceiptDraft,
@@ -33,6 +36,8 @@ import { ShieldCheck } from "lucide-react";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import "@/lib/i18n/vehicleVisitWorkspace";
+import VehicleIntakeReceiptForOrder from "@/components/vehicle-entry/VehicleIntakeReceiptForOrder";
 
 interface Props {
   open: boolean;
@@ -45,12 +50,16 @@ interface Props {
 }
 
 export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order, deliveryDraft, onFinalized, presentation = "dialog", supervisor = false }: Props) {
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const [date, setDate] = useState(() => getDeliveredDateInputValue(deliveryDraft?.date));
+  const [date, setDate] = useState(() => getDeliveredDateInputValue(deliveryDraft?.deliveredAt || deliveryDraft?.date));
+  const [deliveryTime, setDeliveryTime] = useState(() => getDeliveredTimeInputValue(deliveryDraft?.deliveredAt || deliveryDraft?.date));
   const [recordId, setRecordId] = useState<string | null>(deliveryDraft?.recordId || null);
   const [receiptNumber, setReceiptNumber] = useState<string | null>(deliveryDraft?.receiptNumber || null);
   const [recordStatus, setRecordStatus] = useState(deliveryDraft?.status || "draft");
+  const [custodyReceiptId, setCustodyReceiptId] = useState<string | null>(deliveryDraft?.custodyReceiptId || null);
+  const [legacyReceiptReason, setLegacyReceiptReason] = useState(deliveryDraft?.legacyReceiptReason || "");
   const [cancellationReason, setCancellationReason] = useState(deliveryDraft?.cancellationReason || "");
   const [receiverType, setReceiverType] = useState<VehicleHandoverRecipientType>(deliveryDraft?.receiverType || "customer");
   const [receiverName, setReceiverName] = useState(deliveryDraft?.receiverName || order.customer || "");
@@ -75,18 +84,23 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
 
   const [pdfOpen, setPdfOpen] = useState(false);
   const [html, setHtml] = useState("");
-  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [loadingDraft, setLoadingDraft] = useState(true);
+  const [draftLoadError,setDraftLoadError]=useState<string|null>(null);
+  const [draftReadAttempt,setDraftReadAttempt]=useState(0);
   const [savingDraft, setSavingDraft] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [history, setHistory] = useState<VehicleDeliveryReceiptDraft[]>([]);
   const isReadOnly = recordStatus !== "draft";
 
   function applyDraft(draft?: VehicleDeliveryReceiptDraft | null) {
+    setCustodyReceiptId(draft?.custodyReceiptId || null);
+    setLegacyReceiptReason(draft?.legacyReceiptReason || "");
     setRecordId(draft?.recordId || null);
     setReceiptNumber(draft?.receiptNumber || null);
     setRecordStatus(draft?.status || "draft");
     setCancellationReason(draft?.cancellationReason || "");
-    setDate(getDeliveredDateInputValue(draft?.date));
+    setDate(getDeliveredDateInputValue(draft?.deliveredAt || draft?.date));
+    setDeliveryTime(getDeliveredTimeInputValue(draft?.deliveredAt || draft?.date));
     setReceiverType(draft?.receiverType || "customer");
     setReceiverName(draft?.receiverName || order.customer || "");
     setReceiverPhone(draft?.receiverPhone || order.phone || "");
@@ -113,6 +127,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
     if (!open) return;
     let active = true;
     setLoadingDraft(true);
+    setDraftLoadError(null);
     void Promise.all([
       loadVehicleDeliveryReceiptDraft({ id: order.id, orderNumber: order.displayNumber }),
       listVehicleHandoverHistory({ id: order.id, orderNumber: order.displayNumber }),
@@ -125,13 +140,14 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
       .catch((error: any) => {
         if (!active) return;
         applyDraft(deliveryDraft);
+        setDraftLoadError(error?.message || "تعذر تحميل بيانات إقرار التسليم المحفوظة");
         toast.error(error?.message || "تعذر تحميل بيانات إقرار التسليم المحفوظة");
       })
       .finally(() => {
         if (active) setLoadingDraft(false);
       });
     return () => { active = false; };
-  }, [open, order.id, order.displayNumber]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, order.id, order.displayNumber,draftReadAttempt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill parts replaced from work order parts
   useEffect(() => {
@@ -187,7 +203,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
   }
 
   useEffect(() => {
-    if (!open || !signature || !sigCanvas.current) return;
+    if (!open || loadingDraft || !signature || !sigCanvas.current) return;
     const canvas = sigCanvas.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -197,7 +213,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
       ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     };
     image.src = signature;
-  }, [open, signature]);
+  }, [open, signature,loadingDraft]);
 
   async function handleIdPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -237,10 +253,13 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
 
   function currentDraft(): VehicleDeliveryReceiptDraft {
     return {
+      custodyReceiptId,
+      legacyReceiptReason,
       recordId,
       receiptNumber,
       status: recordStatus,
       date,
+      deliveredAt: combineDeliveryDateTime(date, deliveryTime),
       receiverType,
       customerIdNumber,
       receiverName,
@@ -265,6 +284,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
   }
 
   async function handleSave(showSuccess = true): Promise<boolean> {
+    if(loadingDraft||draftLoadError)return false;
     if (isReadOnly) {
       if (showSuccess) toast.info("المستند نهائي ومحفوظ للقراءة فقط");
       return true;
@@ -287,6 +307,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
   }
 
   async function handleFinalize() {
+    if(loadingDraft||draftLoadError)return;
     if (!receiverName.trim()) {
       toast.error("اسم المستلم مطلوب قبل اعتماد التسليم");
       return;
@@ -306,6 +327,8 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
         currentDraft(),
       );
       applyDraft(finalized);
+      void qc.invalidateQueries({ queryKey: ["vehicle-intake-receipts"] });
+      void qc.invalidateQueries({ queryKey: ["intake-receipt-history"] });
       toast.success(`تم اعتماد خروج وتسليم المركبة${finalized.receiptNumber ? ` — ${finalized.receiptNumber}` : ""}`);
       onFinalized?.(finalized);
     } catch (error: any) {
@@ -372,6 +395,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
           </HeaderComponent>
 
           <div className={cn("space-y-4 py-2 pr-1", standalone ? "px-5 py-5" : "max-h-[70vh] overflow-y-auto")}>
+            {!loadingDraft && !draftLoadError && <VehicleIntakeReceiptForOrder orderId={order.cloudId || order.id} orderNumber={order.displayNumber} receiptId={custodyReceiptId} legacyReason={legacyReceiptReason} readOnly={isReadOnly} onChange={(id, reason) => { setCustodyReceiptId(id); setLegacyReceiptReason(reason); }} />}
             {loadingDraft && (
               <div className="flex items-center justify-center gap-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" /> تحميل بيانات الإقرار المحفوظة…
@@ -409,6 +433,10 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
               <div>
                 <Label className="text-xs">تاريخ التسليم</Label>
                 <Input disabled={isReadOnly} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="vehicle-handover-delivery-time" className="text-xs">{t("vehicleHandoverLinks.deliveryTime")}</Label>
+                <Input id="vehicle-handover-delivery-time" disabled={isReadOnly} type="time" step="1" value={deliveryTime} onChange={(e) => setDeliveryTime(e.target.value)} />
               </div>
               <div>
                 <Label className="text-xs">قراءة العداد عند الخروج</Label>
@@ -543,7 +571,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
             </div>}
           </div>
 
-          <FooterComponent className={cn("flex flex-col gap-2 sm:flex-row", standalone && "sticky bottom-0 z-10 border-t border-border bg-card/95 px-5 py-4 backdrop-blur")}>
+          <FooterComponent className={cn("flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap [&_button]:min-w-0 [&_button]:h-auto [&_button]:min-h-10 [&_button]:whitespace-normal [&_button]:py-2", standalone && "sticky bottom-0 z-10 border-t border-border bg-card/95 px-5 py-4 backdrop-blur")}>
             <Button variant="outline" onClick={() => onOpenChange(false)} className="sm:flex-1">إلغاء</Button>
             <Button
               type="button"
@@ -598,15 +626,24 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
     </>
   );
 
+  // A late draft read must never replace recipient data already being typed.
+  // Failed reads stay explicit and retryable rather than editing an unverified draft.
+  const visibleContent=loadingDraft||draftLoadError?<>
+    <HeaderComponent><TitleComponent>{t("common.loading")}</TitleComponent></HeaderComponent>
+    <div role={draftLoadError?"alert":"status"} className="space-y-3 p-4 text-sm">
+      <p>{draftLoadError||t("common.loading")}</p>
+      {draftLoadError&&<Button variant="outline" onClick={()=>{setLoadingDraft(true);setDraftReadAttempt(value=>value+1);}}>{t("vehicleDelivery.retry")}</Button>}
+    </div>
+  </>:receiptContent;
   return (
     <>
       {standalone ? (
-        <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-          {receiptContent}
+        <section className="shrink-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          {visibleContent}
         </section>
       ) : (
         <ResponsiveDialog open={open} onOpenChange={onOpenChange} className="max-w-3xl">
-          {receiptContent}
+          {visibleContent}
         </ResponsiveDialog>
       )}
 

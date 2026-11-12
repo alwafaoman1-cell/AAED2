@@ -27,8 +27,7 @@ describe("entry inspection persistence boundaries", () => {
     expect(source).toContain("refetchType: \"none\"");
     expect(read("src/pages/insurance/InsuranceClaimDetail.tsx")).toContain("ins?.details?.insuranceInspectionReport");
   });
-  it("exposes the same guarded action in desktop, mobile, kanban and the operational file", () => {
-    expect(read("src/pages/vehicle-entry/VehicleEntryList.tsx").match(/<VehicleEntryInspectionAction entry=/g)).toHaveLength(3);
+  it("keeps the operational-file inspection action behind its canonical permission guard", () => {
     expect(read("src/pages/vehicle-entry/VehicleVisitControlPanel.tsx")).toContain("<VehicleEntryInspectionAction entry={visit.entry}");
     expect(read("src/components/vehicle-entry/VehicleEntryInspectionAction.tsx")).toContain('<Can module="Insurance Inspection" action="Create/Edit">');
   });

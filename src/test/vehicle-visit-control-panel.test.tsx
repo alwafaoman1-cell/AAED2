@@ -6,7 +6,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VehicleVisitControlPanel } from "@/pages/vehicle-entry/VehicleVisitControlPanel";
 import i18n from "@/i18n";
 
-const mocks = vi.hoisted(() => ({ detail: vi.fn(), advance: vi.fn(), reconcile: vi.fn(), staff: vi.fn(), roles: ["admin"] as string[] }));
+const mocks = vi.hoisted(() => ({ detail: vi.fn(), advance: vi.fn(), reconcile: vi.fn(), staff: vi.fn(), resolveOrder:vi.fn(), roles: ["admin"] as string[] }));
+vi.mock('@/lib/workOrderListActions',()=>({resolveWorkOrderListAction:mocks.resolveOrder}));
+vi.mock('@/components/workorders/VehicleDeliveryReceiptDialog',()=>({default:()=> <div>Canonical vehicle handover form</div>}));
+vi.mock('@/components/workorders/WorkOrderStatusDialog',()=>({default:()=> <div>Canonical work order review form</div>}));
 vi.mock("@/lib/vehicleVisitLifecycle", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/vehicleVisitLifecycle")>();
   return {
@@ -40,12 +43,45 @@ function renderPanel() {
 beforeEach(async () => {
   await i18n.changeLanguage("ar");
   mocks.detail.mockReset(); mocks.advance.mockReset(); mocks.reconcile.mockReset(); mocks.staff.mockReset();
-  mocks.roles = ["admin"];
+  mocks.roles = ["admin"];mocks.resolveOrder.mockReset();mocks.resolveOrder.mockResolvedValue({cloudId:'order-1',vehicleId:'vehicle-1'});
   mocks.staff.mockResolvedValue([{ user_id: "user-1", full_name: "Test Manager" }]);
   Object.defineProperty(window, "matchMedia", { writable: true, value: vi.fn().mockImplementation(() => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() })) });
 });
 
 describe("vehicle visit transition panel", () => {
+  it('opens the existing handover form from the next-stage button without creating a delivery transition first',async()=>{
+    const ready:any={...visit('approved',2),stage:'ready',operationalStage:'ready'};ready.workflow.stage='ready';
+    Object.assign(ready.entry,{tenant_id:'tenant-1',work_order_id:'order-1'});
+    Object.assign(ready.entry.work_order,{status:'completed',tenant_id:'tenant-1',vehicle_entry_id:'entry-1',claim_id:'claim-1',work_order_type:'insurance'});
+    mocks.detail.mockResolvedValue(ready);renderPanel();
+    const next=await screen.findByRole('button',{name:/الانتقال للمرحلة التالية/});expect(next.hasAttribute('disabled')).toBe(false);
+    expect(screen.queryByRole('button',{name:i18n.t('vehicleVisitWorkspace.delivery')})).toBeNull();
+    fireEvent.click(next);await screen.findByText('Canonical vehicle handover form');
+    expect(mocks.advance).not.toHaveBeenCalled();
+  });
+  it('routes a historical ready/received conflict to explicit work-order review, never automatic delivery',async()=>{
+    const ready:any={...visit('approved',2),stage:'ready',operationalStage:'ready'};ready.workflow.stage='ready';
+    Object.assign(ready.entry,{tenant_id:'tenant-1',work_order_id:'order-1'});
+    Object.assign(ready.entry.work_order,{status:'received',work_completed_at:'2026-07-30T00:00:00Z',tenant_id:'tenant-1',vehicle_entry_id:'entry-1',claim_id:'claim-1',work_order_type:'insurance'});
+    mocks.detail.mockResolvedValue(ready);renderPanel();
+    fireEvent.click(await screen.findByRole('button',{name:i18n.t('vehicleVisitWorkspace.reviewOrder')}));
+    await screen.findByText('Canonical work order review form');expect(mocks.advance).not.toHaveBeenCalled();
+    expect(screen.queryByText('Canonical vehicle handover form')).toBeNull();
+  });
+  it("shows the review badge once rather than duplicating the stage and warning badge", async () => {
+    mocks.detail.mockResolvedValue({...visit("arrived", 0),operationalStage:"needs_review",reviewReason:"work_order_link_conflict"});
+    renderPanel();
+    await screen.findByText(i18n.t("vehicleVisit.work_order_link_conflict"));
+    expect(screen.getAllByText(i18n.t("vehicleVisit.needs_review"))).toHaveLength(1);
+  });
+  it("shows the handover prerequisite once and keeps its inline action accessible", async () => {
+    const ready=visit("approved", 2);
+    ready.entry.work_order.status="completed";
+    mocks.detail.mockResolvedValue({...ready,stage:"ready",operationalStage:"ready",workflow:{...ready.workflow,stage:"ready"}});
+    renderPanel();
+    await screen.findByRole("button",{name:i18n.t("vehicleVisitWorkspace.delivery")});
+    expect(screen.getAllByText(i18n.t("vehicleVisit.signedHandoverRequired"))).toHaveLength(1);
+  });
   it("opens a recorded transition and confirms the cloud read-back before updating the stage", async () => {
     mocks.detail.mockResolvedValueOnce(visit("arrived", 0)).mockResolvedValueOnce(visit("approved", 1));
     mocks.advance.mockResolvedValue({ entry_id: "entry-1", stage: "approved", revision: 1 });
@@ -84,7 +120,8 @@ describe("vehicle visit transition panel", () => {
     renderPanel();
     const next = await screen.findByRole("button", { name: /الانتقال للمرحلة التالية/ });
     expect(next.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("link", { name: "افتح السجل المطلوب" }).getAttribute("href")).toBe("/insurance/claim-1");
+    expect(screen.queryByRole("link", { name: "افتح السجل المطلوب" })).toBeNull();
+    expect(screen.getByRole("button", { name: "اعتماد المطالبة" })).toBeTruthy();
   });
   it("explains permission denial before presenting a transition the server would reject", async () => {
     mocks.roles = ["technician"];

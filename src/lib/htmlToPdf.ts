@@ -11,6 +11,10 @@ import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { buildHtmlWithPageMarginStyle, injectPageMarginStyle } from "./pdfLayoutSettings";
 import { preparePagedPdfDocument, waitForPdfAssets } from "./pdfDocumentRenderer";
+import { PDF_HTML_SANDBOX, sanitizePdfHtml } from "./safeHtml";
+import { downloadPdfBlob } from "./pdfFileDownload";
+import { createPdfCaptureSurface } from "./pdfCaptureSurface";
+import i18n from "i18next";
 
 export interface PdfMargins {
   top: number;    // mm
@@ -45,25 +49,13 @@ interface HtmlToPdfOpts {
 const safePdfName = (fileName: string) => `${fileName.replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
 const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-const triggerBlobDownload = (blob: Blob, fileName: string) => {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = safePdfName(fileName);
-  link.rel = "noopener";
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-  setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1500);
-};
-
 const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} استغرق وقتاً طويلاً. جرّب تقليل عدد/حجم الصور ثم أعد التحميل.`)), ms);
+        timer = setTimeout(() => reject(new Error(i18n.t("pdfDownload.timeout", { stage: label }))), ms);
       }),
     ]);
   } finally {
@@ -256,7 +248,7 @@ const drawVectorFooter = (pdf: jsPDF, footer: PdfFooterContext | undefined) => {
 
 export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
   const { htmlContent, fileName, download = true, margins = DEFAULT_MARGINS, orientation = "portrait", footer, metadata } = opts;
-  const fastHtmlContent = buildHtmlWithPageMarginStyle(htmlContent, orientation);
+  const fastHtmlContent = sanitizePdfHtml(buildHtmlWithPageMarginStyle(htmlContent, orientation));
 
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
@@ -266,17 +258,18 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
   iframe.style.height = orientation === "landscape" ? "794px" : "1123px";
   iframe.style.border = "0";
   iframe.setAttribute("aria-hidden", "true");
+  iframe.setAttribute("sandbox", PDF_HTML_SANDBOX);
   document.body.appendChild(iframe);
 
   try {
     const doc = iframe.contentDocument!;
     doc.open(); doc.write(fastHtmlContent); doc.close();
 
-    await new Promise<void>((resolve) => {
+    await withTimeout(new Promise<void>((resolve) => {
       const ready = () => setTimeout(() => resolve(), 50);
       if (doc.readyState === "complete") ready();
       else iframe.addEventListener("load", ready, { once: true });
-    });
+    }), 5000, i18n.t("pdfDownload.documentStage"));
     await waitForPdfAssets(doc);
 
     doc.documentElement.classList.add("pdf-export");
@@ -289,7 +282,9 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
       injectPageMarginStyle(doc, orientation);
     } catch { /* noop */ }
     preparePagedPdfDocument(doc, orientation);
-    await new Promise<void>((resolve) => iframe.contentWindow?.requestAnimationFrame(() => resolve()) ?? setTimeout(resolve, 0));
+    // Layout is synchronous after pagination; yield on the parent event loop.
+    // Off-screen iframe animation callbacks can be paused indefinitely on mobile.
+    await yieldToBrowser();
 
     const pageEls = Array.from(doc.querySelectorAll<HTMLElement>(".page"));
 
@@ -327,10 +322,12 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
         el.style.maxHeight = "none";
       }
       await yieldToBrowser();
+      let surface: ReturnType<typeof createPdfCaptureSurface> | undefined;
       try {
         const captureWidth = Math.max(el.scrollWidth, el.offsetWidth);
         const captureHeight = Math.max(el.scrollHeight, el.offsetHeight);
-        return await withTimeout(html2canvas(el, {
+        surface = createPdfCaptureSurface(el);
+        return await withTimeout(html2canvas(surface.element, {
           scale: pdfCaptureScale(captureWidth, captureHeight),
           useCORS: true,
           allowTaint: false,
@@ -339,9 +336,10 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
           logging: false,
           windowWidth: captureWidth,
           windowHeight: captureHeight,
-          ignoreElements: (node) => node instanceof HTMLElement && (node.classList.contains("print-bar") || node.classList.contains("no-print")),
-        }), captureHeight > 1600 ? 25000 : 16000, "تحضير صفحة PDF");
+          ignoreElements: surface.ignoreElement,
+        }), captureHeight > 1600 ? 25000 : 16000, i18n.t("pdfDownload.pageStage"));
       } finally {
+        surface?.cleanup();
         el.style.height = originalHeight;
         el.style.minHeight = originalMinHeight;
         el.style.maxHeight = originalMaxHeight;
@@ -396,7 +394,7 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
     drawVectorFooter(pdf, footer);
 
     const blob = pdf.output("blob");
-    if (download) triggerBlobDownload(blob, fileName);
+    if (download) downloadPdfBlob(blob, safePdfName(fileName));
     return blob;
   } finally {
     iframe.remove();

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, Filter, Eye, Edit, Printer, Car, FileText, Workflow, QrCode, Camera, Trash2, MoreHorizontal, Search as SearchIcon, Receipt, FilePlus2, FolderOpen, Package, MessageCircle, Shield, Copy, FileSpreadsheet, FilePlus, Phone, Send, SlidersHorizontal, Bookmark, ChevronDown, ChevronUp, RotateCcw, CalendarDays, Banknote } from "lucide-react";
+import { Plus, Search, Filter, Eye, Edit, Printer, Car, FileText, Workflow, QrCode, Camera, Trash2, MoreHorizontal, Search as SearchIcon, Receipt, FilePlus2, FolderOpen, Package, MessageCircle, Shield, Copy, FileSpreadsheet, FilePlus, Phone, Send, SlidersHorizontal, Bookmark, ChevronDown, ChevronUp, RotateCcw, CalendarDays, Banknote, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -21,14 +21,13 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getWorkOrderHtml, getNeededPartsRequestHtml } from "@/lib/pdfGenerator";
 import { toEnglishDigits, formatPlateLatin } from "@/lib/numberUtils";
-import PdfPreviewDialog from "@/components/PdfPreviewDialog";
-import WorkOrderStatusDialog from "@/components/workorders/WorkOrderStatusDialog";
-import QrLabel from "@/components/workorders/QrLabel";
-import StagePhotosDialog from "@/components/workorders/StagePhotosDialog";
-import WorkOrderForm from "@/components/workorders/WorkOrderForm";
-import WorkOrderExpenseDialog from "@/components/workorders/WorkOrderExpenseDialog";
+const PdfPreviewDialog = lazy(() => import("@/components/PdfPreviewDialog"));
+const WorkOrderStatusDialog = lazy(() => import("@/components/workorders/WorkOrderStatusDialog"));
+const QrLabel = lazy(() => import("@/components/workorders/QrLabel"));
+const StagePhotosDialog = lazy(() => import("@/components/workorders/StagePhotosDialog"));
+const WorkOrderForm = lazy(() => import("@/components/workorders/WorkOrderForm"));
+const WorkOrderExpenseDialog = lazy(() => import("@/components/workorders/WorkOrderExpenseDialog"));
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import {
   deleteWorkOrder,
@@ -47,7 +46,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { queryKeys } from "@/lib/queryKeys";
 import { staffStore } from "@/lib/staffStore";
 import { buildPartsRequestMessage, sendWhatsAppAndLog } from "@/lib/partsWhatsApp";
-import { inspectionsStore } from "@/lib/inspectionsStore";
+import { fetchInspectionCountsForOrders } from "@/lib/inspectionsStore";
 import { moveToTrash } from "@/lib/trashStore";
 import { canDelete, canEdit } from "@/lib/permissions";
 import { logActivity } from "@/lib/auditLogStore";
@@ -70,6 +69,8 @@ import WorkOrderInvoiceBadge from "@/components/workorders/WorkOrderInvoiceBadge
 import { fetchWorkOrderInvoiceIndicators } from "@/lib/workOrderInvoiceIndicators";
 import { isUuid } from "@/lib/uuid";
 import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
+import { resolveSelectedWorkOrderActions, resolveSelectedWorkOrderExport, resolveWorkOrderListAction } from "@/lib/workOrderListActions";
+import { fetchExpensesForWorkOrder, type ExpenseRecord } from "@/lib/expensesStore";
 import {
   DEFAULT_WORK_ORDER_FILTERS,
   clearWorkOrderListFilters,
@@ -237,8 +238,8 @@ function insuranceReason(order: WorkOrder) {
 }
 
 
-function buildWorkOrderHtml(order: WorkOrder) {
-  return getWorkOrderHtml({
+function buildWorkOrderHtml(order: WorkOrder, render: typeof import("@/lib/pdfGenerator")["getWorkOrderHtml"]) {
+  return render({
     orderNumber: order.displayNumber || order.id, date: order.entryDate, customerName: order.customer,
     workOrderType: resolveWorkOrderType(order), trackingToken: order.trackingToken,
     customerPhone: order.phone, vehicleType: order.vehicleType, model: order.model,
@@ -278,6 +279,9 @@ export default function WorkOrders() {
   const [showAdvancedFilters, setShowAdvancedFilters] = usePersistedState("work_orders_advanced_filters_open_v1", false);
   const [showForm, setShowForm] = useState(false);
   const [editOrder, setEditOrder] = useState<WorkOrder | null>(null);
+  const [editVouchers, setEditVouchers] = useState<ExpenseRecord[]>([]);
+  const [actionBusy, setActionBusy] = useState(false);
+  const actionLock = useRef(false);
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewTitle, setPreviewTitle] = useState("");
   const [showPreview, setShowPreview] = useState(false);
@@ -368,10 +372,11 @@ export default function WorkOrders() {
 
   const workOrdersPageQuery = useQuery({
     queryKey: queryKeys.jobOrders.operationalList(profile?.tenant_id, {
-      page, pageSize, search: debouncedSearch, filters: serverListFilters,
+      page, pageSize, search: debouncedSearch, filters: serverListFilters, projection: "summary",
     }),
     queryFn: () => fetchWorkOrderListPage({
       tenantId: profile!.tenant_id,
+      projection: "summary",
       page,
       pageSize,
       search: debouncedSearch,
@@ -397,7 +402,7 @@ export default function WorkOrders() {
     const syncVisibleOrders = () => {
       if (!cancelled) setOrders([...getWorkOrdersForAdminList()]);
     };
-    const unsubscribe = subscribeWorkOrders(syncVisibleOrders);
+    const unsubscribe = subscribeWorkOrders(syncVisibleOrders, { loadAll: false });
     setIsLoadingCloudOrders(true);
     setCloudOrdersError(null);
     refreshWorkOrdersFromCloud()
@@ -432,15 +437,6 @@ export default function WorkOrders() {
     return () => { cancelled = true; };
   }, [deleteOrder]);
 
-  // عدد الفحوصات المرتبطة بكل أمر عمل
-  const inspectionsByOrder: Record<string, number> = (() => {
-    const map: Record<string, number> = {};
-    inspectionsStore.getAll().forEach((i) => {
-      map[i.workOrder] = (map[i.workOrder] || 0) + 1;
-    });
-    return map;
-  })();
-
   // فتح فحص جديد مع تمرير ID أمر العمل (يلتقطه /inspection)
   const openNewInspection = (order: WorkOrder) => {
     sessionStorage.setItem("inspection_link_order", order.id);
@@ -458,6 +454,33 @@ export default function WorkOrders() {
     setDeleteMode("archive_only");
     setDeleteReason("");
   };
+
+  async function runListTask(task: () => Promise<void>) {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    setActionBusy(true);
+    try { await task(); }
+    catch (error) {
+      toast.error(error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message : (isArabic ? "تعذر تحميل الإجراء. أعد المحاولة." : "Could not load this action. Please retry."));
+    } finally { actionLock.current = false; setActionBusy(false); }
+  }
+
+  async function withActionOrder(order: WorkOrder, action: (record: WorkOrder) => void | Promise<void>) {
+    const tenantId = profile?.tenant_id || "";
+    await runListTask(async () => { await action(await resolveWorkOrderListAction(order, tenantId)); });
+  }
+
+  async function openEdit(order: WorkOrder) {
+    await withActionOrder(order, async (full) => {
+      // Removing archive hydration must not make the editor's expense summary disappear.
+      const vouchers = await fetchExpensesForWorkOrder(full);
+      setEditVouchers(vouchers);
+      setEditOrder(full);
+    });
+  }
+
+  const selectedActionOrders = () => resolveSelectedWorkOrderActions([...selectedIds], profile?.tenant_id || "");
 
   const resetFilters = () => {
     setSearchTerm(DEFAULT_WORK_ORDER_FILTERS.searchTerm);
@@ -573,6 +596,16 @@ export default function WorkOrders() {
       : fallbackReady ? filtered.slice((page - 1) * pageSize, page * pageSize) : [],
     [filtered, page, pageSize, serverListReady, fallbackReady, workOrdersPageQuery.data],
   );
+  const inspectionCountsQuery = useQuery({
+    queryKey: ["inspections", "visible-order-counts", profile?.tenant_id, paginatedOrders.map((order) => [order.id, order.cloudId])],
+    queryFn: () => fetchInspectionCountsForOrders(profile!.tenant_id, paginatedOrders),
+    enabled: Boolean(profile?.tenant_id && paginatedOrders.length),
+    staleTime: 15_000,
+    refetchOnMount: "always",
+    retry: false,
+  });
+  // An unavailable count must not hide the link to existing reports.
+  const inspectionsByOrder = inspectionCountsQuery.isError ? undefined : inspectionCountsQuery.data;
   const invoiceIndicatorsQuery = useQuery({
     queryKey: queryKeys.workOrderFinancials.list(profile?.tenant_id, paginatedOrders.map((order) => [order.cloudId || order.id, order.claimId || ""])),
     queryFn: () => fetchWorkOrderInvoiceIndicators(profile!.tenant_id, paginatedOrders),
@@ -590,15 +623,16 @@ export default function WorkOrders() {
       isArabic={isArabic}
     />
   );
-  const availableActionOrders = serverListReady ? paginatedOrders : fallbackReady ? orders : [];
 
   useEffect(() => {
     setPage(1);
   }, [searchTerm, statusFilter, ownershipFilter, technicianFilter, serviceFilter, insuranceFilter, partsFilter, ageFilter, entryFrom, entryTo, archiveFilter, pageSize]);
 
   useEffect(() => {
+    // A new page's query is pending, not evidence that only page 1 exists.
+    if (!listVerified) return;
     if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+  }, [page, totalPages, listVerified]);
 
   // الأوامر التي تحتاج قطع غيار (لأي زر طباعة جماعي)
   const ordersNeedingParts = serverListReady
@@ -618,13 +652,15 @@ export default function WorkOrders() {
   }
 
   async function handlePreview(order: WorkOrder) {
-    const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
-    const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
-    const printableOrder = { ...order, trackingToken: portal?.token || order.trackingToken };
-    await buildTrackingQrDataUrl(printableOrder.trackingToken);
-    setPreviewHtml(buildWorkOrderHtml(printableOrder));
-    setPreviewTitle(`أمر عمل ${order.id}`);
-    setShowPreview(true);
+    await withActionOrder(order, async (full) => {
+      const { buildTrackingQrDataUrl, getWorkOrderHtml } = await import("@/lib/pdfGenerator");
+      const portal = full.cloudId ? await ensureCustomerPortalToken(full.cloudId) : null;
+      const printableOrder = { ...full, trackingToken: portal?.token || full.trackingToken };
+      await buildTrackingQrDataUrl(printableOrder.trackingToken);
+      setPreviewHtml(buildWorkOrderHtml(printableOrder, getWorkOrderHtml));
+      setPreviewTitle(`أمر عمل ${full.id}`);
+      setShowPreview(true);
+    });
   }
 
   async function handlePrintAllFiltered() {
@@ -633,7 +669,7 @@ export default function WorkOrders() {
       return;
     }
     const matchingOrders = await fetchAllMatchingOrders();
-    const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
+    const { buildTrackingQrDataUrl, getWorkOrderHtml } = await import("@/lib/pdfGenerator");
     const printableOrders = await Promise.all(matchingOrders.map(async (order) => {
       const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
       return { ...order, trackingToken: portal?.token || order.trackingToken };
@@ -642,22 +678,21 @@ export default function WorkOrders() {
     await Promise.all(printableOrders.map(o => buildTrackingQrDataUrl(o.trackingToken)));
     // Print stack: each order on its own page
     const combined = printableOrders.map(o => {
-      const html = buildWorkOrderHtml(o);
+      const html = buildWorkOrderHtml(o, getWorkOrderHtml);
       // Extract body content only
       const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
       return match ? match[1] : html;
     }).join('<div style="page-break-after:always"></div>');
     const wrapper = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>طباعة جماعية</title>${
-      buildWorkOrderHtml(printableOrders[0]).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
+      buildWorkOrderHtml(printableOrders[0], getWorkOrderHtml).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
     }</head><body>${combined}</body></html>`;
     setPreviewHtml(wrapper);
     setPreviewTitle(`طباعة ${matchingOrders.length} أمر عمل`);
     setShowPreview(true);
   }
 
-  function openStatus(order: WorkOrder) {
-    setStatusOrder(order);
-    setShowStatus(true);
+  async function openStatus(order: WorkOrder) {
+    await withActionOrder(order, (full) => { setStatusOrder(full); setShowStatus(true); });
   }
 
   async function handlePrintAllNeededParts() {
@@ -668,6 +703,7 @@ export default function WorkOrders() {
     const matchingPartsOrders = serverListReady
       ? await fetchAllMatchingOrders({ ...serverListFilters, parts: "needed" })
       : ordersNeedingParts;
+    const { getNeededPartsRequestHtml } = await import("@/lib/pdfGenerator");
     const html = getNeededPartsRequestHtml({
       requestNumber: `PR-ALL-${Date.now().toString().slice(-6)}`,
       date: new Date().toISOString().slice(0, 10),
@@ -727,7 +763,7 @@ export default function WorkOrders() {
           <Button
             size="sm"
             variant="outline"
-            onClick={handlePrintAllNeededParts}
+            onClick={() => void runListTask(handlePrintAllNeededParts)}
             disabled={ordersNeedingPartsCount === 0}
             className="h-9 gap-1.5 border-0 text-warning hover:bg-warning/10 disabled:opacity-50"
           >
@@ -748,7 +784,7 @@ export default function WorkOrders() {
           >
             <MessageCircle size={14} /> واتساب
           </Button>
-          <Button size="sm" variant="ghost" onClick={handlePrintAllFiltered} className="h-9 gap-1.5 text-foreground">
+          <Button size="sm" variant="ghost" onClick={() => void runListTask(handlePrintAllFiltered)} className="h-9 gap-1.5 text-foreground">
             <Printer size={14} /> طباعة الكل ({filteredResultCount})
           </Button>
           <Button
@@ -1108,10 +1144,10 @@ export default function WorkOrders() {
                         <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={() => navigate(`/work-orders/${encodeURIComponent(order.id)}`)}>
                           <Eye size={14} /> {isArabic ? "عرض" : "View"}
                         </Button>
-                        {allowEdit && <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={() => setEditOrder(order)}>
+                        {allowEdit && <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={() => void openEdit(order)}>
                           <Edit size={14} /> {isArabic ? "تعديل" : "Edit"}
                         </Button>}
-                        <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={() => setPhotosOrderId(order.id)}>
+                        <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={() => void withActionOrder(order, (full) => setPhotosOrderId(full.id))}>
                           <Camera size={14} /> {isArabic ? "صور" : "Photos"}
                         </Button>
                       </div>
@@ -1133,7 +1169,7 @@ export default function WorkOrders() {
                           <Eye size={14} className="text-muted-foreground" /> عرض التفاصيل
                         </DropdownMenuItem>
                         {allowEdit && (
-                          <DropdownMenuItem onClick={() => setEditOrder(order)} className="gap-2 cursor-pointer lg:hidden">
+                          <DropdownMenuItem onClick={() => void openEdit(order)} className="gap-2 cursor-pointer lg:hidden">
                             <Edit size={14} className="text-info" /> تعديل الأمر
                           </DropdownMenuItem>
                         )}
@@ -1145,9 +1181,9 @@ export default function WorkOrders() {
                         <DropdownMenuSub>
                           <DropdownMenuSubTrigger className="gap-2 cursor-pointer">
                             <SearchIcon size={14} className="text-primary" /> فحص السيارة
-                            {(inspectionsByOrder[order.id] || 0) > 0 && (
-                              <span className="ml-auto text-[10px] bg-primary/15 text-primary rounded-full px-1.5">
-                                {inspectionsByOrder[order.id]}
+                            {(!inspectionsByOrder || inspectionsByOrder[order.id] > 0) && (
+                              <span title={!inspectionsByOrder ? (inspectionCountsQuery.isError ? (isArabic ? "عدد الفحوصات غير متاح" : "Inspection count unavailable") : (isArabic ? "جارٍ تحميل العدد" : "Loading count")) : undefined} className="ml-auto text-[10px] bg-primary/15 text-primary rounded-full px-1.5">
+                                {inspectionsByOrder ? inspectionsByOrder[order.id] : inspectionCountsQuery.isError ? "!" : "…"}
                               </span>
                             )}
                           </DropdownMenuSubTrigger>
@@ -1155,23 +1191,28 @@ export default function WorkOrders() {
                             <DropdownMenuItem onClick={() => openNewInspection(order)} className="gap-2 cursor-pointer">
                               <FilePlus2 size={14} className="text-success" /> فحص جديد لهذا الأمر
                             </DropdownMenuItem>
-                            {(inspectionsByOrder[order.id] || 0) > 0 && (
+                            {(!inspectionsByOrder || inspectionsByOrder[order.id] > 0) && (
                               <DropdownMenuItem onClick={() => openExistingInspections(order)} className="gap-2 cursor-pointer">
                                 <FolderOpen size={14} className="text-info" /> الفحوصات السابقة
-                                <span className="ml-auto text-[10px] text-muted-foreground">({inspectionsByOrder[order.id]})</span>
+                                <span className="ml-auto text-[10px] text-muted-foreground">
+                                  {inspectionsByOrder ? `(${inspectionsByOrder[order.id]})` : inspectionCountsQuery.isError ? (isArabic ? "العدد غير متاح" : "Count unavailable") : "…"}
+                                </span>
                               </DropdownMenuItem>
                             )}
+                            {inspectionCountsQuery.isError && <DropdownMenuItem onClick={() => void inspectionCountsQuery.refetch()}>
+                              {isArabic ? "إعادة تحميل عدد الفحوصات" : "Retry inspection counts"}
+                            </DropdownMenuItem>}
                           </DropdownMenuSubContent>
                         </DropdownMenuSub>
 
-                        <DropdownMenuItem onClick={() => setExpenseOrder(order)} className="gap-2 cursor-pointer">
+                        <DropdownMenuItem onClick={() => void withActionOrder(order, setExpenseOrder)} className="gap-2 cursor-pointer">
                           <Receipt size={14} className="text-warning" /> مصروف على هذا الأمر
                         </DropdownMenuItem>
 
-                        <DropdownMenuItem onClick={() => setPhotosOrderId(order.id)} className="gap-2 cursor-pointer lg:hidden">
+                        <DropdownMenuItem onClick={() => void withActionOrder(order, (full) => setPhotosOrderId(full.id))} className="gap-2 cursor-pointer lg:hidden">
                           <Camera size={14} className="text-primary" /> صور المراحل
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setQrOrder(order)} className="gap-2 cursor-pointer">
+                        <DropdownMenuItem onClick={() => void withActionOrder(order, setQrOrder)} className="gap-2 cursor-pointer">
                           <QrCode size={14} className="text-primary" /> رمز QR
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handlePreview(order)} className="gap-2 cursor-pointer">
@@ -1282,7 +1323,7 @@ export default function WorkOrders() {
                           <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                              onClick={() => setDeleteOrder(order)}
+                              onClick={() => void withActionOrder(order, setDeleteOrder)}
                               className="gap-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
                             >
                               <Trash2 size={14} /> حذف الأمر
@@ -1404,28 +1445,34 @@ export default function WorkOrders() {
         )}
       </div>
 
-      <PdfPreviewDialog open={showPreview} onOpenChange={setShowPreview} htmlContent={previewHtml} title={previewTitle} />
-      <WorkOrderStatusDialog order={statusOrder} open={showStatus} onOpenChange={setShowStatus} />
-      <QrLabel order={qrOrder} open={!!qrOrder} onClose={() => setQrOrder(null)} />
-      <StagePhotosDialog orderId={photosOrderId} open={!!photosOrderId} onClose={() => setPhotosOrderId(null)} />
-      <WorkOrderExpenseDialog
+      {actionBusy && <div role="status" className="fixed bottom-4 start-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm shadow-sm"><Loader2 size={16} className="animate-spin" />{t("common.loading")}</div>}
+      <Suspense fallback={<div role="status" className="p-4 text-sm text-muted-foreground">{t("common.loading")}</div>}>
+      {showPreview && <PdfPreviewDialog open={showPreview} onOpenChange={setShowPreview} htmlContent={previewHtml} title={previewTitle} />}
+      {showStatus && <WorkOrderStatusDialog order={statusOrder} open={showStatus} onOpenChange={setShowStatus} onUpdated={() => void workOrdersPageQuery.refetch()} />}
+      {qrOrder && <QrLabel order={qrOrder} open={!!qrOrder} onClose={() => setQrOrder(null)} />}
+      {photosOrderId && <StagePhotosDialog orderId={photosOrderId} open={!!photosOrderId} onClose={() => { setPhotosOrderId(null); void workOrdersPageQuery.refetch(); }} />}
+      {expenseOrder && <WorkOrderExpenseDialog
         order={expenseOrder}
         open={!!expenseOrder}
-        onOpenChange={(o) => !o && setExpenseOrder(null)}
-      />
+        onOpenChange={(o) => { if (!o) { setExpenseOrder(null); void workOrdersPageQuery.refetch(); } }}
+      />}
+      </Suspense>
 
       {/* Edit dialog */}
       <Dialog open={!!editOrder} onOpenChange={(o) => !o && setEditOrder(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-card border-border">
           <DialogHeader><DialogTitle className="text-foreground">تعديل أمر العمل {editOrder?.id}</DialogTitle></DialogHeader>
+          <Suspense fallback={<div role="status" className="p-4 text-sm text-muted-foreground">{t("common.loading")}</div>}>
           <WorkOrderForm
             initial={editOrder}
+            linkedExpenseVouchers={editVouchers}
             onClose={() => setEditOrder(null)}
             onSaved={() => {
               setEditOrder(null);
               void workOrdersPageQuery.refetch();
             }}
           />
+          </Suspense>
         </DialogContent>
       </Dialog>
 
@@ -1482,17 +1529,15 @@ export default function WorkOrders() {
         {/* تغيير الحالة جماعياً */}
         <Select
           onValueChange={async (status) => {
-            try {
-              for (const id of Array.from(selectedIds)) {
-                await updateWorkOrderInCloud(id, { status });
+            await runListTask(async () => {
+              for (const order of await selectedActionOrders()) {
+                await updateWorkOrderInCloud(order.id, { status });
               }
               toast.success(`تم تحديث حالة ${selectedIds.size} أمر إلى "${status}"`);
               if (serverListReady) await workOrdersPageQuery.refetch();
               setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
-            } catch (error: any) {
-              toast.error(error?.message || "تعذر تحديث أوامر العمل في Supabase");
-            }
+            });
           }}
         >
           <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="تغيير الحالة" /></SelectTrigger>
@@ -1503,17 +1548,15 @@ export default function WorkOrders() {
         {/* إسناد لفني */}
         <Select
           onValueChange={async (tech) => {
-            try {
-              for (const id of Array.from(selectedIds)) {
-                await updateWorkOrderInCloud(id, { technician: tech });
+            await runListTask(async () => {
+              for (const order of await selectedActionOrders()) {
+                await updateWorkOrderInCloud(order.id, { technician: tech });
               }
               toast.success(`تم إسناد ${selectedIds.size} أمر إلى ${tech}`);
               if (serverListReady) await workOrdersPageQuery.refetch();
               setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
-            } catch (error: any) {
-              toast.error(error?.message || "تعذر إسناد أوامر العمل في Supabase");
-            }
+            });
           }}
         >
           <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="إسناد لفني" /></SelectTrigger>
@@ -1526,9 +1569,8 @@ export default function WorkOrders() {
           size="sm"
           variant="outline"
           className="h-8 gap-1"
-          onClick={() => {
-            const ids = Array.from(selectedIds);
-            const ords = availableActionOrders.filter((o) => ids.includes(o.id));
+          onClick={() => void runListTask(async () => {
+            const ords = await resolveSelectedWorkOrderExport([...selectedIds], profile?.tenant_id || "");
             const headers = ["رقم الأمر","العميل","اللوحة","المركبة","الحالة","الفني","التكلفة"];
             const rows = ords.map((o) => [o.id, o.customer, o.plate, `${o.vehicleType} ${o.model}`, o.status, o.technician || "", actualWorkOrderCost(o).toFixed(3)]);
             const csv = "\uFEFF" + [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -1538,7 +1580,7 @@ export default function WorkOrders() {
             a.href = url; a.download = `work-orders-${new Date().toISOString().slice(0,10)}.csv`; a.click();
             URL.revokeObjectURL(url);
             toast.success(`تم تصدير ${ords.length} سجل`);
-          }}
+          })}
         >
           <FileSpreadsheet size={14} /> تصدير
         </Button>
@@ -1546,28 +1588,27 @@ export default function WorkOrders() {
           size="sm"
           variant="outline"
           className="h-8 gap-1"
-          onClick={async () => {
-            const ids = Array.from(selectedIds);
-            const ords = availableActionOrders.filter(o => ids.includes(o.id));
+          onClick={() => void runListTask(async () => {
+            const ords = await selectedActionOrders();
             if (ords.length === 0) return;
-            const { buildTrackingQrDataUrl } = await import("@/lib/pdfGenerator");
+            const { buildTrackingQrDataUrl, getWorkOrderHtml } = await import("@/lib/pdfGenerator");
             const printableOrders = await Promise.all(ords.map(async (order) => {
               const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
               return { ...order, trackingToken: portal?.token || order.trackingToken };
             }));
             await Promise.all(printableOrders.map(o => buildTrackingQrDataUrl(o.trackingToken)));
             const combined = printableOrders.map(o => {
-              const html = buildWorkOrderHtml(o);
+              const html = buildWorkOrderHtml(o, getWorkOrderHtml);
               const m = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
               return m ? m[1] : html;
             }).join('<div style="page-break-after:always"></div>');
             const wrapper = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>طباعة جماعية</title>${
-              buildWorkOrderHtml(printableOrders[0]).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
+              buildWorkOrderHtml(printableOrders[0], getWorkOrderHtml).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
             }</head><body>${combined}</body></html>`;
             setPreviewHtml(wrapper);
             setPreviewTitle(`طباعة ${ords.length} أمر عمل`);
             setShowPreview(true);
-          }}
+          })}
         >
           <Printer size={14} /> طباعة
         </Button>
@@ -1575,26 +1616,20 @@ export default function WorkOrders() {
           size="sm"
           variant="outline"
           className="h-8 gap-1"
-          onClick={async () => {
-            try {
+          onClick={() => void runListTask(async () => {
               let n = 0;
-              for (const id of Array.from(selectedIds)) {
-                const order = availableActionOrders.find((o) => o.id === id);
-                if (!order) continue;
+              for (const order of await selectedActionOrders()) {
                 await archiveWorkOrder(order, "Bulk Archive Work Order");
-                deleteWorkOrder(id);
+                deleteWorkOrder(order.id);
                 if (!serverListReady) await refreshWorkOrdersFromCloud().catch(() => {});
-                deleteWorkOrder(id);
+                deleteWorkOrder(order.id);
                 n++;
               }
               toast.success(`تم نقل ${n} أمر إلى الأرشيف`);
               if (serverListReady) await workOrdersPageQuery.refetch();
               setOrders([...getWorkOrdersForAdminList()]);
               setSelectedIds(new Set());
-            } catch (error: any) {
-              toast.error(error?.message || "تعذر نقل أوامر العمل إلى الأرشيف في Supabase");
-            }
-          }}
+          })}
         >
           <FolderOpen size={14} /> للأرشيف
         </Button>
@@ -1634,15 +1669,13 @@ export default function WorkOrders() {
             </label>
           </div>
         )}
-        onConfirm={async () => {
+        onConfirm={() => runListTask(async () => {
           let n = 0;
-          for (const id of Array.from(selectedIds)) {
-            const order = availableActionOrders.find((o) => o.id === id);
-            if (!order) continue;
+          for (const order of await selectedActionOrders()) {
             try {
               await runWorkOrderDelete(order, deleteMode, deleteReason || "Bulk delete work orders");
             } catch (error: any) {
-              toast.error(error?.message || `فشل حذف/أرشفة أمر العمل ${id} في Supabase`);
+              toast.error(error?.message || `فشل حذف/أرشفة أمر العمل ${order.id} في Supabase`);
               return;
             }
             n++;
@@ -1654,7 +1687,7 @@ export default function WorkOrders() {
           setShowBulkDelete(false);
           setDeleteMode("archive_only");
           setDeleteReason("");
-        }}
+        })}
       />
     </div>
   );

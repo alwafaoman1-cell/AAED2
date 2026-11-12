@@ -17,6 +17,14 @@ describe("supervisor day bands", () => {
   });
 });
 describe("actual arrival and approval clocks", () => {
+  it("does not count a prepared inspection date as arrival but keeps a real approval date", () => {
+    const current = row({ custody: "with_customer", stage: "arrived" });
+    current.visit!.entry.vehicle_location = "مع العميل";
+    current.visit!.entry.vehicle_condition = { visit_purpose: "inspection", arrival_confirmation: "pending" };
+    const timing = getSupervisorVisitTiming(current, [], NOW);
+    expect(timing.arrival).toMatchObject({ days: null, issue: "unconfirmed", tone: "unknown" });
+    expect(timing.approval.days).toBe(7);
+  });
   it("does not replace approval with entry creation, order creation or last workflow change", () => {
     const current = row();
     current.visit!.entry.work_order = { created_at: "2026-11-05", work_started_at: "2026-11-04" };

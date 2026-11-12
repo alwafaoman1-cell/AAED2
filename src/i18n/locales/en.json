@@ -1,4 +1,25 @@
 {
+  "pdfDownload": {
+    "documentStage": "Preparing the PDF document",
+    "pageStage": "Rendering the PDF page",
+    "timeout": "{{stage}} did not finish. Please try again, or reduce the number or size of photos.",
+    "saveFailed": "The PDF could not be downloaded. Please try again."
+  },
+  "overdueInsuranceAlerts": {
+    "bellLabel": "Overdue insurance payments",
+    "title": "Insurers with overdue balances",
+    "description": "Payment terms have elapsed and outstanding balances remain.",
+    "loading": "Checking overdue insurance balances…",
+    "unknown": "Overdue insurance balances have not been confirmed yet.",
+    "loadError": "Could not confirm overdue insurance balances. Try again or contact your administrator.",
+    "retry": "Try again",
+    "empty": "No overdue insurance balances currently.",
+    "days": "{{count}} days",
+    "claimsCount": "{{count}} claims",
+    "currency": "OMR",
+    "terms": "Payment terms: {{count}} days",
+    "openPayments": "Open the full payments dashboard"
+  },
   "insuranceClaims": {
     "rearThumbnailView": "View the vehicle rear photo: {{vehicle}}",
     "rearThumbnailAction": "View or change the vehicle photo: {{vehicle}}"

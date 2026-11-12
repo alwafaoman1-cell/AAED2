@@ -12,6 +12,8 @@ node_modules
 dist
 dist-ssr
 backups/
+# Local verification screenshots, PDFs and private runtime evidence.
+output/
 supabase/.temp/
 *.tsbuildinfo
 *.local

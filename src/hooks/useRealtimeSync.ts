@@ -8,13 +8,14 @@ import { applyExpenseRealtimeChange } from "@/lib/expensesStore";
 
 const RESUME_DELAY_MS = 2_000;
 const STALE_AFTER_HIDDEN_MS = 30_000;
+const EXPENSE_STORE_INVALIDATION_KEYS = new Set(["expense_management", "monthly-vehicle-profitability"]);
 
 const TABLES_TO_KEYS: Record<string, string[]> = {
-  insurance_claims: ["insurance_claims", "insurance_invoices", "vehicle_visit", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
-  insurance_invoices: ["insurance_invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
+  insurance_claims: ["insurance_claims", "insurance_invoices", "vehicle_visit", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability", "insurance_hub_summary"],
+  insurance_invoices: ["insurance_invoices", "insurance_hub_summary", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
   job_orders: ["job_orders", "insurance_claims", "vehicle_visit", "invoices", "work_order_financials", "vehicle_360", "monthly-vehicle-profitability"],
   invoices: ["invoices"],
-  claim_payments: ["claim_payments", "insurance_claims", "work_order_financials", "vehicle_360", "accounting_receipts_page", "monthly-vehicle-profitability"],
+  claim_payments: ["claim_payments", "insurance_claims", "insurance_hub_summary", "work_order_financials", "vehicle_360", "accounting_receipts_page", "monthly-vehicle-profitability"],
   accounting_receipts: ["accounting_receipts_page"],
   customers: ["customers"],
   vehicles: ["vehicles", "customers", "vehicle_360"],
@@ -49,6 +50,11 @@ const TABLES_TO_KEYS: Record<string, string[]> = {
 
 const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean; tables: string[] }> = [
   {
+    scope: "insurance_hub",
+    test: (path) => path === "/insurance",
+    tables: ["insurance_claims", "insurance_invoices", "claim_payments"],
+  },
+  {
     scope: "dashboard",
     test: (path) => path === "/" || path === "/dashboard",
     tables: ["sales_documents", "sales_payments"],
@@ -61,12 +67,12 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   {
     scope: "work_order_detail",
     test: (path) => /^\/work-orders\/[^/]+/.test(path),
-    tables: ["job_orders", "job_order_parts", "job_order_logs", "insurance_claims", "insurance_invoices", "claim_payments", "sales_documents", "sales_payments", "expenses", "vehicle_entries", "vehicle_handover_records", "vehicle_inspection_releases", "vehicle_visit_workflows"],
+    tables: ["job_orders", "job_order_parts", "job_order_logs", "insurance_claims", "insurance_invoices", "claim_payments", "sales_documents", "sales_payments", "expenses", "vehicle_entries", "vehicle_handover_records", "vehicle_inspection_releases", "vehicle_visit_workflows", "inspections"],
   },
   {
     scope: "work_orders_list",
     test: (path) => path === "/work-orders",
-    tables: ["job_orders", "expenses", "insurance_claims", "insurance_invoices", "claim_payments", "sales_documents", "sales_payments", "vehicle_entries", "vehicle_visit_workflows"],
+    tables: ["job_orders", "expenses", "insurance_claims", "insurance_invoices", "claim_payments", "sales_documents", "sales_payments", "vehicle_entries", "vehicle_visit_workflows", "inspections"],
   },
   {
     scope: "supervisor",
@@ -77,6 +83,12 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
     scope: "technician",
     test: (path) => path === "/technician" || path === "/technician/scan",
     tables: ["job_orders", "job_order_parts", "vehicle_entries", "vehicle_inspection_releases", "vehicle_visit_workflows"],
+  },
+  {
+    // Must precede the legacy /insurance/:id matcher, including the list alias.
+    scope: "claims_list",
+    test: (path) => path === "/insurance/claims" || path === "/insurance/list" || path.startsWith("/insurance/pipeline"),
+    tables: ["insurance_claims", "vehicle_entries", "vehicle_visit_workflows"],
   },
   {
     scope: "claim_detail",
@@ -92,11 +104,6 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
         !path.startsWith("/insurance/documents")
       ),
     tables: ["insurance_claims", "claim_audit_logs", "claim_payments", "insurance_invoices", "vehicle_media", "expenses", "job_orders", "vehicle_entries", "vehicle_handover_records", "vehicle_inspection_releases", "vehicle_visit_workflows"],
-  },
-  {
-    scope: "claims_list",
-    test: (path) => path === "/insurance/claims" || path.startsWith("/insurance/pipeline"),
-    tables: ["insurance_claims", "vehicle_entries", "vehicle_visit_workflows"],
   },
   {
     scope: "vehicle_entry_list",
@@ -150,8 +157,9 @@ const ROUTE_TABLE_SCOPES: Array<{ scope: string; test: (path: string) => boolean
   },
 ];
 
-function getRealtimeScope(pathname: string) {
-  return ROUTE_TABLE_SCOPES.find((scope) => scope.test(pathname)) ?? { scope: "minimal", tables: [] };
+export function getRealtimeScope(pathname: string) {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  return ROUTE_TABLE_SCOPES.find((scope) => scope.test(path)) ?? { scope: "minimal", tables: [] };
 }
 
 export function useRealtimeSync() {
@@ -164,28 +172,26 @@ export function useRealtimeSync() {
     if (!profile?.tenant_id || realtimeScope.tables.length === 0) return;
 
     const pending = new Set<string>();
+    const scopeKeys = new Set(realtimeScope.tables.flatMap((table) => TABLES_TO_KEYS[table] ?? []));
     let timer: ReturnType<typeof setTimeout> | null = null;
     let hiddenAt: number | null = null;
     let resumedAt: number | null = null;
+    let disposed = false;
 
     const now = () => Date.now();
     const isVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
     const isRecentlyReturnedToTab = () => resumedAt !== null && now() - resumedAt < RESUME_DELAY_MS;
 
     const scheduleFlush = () => {
-      if (timer || pending.size === 0 || !isVisible() || hasUnsavedWork()) return;
+      if (disposed || timer || pending.size === 0 || !isVisible() || hasUnsavedWork()) return;
       const delay = Math.max(1_500, RESUME_DELAY_MS - (resumedAt === null ? RESUME_DELAY_MS : now() - resumedAt));
       timer = setTimeout(flush, delay);
     };
 
     const queueStaleActiveQueries = () => {
-      for (const table of realtimeScope.tables) {
-        for (const key of TABLES_TO_KEYS[table] ?? []) {
-          if (qc.getQueryCache().findAll({ queryKey: [key], type: "active" })
-            .some((query) => query.state.dataUpdatedAt < now() - STALE_AFTER_HIDDEN_MS)) {
-            pending.add(key);
-          }
-        }
+      for (const query of qc.getQueryCache().findAll({ type: "active" })) {
+        const key = String(query.queryKey[0]);
+        if (scopeKeys.has(key) && query.state.dataUpdatedAt < now() - STALE_AFTER_HIDDEN_MS) pending.add(key);
       }
     };
 
@@ -208,13 +214,15 @@ export function useRealtimeSync() {
       timer = null;
       if (!isVisible() || hasUnsavedWork()) return;
       if (isRecentlyReturnedToTab()) { scheduleFlush(); return; }
-      const keys = Array.from(pending);
+      const keys = new Set(pending);
       pending.clear();
-      for (const key of keys) {
-        // Only mounted readers refetch. A tab return never reloads the page or
-        // hydrates whole legacy stores while a form is being edited.
-        void qc.invalidateQueries({ queryKey: [key], refetchType: "active" });
-      }
+      // One cache traversal per burst, including overlapping table dependencies.
+      // Inactive readers are marked stale, but only mounted readers refetch.
+      // Keep default cancellation: an older in-flight read must not swallow an event.
+      void qc.invalidateQueries({
+        predicate: (query) => keys.has(String(query.queryKey[0])),
+        refetchType: "active",
+      });
     };
 
     const schedule = (keys: string[]) => {
@@ -246,7 +254,15 @@ export function useRealtimeSync() {
         }
         if (table === "expenses") {
           void Promise.resolve().then(() => applyExpenseRealtimeChange(payload))
-            .catch((error) => console.warn("[realtime:expenses]", error));
+            .then(() => {
+              // The compatibility store already invalidates these readers via
+              // the App's shared QueryClient. Do not refetch them a second time.
+              const expensePayload = payload as { eventType?: string; new?: { id?: unknown }; old?: { id?: unknown } };
+              const validRow = (expensePayload.new?.id || expensePayload.old?.id) &&
+                ["INSERT", "UPDATE", "DELETE"].includes(expensePayload.eventType ?? "");
+              schedule(validRow ? keys.filter((key) => !EXPENSE_STORE_INVALIDATION_KEYS.has(key)) : keys);
+            })
+            .catch((error) => { console.warn("[realtime:expenses]", error); schedule(keys); });
           if (realtimeScope.scope === "work_orders_list") {
             void import("@/lib/workOrdersStore")
               .then(({ refreshWorkOrderActualCostFromExpenseChange }) => refreshWorkOrderActualCostFromExpenseChange(payload))
@@ -258,7 +274,7 @@ export function useRealtimeSync() {
             .then(({ applyInspectionRealtimeChange }) => applyInspectionRealtimeChange(payload))
             .catch((error) => console.warn("[realtime:inspections]", error));
         }
-        schedule(keys);
+        if (table !== "expenses") schedule(keys);
       });
     }
 
@@ -276,6 +292,7 @@ export function useRealtimeSync() {
     }
 
     return () => {
+      disposed = true;
       if (timer) clearTimeout(timer);
       unsubscribeDirty();
       if (typeof document !== "undefined") {

@@ -11,6 +11,8 @@ import {
   type EntrySignatureSubmitResult,
 } from "@/lib/vehicleEntryOneTimePreview";
 import { toast } from "sonner";
+import { loadVehicleSignatureMedia } from "@/lib/vehicleSignatureMedia";
+import { intakeReceiptError } from "@/lib/vehicleIntakeReceiptErrors";
 
 interface EntrySignatureData {
   entry_number: string;
@@ -131,21 +133,19 @@ export default function VehicleEntrySignPage() {
       return;
     }
     setData(result);
-    setSignerName(result.signer_name || result.customer?.name || "");
+    setSignerName(result.signer_name || "");
     setError(null);
     setLoading(false);
 
     setPhotosLoading(true);
     setPhotosUnavailable(false);
-    const { data: mediaResponse, error: mediaError } = await supabase.functions.invoke(
-      "vehicle-entry-signature-media",
-      { body: { token } },
-    );
+    const { data: mediaResponse, error: mediaError } = await loadVehicleSignatureMedia(token);
     if (mediaError || mediaResponse?.error) {
       setPhotos([]);
       setPhotosUnavailable(true);
     } else {
       setPhotos(Array.isArray(mediaResponse?.media) ? mediaResponse.media : []);
+      setPhotosUnavailable(mediaResponse?.unavailable_count > 0);
     }
     setPhotosLoading(false);
   }, [token]);
@@ -244,7 +244,7 @@ export default function VehicleEntrySignPage() {
         if (canShowOneTimeEntryPreview(result)) {
           try {
             setOneTimePreview({
-              html: buildOneTimeEntryPreviewHtml(result.preview_entry, photos, signatureDataUrl),
+              html: buildOneTimeEntryPreviewHtml(result.preview_entry, photos, signatureDataUrl, result.signed_at),
               expiresAt: null,
             });
           } catch {
@@ -254,7 +254,7 @@ export default function VehicleEntrySignPage() {
       }
     } catch (submitError: any) {
       const message = String(submitError?.message || "");
-      toast.error(message.includes("expired_link") ? errorMessage("expired_link") : "تعذر حفظ التوقيع. يرجى المحاولة مرة أخرى.");
+      toast.error(message.includes("CUSTODY_") ? intakeReceiptError(submitError).message : message.includes("expired_link") ? errorMessage("expired_link") : "تعذر حفظ التوقيع. يرجى المحاولة مرة أخرى.");
     } finally {
       setSubmitting(false);
     }
@@ -353,7 +353,7 @@ export default function VehicleEntrySignPage() {
           <div className="mb-3 flex items-center gap-2 font-bold"><Camera size={18} /> صور المركبة عند الدخول / Entry Photos</div>
           {photosLoading ? (
             <div className="flex min-h-28 items-center justify-center text-sm text-muted-foreground"><Loader2 className="ml-2 h-5 w-5 animate-spin" /> جارٍ تحميل الصور…</div>
-          ) : photosUnavailable ? (
+          ) : photosUnavailable && photos.length === 0 ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">تعذر تحميل الصور مؤقتًا. بيانات المركبة والتوقيع ما زالت متاحة.</div>
           ) : photos.length === 0 ? (
             <div className="rounded-xl border border-dashed bg-slate-50 p-5 text-center text-sm text-muted-foreground">لا توجد صور مرفوعة على نموذج الدخول.</div>
@@ -369,6 +369,7 @@ export default function VehicleEntrySignPage() {
               ))}
             </div>
           )}
+          {photosUnavailable && photos.length > 0 && <p role="alert" className="mt-2 text-sm text-amber-900">تعذر تحميل بعض الصور مؤقتًا. يرجى مراجعة الورشة إذا كانت صورة مطلوبة غير ظاهرة.</p>}
           <p className="mt-3 text-center text-[11px] leading-5 text-muted-foreground">الصور جزء من توثيق حالة المركبة وقت الدخول، وروابط عرضها مؤقتة ومحمية برابط التوقيع.</p>
         </section>
 

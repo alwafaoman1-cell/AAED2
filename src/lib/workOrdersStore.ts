@@ -1,8 +1,10 @@
 ﻿import { classifyWorkOrderCosts, type ClaimApprovalMode, type ClaimApprovalInfo } from "@/lib/workOrderCosting";
-import { addUnifiedVehicleMedia, upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
+import { addUnifiedVehicleMedia, fetchUnifiedOperationalState, upsertUnifiedOperationalState } from "@/lib/claimWorkOrderUnified";
 import { ClaimWorkOrderAlreadyExistsError, findPrimaryClaimWorkOrder } from "@/lib/claimWorkOrderGuard";
 import { extractWorkOrderNumber, isSupportedWorkOrderNumber, normalizeWorkOrderNumber } from "@/lib/workOrderNumber";
 import { buildWorkOrderActualCostMap, type WorkOrderExpenseCostRow } from "@/lib/workOrderActualCosts";
+
+export const WORK_ORDER_DETAIL_SELECT = "*,detail_customer:customers!job_orders_customer_id_fkey(id,name,phone),detail_vehicle:vehicles!job_orders_vehicle_id_fkey(id,plate_number,plate_letters,brand,model,year,vin,vin_number,color,vehicle_cover_image_url,vehicle_thumbnail_url),detail_claim:insurance_claims!job_orders_claim_id_fkey(id,claim_number,approved_amount,estimated_amount,estimation_type)";
 
 // Shared in-memory store for Work Orders so other modules (Inspection) can read & sync them.
 // This is a temporary client-side store until backend wiring is added.
@@ -60,12 +62,16 @@ export function isPartStillNeeded(p: NeededPart): boolean {
 
 export interface WorkOrder {
   id: string;
+  /** Read-only list projection; must be resolved through the canonical reader before saving. */
+  summaryOnly?: true;
   /** UUID الداخلي في Supabase. لا يُستخدم في الروابط العامة. */
   cloudId?: string;
   /** رقم عرض احترافي للأمر (مثل WO-00012). إن لم يُحدّد يُستخدم id كرقم. */
   displayNumber?: string;
   workOrderType?: import("@/lib/workOrderType").WorkOrderType;
   claimId?: string;
+  /** Confirmed joined read only; never a separately persisted claim source. */
+  resolvedClaim?: { id: string; claim_number: string };
   trackingToken?: string;
   vehicleId?: string;
   parentWorkOrderId?: string;
@@ -205,6 +211,7 @@ export function normalizeWorkOrderStatus(status: string | null | undefined): str
 
 export interface WorkOrderListPageInput {
   tenantId: string;
+  projection?: "full" | "summary";
   page: number;
   pageSize: number;
   search?: string;
@@ -319,6 +326,7 @@ function findWorkOrderIndex(id: string): number {
 }
 
 export function upsertWorkOrderInCache(order: WorkOrder): WorkOrder {
+  if (order.summaryOnly) throw new Error("WORK_ORDER_FULL_RECORD_REQUIRED");
   const list = load();
   const idx = list.findIndex((o) =>
     (order.cloudId && o.cloudId === order.cloudId) ||
@@ -622,10 +630,10 @@ export async function refreshWorkOrdersFromCloud(): Promise<void> {
   await fetchFromCloud({ throwOnError: true });
 }
 
-export function subscribeWorkOrders(cb: () => void): () => void {
+export function subscribeWorkOrders(cb: () => void, options: { loadAll?: boolean } = {}): () => void {
 
   // Ensure cloud sync is bootstrapped the first time anyone subscribes.
-  ensureCloudSync();
+  if (options.loadAll !== false) ensureCloudSync();
   listeners.add(cb);
   return () => { listeners.delete(cb); };
 }
@@ -784,13 +792,22 @@ function mapCloudRow(
 export async function fetchWorkOrderListPage(input: WorkOrderListPageInput): Promise<WorkOrderListPageResult> {
   const page = Math.max(1, Number(input.page) || 1);
   const pageSize = Math.min(100, Math.max(10, Number(input.pageSize) || 20));
-  const { data, error } = await (supabase.rpc as any)("work_orders_list_rpc", {
+  const args = {
     p_tenant_id: input.tenantId,
     p_page: page,
     p_page_size: pageSize,
     p_search: input.search?.trim() || "",
     p_filters: input.filters || {},
-  });
+  };
+  let summaryOnly = input.projection === "summary";
+  let { data, error } = summaryOnly
+    ? await (supabase.rpc as any)("work_orders_summary_page_rpc", args)
+    : await (supabase.rpc as any)("work_orders_list_rpc", args);
+  // Compatibility is another bounded PAGE read, never an archive hydration.
+  if (summaryOnly && error && ["PGRST202", "42883"].includes(error.code || "")) {
+    summaryOnly = false;
+    ({ data, error } = await (supabase.rpc as any)("work_orders_list_rpc", args));
+  }
   if (error) throw error;
 
   const payload = data && typeof data === "object" ? data as Record<string, any> : {};
@@ -821,7 +838,8 @@ export async function fetchWorkOrderListPage(input: WorkOrderListPageInput): Pro
     const actualCosts = new Map<string, number>([[raw.id, Number(raw.actual_expense_cost || 0)]]);
     const mapped = mapCloudRow(raw, customerMap, vehicleMap, claimMap, actualCosts);
     const pendingPatch = _pendingPatches.get(mapped.id);
-    return pendingPatch ? { ...mapped, ...pendingPatch } : mapped;
+    const row = pendingPatch ? { ...mapped, ...pendingPatch } : mapped;
+    return summaryOnly ? { ...row, summaryOnly: true as const } : row;
   });
 
   const rawPagination = payload.pagination || {};
@@ -883,7 +901,7 @@ function chunks<T>(values: T[], size = 100): T[][] {
   return result;
 }
 
-async function fetchActualExpenseCostsForOrders(tenantId: string, rows: CloudRow[]): Promise<Map<string, number>> {
+export async function fetchActualExpenseCostsForOrders(tenantId: string, rows: CloudRow[]): Promise<Map<string, number>> {
   if (!tenantId || rows.length === 0) return new Map();
   const ids = Array.from(new Set(rows.map((row) => String(row.id || "").trim()).filter(Boolean)));
   const numbers = Array.from(new Set(rows.map((row) => String(row.order_number || "").trim()).filter(Boolean)));
@@ -1319,7 +1337,10 @@ function buildJobOrderPayload(o: WorkOrder, tenantId: string, customerId: string
 }
 
 async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
-  const [custRes, vehRes, claimRes] = await Promise.all([
+  const joined = ["detail_customer","detail_vehicle","detail_claim"].every(key => Object.prototype.hasOwnProperty.call(row,key));
+  const [custRes, vehRes, claimRes] = joined ? [
+    {data:row.detail_customer},{data:row.detail_vehicle},{data:row.detail_claim},
+  ] : await Promise.all([
     row.customer_id
       ? supabase.from("customers").select("id,name,phone").eq("id", row.customer_id).maybeSingle()
       : Promise.resolve({ data: null } as any),
@@ -1355,7 +1376,9 @@ async function mapSavedJobOrder(row: any): Promise<WorkOrder> {
       estimationType: claim.estimation_type,
     });
   }
-  return mapCloudRow(row, custMap, vehMap, claimMap);
+  const mapped=mapCloudRow(row, custMap, vehMap, claimMap);
+  if(joined&&claim?.id&&typeof claim.claim_number==="string")mapped.resolvedClaim={id:claim.id,claim_number:claim.claim_number};
+  return mapped;
 }
 
 type WorkOrderRealtimePayload = {
@@ -1548,7 +1571,7 @@ export async function fetchWorkOrderFromCloudByIdentifier(identifier: string): P
 
   let query = supabase
     .from("job_orders")
-    .select("*")
+    .select(WORK_ORDER_DETAIL_SELECT)
     .eq("tenant_id", ctx.tenantId)
     .limit(1);
 
@@ -1563,7 +1586,7 @@ export async function fetchWorkOrderFromCloudByIdentifier(identifier: string): P
     if (aliasId) {
       const aliasResult = await supabase
         .from("job_orders")
-        .select("*")
+        .select(WORK_ORDER_DETAIL_SELECT)
         .eq("tenant_id", ctx.tenantId)
         .eq("id", aliasId)
         .limit(1)
@@ -1575,12 +1598,27 @@ export async function fetchWorkOrderFromCloudByIdentifier(identifier: string): P
   }
   if (!data?.id) return null;
 
-  const saved = await mapSavedJobOrder(data);
+  // Keep the operational source used by the former detail adapter. Resolve it
+  // alongside metadata, not via a second partial work-order reader/archive.
+  const [saved, operational] = await Promise.all([
+    mapSavedJobOrder(data),
+    fetchUnifiedOperationalState({ claimId: data.claim_id || null, workOrderId: data.id }),
+  ]);
+  if (operational && operational.tenant_id !== ctx.tenantId) throw new Error("WORK_ORDER_READ_SCOPE_CHANGED");
+  if (operational) {
+    if (operational.operational_status) saved.status = cloudStatusToLocal(operational.operational_status);
+    if (operational.vehicle_presence_status) saved.vehiclePresenceStatus = operational.vehicle_presence_status;
+    if (operational.vehicle_received_at) saved.receivedAt = operational.vehicle_received_at;
+    if (operational.operational_notes) saved.description = operational.operational_notes;
+    if (operational.parts_required?.length) saved.partsNeeded = operational.parts_required as NeededPart[];
+  }
+  if ((await getCurrentTenantId()) !== ctx.tenantId) throw new Error("WORK_ORDER_READ_SCOPE_CHANGED");
   upsertWorkOrderInCache(saved);
   return saved;
 }
 
 export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder> {
+  if (order.summaryOnly) throw new Error("WORK_ORDER_FULL_RECORD_REQUIRED");
   assertNoTemporaryOperationalIds(order);
   const ctx = await tenantContext();
   if (!ctx) throw new Error("تعذر تحديد الورشة الحالية");
@@ -1678,7 +1716,7 @@ export async function saveWorkOrderToCloud(order: WorkOrder): Promise<WorkOrder>
           repair_stage: saved.status,
           operational_notes: saved.description || saved.diagnosis || null,
           parts_required: saved.partsNeeded || [],
-          vehicle_received_at: saved.receivedAt || null,
+          vehicle_received_at: saved.receivedAt || undefined,
         },
       });
     } catch (syncError) {

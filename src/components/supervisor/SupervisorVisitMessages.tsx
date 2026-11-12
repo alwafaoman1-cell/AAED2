@@ -10,14 +10,14 @@ import { buildVehicleVisitMessageDraft, listVehicleVisitMessageLogs, loadVehicle
 import { SupervisorClaimApproval } from "./SupervisorClaimApproval";
 import "@/lib/i18n/vehicleVisitMessages";
 
-export function SupervisorVisitMessages({ entryId, claimId }: VehicleVisitMessageSelection) {
+export function SupervisorVisitMessages({ entryId, claimId,initialDraft,initialKind }: VehicleVisitMessageSelection&{initialDraft?:VehicleVisitMessageDraft|null;initialKind?:VehicleVisitMessageKind}) {
   const { profile } = useAuth();
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const tr = (key: string) => t(`vehicleVisitMessages.${key}`);
   const language = i18n.language.startsWith("en") ? "en" : "ar";
-  const [kind, setKind] = useState<VehicleVisitMessageKind>("approval");
-  const [prepared, setPrepared] = useState<VehicleVisitMessageDraft | null>(null);
+  const [kind, setKind] = useState<VehicleVisitMessageKind>(initialDraft?.kind||initialKind||"approval");
+  const [prepared, setPrepared] = useState<VehicleVisitMessageDraft | null>(initialDraft||null);
   const [edited, setEdited] = useState({ identity: "", body: "" });
   const [reviewed, setReviewed] = useState("");
   const [feedback, setFeedback] = useState<{ error: boolean; cause?: unknown; key?: string } | null>(null);
@@ -86,9 +86,9 @@ export function SupervisorVisitMessages({ entryId, claimId }: VehicleVisitMessag
       setPrepared(null); setReviewed(""); setFeedback(null); void query.refetch(); void logs.refetch();
     }}>{tr("retry")}</Button>
     {context && !query.isError && <>
-      <p>{tr(context.presence)} · {context.customerName} · <bdi>{context.phone}</bdi></p>
+      <p>{tr(context.presence)} · {kind==='temporary_release_signature'?context.signatureRelease?.recipientName||context.customerName:context.customerName} · <bdi>{draft?.recipientPhone||context.phone}</bdi></p>
       {context.noEntry && <p className="text-sm">{tr("noEntry")}</p>}
-      {context.claimId && !context.approved && <>
+      {kind==='approval'&&context.claimId && !context.approved && <>
         <p role="status">{tr("pending")}</p>
         <SupervisorClaimApproval claimId={context.claimId} onApproved={() => {
           setKind("approval"); setPrepared(null); setReviewed(""); setFeedback({error:false,key:"approved"});
@@ -96,7 +96,7 @@ export function SupervisorVisitMessages({ entryId, claimId }: VehicleVisitMessag
         }} />
       </>}
       <div className="flex flex-wrap gap-2" role="group" aria-label={tr("title")}>
-        {(["approval", "entry_receipt", "temporary_release"] as const).map(action => <Button key={action} type="button"
+        {(["approval", "entry_receipt", "temporary_release_signature","temporary_release"] as const).map(action => <Button key={action} type="button"
           variant={kind === action ? "default" : "outline"} className="min-h-11 whitespace-normal" disabled={busy}
           aria-pressed={kind === action} onClick={() => { setKind(action); setPrepared(null); setReviewed(""); setFeedback(null); }}>{tr(action)}</Button>)}
       </div>
@@ -104,11 +104,14 @@ export function SupervisorVisitMessages({ entryId, claimId }: VehicleVisitMessag
       {legacyBlocked && <p role="status">{tr("errors.LEGACY_APPROVAL")}</p>}
       {eventRecorded && <p role="status">{tr("eventRecorded")}</p>}
       {kind === "temporary_release" && !context.releaseFinalized && <p role="status">{tr("errors.RELEASE_REQUIRED")}</p>}
+      {kind==='temporary_release_signature'&&(!context.signatureRelease?.complete||context.presence!=='in_workshop')&&<p role="status">{tr('errors.RELEASE_SIGNATURE_REQUIRED')}</p>}
       {kind === "entry_receipt" && (!context.entryIssued || context.presence !== "in_workshop") && <p>{tr("errors.ENTRY_REQUIRED")}</p>}
       <Button type="button" className="min-h-11" variant="outline" disabled={busy || query.isFetching
         || (kind === "approval" && !context.approved) || (kind === "entry_receipt" && (!context.entryIssued || context.presence !== "in_workshop" || !!draft))
-        || (kind === "temporary_release" && (!context.releaseFinalized || !!draft))}
-        onClick={() => void prepare()}>{tr(kind === "entry_receipt" ? "prepareLink" : kind === "temporary_release" ? "prepareViewLink" : "prepare")}</Button>
+        || (kind === "temporary_release" && (!context.releaseFinalized || !!draft))
+        ||(kind==='temporary_release_signature'&&(!context.signatureRelease?.complete||context.presence!=='in_workshop'||!!draft))}
+        aria-busy={busy}
+        onClick={() => void prepare()}>{tr(kind === "entry_receipt" ? "prepareLink" :kind==='temporary_release_signature'?'prepareSignatureLink': kind === "temporary_release" ? "prepareViewLink" : "prepare")}</Button>
       {draft && <div className="space-y-3">
         <label className="block space-y-2"><span>{tr("body")}</span><Textarea aria-label={tr("body")} value={body} maxLength={4000} rows={7} disabled={busy}
           onChange={event => { setEdited({ identity, body: event.target.value }); setReviewed(""); }} /></label>

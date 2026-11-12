@@ -21,7 +21,10 @@ describe("claim and vehicle center ownership", () => {
     expect(source).toContain('["approve", "arrival", "undoDelivery"].includes(requestedVisitAction)');
     expect(source).toContain('openApproveDialog();');
     const quickAction = readFileSync(join(process.cwd(), "src/pages/vehicle-entry/VehicleVisitQuickActionDialog.tsx"), "utf8");
-    expect(quickAction).toContain('visitAction=approve');
+    expect(quickAction).toContain('<VehicleVisitControlPanel');
+    const actions=readFileSync(join(process.cwd(),'src/components/vehicle-entry/VehicleVisitInlineActions.tsx'),'utf8');
+    expect(actions).toContain('<SupervisorClaimApproval');
+    expect(actions).not.toContain('approved_at:');
     expect(quickAction).not.toContain('status: "approved"');
   });
 });

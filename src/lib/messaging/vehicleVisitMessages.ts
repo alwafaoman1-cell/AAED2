@@ -2,7 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { getLinkedVehicleVisit, getVehicleVisitDetail } from "@/lib/vehicleVisitLifecycle";
 import { createVehicleEntryCustomerSignatureLink, getVehicleEntryPresence } from "@/lib/vehicleEntryService";
-import { createInspectionReleaseViewLink } from "@/lib/vehicleInspectionRelease";
+import { createInspectionReleaseViewLink,createInspectionReleaseLink,getInspectionReleaseById,inspectionReleaseMissingFields } from "@/lib/vehicleInspectionRelease";
 import { hasConfirmedVehicleEntryWorkOrderLink } from "@/lib/vehicleEntryWorkOrderLink";
 import { normalizePhone } from "@/lib/phoneUtils";
 import { readSystemPreferences } from "@/lib/systemPreferences";
@@ -12,7 +12,7 @@ import i18n from "@/i18n";
 import "@/lib/i18n/vehicleVisitMessages";
 
 export interface VehicleVisitMessageSelection { entryId?: string; claimId?: string }
-export type VehicleVisitMessageKind = "approval" | "entry_receipt" | "temporary_release";
+export type VehicleVisitMessageKind = "approval" | "entry_receipt" | "temporary_release" | "temporary_release_signature";
 export interface VehicleVisitMessageContext {
   tenantId: string; entryId: string | null; claimId: string | null; workOrderId: string | null;
   customerId: string | null; vehicleId: string; customerName: string; phone: string;
@@ -22,10 +22,13 @@ export interface VehicleVisitMessageContext {
   entryIssued: boolean; entryUpdatedAt: string; claimUpdatedAt: string;
   releaseId: string | null; releaseNumber: string; releaseFinalized: boolean; noEntry: boolean;
   legacyApprovalState: "none" | "queued" | "draft_opened" | "sent_unconfirmed";
+  signatureRelease?:{id:string;number:string;updatedAt:string;status:'draft'|'awaiting_signature';recipientName:string;recipientPhone:string;complete:boolean};
 }
 export interface VehicleVisitMessageDraft {
   context: VehicleVisitMessageContext; kind: VehicleVisitMessageKind; language: "ar" | "en";
   body: string; url: string | null; idempotencyKey: string; fingerprint: string;
+  recipientPhone?:string;
+  expiresAt?:string;
 }
 const STAFF = ["admin", "manager", "insurance", "supervisor"];
 const fail = (code: string): never => { throw Object.assign(new Error(code), { code: `VISIT_MESSAGE_${code}` }); };
@@ -103,6 +106,14 @@ export async function loadVehicleVisitMessageContext(selection: VehicleVisitMess
   const activeReleases = (visit?.releases || []).filter(r => r.status === "signed" && !r.returned_at);
   if (activeReleases.length > 1) fail("CONFLICT");
   const release = activeReleases[0];
+  const pendingReleases=(visit?.releases||[]).filter(row=>['draft','awaiting_signature'].includes(row.status)&&!row.returned_at);
+  if(pendingReleases.length>1)fail('CONFLICT');
+  let signatureRelease:VehicleVisitMessageContext['signatureRelease'];
+  if(pendingReleases.length){
+    const saved=await getInspectionReleaseById(pendingReleases[0].id);
+    if(saved.vehicle_entry_id!==entryId||saved.tenant_id!==tenantId||!['draft','awaiting_signature'].includes(saved.status)||saved.returned_at)fail('STALE');
+    signatureRelease={id:saved.id,number:saved.release_number,updatedAt:saved.updated_at||'',status:saved.status as 'draft'|'awaiting_signature',recipientName:saved.form_data.recipient_name,recipientPhone:normalizePhone(saved.form_data.recipient_phone,prefs.defaultCountryCode),complete:inspectionReleaseMissingFields(saved.form_data).length===0};
+  }
   const vehicleId = entry?.vehicle_id || claim?.vehicle_id;
   if (!isUuid(vehicleId)) fail("IDENTITY");
   let vehicle = { ...entry?.vehicle, ...entry?.vehicle_snapshot };
@@ -134,7 +145,7 @@ export async function loadVehicleVisitMessageContext(selection: VehicleVisitMess
     entryIssued: Boolean(entry && ["Issued", "Converted to Claim", "Converted to Work Order"].includes(entry.status) && entry.issued_at),
     entryUpdatedAt: entry?.updated_at || "", claimUpdatedAt: claim?.updated_at || "", releaseId: release?.id || null, releaseNumber: release?.release_number || "",
     releaseFinalized: Boolean(release?.released_at && presence === "with_customer"), noEntry: !entryId,
-    legacyApprovalState,
+    legacyApprovalState,...(signatureRelease?{signatureRelease}:{}),
   };
   await messageTenant(tenantId);
   return context;
@@ -146,41 +157,46 @@ export function vehicleVisitMessagePrefix(context: Pick<VehicleVisitMessageConte
 }
 export function vehicleVisitMessageKey(context: VehicleVisitMessageContext, kind: VehicleVisitMessageKind): string {
   // Language, edits, URL rotation and double clicks do not create a new business event.
-  const event = kind === "approval" ? `${context.claimId}:${context.approvalEvent}` : kind === "temporary_release" ? context.releaseId : context.entryId;
+  const event = kind === "approval" ? `${context.claimId}:${context.approvalEvent}` : kind === "temporary_release" ? context.releaseId : kind==='temporary_release_signature'?`${context.signatureRelease?.id}:${context.signatureRelease?.updatedAt}`:context.entryId;
   const anchor = kind === "approval" ? { ...context, entryId: null } : context;
   return `${vehicleVisitMessagePrefix(anchor)}${kind}:${event}`;
 }
 export function buildVehicleVisitMessageDraft(context: VehicleVisitMessageContext, kind: VehicleVisitMessageKind, language: "ar" | "en", url: string | null = null): VehicleVisitMessageDraft {
-  if (!/^[1-9]\d{7,14}$/.test(context.phone)) fail("PHONE");
+  const phone=kind==='temporary_release_signature'?context.signatureRelease?.recipientPhone||'':context.phone;
+  if (!/^[1-9]\d{7,14}$/.test(phone)) fail("PHONE");
   if (kind === "approval" && (!context.claimId || !context.approved)) fail("PENDING_APPROVAL");
   if (kind === "entry_receipt" && (!context.entryId || !context.entryIssued || context.presence !== "in_workshop" || !url)) fail("ENTRY_REQUIRED");
   if (kind === "temporary_release" && (!context.entryId || !context.releaseId || !context.releaseFinalized || context.presence !== "with_customer" || !url)) fail("RELEASE_REQUIRED");
+  if(kind==='temporary_release_signature'&&(!context.entryId||context.presence!=='in_workshop'||context.signatureRelease?.status!=='awaiting_signature'||!context.signatureRelease.complete||!url))fail('RELEASE_SIGNATURE_REQUIRED');
   const key = kind === "approval" ? `approval_${context.presence}` : kind;
-  const body = i18n.t(`vehicleVisitMessages.bodies.${key}`, { lng: language, customer: context.customerName,
-    claim: context.claimNumber, entry: context.entryNumber, release: context.releaseNumber, order: context.workOrderNumber || "—", link: url || "",
+  const body = i18n.t(`vehicleVisitMessages.bodies.${key}`, { lng: language, customer: kind==='temporary_release_signature'?context.signatureRelease?.recipientName:context.customerName,
+    claim: context.claimNumber, entry: context.entryNumber, release: kind==='temporary_release_signature'?context.signatureRelease?.number:context.releaseNumber, order: context.workOrderNumber || "—", link: url || "",
     plate: context.plate || "—", vehicle: context.vehicle || "—" });
-  return { context, kind, language, body, url, idempotencyKey: vehicleVisitMessageKey(context, kind), fingerprint: vehicleVisitMessageFingerprint(context) };
+  return { context, kind, language, body, url,recipientPhone:phone, idempotencyKey: vehicleVisitMessageKey(context, kind), fingerprint: vehicleVisitMessageFingerprint(context) };
 }
 export async function prepareVehicleVisitMessage(selection: VehicleVisitMessageSelection, kind: VehicleVisitMessageKind, language: "ar" | "en", expectedTenant: string): Promise<VehicleVisitMessageDraft> {
   const context = await loadVehicleVisitMessageContext(selection, expectedTenant);
   if (kind === "approval") return buildVehicleVisitMessageDraft(context, kind, language);
   if (kind === "entry_receipt" && (!context.entryIssued || context.presence !== "in_workshop" || !context.entryId)) fail("ENTRY_REQUIRED");
   if (kind === "temporary_release" && (!context.entryId || !context.releaseId || !context.releaseFinalized || context.presence !== "with_customer")) fail("RELEASE_REQUIRED");
-  if (!/^[1-9]\d{7,14}$/.test(context.phone)) fail("PHONE");
+  if(kind==='temporary_release_signature'&&(!context.entryId||context.presence!=='in_workshop'||!context.signatureRelease?.complete))fail('RELEASE_SIGNATURE_REQUIRED');
+  if (!/^[1-9]\d{7,14}$/.test(kind==='temporary_release_signature'?context.signatureRelease?.recipientPhone||'':context.phone)) fail("PHONE");
   const link = kind === "entry_receipt" ? await createVehicleEntryCustomerSignatureLink(context.entryId!)
-    : await createInspectionReleaseViewLink(context.releaseId!);
+    :kind==='temporary_release_signature'?await createInspectionReleaseLink(context.signatureRelease!.id):await createInspectionReleaseViewLink(context.releaseId!);
   const current = await loadVehicleVisitMessageContext(selection, expectedTenant);
-  if (vehicleVisitMessageFingerprint(context) !== vehicleVisitMessageFingerprint(current)) fail("STALE");
-  return buildVehicleVisitMessageDraft(current, kind, language, link.url);
+  const comparable=kind==='temporary_release_signature'?{...current,signatureRelease:current.signatureRelease?{...current.signatureRelease,status:context.signatureRelease!.status,updatedAt:context.signatureRelease!.updatedAt}:undefined}:current;
+  if (vehicleVisitMessageFingerprint(context) !== vehicleVisitMessageFingerprint(comparable)) fail("STALE");
+  return {...buildVehicleVisitMessageDraft(current, kind, language, link.url),expiresAt:link.expires_at};
 }
 export async function sendVehicleVisitMessage(draft: VehicleVisitMessageDraft, reviewedBody: string, isCurrent: () => boolean = () => true) {
   if (!reviewedBody.trim() || reviewedBody.length > 4000) fail("BODY");
+  if(draft.kind==='temporary_release_signature'&&(!draft.expiresAt||!(Date.parse(draft.expiresAt)>Date.now())))fail('STALE');
   const current = await loadVehicleVisitMessageContext({ entryId: draft.context.entryId || undefined, claimId: draft.context.claimId || undefined }, draft.context.tenantId);
   if (!isCurrent() || vehicleVisitMessageFingerprint(current) !== draft.fingerprint) fail("STALE");
   if (draft.kind === "approval" && current.legacyApprovalState !== "none") fail("LEGACY_APPROVAL");
   // Re-run eligibility, preserving the reviewed stable event key.
   buildVehicleVisitMessageDraft(current, draft.kind, draft.language, draft.url);
-  const result = await sendUnifiedMessage({ channel: "whatsapp", body: reviewedBody.trim(), recipientPhone: current.phone,
+  const result = await sendUnifiedMessage({ channel: "whatsapp", body: reviewedBody.trim(), recipientPhone: draft.kind==='temporary_release_signature'?current.signatureRelease!.recipientPhone:current.phone,
     templateType: `vehicle_visit_${draft.kind}`, idempotencyKey: draft.idempotencyKey,
     customerId: current.customerId, vehicleId: current.vehicleId, workOrderId: current.workOrderId, claimId: current.claimId,
     shortLink: draft.url });

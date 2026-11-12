@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
   Shield, Clock, CheckCircle, DollarSign, FileText, TrendingUp,
@@ -8,65 +9,31 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import StatCard from "@/components/StatCard";
-import { useInsuranceClaims } from "@/hooks/useInsuranceClaims";
-import { useClaimPayments } from "@/hooks/useClaimPayments";
-import { useInsuranceInvoices } from "@/hooks/useInsuranceInvoices";
-import { useInsuranceAlerts } from "@/hooks/useInsuranceAlerts";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchInsuranceHubSummary } from "@/lib/dashboardReadSummaries";
+import "@/lib/i18n/performanceReadSummaries";
 import { toEnglishDigits } from "@/lib/numberUtils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-import { getClaimVehicleLocation, isActiveClaim } from "@/lib/claimVehicleLocation";
 
 const fmt = (n: number) => toEnglishDigits(Math.round(n).toLocaleString("en-US"));
 
 export default function InsuranceHub() {
   const navigate = useNavigate();
-  const { data: claims = [], isLoading } = useInsuranceClaims();
-  const { data: payments = [] } = useClaimPayments();
-  const { data: invoices = [] } = useInsuranceInvoices();
-  const alerts = useInsuranceAlerts();
-
-  const stats = useMemo(() => {
-    const total = claims.length;
-    const pending = claims.filter((c) => c.status === "pending").length;
-    const approved = claims.filter((c) => c.status === "approved").length;
-    const paid = claims.filter((c) => c.status === "paid").length;
-    const rejected = claims.filter((c) => c.status === "rejected").length;
-    const estimatedTotal = claims.reduce((s, c) => s + (Number(c.estimated_amount) || 0), 0);
-    const approvedTotal = claims.reduce((s, c) => s + (Number(c.approved_amount) || 0), 0);
-    const paidTotal = payments.filter((p) => p.status === "cleared").reduce((s, p) => s + Number(p.amount || 0), 0);
-    const invoicedTotal = invoices.reduce((s, i) => s + Number(i.total || 0), 0);
-    const outstanding = Math.max(invoicedTotal - paidTotal, 0);
-    const approvalRate = total ? Math.round(((approved + paid) / total) * 100) : 0;
-
-    // KPIs مبنية على تاريخ الدخول وتاريخ التسليم الفعلي
-    const now = Date.now();
-    const inWorkshop = claims.filter((c) => getClaimVehicleLocation(c) === "in_workshop").length;
-    const withCustomer = claims.filter((c) => getClaimVehicleLocation(c) === "with_customer").length;
-    const deliveredCount = claims.filter((c) => getClaimVehicleLocation(c) === "delivered").length;
-    const completedPendingCollection = invoices.filter((i) => i.status !== "paid" && i.status !== "cancelled" && Number(i.total) - Number(i.paid_amount || 0) - Number(i.settlement_discount_amount || 0) > 0.01).length;
-    const overdueClaims = claims.filter((c) => {
-      const delivered = (c as any).delivered_at;
-      if (delivered) return false;
-      const days = Math.round((now - new Date(c.created_at).getTime()) / 86_400_000);
-      return days > 30;
-    }).length;
-
-    return { total, pending, approved, paid, rejected, estimatedTotal, approvedTotal, paidTotal, invoicedTotal, outstanding, approvalRate,
-      inWorkshop, withCustomer, deliveredCount, completedPendingCollection, overdueClaims };
-  }, [claims, payments, invoices]);
-
-  // Top 5 insurance companies by claim count
-  const topCompanies = useMemo(() => {
-    const map = new Map<string, { name: string; count: number; amount: number }>();
-    for (const c of claims) {
-      const key = c.insurance_company || "—";
-      const cur = map.get(key) || { name: key, count: 0, amount: 0 };
-      cur.count++;
-      cur.amount += Number(c.approved_amount || c.estimated_amount || 0);
-      map.set(key, cur);
-    }
-    return Array.from(map.values()).sort((a, b) => b.amount - a.amount).slice(0, 5);
-  }, [claims]);
+  const {profile}=useAuth();
+  const {t}=useTranslation();
+  const query=useQuery({queryKey:["insurance_hub_summary",profile?.tenant_id],enabled:!!profile?.tenant_id,
+    queryFn:()=>fetchInsuranceHubSummary(profile!.tenant_id),staleTime:30_000,refetchOnWindowFocus:false,retry:false});
+  if(query.isPending||query.isError)return <div className="p-8 text-center text-sm text-muted-foreground" role={query.isError?"alert":"status"}>
+    {t(query.isError?"performanceRead.failed":"performanceRead.loading")}
+    {query.isError&&<Button variant="outline" className="ms-3" onClick={()=>void query.refetch()}>{t("performanceRead.retry")}</Button>}
+  </div>;
+  const summary=query.data;
+  const {stats,topCompanies,agingBuckets,monthlyTrend,recentClaims}=summary;
+  const isLoading=false;
+  const criticalAlerts=summary.criticalAlerts.map(alert=>({...alert,
+    title:t(`performanceRead.alerts.${alert.type}`,{count:alert.days}),
+    description:[alert.label,alert.detail,alert.amount==null?null:`${fmt(alert.amount)} OMR`].filter(Boolean).join(" — "),
+  }));
 
   // Status distribution for pie
   const statusData = [
@@ -76,46 +43,6 @@ export default function InsuranceHub() {
     { name: "مرفوضة", value: stats.rejected, color: "hsl(var(--destructive))" },
   ].filter((d) => d.value > 0);
 
-  // Aging buckets for outstanding receivables
-  const agingBuckets = useMemo(() => {
-    const now = Date.now();
-    const buckets = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
-    for (const inv of invoices) {
-      if (inv.status === "paid" || inv.status === "cancelled") continue;
-      const remaining = Number(inv.total) - Number(inv.paid_amount || 0) - Number(inv.settlement_discount_amount || 0);
-      if (remaining <= 0) continue;
-      const issued = new Date(inv.invoice_date || inv.issued_at || inv.created_at).getTime();
-      const ageDays = Math.floor((now - issued) / 86400000);
-      if (ageDays <= 30) buckets["0-30"] += remaining;
-      else if (ageDays <= 60) buckets["31-60"] += remaining;
-      else if (ageDays <= 90) buckets["61-90"] += remaining;
-      else buckets["90+"] += remaining;
-    }
-    return Object.entries(buckets).map(([name, value]) => ({ name, value }));
-  }, [invoices]);
-
-  // Monthly claims trend (last 6 months)
-  const monthlyTrend = useMemo(() => {
-    const months: { name: string; claims: number; amount: number }[] = [];
-    const now = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const label = d.toLocaleDateString("en-US", { month: "short" });
-      months.push({ name: label, claims: 0, amount: 0 });
-    }
-    for (const c of claims) {
-      const cd = new Date(c.created_at);
-      const idx = 5 - (now.getMonth() - cd.getMonth() + (now.getFullYear() - cd.getFullYear()) * 12);
-      if (idx >= 0 && idx < 6) {
-        months[idx].claims++;
-        months[idx].amount += Number(c.estimated_amount || 0);
-      }
-    }
-    return months;
-  }, [claims]);
-
-  const recentClaims = claims.filter(isActiveClaim).slice(0, 6);
-  const criticalAlerts = alerts.filter((a) => a.severity === "critical").slice(0, 5);
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -168,7 +95,7 @@ export default function InsuranceHub() {
         <div className="bg-destructive/5 border border-destructive/20 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold flex items-center gap-2 text-destructive">
-              <AlertTriangle size={18} /> تنبيهات حرجة ({alerts.length})
+              <AlertTriangle size={18} /> تنبيهات حرجة ({summary.alertCount})
             </h3>
             <Button variant="ghost" size="sm" onClick={() => navigate("/insurance/alerts")} className="gap-1 text-xs">
               عرض الكل <ArrowLeft size={14} />

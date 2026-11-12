@@ -17,6 +17,10 @@ vi.mock("@/lib/vehicleEntryService", () => ({ confirmVehicleEntryWorkOrderLink: 
 vi.mock("@/lib/documentExtraction/persistence", () => ({ getPrivateDocumentUrl: vi.fn() }));
 vi.mock("@/lib/cloud/createCloudStore", () => ({ getCurrentTenantId: vi.fn() }));
 vi.mock("@/components/vehicle-entry/VehicleEntryInspectionAction", () => ({ VehicleEntryInspectionAction: () => null }));
+// Custody/source actions have their own runtime tests. This test isolates the
+// supervisor stage controls and intentionally rejects history prefetches.
+vi.mock('@/components/vehicle-entry/VehicleVisitLocationPanel',()=>({VehicleVisitLocationPanel:()=>null}));
+vi.mock('@/components/vehicle-entry/VehicleVisitInlineActions',()=>({VehicleVisitInlineActions:()=>null}));
 
 const visit = () => ({ entry: { id: "one", entry_number: "ENT-1", vehicle_id: "car", work_order_id: "order",
   claim: { id: "claim", claim_number: "CLAIM-1", status: "pending", vehicle_id: "car" },

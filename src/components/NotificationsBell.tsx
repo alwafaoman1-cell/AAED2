@@ -10,6 +10,7 @@ import { useOverdueInsuranceAlerts } from "@/hooks/useOverdueInsuranceAlerts";
 import { notificationSound } from "@/lib/notificationSound";
 import { adminNotificationsStore, type AdminNotification } from "@/lib/adminNotificationsStore";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 const ADMIN_TYPE_ICON: Record<string, { I: any; c: string }> = {
   info: { I: Info, c: "text-sky-500" },
@@ -33,6 +34,7 @@ function timeAgo(iso: string): string {
 
 export default function NotificationsBell() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [tick, setTick] = useState(0);
   const [activeTab, setActiveTab] = useState("activity");
@@ -67,8 +69,12 @@ export default function NotificationsBell() {
   void tick;
   const unread = items.filter((n) => !n.read).length;
   const adminUnread = adminItems.filter((n) => !n.read).length;
-  const overdueCount = overdue.length;
-  const totalCount = unread + overdueCount + adminUnread;
+  const overdueKnown = overdue.isSuccess && Array.isArray(overdue.data) && !overdue.isFetching && overdue.fetchStatus !== "paused";
+  const overdueCount = overdueKnown ? overdue.data.length : null;
+  const overdueState = overdue.isError ? "loadError" : overdue.isFetching ? "loading" : overdueKnown ? null : "unknown";
+  const overdueStateLabel = overdueState ? t(`overdueInsuranceAlerts.${overdueState}`) : undefined;
+  const hasOverdueRows = !!overdue.data?.length;
+  const totalCount = overdueCount === null ? null : unread + overdueCount + adminUnread;
 
   const handleClick = (n: NotificationItem) => {
     notificationsStore.markRead(n.id);
@@ -81,14 +87,14 @@ export default function NotificationsBell() {
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="relative" aria-label="الإشعارات">
           <Bell size={18} />
-          {totalCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
-              {totalCount > 99 ? "99+" : totalCount}
+          {(totalCount === null || totalCount > 0) && (
+            <span title={overdueStateLabel} aria-label={overdueStateLabel} className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
+              {totalCount === null ? (overdue.isError ? "!" : "…") : totalCount > 99 ? "99+" : totalCount}
             </span>
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-96 p-0" dir="rtl">
+      <PopoverContent align="end" className="w-96 p-0" dir={i18n.dir()}>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="p-3 border-b border-border bg-secondary/30 flex items-center justify-between">
             <div className="font-semibold text-sm flex items-center gap-2">
@@ -127,8 +133,8 @@ export default function NotificationsBell() {
               </TabsTrigger>
               <TabsTrigger value="alerts" className="text-xs px-2 py-1 relative">
                 تنبيهات
-                {overdueCount > 0 && (
-                  <span className="absolute -top-1 -left-1 w-2 h-2 rounded-full bg-destructive" />
+                {(hasOverdueRows || overdueState !== null) && (
+                  <span title={overdueStateLabel} className="absolute -top-1 -left-1 w-2 h-2 rounded-full bg-destructive" />
                 )}
               </TabsTrigger>
             </TabsList>
@@ -237,12 +243,23 @@ export default function NotificationsBell() {
 
           <TabsContent value="alerts" className="mt-0">
             <div className="max-h-[380px] overflow-y-auto">
-              {overdueCount === 0 ? (
+              {overdueStateLabel && (
+                <div role={overdue.isError ? "alert" : "status"} className="p-6 text-center text-sm text-muted-foreground">
+                  <p>{overdueStateLabel}</p>
+                  {overdue.isError && (
+                    <Button variant="ghost" size="sm" className="mt-2" disabled={overdue.isFetching} onClick={() => { void overdue.refetch(); }}>
+                      {t("overdueInsuranceAlerts.retry")}
+                    </Button>
+                  )}
+                </div>
+              )}
+              {overdueKnown && overdueCount === 0 && (
                 <div className="p-8 text-center text-sm text-muted-foreground">
                   <AlertTriangle size={20} className="mx-auto mb-2 text-muted-foreground/50" />
-                  لا توجد تنبيهات حالياً
+                  {t("overdueInsuranceAlerts.empty")}
                 </div>
-              ) : overdue.map((o, i) => (
+              )}
+              {overdue.data?.map((o, i) => (
                 <button
                   key={i}
                   onClick={() => o.companyId && navigate(`/insurance/companies/${o.companyId}`)}
@@ -251,23 +268,23 @@ export default function NotificationsBell() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-sm">{o.name}</span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/15 text-destructive font-bold">
-                      {o.oldestDays} يوم
+                      {t("overdueInsuranceAlerts.days", { count: o.oldestDays })}
                     </span>
                   </div>
                   <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
-                    <span>{o.claimsCount} مطالبة</span>
-                    <span className="font-bold text-warning">{o.remaining.toLocaleString()} ر.ع</span>
+                    <span>{t("overdueInsuranceAlerts.claimsCount", { count: o.claimsCount })}</span>
+                    <span className="font-bold text-warning">{o.remaining.toLocaleString()} {t("overdueInsuranceAlerts.currency")}</span>
                   </div>
                   <div className="text-[10px] text-muted-foreground mt-0.5">
-                    مدة السداد المتفق عليها: {o.termsDays} يوم
+                    {t("overdueInsuranceAlerts.terms", { count: o.termsDays })}
                   </div>
                 </button>
               ))}
             </div>
-            {overdueCount > 0 && (
+            {hasOverdueRows && (
               <div className="p-2 border-t border-border bg-secondary/20">
                 <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => navigate("/insurance/payments")}>
-                  فتح لوحة المدفوعات الكاملة ←
+                  {t("overdueInsuranceAlerts.openPayments")}
                 </Button>
               </div>
             )}

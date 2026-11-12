@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Copy, Link2, MessageCircle, Loader2, ShieldCheck, PenLine, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { getWorkOrderById, type WorkItem } from "@/lib/workOrdersStore";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
-import { buildCustomerPortalUrl, buildWorkOrderSignatureUrl, ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
+import { buildCustomerPortalUrl, buildWorkOrderSignatureUrl } from "@/lib/customerPortalTokens";
+import { useWorkOrderPortalToken } from "@/hooks/useWorkOrderPortalToken";
+import { useTranslation } from "react-i18next";
+import "@/lib/i18n/performanceReadSummaries";
 
 interface Props {
   jobOrderId: string;
@@ -16,29 +18,9 @@ interface Props {
 }
 
 export default function CustomerPortalLink({ jobOrderId, customerPhone, orderNumber, localOrderId, customerName }: Props) {
-  const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [signed, setSigned] = useState<boolean>(false);
-
-  const loadToken = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await ensureCustomerPortalToken(jobOrderId);
-      if (data?.token) {
-        setToken(data.token);
-        setSigned(!!data.signed_at);
-      } else {
-        setToken(null);
-        setSigned(false);
-      }
-    } catch (error) {
-      setToken(null);
-      setSigned(false);
-      toast.error(error instanceof Error ? error.message : "تعذر تجهيز رابط العميل");
-    }
-    setLoading(false);
-  }, [jobOrderId]);
-  useEffect(() => { loadToken(); }, [loadToken]);
+  const portal=useWorkOrderPortalToken(jobOrderId);const {t}=useTranslation();
+  const token=portal.data?.token||null;const signed=!!portal.data?.signed_at;const loading=portal.isPending||portal.creating;
+  const loadToken=async()=>{try{await portal.ensure();}catch(error){toast.error(error instanceof Error?error.message:t("performanceRead.linkFailed"));}};
 
   const trackUrl = buildCustomerPortalUrl(token);
   const signUrl = buildWorkOrderSignatureUrl(token);
@@ -94,7 +76,7 @@ export default function CustomerPortalLink({ jobOrderId, customerPhone, orderNum
       {loading ? (
         <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
       ) : !token ? (
-        <p className="text-xs text-muted-foreground">سيتم إنشاء الرابط تلقائياً بعد مزامنة أمر العمل مع السحابة.</p>
+        <div className="space-y-2">{portal.isError&&<p role="alert" className="text-xs text-destructive">{t("performanceRead.linkFailed")}</p>}<Button size="sm" variant="outline" disabled={portal.creating} onClick={()=>void loadToken()}>{t("performanceRead.prepareLink")}</Button></div>
       ) : (
         <>
           {/* SIGN section — primary CTA */}

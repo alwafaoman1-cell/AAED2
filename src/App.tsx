@@ -97,6 +97,7 @@ const InsurancePayments = lazy(() => import("./pages/insurance/InsurancePayments
 const InvestorsReport = lazy(() => import("./pages/insurance/InvestorsReport"));
 const InsuranceWorkOrders = lazy(() => import("./pages/insurance/InsuranceWorkOrders"));
 const InsuranceAccounting = lazy(() => import("./pages/insurance/InsuranceAccounting"));
+const InsuranceSettlementReport = lazy(() => import("./pages/insurance/InsuranceSettlementReport"));
 const InsuranceEstimates = lazy(() => import("./pages/insurance/InsuranceEstimates"));
 const InsuranceIndependentEstimates = lazy(() => import("./pages/insurance/InsuranceIndependentEstimates"));
 const InsuranceDocumentsArchive = lazy(() => import("./pages/insurance/InsuranceDocumentsArchive"));
@@ -121,6 +122,7 @@ const EstimateDetail = lazy(() => import("./pages/estimates/EstimateDetail"));
 const VehicleEntryList = lazy(() => import("./pages/vehicle-entry/VehicleEntryList"));
 const VehicleEntryForm = lazy(() => import("./pages/vehicle-entry/VehicleEntryForm"));
 const VehicleEntryDetail = lazy(() => import("./pages/vehicle-entry/VehicleEntryDetail"));
+const VehicleIntakeReceiptVerifyPage = lazy(() => import("./pages/vehicle-entry/VehicleIntakeReceiptVerifyPage"));
 const VehicleInspectionReleasePage = lazy(() => import("./pages/vehicle-entry/VehicleInspectionReleasePage"));
 const VehicleTechnicalDeclarationPage = lazy(() => import("./pages/vehicle-entry/VehicleTechnicalDeclarationPage"));
 const ExecutiveDashboard = lazy(() => import("./pages/dashboard/ExecutiveDashboard"));
@@ -209,6 +211,7 @@ import UnsavedWorkGuard from "@/components/UnsavedWorkGuard";
 import AccountingSetupRouteGuard from "@/components/accounting/AccountingSetupRouteGuard";
 import AccountingReportsRouteGuard from "@/components/accounting/AccountingReportsRouteGuard";
 import { setExpensesQueryClient } from "@/lib/expensesStore";
+import { setExpenseCategoryQueryClient } from "@/lib/expenses/expenseCategoryReader";
 
 // كاش حيّ — يعيد الجلب فور الدخول للصفحة لمنع عرض بيانات قديمة بين التنقّلات.
 // المستخدم كان يضطر لـ Ctrl+Shift+R لأن staleTime كان 30s.
@@ -236,6 +239,7 @@ const queryClient = new QueryClient({
 });
 setTemplateQueryClient(queryClient);
 setExpensesQueryClient(queryClient);
+setExpenseCategoryQueryClient(queryClient);
 
 // Do not let browser focus/visibility events trigger implicit app refreshes.
 // Explicit saves and scoped realtime events remain the only refresh paths.
@@ -341,6 +345,7 @@ const App = () => (
               <Route path="/estimates/:id/edit" element={<EstimateForm />} />
               <Route path="/vehicle-entry" element={<VehicleEntryList />} />
               <Route path="/vehicle-entry/new" element={<VehicleEntryForm />} />
+              <Route path="/vehicle-entry/receipt/verify" element={<VehicleIntakeReceiptVerifyPage />} />
               <Route path="/vehicle-entry/:id" element={<VehicleEntryDetail />} />
               <Route path="/vehicle-entry/:id/edit" element={<VehicleEntryForm />} />
               <Route path="/vehicle-entry/:id/inspection-release" element={<ProtectedRoute roles={["admin","manager","insurance","supervisor"]}><VehicleInspectionReleasePage /></ProtectedRoute>} />
@@ -449,6 +454,7 @@ const App = () => (
                 <Route path="/insurance/companies" element={<InsuranceCompanies />} />
                 <Route path="/insurance/work-orders" element={<InsuranceWorkOrders />} />
                 <Route path="/insurance/accounting" element={<InsuranceAccounting />} />
+                <Route path="/insurance/settlement-discounts" element={<ProtectedRoute roles={["admin", "manager", "insurance", "accountant"]}><InsuranceSettlementReport /></ProtectedRoute>} />
                 <Route path="/insurance/estimates" element={<InsuranceEstimates />} />
                 <Route path="/insurance/independent-estimates" element={<InsuranceIndependentEstimates />} />
                 <Route path="/insurance/documents" element={<InsuranceDocumentsArchive />} />

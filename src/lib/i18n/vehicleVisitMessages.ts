@@ -1,5 +1,6 @@
 import i18n from "@/i18n";
 const ar = {
+  temporary_release_signature:'رابط توقيع المعاينة والخروج المؤقت',prepareSignatureLink:'تجهيز رابط توقيع المحضر',
   title: "رسائل عميل الزيارة", loading: "جارٍ التحقق من الزيارة والعميل والموقع الحالي…", retry: "تحديث والتحقق مجددًا",
   approval: "موافقة التأمين", entry_receipt: "رابط استلام وتوقيع الدخول", temporary_release: "محضر الخروج المؤقت المكتمل",
   in_workshop: "داخل الورشة", with_customer: "مع العميل", pending: "المطالبة ليست معتمدة بعد. لن تُجهز رسالة موافقة أو تُرسل تلقائيًا.",
@@ -14,6 +15,7 @@ const ar = {
   approve: "اعتماد المطالبة", amount: "المبلغ الموافق عليه (OMR)", approveConfirm: "أؤكد مبلغ وموافقة التأمين لهذه المطالبة", approveRole: "اعتماد المطالبة متاح للمدير أو المسؤول فقط.",
   approveFailed: "لم يتأكد اعتماد المطالبة. أعد تحميلها قبل المحاولة مجددًا.", approved: "تم التحقق من اعتماد المطالبة. راجع الرسالة قبل إرسالها.", close: "إغلاق",
   errors: {
+    RELEASE_SIGNATURE_REQUIRED:'يلزم محضر محفوظ مكتمل البيانات، ومركبة داخل الورشة. إنشاء الرابط ليس إثبات خروج.',
     FORBIDDEN: "لا توجد صلاحية نشطة لإدارة رسائل هذه الورشة.", STALE: "تغيرت الزيارة أو العميل أو الموقع. حدّث وراجع مسودة جديدة؛ لم تُرسل رسالة.",
     IDENTITY: "يلزم معرّف دخول أو مطالبة صحيح.", CONFLICT: "روابط أو موقع الزيارة بحاجة للمراجعة. لن نربط أو نصحح السجلات تلقائيًا.",
     CUSTOMER_UNAVAILABLE: "عميل الزيارة المحدد لم يعد متاحًا. لن نستخدم مالك المركبة التاريخي بدلًا منه.", PHONE: "يلزم هاتف صالح لعميل الزيارة.",
@@ -23,6 +25,7 @@ const ar = {
   },
   statuses: { queued: "في الانتظار", sent: "مقبولة من المزود", delivered: "تم التوصيل", read: "مقروءة", failed: "فشل", dry_run: "تجربة فقط", unknown: "حالة غير مؤكدة" },
   bodies: {
+    temporary_release_signature:'مرحبًا {{customer}}، يرجى مراجعة وتوقيع محضر المعاينة والخروج المؤقت {{release}} للدخول {{entry}}. المركبة: {{vehicle}} · اللوحة: {{plate}}. لا يسجل إنشاء الرابط خروج المركبة، وهذا ليس تسليم إصلاح نهائيًا.\n{{link}}',
     approval_with_customer: "مرحبًا {{customer}}، تمت موافقة التأمين على المطالبة {{claim}}. المركبة: {{vehicle}} · اللوحة: {{plate}} · أمر العمل: {{order}}. مركبتكم مسجلة حاليًا معكم. يرجى التواصل معنا لتحديد موعد إحضار المركبة إلى الورشة. لا تعني الموافقة أن الإصلاح بدأ.",
     approval_in_workshop: "مرحبًا {{customer}}، تمت موافقة التأمين على المطالبة {{claim}} لمركبتكم الموجودة داخل الورشة. المركبة: {{vehicle}} · اللوحة: {{plate}} · أمر العمل: {{order}}. سننسق أعمال الإصلاح المعتمدة ونوافيكم بالتحديثات. لا تعني هذه الرسالة أن الإصلاح اكتمل.",
     entry_receipt: "مرحبًا {{customer}}، هذا رابط مراجعة وتوقيع مستند استلام المركبة للدخول {{entry}}. أمر العمل: {{order}}. المطالبة: {{claim}}. هذا ليس محضر خروج أو تسليم نهائي.\n{{link}}",
@@ -30,6 +33,7 @@ const ar = {
   },
 };
 const en = {
+  temporary_release_signature:'Inspection temporary-release signature link',prepareSignatureLink:'Prepare report signature link',
   title: "Visit customer messages", loading: "Verifying the visit, customer and current location…", retry: "Refresh and verify",
   approval: "Insurance approval", entry_receipt: "Entry receipt / signature link", temporary_release: "Completed temporary-release report",
   in_workshop: "Inside workshop", with_customer: "With customer", pending: "This claim is not approved. No approval message will be prepared or sent automatically.",
@@ -44,6 +48,7 @@ const en = {
   approve: "Approve claim", amount: "Approved amount (OMR)", approveConfirm: "I confirm this claim's insurance approval and amount", approveRole: "Only an admin or manager can approve the claim.",
   approveFailed: "Claim approval was not confirmed. Reload before retrying.", approved: "Claim approval verified. Review the message before sending.", close: "Close",
   errors: {
+    RELEASE_SIGNATURE_REQUIRED:'A complete saved report and actual workshop custody are required. Creating a link is not evidence of release.',
     FORBIDDEN: "An active, authorized workshop profile is required.", STALE: "The visit, customer or location changed. Refresh and review a new draft; no message was sent.",
     IDENTITY: "A valid entry or claim UUID is required.", CONFLICT: "Visit links or custody require review. No records will be relinked or repaired automatically.",
     CUSTOMER_UNAVAILABLE: "The selected visit customer is unavailable. The vehicle's historical owner will not be substituted.", PHONE: "The visit customer needs a valid phone number.",
@@ -53,6 +58,7 @@ const en = {
   },
   statuses: { queued: "Queued", sent: "Provider accepted", delivered: "Delivered", read: "Read", failed: "Failed", dry_run: "Dry run only", unknown: "Unconfirmed status" },
   bodies: {
+    temporary_release_signature:'Hello {{customer}}, please review and sign inspection and temporary-release report {{release}} for entry {{entry}}. Vehicle: {{vehicle}} · Plate: {{plate}}. Creating this link does not record a vehicle exit, and this is not final repair handover.\n{{link}}',
     approval_with_customer: "Hello {{customer}}, insurance approved claim {{claim}}. Vehicle: {{vehicle}} · Plate: {{plate}} · Work order: {{order}}. Your vehicle is currently recorded with you. Please contact us to schedule its arrival at the workshop. Approval does not mean repairs have started.",
     approval_in_workshop: "Hello {{customer}}, insurance approved claim {{claim}} for your vehicle currently inside the workshop. Vehicle: {{vehicle}} · Plate: {{plate}} · Work order: {{order}}. We will coordinate the approved repairs and keep you updated. This message does not mean repairs are complete.",
     entry_receipt: "Hello {{customer}}, please review and sign the vehicle entry receipt for entry {{entry}}. Work order: {{order}}. Claim: {{claim}}. This is not a temporary-release or final-delivery receipt.\n{{link}}",

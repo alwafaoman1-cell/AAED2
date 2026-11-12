@@ -313,7 +313,7 @@ export function useUpdateClaimStatus(options: { notify?: boolean } = {}) {
       status: "pending" | "approved" | "rejected" | "paid" | "cancelled";
       approved_amount?: number;
       rejection_reason?: string;
-      expected_status?: "pending";
+      expected_status?: "pending" | "approved" | "rejected" | "paid" | "cancelled";
     }) => {
       const { data: current, error: currentError } = await supabase
         .from("insurance_claims" as any)
