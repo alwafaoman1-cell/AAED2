@@ -1,3 +1,4 @@
+import { VehicleReviewReturnAction } from "@/components/vehicle-entry/VehicleReviewReturnAction";
 import { useCallback,useEffect,useRef,useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { VehicleEntryInspectionAction } from "@/components/vehicle-entry/VehicleEntryInspectionAction";
@@ -300,6 +301,8 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
           <section><h3 className="text-sm font-semibold">{t("vehicleVisit.insuranceInvoices")}</h3><div className="mt-2 space-y-1">{visit.insuranceInvoices.map((invoice: any) => <Link key={invoice.id} to={claim?.id ? `/insurance/${claim.id}` : "#"} className="block rounded border border-border p-2 text-sm text-primary hover:bg-muted/30">{invoice.invoice_number || invoice.id} · {invoice.total ?? "—"}</Link>)}</div></section>
         </div>
       </details>}
+    {entry.vehicle_condition?.review_return && <section className="rounded-lg border p-3 text-sm space-y-2"><h3 className="font-semibold">{i18n.language.startsWith("en") ? "Review visit after delivery" : "زيارة مراجعة بعد التسليم"}</h3><Link className="text-primary underline" to={`/vehicle-entry/${entry.vehicle_condition.review_return.source_entry_id}`}>{entry.vehicle_condition.review_return.source_entry_number} / {entry.vehicle_condition.review_return.source_handover_number}</Link><p>{entry.vehicle_condition.review_return.reason}</p><p>{entry.vehicle_condition.review_return.arrival_condition}</p><p className="whitespace-pre-wrap">{entry.vehicle_condition.review_return.notes}</p></section>}
+    {current === "delivered" && <VehicleReviewReturnAction entryId={entryId} />}
     <VehicleVisitLocationPanel ref={locationActions} visit={visit} onChanged={refreshVisit}/>
     {!supervisor && <VehicleVisitInlineActions ref={inlineActions} entry={entry} onChanged={refreshVisit} hideDeliveryAction={Boolean(canOpenHandover)}/>}
     <div className="flex flex-wrap gap-2">

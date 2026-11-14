@@ -318,6 +318,7 @@ export default function VehicleEntrySignPage() {
   const condition = data.vehicle_condition || {};
   const contents = data.vehicle_contents || {};
   const conditionText = [
+    (condition.review_return as { reason?: string } | undefined)?.reason,
     condition.condition_description,
     condition.visible_damage,
     condition.previous_damage,

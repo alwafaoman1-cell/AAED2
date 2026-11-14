@@ -1,3 +1,4 @@
+import { VehicleReviewReturnAction } from "./VehicleReviewReturnAction";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ClipboardCheck, FileText, LogIn, MapPin, MoreHorizontal } from "lucide-react";
@@ -28,6 +29,7 @@ export function VehicleCenterRowActions({ row, tab, details, onOpen }: {
       aria-label={`${label} · ${number}`} onClick={() => onOpen(row, action.request)}>
       {action.request?.intent === "arrival" && <LogIn className="h-4 w-4 shrink-0" aria-hidden="true" />}{label}
     </Button>
+    {row._visitStage === "delivered" && !row._claimOnly && <VehicleReviewReturnAction entryId={row.id} />}
     <DropdownMenu dir={i18n.dir()}><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="h-10 w-10 shrink-0" aria-label={`${t("vehicleCenterMobile.moreActions")} · ${number}`}><MoreHorizontal className="h-4 w-4" aria-hidden="true" /></Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="print:hidden">
         <DropdownMenuItem onSelect={() => onOpen(row)} aria-label={`${t("vehicleVisit.manageLocationAndStage")} · ${number}`}><MapPin className="me-2 h-4 w-4" aria-hidden="true" />{t("vehicleVisit.manageLocationAndStage")}</DropdownMenuItem>

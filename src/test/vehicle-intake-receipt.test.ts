@@ -44,3 +44,16 @@ describe("vehicle intake receipt evidence and verification", () => {
     expect(html).toContain('dir="rtl"'); expect(html).toContain("وصل استلام مركبة"); expect(html).toContain("اسم الشركة");
   });
 });
+
+it("keeps delivery confirmation separate and hides it until the receipt is used", async () => {
+ const changed = structuredClone(document);
+ changed.delivery_confirmation = { handover_id: "h", handover_number: "VH-1", recipient_name: "New recipient", delivered_at: "2026-11-14T10:00:00Z", confirmed_at: "2026-11-14T10:01:00Z", delivered_by_name: "Staff", signature_data_url: "data:image/png;base64,DELIVERYSIGNATURE" };
+ expect(await buildIntakeReceiptHtml(changed, "en")).not.toContain("DELIVERYSIGNATURE");
+ changed.receipt.status = "used";
+ changed.entry.vehicle_condition = { review_return: { source_entry_number: "ENT-OLD", source_handover_number: "VH-OLD", reason: "<script>reason</script>", arrival_condition: "Scratch", notes: "Inspect brakes" } };
+ const html = await buildIntakeReceiptHtml(changed, "en");
+ expect(html).toContain("ORIGINALSIGNATURE"); expect(html).toContain("DELIVERYSIGNATURE");
+ expect(html).toContain("ENT-OLD / VH-OLD"); expect(html).toContain("Inspect brakes");
+ expect(html).not.toContain("<script>"); expect(html).toContain("&lt;script&gt;");
+ expect(new DOMParser().parseFromString(html,"text/html").body.textContent).not.toMatch(/[\u0600-\u06ff]/);
+});
