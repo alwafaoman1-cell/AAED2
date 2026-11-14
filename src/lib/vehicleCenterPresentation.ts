@@ -1,3 +1,4 @@
+import { isVehicleReviewVisit } from "@/lib/vehicleReviewVisit";
 import { getVehicleVisitNextBlocker, type VehicleCenterTab, type VisitStage } from "@/lib/vehicleVisitLifecycle";
 
 export const CENTER_LOCATION_TABS: VehicleCenterTab[] = ["in_workshop", "with_customer", "awaiting_arrival"];
@@ -18,6 +19,7 @@ export function getVehicleCenterPrimaryAction(row: any, tab: VehicleCenterTab, h
   if (["delivered", "cancelled"].includes(tab) || row._claimOnly) return { label: "viewRecord" };
   if (tab !== "in_workshop") return row._canRegisterEntry && hasRole("admin", "manager", "insurance", "supervisor")
     ? { label: "registerArrival", request: { intent: "arrival", expectedStage: stage } } : { label: "viewRecord" };
+  if (isVehicleReviewVisit(row)) return { label: "reviewRepair" };
   const next = nextStage[stage];
   if (!next) return { label: "viewRecord" };
   const blocker = getVehicleVisitNextBlocker(next, row, hasRole, Boolean(row._hasFinalHandover));

@@ -70,7 +70,7 @@ describe('visit editor identity and wizard',()=>{
     act(()=>result.current.goNext());expect(result.current.step).toBe(3);act(()=>result.current.setTechnicalForm({...result.current.technicalForm,cranking:'yes'}));act(()=>result.current.goNext());expect(result.current.step).toBe(4);expect(result.current.form.technical_declaration?.form.cranking).toBe('yes');
   });
   it('prevents double-clicks from issuing two saves and never reports a rejected save as persisted',async()=>{
-    const {result}=renderHook(()=>useVehicleEntryEditor());act(()=>result.current.selectCustomer({id:'visitor',name:'Visitor',phone:'99112233'}));act(()=>result.current.patchVehicle({plate_number:'24680',make:'Dodge'}));
+    const {result}=renderHook(()=>useVehicleEntryEditor());act(()=>result.current.patchCondition({running_status:'running'}));act(()=>result.current.selectCustomer({id:'visitor',name:'Visitor',phone:'99112233'}));act(()=>result.current.patchVehicle({plate_number:'24680',make:'Dodge'}));
     let reject:(reason:Error)=>void=()=>{};mock.save.mockImplementation(()=>new Promise((_,fail)=>{reject=fail;}));
     let first:Promise<void>;let second:Promise<void>;act(()=>{first=result.current.handleSave('Issued');second=result.current.handleSave('Issued');});
     expect(mock.save).toHaveBeenCalledOnce();await act(async()=>{reject(new Error('denied'));await Promise.all([first,second]);});await waitFor(()=>expect(result.current.saving).toBe(false));expect(result.current.form.id).toBeUndefined();

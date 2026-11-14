@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
-const mocks = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn(), tenant: vi.fn(), linked: vi.fn(), visit: vi.fn(), link: vi.fn(), viewLink: vi.fn(),releaseLink:vi.fn(),release:vi.fn(), send: vi.fn(), bundles: {} as Record<string, any> }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn(), tenant: vi.fn(), linked: vi.fn(), visit: vi.fn(), link: vi.fn(), viewLink: vi.fn(),releaseLink:vi.fn(),release:vi.fn(), portal:vi.fn(),portalRead:vi.fn(), send: vi.fn(), bundles: {} as Record<string, any> }));
 vi.mock("@/i18n", () => ({ default: {
   addResourceBundle: (language: string, _namespace: string, resources: object) => { mocks.bundles[language] = { ...mocks.bundles[language], ...resources }; },
   t: (key: string, params: Record<string, string> = {}) => {
@@ -14,6 +14,8 @@ vi.mock("@/lib/vehicleVisitLifecycle", () => ({ getLinkedVehicleVisit: mocks.lin
 vi.mock("@/lib/vehicleEntryService", () => ({ createVehicleEntryCustomerSignatureLink: mocks.link,
   getVehicleEntryPresence: (entry: any) => entry.vehicle_location === "داخل الورشة" ? "in_workshop" : entry.vehicle_location === "مع العميل" ? "with_customer" : "needs_review" }));
 vi.mock("@/lib/vehicleInspectionRelease", () => ({ createInspectionReleaseViewLink: mocks.viewLink,createInspectionReleaseLink:mocks.releaseLink,getInspectionReleaseById:mocks.release,inspectionReleaseMissingFields:(form:any)=>form.complete===false?['pending_action']:[] }));
+vi.mock("@/lib/unifiedVehiclePortal", () => ({ ensureVehicleCustomerPortal:mocks.portal, getVehicleCustomerPortalContext:mocks.portalRead,
+  buildUnifiedVehiclePortalUrl:(token:string)=>`https://example.invalid/customer/vehicle/${token}` }));
 vi.mock("@/lib/systemPreferences", () => ({ readSystemPreferences: async () => ({ defaultCountryCode: "968" }) }));
 vi.mock("@/lib/messaging/messagingService", () => ({ sendUnifiedMessage: mocks.send }));
 import { buildVehicleVisitMessageDraft, loadVehicleVisitMessageContext, prepareVehicleVisitMessage, sendVehicleVisitMessage,
@@ -46,6 +48,8 @@ beforeEach(() => {
   mocks.link.mockResolvedValue({ url: "https://example.invalid/vehicle-entry/sign/test-token" });
   mocks.viewLink.mockResolvedValue({ url: "https://example.invalid/vehicle-entry/inspection-release/sign/view-token", expires_at: "2026-11-12" });
   mocks.send.mockResolvedValue({ ok: true, status: "sent", logId: id(9) });
+  mocks.portal.mockResolvedValue({ token: "canonical-token", enabled:true, expires_at:null });
+  mocks.portalRead.mockResolvedValue({ token: "canonical-token", enabled:true, expires_at:null });
 });
 async function context() { return loadVehicleVisitMessageContext({ entryId, claimId }, tenant); }
 
@@ -112,7 +116,8 @@ describe("vehicle visit messages: identity, review and manual delivery", () => {
     const outside = { ...inside, presence: "with_customer" as const };
     expect(buildVehicleVisitMessageDraft(inside, "approval", "en").body).toContain("inside the workshop");
     expect(buildVehicleVisitMessageDraft(inside, "approval", "en").body).toContain("Toyota Corolla 2026");
-    expect(buildVehicleVisitMessageDraft(inside, "approval", "en").body).toContain("QA 1234");
+    expect(buildVehicleVisitMessageDraft(inside, "approval", "en").body).not.toContain("QA 1234");
+    expect(buildVehicleVisitMessageDraft(inside, "approval", "en").body).not.toMatch(/TEST-CLAIM|TEST-ENTRY/);
     expect(buildVehicleVisitMessageDraft(outside, "approval", "en").body).toContain("schedule its arrival");
     expect(buildVehicleVisitMessageDraft(outside, "approval", "en").body).not.toMatch(/[\u0600-\u06ff]/);
     expect(buildVehicleVisitMessageDraft(inside, "approval", "ar").body).toContain("داخل الورشة");
@@ -144,9 +149,10 @@ describe("vehicle visit messages: identity, review and manual delivery", () => {
     expect(buildVehicleVisitMessageDraft(current, "approval", "en").idempotencyKey).toBe(buildVehicleVisitMessageDraft(current, "approval", "ar").idempotencyKey);
     expect(vehicleVisitMessageKey({ ...current, approvalEvent: "next-approval" }, "approval")).not.toBe(vehicleVisitMessageKey(current, "approval"));
   });
-  it("creates a receipt signature link only on an explicit preparation call", async () => {
+  it("prepares the same protected receipt portal only on an explicit call", async () => {
     const draft = await prepareVehicleVisitMessage({ entryId, claimId }, "entry_receipt", "en", tenant);
-    expect(mocks.link).toHaveBeenCalledTimes(1); expect(mocks.link).toHaveBeenCalledWith(entryId);
+    expect(mocks.portal).toHaveBeenCalledExactlyOnceWith(entryId); expect(mocks.link).not.toHaveBeenCalled();
+    expect(draft.url).toBe("https://example.invalid/customer/vehicle/canonical-token");
     expect(draft.body).toContain("not a temporary-release or final-delivery receipt");
     expect(mocks.send).not.toHaveBeenCalled();
   });
@@ -161,14 +167,14 @@ describe("vehicle visit messages: identity, review and manual delivery", () => {
     expect(() => buildVehicleVisitMessageDraft({ ...current, releaseFinalized: true }, "temporary_release", "en")).toThrow("RELEASE_REQUIRED");
     expect(mocks.link).not.toHaveBeenCalled();
   });
-  it("uses only the parent's consumed read capability for a signed temporary release", async () => {
+  it("uses the unified portal for a signed temporary release without creating another bearer link", async () => {
     entry.vehicle_location = "مع العميل"; claim.vehicle_presence_status = "with_customer";
     mocks.visit.mockImplementation(async () => ({ entry, reviewReason: null, hasFinalHandover: false, releases: [
       { id: id(10), release_number: "TEMP-TEST", status: "signed", released_at: "2026-11-05", returned_at: null },
     ] }));
     const draft = await prepareVehicleVisitMessage({ entryId, claimId }, "temporary_release", "en", tenant);
-    expect(mocks.viewLink).toHaveBeenCalledWith(id(10)); expect(mocks.link).not.toHaveBeenCalled();
-    expect(mocks.send).not.toHaveBeenCalled(); expect(draft.body).toContain("read-only"); expect(draft.body).toContain("TEMP-TEST");
+    expect(mocks.portal).toHaveBeenCalledWith(entryId); expect(mocks.viewLink).not.toHaveBeenCalled(); expect(mocks.link).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled(); expect(draft.body).toContain("read-only"); expect(draft.body).not.toContain("TEMP-TEST");
     expect(draft.body).not.toMatch(/[\u0600-\u06ff]/);
     expect(buildVehicleVisitMessageDraft(draft.context, "temporary_release", "ar", draft.url).body).toContain("للقراءة فقط");
   });
@@ -176,7 +182,7 @@ describe("vehicle visit messages: identity, review and manual delivery", () => {
     entry.vehicle_location = "مع العميل"; claim.vehicle_presence_status = "with_customer";
     const release = { id: id(10), release_number: "TEMP-TEST", status: "signed", released_at: "2026-11-05", returned_at: null as string | null };
     mocks.visit.mockImplementation(async () => ({ entry, reviewReason: null, hasFinalHandover: false, releases: [release] }));
-    mocks.viewLink.mockImplementationOnce(async () => { entry.vehicle_location = "داخل الورشة"; claim.vehicle_presence_status = "in_workshop"; release.returned_at = "2026-11-05"; return { url: "https://example.invalid/view" }; });
+    mocks.portal.mockImplementationOnce(async () => { entry.vehicle_location = "داخل الورشة"; claim.vehicle_presence_status = "in_workshop"; release.returned_at = "2026-11-05"; return { token: "canonical-token", enabled:true, expires_at:null }; });
     await expect(prepareVehicleVisitMessage({ entryId, claimId }, "temporary_release", "en", tenant)).rejects.toMatchObject({ code: "VISIT_MESSAGE_STALE" });
     expect(mocks.send).not.toHaveBeenCalled();
   });
@@ -198,6 +204,12 @@ describe("vehicle visit messages: identity, review and manual delivery", () => {
     await expect(sendVehicleVisitMessage(draft, draft.body)).rejects.toMatchObject({ code: "VISIT_MESSAGE_STALE" });
     customer.phone = "+96897000001";
     await expect(sendVehicleVisitMessage(draft, draft.body, () => false)).rejects.toMatchObject({ code: "VISIT_MESSAGE_STALE" });
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it("blocks a portal paused after the invitation was reviewed", async () => {
+    const draft = await prepareVehicleVisitMessage({entryId}, "entry_receipt", "en", tenant);
+    mocks.portalRead.mockResolvedValue({token:"canonical-token", enabled:false, expires_at:null});
+    await expect(sendVehicleVisitMessage(draft,draft.body)).rejects.toMatchObject({code:"VISIT_MESSAGE_STALE"});
     expect(mocks.send).not.toHaveBeenCalled();
   });
   it("sends only the reviewed draft via unified provider with canonical refs and stable key", async () => {

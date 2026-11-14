@@ -1,3 +1,4 @@
+import { vehicleRunningStatusLabel } from "@/lib/vehicleRunningStatus";
 import { useTranslation } from "react-i18next";
 import { ImagePlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,10 @@ export function VehicleEntryReviewStep({ editor }: { editor: VehicleEntryEditor 
   }
 
   return <>
+    <Section title={t("vehicleIntakeWizard.conditionTitle")}>
+      <p className="font-semibold">{vehicleRunningStatusLabel(form.condition.running_status, i18n.language)}</p>
+      <p>{t("vehicleIntakeWizard.odometer")}: <bdi>{form.vehicle.mileage || "—"}</bdi></p>
+    </Section>
     <Section title={t("vehicleIntakeWizard.photos")} desc={t("vehicleIntakeWizard.photoHint")}>
       <input ref={photoInputRef} type="file" accept="image/*" className="hidden" aria-label={t("vehicleIntakeWizard.choosePhoto")} onChange={(e) => {
         stageEntryPhoto(activePhotoCategory, e.target.files?.[0]);

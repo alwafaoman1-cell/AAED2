@@ -158,14 +158,17 @@ describe("new entry archived vehicle regression", () => {
   it.each(["Draft", "Issued"] as const)("saves a %s entry using the archived vehicle and current visitor without registry updates", async (status) => {
     const form = newEntry();
     form.status = status;
+    const runningStatus = status === "Issued" ? "not_running" : "unknown";
+    form.condition.running_status = runningStatus;
     Object.assign(cloud.tables.vehicles[0], { archived: true, archived_at: "2026-10-01" });
     cloud.vehicleUpdateDenied = true;
     const before = structuredClone(cloud.tables.vehicles);
-    cloud.intakeData = {entry:{id:"saved-entry",tenant_id:TENANT,vehicle_id:VEHICLE,customer_id:VISITOR,status}};
+    cloud.intakeData = {entry:{id:"saved-entry",tenant_id:TENANT,vehicle_id:VEHICLE,customer_id:VISITOR,status,vehicle_condition:{running_status:runningStatus}}};
     const saved = await saveVehicleEntry(form);
     expect(saved).toMatchObject({ vehicle_id: VEHICLE, customer_id: VISITOR, status });
+    expect(saved.vehicle_condition.running_status).toBe(runningStatus);
     expect(cloud.intakeCalls).toHaveLength(1);
-    expect(cloud.intakeCalls[0]).toMatchObject({p_entry_id:null,p_form:{vehicle_id:VEHICLE,customer_id:VISITOR,status}});
+    expect(cloud.intakeCalls[0]).toMatchObject({p_entry_id:null,p_form:{vehicle_id:VEHICLE,customer_id:VISITOR,status,condition:{running_status:runningStatus}}});
     // The browser does not prewrite master/entry rows. Actual commit/archive
     // behavior is exercised by the authenticated SQL rollback suite.
     expect(cloud.tables.vehicle_entries).toHaveLength(0);

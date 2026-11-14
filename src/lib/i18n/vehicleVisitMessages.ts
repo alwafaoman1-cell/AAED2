@@ -25,11 +25,11 @@ const ar = {
   },
   statuses: { queued: "في الانتظار", sent: "مقبولة من المزود", delivered: "تم التوصيل", read: "مقروءة", failed: "فشل", dry_run: "تجربة فقط", unknown: "حالة غير مؤكدة" },
   bodies: {
-    temporary_release_signature:'مرحبًا {{customer}}، يرجى مراجعة وتوقيع محضر المعاينة والخروج المؤقت {{release}} للدخول {{entry}}. المركبة: {{vehicle}} · اللوحة: {{plate}}. لا يسجل إنشاء الرابط خروج المركبة، وهذا ليس تسليم إصلاح نهائيًا.\n{{link}}',
-    approval_with_customer: "مرحبًا {{customer}}، تمت موافقة التأمين على المطالبة {{claim}}. المركبة: {{vehicle}} · اللوحة: {{plate}} · أمر العمل: {{order}}. مركبتكم مسجلة حاليًا معكم. يرجى التواصل معنا لتحديد موعد إحضار المركبة إلى الورشة. لا تعني الموافقة أن الإصلاح بدأ.",
-    approval_in_workshop: "مرحبًا {{customer}}، تمت موافقة التأمين على المطالبة {{claim}} لمركبتكم الموجودة داخل الورشة. المركبة: {{vehicle}} · اللوحة: {{plate}} · أمر العمل: {{order}}. سننسق أعمال الإصلاح المعتمدة ونوافيكم بالتحديثات. لا تعني هذه الرسالة أن الإصلاح اكتمل.",
-    entry_receipt: "مرحبًا {{customer}}، هذا رابط مراجعة وتوقيع مستند استلام المركبة للدخول {{entry}}. أمر العمل: {{order}}. المطالبة: {{claim}}. هذا ليس محضر خروج أو تسليم نهائي.\n{{link}}",
-    temporary_release: "مرحبًا {{customer}}، هذا رابط قراءة محضر المعاينة والخروج المؤقت الموقع {{release}} للدخول {{entry}}. المركبة مسجلة حاليًا معكم. النسخة للقراءة فقط ولا تطلب توقيعًا جديدًا، وليست محضر تسليم إصلاح نهائي.\n{{link}}",
+    temporary_release_signature: "يرجى مراجعة وتوقيع محضر المعاينة والخروج المؤقت داخل البوابة. إنشاء الرابط لا يسجل خروج المركبة، وهذا ليس تسليم إصلاح نهائيًا.",
+    approval_with_customer: "تمت موافقة التأمين. مركبتكم مسجلة حاليًا معكم. يرجى التواصل معنا لتحديد موعد إحضار المركبة إلى الورشة. لا تعني الموافقة أن الإصلاح بدأ.",
+    approval_in_workshop: "تمت موافقة التأمين لمركبتكم الموجودة داخل الورشة. سنوافيكم بالتحديثات داخل البوابة. لا تعني هذه الرسالة أن الإصلاح اكتمل.",
+    entry_receipt: "يرجى مراجعة وتوقيع نموذج الدخول ووصل الاستلام داخل البوابة. هذا ليس محضر خروج أو تسليم نهائي.",
+    temporary_release: "محضر المعاينة والخروج المؤقت الموقع متاح داخل البوابة للقراءة فقط، ولا يطلب توقيعًا جديدًا. هذا ليس محضر تسليم إصلاح نهائي.",
   },
 };
 const en = {
@@ -58,11 +58,11 @@ const en = {
   },
   statuses: { queued: "Queued", sent: "Provider accepted", delivered: "Delivered", read: "Read", failed: "Failed", dry_run: "Dry run only", unknown: "Unconfirmed status" },
   bodies: {
-    temporary_release_signature:'Hello {{customer}}, please review and sign inspection and temporary-release report {{release}} for entry {{entry}}. Vehicle: {{vehicle}} · Plate: {{plate}}. Creating this link does not record a vehicle exit, and this is not final repair handover.\n{{link}}',
-    approval_with_customer: "Hello {{customer}}, insurance approved claim {{claim}}. Vehicle: {{vehicle}} · Plate: {{plate}} · Work order: {{order}}. Your vehicle is currently recorded with you. Please contact us to schedule its arrival at the workshop. Approval does not mean repairs have started.",
-    approval_in_workshop: "Hello {{customer}}, insurance approved claim {{claim}} for your vehicle currently inside the workshop. Vehicle: {{vehicle}} · Plate: {{plate}} · Work order: {{order}}. We will coordinate the approved repairs and keep you updated. This message does not mean repairs are complete.",
-    entry_receipt: "Hello {{customer}}, please review and sign the vehicle entry receipt for entry {{entry}}. Work order: {{order}}. Claim: {{claim}}. This is not a temporary-release or final-delivery receipt.\n{{link}}",
-    temporary_release: "Hello {{customer}}, this is your signed inspection and temporary-release report {{release}} for entry {{entry}}. Your vehicle is currently recorded with you. This copy is read-only and does not request another signature. It is not final repair delivery.\n{{link}}",
+    temporary_release_signature: "Please review and sign the inspection and temporary-release report inside the portal. Creating this link does not record a vehicle exit, and this is not final repair handover.",
+    approval_with_customer: "Insurance approval is confirmed. Your vehicle is currently recorded with you. Please contact us to schedule its arrival at the workshop. Approval does not mean repairs have started.",
+    approval_in_workshop: "Insurance approval is confirmed for your vehicle currently inside the workshop. Updates will be available in the portal. This message does not mean repairs are complete.",
+    entry_receipt: "Please review and sign the intake form and receipt inside the portal. This is not a temporary-release or final-delivery receipt.",
+    temporary_release: "Your signed inspection and temporary-release report is available inside the portal as a read-only copy and does not request another signature. It is not final repair delivery.",
   },
 };
 for (const [language, resources] of [["ar", ar], ["en", en]] as const) {

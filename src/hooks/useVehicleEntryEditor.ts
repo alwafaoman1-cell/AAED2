@@ -1,3 +1,4 @@
+import { needsRunningStatusBeforeIssue } from "@/lib/vehicleRunningStatus";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate,useParams,useSearchParams } from "react-router-dom";
 import { useQuery,useQueryClient } from "@tanstack/react-query";
@@ -293,6 +294,7 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor";sourc
   }
   async function handleSave(status = form.status) {
     if(savingRef.current) return;
+    if (needsRunningStatusBeforeIssue(form, status)) { toast.error(t("vehicleIntakeWizard.runningStatusRequired")); return; }
     if (!canSave) {
       toast.error(t("vehicleIntakeWizard.required"));
       return;

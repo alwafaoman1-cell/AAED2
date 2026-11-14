@@ -38,6 +38,8 @@ interface PdfPreviewDialogProps {
   recipientPhone?: string;
   /** اسم المستلم لعرضه في حوار واتساب */
   recipientName?: string;
+  /** Public customers can download their own document without staff messaging controls. */
+  allowShare?: boolean;
 }
 
 const ZOOM_STEPS = [0.5, 0.65, 0.8, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
@@ -63,8 +65,10 @@ export default function PdfPreviewDialog({
   onSaved,
   recipientPhone,
   recipientName,
+  allowShare = true,
 }: PdfPreviewDialogProps) {
   const { t, i18n } = useTranslation();
+  const en = !!i18n.language?.startsWith("en");
   const [fullscreen, setFullscreen] = useState(false);
   const [savedUrl, setSavedUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -192,7 +196,7 @@ export default function PdfPreviewDialog({
         if (res?.url) {
           session.saved = true;
           setSavedUrl(res.url);
-          toast.success("تم حفظ المستند في الأرشيف");
+          toast.success(en ? "Document saved in the archive" : "تم حفظ المستند في الأرشيف");
           try { onSaved?.(res); } catch (error) { console.warn("archive onSaved failed", error); }
         }
       })
@@ -205,7 +209,7 @@ export default function PdfPreviewDialog({
         if (archiveSessionRef.current === session) setSaving(false);
       });
     return session.pending;
-  }, [archiveContext, autoSave, onSaved]);
+  }, [archiveContext, autoSave, onSaved, en]);
 
   // تتبّع الصفحة الحالية أثناء التمرير
   useEffect(() => {
@@ -278,7 +282,7 @@ export default function PdfPreviewDialog({
       return blob;
     } catch (e: any) {
       console.error("PDF generation failed", e);
-      const message = e?.message || "فشل إنشاء ملف PDF";
+      const message = e?.message || (en ? "PDF generation failed" : "فشل إنشاء ملف PDF");
       if (archiveSessionRef.current === session) {
         setError(message);
         toast.error(message);
@@ -287,7 +291,7 @@ export default function PdfPreviewDialog({
     } finally {
       if (archiveSessionRef.current === session) setPdfGenerating(false);
     }
-  }, [previewHtml, pdfBlob, safeName, orientation]);
+  }, [previewHtml, pdfBlob, safeName, orientation, en]);
 
   // اطبع نفس ملف PDF المستخدم في التنزيل لضمان تطابق الطباعة والتنزيل.
   const handlePrint = async () => {
@@ -320,7 +324,7 @@ export default function PdfPreviewDialog({
       void archiveAfterExport(archiveSession);
     } catch (e) {
       console.error(e);
-      toast.error("تعذّرت طباعة ملف PDF");
+      toast.error(en ? "The PDF could not be printed" : "تعذّرت طباعة ملف PDF");
       iframe.remove();
       if (url) URL.revokeObjectURL(url);
       return;
@@ -362,7 +366,7 @@ export default function PdfPreviewDialog({
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
-    toast.success("تم تصدير بيانات المستند بصيغة HTML");
+    toast.success(en ? "Document data exported as HTML" : "تم تصدير بيانات المستند بصيغة HTML");
   };
 
   const zoomLabel = zoom === FIT_ZOOM ? (i18n.language?.startsWith("en") ? "Fit" : "ملاءمة") : `${Math.round(zoom * 100)}%`;
@@ -382,18 +386,18 @@ export default function PdfPreviewDialog({
               {pdfGenerating && (
                 <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-500 font-medium shrink-0">
                   <Loader2 size={11} className="animate-spin" />
-                  تحضير PDF…
+                  {en ? "Preparing PDF…" : "تحضير PDF…"}
                 </span>
               )}
               {oversizedPages > 0 && (
                 <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 font-medium shrink-0">
-                  {oversizedPages} صفحة تحتوي عنصراً أكبر من A4
+                  {en ? `${oversizedPages} page(s) contain an item larger than A4` : `${oversizedPages} صفحة تحتوي عنصراً أكبر من A4`}
                 </span>
               )}
               {autoSave &&
                 (saving ? (
                   <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500 font-medium shrink-0">
-                    <CloudUpload size={11} className="animate-pulse" /> جارٍ الحفظ…
+                    <CloudUpload size={11} className="animate-pulse" /> {en ? "Saving…" : "جارٍ الحفظ…"}
                   </span>
                 ) : savedUrl ? (
                   <a
@@ -402,18 +406,18 @@ export default function PdfPreviewDialog({
                     rel="noopener"
                     className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-medium hover:bg-emerald-500/25 transition shrink-0"
                   >
-                    <Check size={11} /> محفوظ
+                    <Check size={11} /> {en ? "Saved" : "محفوظ"}
                   </a>
                 ) : null)}
             </DialogTitle>
-            <DialogDescription className="sr-only">معاينة المستند داخل الصفحة</DialogDescription>
+            <DialogDescription className="sr-only">{en ? "Document preview" : "معاينة المستند داخل الصفحة"}</DialogDescription>
           </DialogHeader>
 
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setFullscreen((f) => !f)} title={fullscreen ? "تصغير" : "ملء الشاشة"}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setFullscreen((f) => !f)} title={fullscreen ? (en ? "Exit full screen" : "تصغير") : (en ? "Full screen" : "ملء الشاشة")}>
               {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onOpenChange(false)} title="إغلاق">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onOpenChange(false)} title={en ? "Close" : "إغلاق"}>
               <X size={15} />
             </Button>
           </div>
@@ -423,57 +427,57 @@ export default function PdfPreviewDialog({
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-background/60 shrink-0 gap-2 flex-wrap">
           {/* Pagination */}
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => goPage(currentPage - 1)} disabled={currentPage <= 1} title="السابقة">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => goPage(currentPage - 1)} disabled={currentPage <= 1} title={en ? "Previous" : "السابقة"}>
               <ChevronUp size={14} />
             </Button>
             <span className="text-xs text-muted-foreground tabular-nums min-w-[56px] text-center">
               {currentPage} / {pageCount}
             </span>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => goPage(currentPage + 1)} disabled={currentPage >= pageCount} title="التالية">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => goPage(currentPage + 1)} disabled={currentPage >= pageCount} title={en ? "Next" : "التالية"}>
               <ChevronDown size={14} />
             </Button>
           </div>
 
           {/* Zoom */}
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomOut} title="تصغير">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomOut} title={en ? "Zoom out" : "تصغير"}>
               <ZoomOut size={14} />
             </Button>
             <span className="text-xs text-muted-foreground tabular-nums min-w-[56px] text-center">{zoomLabel}</span>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomIn} title="تكبير">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomIn} title={en ? "Zoom in" : "تكبير"}>
               <ZoomIn size={14} />
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fitWidth} title="ملاءمة العرض">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fitWidth} title={en ? "Fit width" : "ملاءمة العرض"}>
               <Maximize size={14} />
             </Button>
           </div>
 
           {/* Actions */}
           <div className="flex items-center gap-1">
-            <WhatsAppShareButton
+            {allowShare && <WhatsAppShareButton
               htmlContent={htmlContent}
               fileBaseName={safeName}
               subFolder="shared"
-              triggerLabel="واتساب"
+              triggerLabel={en ? "WhatsApp" : "واتساب"}
               size="sm"
               triggerVariant="ghost"
               triggerClassName="h-7"
-              title={`مشاركة: ${title}`}
+              title={`${en ? "Share" : "مشاركة"}: ${title}`}
               defaultPhone={recipientPhone}
               recipientName={recipientName}
-              defaultMessage={recipientName ? `مرحباً ${recipientName}،\nإليك ${title}.` : ""}
-            />
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handlePrint} disabled={pdfGenerating} title="إنشاء ملف PDF ثم طباعته">
+              defaultMessage={recipientName ? (en ? `Hello ${recipientName},\nHere is ${title}.` : `مرحباً ${recipientName}،\nإليك ${title}.`) : ""}
+            />}
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handlePrint} disabled={pdfGenerating} title={en ? "Generate and print PDF" : "إنشاء ملف PDF ثم طباعته"}>
               <Printer size={14} />
-              <span className="text-xs">طباعة PDF</span>
+              <span className="text-xs">{en ? "Print PDF" : "طباعة PDF"}</span>
             </Button>
             <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handleDownload} disabled={pdfGenerating}>
               {pdfGenerating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              <span className="text-xs">تنزيل PDF</span>
+              <span className="text-xs">{en ? "Download PDF" : "تنزيل PDF"}</span>
             </Button>
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handleExportData} title="تنزيل محتوى المستند كملف HTML دون تحويله إلى صورة PDF">
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5" onClick={handleExportData} title={en ? "Download the document content as HTML" : "تنزيل محتوى المستند كملف HTML دون تحويله إلى صورة PDF"}>
               <FileCode2 size={14} />
-              <span className="text-xs">تصدير البيانات فقط</span>
+              <span className="text-xs">{en ? "Export document data" : "تصدير البيانات فقط"}</span>
             </Button>
           </div>
         </div>

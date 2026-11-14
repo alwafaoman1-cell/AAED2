@@ -8,7 +8,9 @@ import { toast } from "sonner";
 import { sendWhatsAppMessage } from "@/lib/partsWhatsApp";
 import WorkOrderClosingReview from "@/components/workorders/WorkOrderClosingReview";
 import { isClosingStatus } from "@/components/workorders/workOrderClosingStatus";
-import { buildCustomerPortalUrl, ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
+import { buildCustomerPortalUrl } from "@/lib/customerPortalTokens";
+import { useWorkOrderPortalToken } from "@/hooks/useWorkOrderPortalToken";
+import { useTranslation } from "react-i18next";
 import { uploadStagePhoto } from "@/lib/workOrderPhotosStorage";
 
 interface Props {
@@ -110,23 +112,12 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState<null | "save" | "send">(null);
   const [closingReview, setClosingReview] = useState<WorkOrder["closingReview"] | null>(null);
-  const [portalToken, setPortalToken] = useState<string | null>(null);
-  const [isSigned, setIsSigned] = useState<boolean>(false);
+  const portal = useWorkOrderPortalToken(open ? cloudJobOrderId || "" : "");
+  const { i18n } = useTranslation(); const en = i18n.language.startsWith("en");
+  const portalHint = en ? "The protected customer portal link is included when you send. Customers enter their own plate number and letters to review and sign documents." : "يُرفق رابط بوابة العميل المحمية عند الإرسال. يدخل العميل رقم لوحته وحروفها لمراجعة المستندات وتوقيعها.";
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
   const initializedOrderId = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!open || !cloudJobOrderId) { setPortalToken(null); setIsSigned(false); return; }
-    let mounted = true;
-    (async () => {
-      const data = await ensureCustomerPortalToken(cloudJobOrderId);
-      if (!mounted) return;
-      setPortalToken(data?.token || null);
-      setIsSigned(!!data?.signed_at);
-    })();
-    return () => { mounted = false; };
-  }, [open, cloudJobOrderId]);
 
   useEffect(() => {
     if (!open || !order) {
@@ -234,17 +225,15 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   async function handleSaveAndSend() {
     const phone = (order!.phone || "").replace(/\D/g, "");
     if (!phone) { toast.error("لا يوجد رقم هاتف للعميل"); return; }
-    if (!isSigned) {
-      toast.error("لا يمكن إرسال رابط المتابعة قبل توقيع العميل على بطاقة أمر العمل");
-      return;
-    }
     setSaving("send");
     try {
+      const info = await portal.ensure();
+      if (info.enabled === false || (info.expires_at && !(Date.parse(info.expires_at) > Date.now()))) throw new Error(en ? "The customer portal is unavailable" : "بوابة العميل غير متاحة");
       const saved = await persist();
       if (!saved) return;
       let text = message.trim();
-      const portalUrl = buildCustomerPortalUrl(portalToken);
-      if (portalUrl) text += `\n\n🔗 تابع حالة الإصلاح: ${portalUrl}`;
+      const portalUrl = buildCustomerPortalUrl(info.token);
+      if (portalUrl) text += `\n\n${en ? "Customer portal" : "بوابة العميل"}: ${portalUrl}\n${en ? "Open it using your vehicle plate number and letters; English letters are accepted." : "افتحها برقم لوحة مركبتك وحروفها، ويمكن كتابة الحروف بالإنجليزية."}`;
       await sendWhatsAppMessage({
         message: text,
         phone,
@@ -375,18 +364,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
               className="text-sm"
               placeholder="نص الرسالة..."
             />
-            <div className={`mt-2 rounded-md border px-2.5 py-2 text-[11px] flex items-start gap-2 ${
-              isSigned ? "bg-success/10 border-success/30 text-success" : "bg-warning/10 border-warning/30 text-warning"
-            }`}>
-              <span className="font-bold">{isSigned ? "✓" : "⚠"}</span>
-              <div className="leading-relaxed">
-                {isSigned ? (
-                  <>تم توقيع العميل على البطاقة — سيُرفق <b>رابط متابعة الإصلاح</b> تلقائياً في الرسالة.</>
-                ) : (
-                  <>لم يوقّع العميل بعد على بطاقة أمر العمل. <b>رابط المتابعة لن يُرسل</b> حتى يتم التوقيع. الصور تُحفظ داخل النظام فقط ولا تُرسل عبر واتساب.</>
-                )}
-              </div>
-            </div>
+            <div className="mt-2 rounded-md border border-info/30 bg-info/10 px-2.5 py-2 text-[11px] text-info">{portalHint}</div>
             <p className="text-[10px] text-muted-foreground mt-1">
               {order.phone ? `سيتم إرسالها للعميل عبر واتساب على: ${order.phone}` : "⚠ لا يوجد رقم هاتف للعميل — زر الإرسال معطّل"}
             </p>
@@ -406,8 +384,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
             </Button>
             <Button
               onClick={handleSaveAndSend}
-              disabled={saving !== null || !order.phone || !isSigned}
-              title={!isSigned ? "بانتظار توقيع العميل على البطاقة" : ""}
+              disabled={saving !== null || !order.phone || !cloudJobOrderId}
               className="flex-1 gradient-gold text-primary-foreground gap-1.5 h-11"
             >
               {saving === "send" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}

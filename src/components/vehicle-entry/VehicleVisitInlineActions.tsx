@@ -1,3 +1,4 @@
+import { isVehicleReviewVisit } from "@/lib/vehicleReviewVisit";
 import {forwardRef,lazy,Suspense,useImperativeHandle,useRef,useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useMutation} from '@tanstack/react-query';
@@ -36,6 +37,7 @@ export const VehicleVisitInlineActions=forwardRef<VehicleVisitInlineActionHandle
   const update=useUpdateClaimStatus({notify:false});
   const operation=useMutation({
     mutationFn:async(action:'claim'|'order'|'cancel'|'status'|'delivery')=>{
+      if(isVehicleReviewVisit(entry)) throw new Error(t('vehicleVisitWorkspace.readOnly'));
       if(lock.current) throw new Error(t('vehicleVisitWorkspace.failed'));
       lock.current=true;
       try{
@@ -71,6 +73,7 @@ export const VehicleVisitInlineActions=forwardRef<VehicleVisitInlineActionHandle
     openOrderAction:action=>{if(!lock.current)requestOrderAction(action);},
     openApproval:()=>{if(manager&&claim?.status==='pending'&&!operation.isPending){setApprovalOpen(true);setCancelOpen(false);}},
   }),[requestOrderAction,manager,claim?.status,operation.isPending]);
+  if (isVehicleReviewVisit(entry)) return null;
   return <section className="space-y-3" aria-label={t('vehicleVisitWorkspace.actions')}>
     {['cancelled','rejected'].includes(claim?.status)&&<p role="status" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">{t('vehicleVisitWorkspace.cancelled')} · {t('vehicleVisitWorkspace.cancelledHint')}</p>}
     <div className="flex flex-wrap gap-2">

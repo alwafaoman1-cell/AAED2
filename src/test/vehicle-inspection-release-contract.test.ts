@@ -69,13 +69,13 @@ describe("vehicle inspection and temporary release", () => {
     expect(app).toContain('path="/vehicle-entry/inspection-release/sign/:token"');
     expect(detail).toContain('<VehicleVisitControlPanel');
     expect(read('src/components/vehicle-entry/VehicleVisitLocationPanel.tsx')).toContain('<ReleasePage entryId={visit.entry.id}');
-    expect(publicPage).toContain("get_vehicle_inspection_release_for_signature");
-    expect(publicPage).toContain("submit_vehicle_inspection_release_signature");
-    expect(publicPage).toContain("p_signer_name: signerName.trim()");
+    expect(publicPage).toContain("LegacyUnifiedPortalRedirect");
+    expect(publicPage).not.toContain("get_vehicle_inspection_release_for_signature");
+    expect(read("src/lib/unifiedVehiclePortal.ts")).toContain("customer_vehicle_portal_sign_release");
     expect(publicPage).not.toContain("submit_vehicle_entry_customer_signature");
-    expect(media).toContain('body?.purpose === "inspection_release"');
-    expect(media).toContain('.from("vehicle_inspection_release_links")');
-    expect(media).toContain("photoIds.length ? mediaQuery.in");
+    expect(media).toContain("customer_vehicle_portal_media_scope");
+    expect(media).toContain("body?.portal_session");
+    expect(media).not.toContain('.from("vehicle_inspection_release_links")');
   });
 
   it("prefills from the entry, but blocks a link until key exit/recipient facts are present", () => {

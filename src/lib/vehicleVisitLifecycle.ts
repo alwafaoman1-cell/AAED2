@@ -1,3 +1,4 @@
+import { isVehicleReviewVisit } from "@/lib/vehicleReviewVisit";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { getVehicleEntry, getVehicleEntryPresence, getVehicleVisitBillingKind, listVehicleEntries, type VehicleEntryPresence } from "@/lib/vehicleEntryService";
@@ -459,8 +460,8 @@ export async function listVehicleVisitCenter(): Promise<VehicleVisitItem[]> {
   const byEntry = new Map(workflows.map((workflow) => [workflow.entry_id, workflow]));
   const signedEntries = new Set(handovers.filter((handover) => {
     const entry = entryById.get(handover.vehicle_entry_id);
-    return Boolean(entry && handover.work_order_id &&
-      [entry.work_order_id, entry.converted_work_order_id].includes(handover.work_order_id));
+    return Boolean(entry && (isVehicleReviewVisit(entry) || (handover.work_order_id &&
+      [entry.work_order_id, entry.converted_work_order_id].includes(handover.work_order_id))));
   }).map((handover) => handover.vehicle_entry_id));
   const temporaryEntries = new Set(releases.map((release) => release.vehicle_entry_id));
   const visits = entries.map((entry) => resolveVehicleVisit(entry, byEntry.get(entry.id) || null, signedEntries.has(entry.id), temporaryEntries.has(entry.id)));
@@ -533,7 +534,7 @@ export async function getVehicleVisitDetail(entryId: string, options?: { include
   const [workflowResult, eventsResult, handoversResult, releasesResult] = await Promise.all([
     supabase.from("vehicle_visit_workflows" as any).select("*").eq("tenant_id", tenantId).eq("entry_id", entryId).maybeSingle(),
     lightweight ? Promise.resolve({ data: [], error: null }) : supabase.from("vehicle_visit_transitions" as any).select("*").eq("tenant_id", tenantId).eq("entry_id", entryId).order("revision", { ascending: false }).limit(500),
-    supabase.from("vehicle_handover_records" as any).select("id,work_order_id,receipt_number,status,delivered_at,finalized_at,cancellation_reason")
+    supabase.from("vehicle_handover_records" as any).select("id,work_order_id,receipt_number,status,delivered_at,finalized_at,cancellation_reason,work_summary")
       .eq("tenant_id", tenantId).eq("vehicle_entry_id", entryId).order("created_at", { ascending: false }).limit(30),
     supabase.from("vehicle_inspection_releases" as any).select("id,release_number,status,released_at,returned_at")
       .eq("tenant_id", tenantId).eq("vehicle_entry_id", entryId).order("created_at", { ascending: false }).limit(30),
@@ -547,7 +548,7 @@ export async function getVehicleVisitDetail(entryId: string, options?: { include
   const order = entry.work_order || entry.converted_work_order;
   const claim = entry.claim || entry.converted_claim;
   const item = resolveVehicleVisit(entry, (workflowResult.data as unknown as VehicleVisitWorkflow) || null,
-    handovers.some((row) => row.status === "finalized" && row.work_order_id === order?.id),
+    handovers.some((row) => row.status === "finalized" && (isVehicleReviewVisit(entry) || row.work_order_id === order?.id)),
     releases.some((row) => row.status === "signed" && !row.returned_at));
   if (lightweight) return {
     ...item,

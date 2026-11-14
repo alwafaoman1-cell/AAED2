@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 import {beforeEach,describe,expect,it,vi} from 'vitest';
-const mocks=vi.hoisted(()=>({tenant:vi.fn(),from:vi.fn(),rpc:vi.fn(),row:null as any}));
+const mocks=vi.hoisted(()=>({tenant:vi.fn(),from:vi.fn(),rpc:vi.fn(),portal:vi.fn(),row:null as any}));
 vi.mock('@/lib/cloud/createCloudStore',()=>({getCurrentTenantId:mocks.tenant}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{from:mocks.from,rpc:mocks.rpc}}));
 vi.mock('@/lib/pdfGenerator',()=>({getTemplateSettings:()=>({})}));
 vi.mock('@/lib/htmlToPdf',()=>({generatePdfFromHtml:vi.fn(),DEFAULT_MARGINS:{}}));
 vi.mock('@/lib/vehicleTechnicalDeclaration',()=>({buildTechnicalDeclarationConditionSummary:()=>[]}));
+vi.mock('@/lib/unifiedVehiclePortal',()=>({ensureVehicleCustomerPortal:mocks.portal,buildUnifiedVehiclePortalUrl:(token:string)=>`https://example.invalid/customer/vehicle/${token}`}));
 import {emptyInspectionReleaseForm,normalizeInspectionReleaseForm,saveInspectionRelease,createInspectionReleaseLink,getInspectionReleaseById,finalizeInspectionReleasePaper} from '@/lib/vehicleInspectionRelease';
 const tenant='00000000-0000-4000-8000-000000000001',entry='00000000-0000-4000-8000-000000000002',release='00000000-0000-4000-8000-000000000003';
 const form={...emptyInspectionReleaseForm,inspection_summary:'Visual inspection only',pending_action:'Awaiting customer decision',exit_condition:'Driving condition not tested',recipient_name:'QA Visitor',recipient_id_number:'QA-ID',recipient_phone:'80000119'};
 beforeEach(()=>{
   vi.clearAllMocks();mocks.tenant.mockResolvedValue(tenant);
+  mocks.portal.mockResolvedValue({token:'canonical-token',enabled:true,expires_at:null});
   mocks.row={id:release,tenant_id:tenant,vehicle_entry_id:entry,status:'draft',form_data:form,release_number:'QA-VIR',updated_at:'2026-11-07T10:00:00Z'};
   mocks.from.mockImplementation(()=>{const q:any={select:()=>q,eq:()=>q,single:async()=>({data:mocks.row,error:null})};return q;});
   mocks.rpc.mockImplementation(async(name:string)=>name==='save_vehicle_inspection_release'?{data:mocks.row,error:null}:name==='create_vehicle_inspection_release_link'?(mocks.row={...mocks.row,status:'awaiting_signature'},{data:{token:'a'.repeat(64),release_id:release,expires_at:'2099-01-01'},error:null}):{data:{release_number:'QA-VIR',signed:false},error:null});
@@ -50,13 +52,19 @@ describe('inspection release confirmed persistence',()=>{
     await expect(saveInspectionRelease(entry,form)).rejects.toThrow('SAVE_UNCONFIRMED');
     await expect(getInspectionReleaseById(release)).rejects.toThrow('READ_UNCONFIRMED');
   });
-  it('verifies the real public link capability and awaiting-signature cloud state',async()=>{
+  it('verifies canonical awaiting-signature cloud state then returns only the unified portal URL',async()=>{
     const link=await createInspectionReleaseLink(release);
-    expect(link.url).toContain('/vehicle-entry/inspection-release/sign/'+ 'a'.repeat(64));
-    expect(mocks.rpc).toHaveBeenCalledWith('get_vehicle_inspection_release_for_signature',{p_token:'a'.repeat(64)});
+    expect(link.url).toBe('https://example.invalid/customer/vehicle/canonical-token');
+    expect(mocks.portal).toHaveBeenCalledWith(entry);
+    expect(mocks.rpc.mock.calls.map(([name])=>name)).not.toContain('get_vehicle_inspection_release_for_signature');
   });
   it('never calls an invalid or unavailable capability a working link',async()=>{
-    mocks.rpc.mockImplementation(async(name:string)=>name==='create_vehicle_inspection_release_link'?(mocks.row={...mocks.row,status:'awaiting_signature'},{data:{token:'a'.repeat(64),release_id:release,expires_at:'2099-01-01'},error:null}):{data:{error:'invalid_link'},error:null});
-    await expect(createInspectionReleaseLink(release)).rejects.toThrow('LINK_UNCONFIRMED');
+    mocks.rpc.mockImplementation(async()=>({data:{token:'invalid',release_id:release,expires_at:'2099-01-01'},error:null}));
+    await expect(createInspectionReleaseLink(release)).rejects.toThrow();
+    expect(mocks.portal).not.toHaveBeenCalled();
+  });
+  it('never returns a working link for a paused portal',async()=>{
+    mocks.portal.mockResolvedValue({token:'canonical-token',enabled:false,expires_at:null});
+    await expect(createInspectionReleaseLink(release)).rejects.toThrow('CUSTOMER_PORTAL_UNAVAILABLE');
   });
 });

@@ -34,7 +34,7 @@ const query = (claim = CLAIM_A) => `claim=${claim}&channel=insurance&purpose=ins
 function sourceForm(claimId: string | null, orderId: string | null = null): SupervisorIntakeSource {
   const base = defaultVehicleEntryForm();
   return { existingEntryId: null, channel: claimId ? "insurance" : "cash", form: {
-    ...base, customer_id: `customer-${mock.tenant}`, vehicle_id: `vehicle-${mock.tenant}`,
+    ...base, condition: { ...base.condition, running_status: "running" }, customer_id: `customer-${mock.tenant}`, vehicle_id: `vehicle-${mock.tenant}`,
     insurance_claim_id: claimId, work_order_id: orderId, arrival_date: "2026-11-05", arrival_time: "10:30",
     customer: { ...base.customer, name: "Visit customer", phone: "+96899112233" },
     vehicle: { ...base.vehicle, plate_number: "24680", make: "Toyota", model: "Prado" },
@@ -101,7 +101,7 @@ describe("supervisor intake scope isolation", () => {
       expect(h.result.current.form.customer_id).toBe(`customer-${mock.tenant}`);
     } else {
       expect(h.result.current.needsSource).toBe(false); expect(h.result.current.channel).toBe("cash");
-      act(() => { h.result.current.selectCustomer({ id: "fresh-customer", name: "Fresh visitor", phone: "99112233" }); h.result.current.patchVehicle({ plate_number: "9876", make: "Toyota" }); });
+      act(() => { h.result.current.selectCustomer({ id: "fresh-customer", name: "Fresh visitor", phone: "99112233" }); h.result.current.patchVehicle({ plate_number: "9876", make: "Toyota" }); h.result.current.patchCondition({ running_status: "running" }); });
     }
     await waitFor(() => expect(h.result.current.canSave).toBe(true));
     await act(async () => { await h.result.current.handleSave("Issued"); });

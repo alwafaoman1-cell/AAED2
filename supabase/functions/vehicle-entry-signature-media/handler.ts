@@ -47,10 +47,10 @@ return async (request: Request) => {
     const raw = await request.text();
     if (new TextEncoder().encode(raw).length > 4096) return json(request, { error: "request_too_large" }, 413);
     let body; try { body = JSON.parse(raw); } catch { body = null; }
-    const token = String(body?.token || "").trim();
-    if (!/^[a-f0-9]{64}$/i.test(token)) return json(request, { error: "invalid_link" }, 400);
-    const inspectionRelease = body?.purpose === "inspection_release";
-
+    const token = String(body?.portal_token || "").trim();
+    const session = String(body?.portal_session || "").trim();
+    const requestedEntry = String(body?.entry_id || "").trim();
+    if (!/^[a-f0-9]{64}$/i.test(token) || !/^[a-f0-9]{64}$/i.test(session) || !/^[a-f0-9-]{36}$/i.test(requestedEntry)) return json(request, { error: "portal_access_required" }, 401);
     const supabaseUrl = env("SUPABASE_URL");
     const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !serviceKey) return json(request, { error: "service_unavailable" }, 503);
@@ -59,86 +59,46 @@ return async (request: Request) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const now = new Date().toISOString();
-    let tenantId = "";
-    let entryId = "";
-    let photoIds: string[] | null = null;
-    let linkRevision: number | null = null;
-    if (inspectionRelease) {
-      const bytes = new TextEncoder().encode(token);
-      const digest = await crypto.subtle.digest("SHA-256", bytes);
-      const tokenHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
-      const { data: link, error: linkError } = await admin
-        .from("vehicle_inspection_release_links")
-        .select("tenant_id,release_id,expires_at")
-        .eq("token_hash", tokenHash)
-        .is("revoked_at", null)
-        .gt("expires_at", now)
-        .maybeSingle();
-      if (linkError) throw linkError;
-      if (!link) return json(request, { error: "invalid_link" }, 404);
-      const { data: release, error: releaseError } = await admin
-        .from("vehicle_inspection_releases")
-        .select("tenant_id,vehicle_entry_id,photo_media_ids,status")
-        .eq("tenant_id", link.tenant_id)
-        .eq("id", link.release_id)
-        .in("status", ["awaiting_signature", "signed"])
-        .maybeSingle();
-      if (releaseError) throw releaseError;
-      if (!release) return json(request, { error: "release_unavailable" }, 404);
-      tenantId = release.tenant_id;
-      entryId = release.vehicle_entry_id;
-      photoIds = Array.isArray(release.photo_media_ids) ? release.photo_media_ids.slice(0, 12) : [];
-    } else {
-      const { data: link, error: linkError } = await admin
-        .from("vehicle_entry_signature_links")
-        .select("tenant_id,vehicle_entry_id,expires_at,consumed_at,intake_revision")
-        .eq("token", token)
-        .is("revoked_at", null)
-        .gt("expires_at", now)
-        .maybeSingle();
-      if (linkError) throw linkError;
-      if (!link) return json(request, { error: "invalid_link" }, 404);
-      tenantId = link.tenant_id;
-      entryId = link.vehicle_entry_id;
-      linkRevision = link.intake_revision;
-    }
-
-    let entryQuery = admin
-      .from("vehicle_entries")
-      .select("id,intake_revision")
-      .eq("id", entryId)
-      .eq("tenant_id", tenantId)
-      .is("deleted_at", null);
-    entryQuery = inspectionRelease
-      ? entryQuery.in("status", ["Received", "Issued", "Converted to Claim", "Converted to Work Order"])
-      : entryQuery.neq("status", "Cancelled");
-    const { data: entry, error: entryError } = await entryQuery.maybeSingle();
-    if (entryError) throw entryError;
-    if (!entry) return json(request, { error: "entry_unavailable" }, 404);
-    if (!inspectionRelease && (linkRevision == null || linkRevision !== entry.intake_revision)) return json(request, { error: "invalid_link" }, 404);
-
-    let mediaQuery = admin
+    const { data: scope, error: scopeError } = await admin.rpc("customer_vehicle_portal_media_scope", { p_token: token, p_session: session, p_entry_id: requestedEntry });
+    if (scopeError || !scope?.entry_id || !scope?.tenant_id) return json(request, { error: "portal_access_required" }, 403);
+    if (body.revision != null && Number(body.revision) !== scope.revision) return json(request, { error: "portal_revision_changed" }, 409);
+    const tenantId = scope.tenant_id; const entryId = scope.entry_id; const linkRevision = scope.revision;
+    const frozenIds = Array.isArray(scope.media_ids) ? [...new Set(scope.media_ids)] : null;
+    const mediaQuery = () => admin
       .from("vehicle_media")
       .select("id,storage_bucket,storage_path,category,file_name,mime_type,caption,uploaded_at")
       .eq("tenant_id", tenantId)
       .eq("vehicle_entry_id", entryId)
       .eq("media_type", "image")
       .is("deleted_at", null);
-    if (photoIds) mediaQuery = photoIds.length ? mediaQuery.in("id", photoIds) : mediaQuery.eq("id", "00000000-0000-0000-0000-000000000000");
-    const { data: mediaRows, error: mediaError } = await mediaQuery
-      .order("uploaded_at", { ascending: true }).limit(12);
-    if (mediaError) throw mediaError;
+    const mediaRows = [];
+    if (frozenIds) {
+      // A signed document must include every recorded image. The preview limit
+      // for an unsigned intake must not truncate its immutable signed evidence.
+      for (let offset = 0; offset < frozenIds.length; offset += 50) {
+        const ids = frozenIds.slice(offset, offset + 50);
+        const { data, error } = await mediaQuery().in("id", ids)
+          .order("uploaded_at", { ascending: true }).limit(ids.length);
+        if (error) throw error;
+        mediaRows.push(...(data || []));
+      }
+      mediaRows.sort((a, b) => String(a.uploaded_at || "").localeCompare(String(b.uploaded_at || "")) || String(a.id).localeCompare(String(b.id)));
+    } else {
+      const { data, error } = await mediaQuery()
+        .order("uploaded_at", { ascending: true }).limit(12);
+      if (error) throw error;
+      mediaRows.push(...(data || []));
+    }
 
     const media = [];
-    let unavailableCount = 0;
+    let unavailableCount = frozenIds ? frozenIds.filter(id => !(mediaRows || []).some(row => row.id === id)).length : 0;
     for (const row of mediaRows || []) {
       const bucket = String(row.storage_bucket || "insurance-docs");
       const path = String(row.storage_path || "").replace(/^\/+/, "");
-      if (!path || path.includes("..") || !path.startsWith(`${tenantId}/vehicle-entry/${entryId}/`)) continue;
-      if (row.mime_type && !String(row.mime_type).startsWith("image/")) continue;
+      if (!path || path.includes("..") || !path.startsWith(`${tenantId}/vehicle-entry/${entryId}/`)) { unavailableCount++; continue; }
+      if (row.mime_type && !String(row.mime_type).startsWith("image/")) { unavailableCount++; continue; }
 
-      const { data: signed, error: signError } = await admin.storage.from(bucket).createSignedUrl(path, 900);
+      const { data: signed, error: signError } = await admin.storage.from(bucket).createSignedUrl(path, 60);
       if (signError || !signed?.signedUrl) { unavailableCount++; continue; }
       media.push({
         id: row.id,
@@ -149,15 +109,9 @@ return async (request: Request) => {
       });
     }
 
-    // An edit during Storage signing must not return URLs from a newer revision.
-    if (!inspectionRelease) {
-      const { data: current, error: currentError } = await admin.from("vehicle_entries")
-        .select("id,intake_revision").eq("id", entryId).eq("tenant_id", tenantId)
-        .is("deleted_at", null).neq("status", "Cancelled").maybeSingle();
-      if (currentError) throw currentError;
-      if (!current || current.intake_revision !== linkRevision) return json(request, { error: "invalid_link" }, 404);
-    }
-    return json(request, { media, expires_in: 900, unavailable_count: unavailableCount });
+    const { data: current, error: currentError } = await admin.rpc("customer_vehicle_portal_media_scope", { p_token: token, p_session: session, p_entry_id: requestedEntry });
+    if (currentError || !current || current.revision !== linkRevision) return json(request, { error: "portal_access_required" }, 403);
+    return json(request, { media, revision: linkRevision, expires_in: 60, unavailable_count: unavailableCount });
   } catch (error) {
     console.error("vehicle-entry-signature-media", error instanceof Error ? error.message : "unknown_error");
     return json(request, { error: "media_unavailable" }, 500);

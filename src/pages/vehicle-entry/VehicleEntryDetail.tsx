@@ -1,8 +1,9 @@
+import { vehicleRunningStatusLabel } from "@/lib/vehicleRunningStatus";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ClipboardList, Copy, Download, Edit, ExternalLink, FileText, Link2, Loader2, MessageCircle, Printer, QrCode, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowRight, ClipboardList, Download, Edit, ExternalLink, FileText, Loader2, Printer, QrCode, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,6 @@ import { getTemplateSettingsAsync } from "@/lib/pdfGenerator";
 import {
   buildVehicleEntryHtml,
   currentVehicleEntrySignatures,
-  createVehicleEntryCustomerSignatureLink,
   getVehicleEntryPresence,
   getVehicleEntryVisitPurpose,
   getVehicleEntry,
@@ -26,6 +26,7 @@ import { VehicleVisitControlPanel } from "./VehicleVisitControlPanel";
 import { toast } from "sonner";
 import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 import VehicleIntakeReceiptPanel from "@/components/vehicle-entry/VehicleIntakeReceiptPanel";
+import VehicleCustomerPortalPanel from "@/components/vehicle-entry/VehicleCustomerPortalPanel";
 import { getIntakeReceiptContext, getIntakeReceiptDocument } from "@/lib/vehicleIntakeReceipt";
 
 function fmtDateTime(value?: string | null) {
@@ -51,7 +52,6 @@ export default function VehicleEntryDetail() {
   const [previewing, setPreviewing] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [printingSticker, setPrintingSticker] = useState(false);
-  const [customerSignatureLink, setCustomerSignatureLink] = useState<string | null>(null);
 
   const detail = useQuery({
     queryKey: queryKeys.vehicleEntries.detail(id),
@@ -77,15 +77,6 @@ export default function VehicleEntryDetail() {
       toast.success("تم حذف الملف من نموذج الدخول");
     },
     onError: (error: any) => toast.error(error?.message || "تعذر حذف الملف"),
-  });
-
-  const signatureLinkMutation = useMutation({
-    mutationFn: () => createVehicleEntryCustomerSignatureLink(id!),
-    onSuccess: (result) => {
-      setCustomerSignatureLink(result.url);
-      toast.success("تم إنشاء رابط توقيع العميل بصلاحية 7 أيام");
-    },
-    onError: (error: any) => toast.error(error?.message || "تعذر إنشاء رابط توقيع العميل"),
   });
 
   const entry = detail.data;
@@ -160,27 +151,6 @@ export default function VehicleEntryDetail() {
     } finally {
       setPrintingSticker(false);
     }
-  }
-
-  async function copyCustomerSignatureLink() {
-    if (!customerSignatureLink) return;
-    try {
-      await navigator.clipboard.writeText(customerSignatureLink);
-      toast.success("تم نسخ رابط التوقيع");
-    } catch {
-      toast.error("تعذر نسخ الرابط. افتحه ثم انسخه من المتصفح.");
-    }
-  }
-
-  function shareCustomerSignatureLink() {
-    if (!customerSignatureLink) return;
-    const customer = entry?.customer || entry?.customers || entry?.customer_snapshot || {};
-    const message = [
-      `مرحبًا ${customer.name || ""}`.trim(),
-      `يرجى مراجعة واعتماد نموذج دخول واستلام المركبة رقم ${entry?.entry_number || ""} بالتوقيع الإلكتروني:`,
-      customerSignatureLink,
-    ].join("\n");
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   }
 
   if (detail.isLoading) {
@@ -289,6 +259,7 @@ export default function VehicleEntryDetail() {
         {cardTitle("حالة المركبة والأضرار", "Condition & Damage")}
         <DamageMapPreview marks={damageMarks} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Info label={i18n.language.startsWith("en") ? "Running condition" : "حالة التشغيل"} value={vehicleRunningStatusLabel(entry.vehicle_condition?.running_status || entry.condition_snapshot?.running_status, i18n.language)} />
           <Info label="حالة المركبة" value={entry.vehicle_condition?.condition_description || entry.condition_snapshot?.condition_description || "—"} />
           <Info label="الأضرار الظاهرة" value={entry.vehicle_condition?.visible_damage || entry.condition_snapshot?.visible_damage || "—"} />
           <Info label="سبب الضرر/الحادث" value={entry.vehicle_condition?.incident_description || entry.condition_snapshot?.incident_description || "—"} />
@@ -362,30 +333,8 @@ export default function VehicleEntryDetail() {
           <SignatureBox label={english ? "Vehicle intake signer signature" : "توقيع العميل/المسلم"} signature={signatures.find((s: any) => s.signature_role === "delivered_by")} />
           <SignatureBox label="ختم الورشة" />
         </div>
-        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 font-bold"><Link2 size={16} /> توقيع العميل الإلكتروني</div>
-              <p className="mt-1 text-xs text-muted-foreground">رابط آمن لمرة واحدة، صالح 7 أيام. بعد التوقيع يظهر تلقائيًا هنا وفي مستند دخول المركبة.</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={() => detail.refetch()} className="gap-1.5"><RefreshCw size={14} /> تحديث الحالة</Button>
-              <Button size="sm" disabled={signatureLinkMutation.isPending || Boolean(signatures.find((s: any) => s.signature_role === "delivered_by"))} onClick={() => signatureLinkMutation.mutate()} className="gap-1.5">
-                <Link2 size={14} /> {signatureLinkMutation.isPending ? "جاري الإنشاء..." : "إنشاء رابط التوقيع"}
-              </Button>
-            </div>
-          </div>
-          {customerSignatureLink && (
-            <div className="mt-3 space-y-2">
-              <div className="break-all rounded-lg border bg-background p-2 text-xs" dir="ltr">{customerSignatureLink}</div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={copyCustomerSignatureLink} className="gap-1.5"><Copy size={14} /> نسخ الرابط</Button>
-                <Button variant="outline" size="sm" onClick={shareCustomerSignatureLink} className="gap-1.5 text-emerald-700"><MessageCircle size={14} /> إرسال واتساب</Button>
-                <Button variant="outline" size="sm" onClick={() => window.open(customerSignatureLink, "_blank", "noopener,noreferrer")} className="gap-1.5"><ExternalLink size={14} /> فتح صفحة التوقيع</Button>
-              </div>
-            </div>
-          )}
-        </div>
+        <VehicleCustomerPortalPanel entryId={entry.id} customerPhone={customer.phone}/>
+
       </Card>
 
       <Card className="p-4 space-y-3">

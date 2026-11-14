@@ -109,6 +109,7 @@ const VehicleDetail = lazy(() => import("./pages/VehicleDetail"));
 const Customers = lazy(() => import("./pages/Customers"));
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const UnifiedVehicleCustomerPortal = lazy(() => import("./pages/public/UnifiedVehicleCustomerPortal"));
 const CustomerPortal = lazy(() => import("./pages/CustomerPortal"));
 const TrashPage = lazy(() => import("./pages/TrashPage"));
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
@@ -275,6 +276,7 @@ const App = () => (
             <Route path="/privacy" element={<Navigate to="/privacy-policy" replace />} />
             <Route path="/track/:id" element={<LegacyPortalRedirect param="id" />} />
             <Route path="/invoice/view/:token" element={<InvoicePublicView />} />
+            <Route path="/customer/vehicle/:token" element={<UnifiedVehicleCustomerPortal />} />
             <Route path="/p/:token" element={<CustomerPortal />} />
             <Route path="/v/:plate" element={<LegacyPortalRedirect param="plate" />} />
             <Route path="/c/approve/:token" element={<SupplementApprovalPage />} />

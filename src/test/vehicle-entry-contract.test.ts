@@ -252,31 +252,32 @@ describe("vehicle entry receipt contract", () => {
 
     expect(app).toContain('import("./pages/public/VehicleEntrySignPage")');
     expect(app).toContain('path="/vehicle-entry/sign/:token"');
-    expect(publicPage).toContain("get_vehicle_entry_for_customer_signature");
-    expect(publicPage).toContain("submit_vehicle_entry_customer_signature");
-    expect(publicPage).toContain("I have reviewed the vehicle details and declaration");
-    expect(detail).toContain("إنشاء رابط التوقيع");
-    expect(detail).toContain("إرسال واتساب");
+    expect(publicPage).toContain("LegacyUnifiedPortalRedirect");
+    expect(publicPage).not.toContain("get_vehicle_entry_for_customer_signature");
+    expect(read("src/lib/unifiedVehiclePortal.ts")).toContain("customer_vehicle_portal_sign");
+    expect(read("src/components/LegacyUnifiedPortalRedirect.tsx")).toContain("customer_vehicle_portal_resolve");
+    expect(detail).toContain("<VehicleCustomerPortalPanel");
     expect(service).toContain("createVehicleEntryCustomerSignatureLink");
     expect(realtime).toContain('vehicle_entry_signatures: ["vehicle_entries", "vehicle_360"]');
   });
 
-  it("exposes only token-scoped entry images through short-lived signed URLs", () => {
+  it("keeps media storage scoped and legacy public routes free of bearer media loaders", () => {
     const publicPage = read("src/pages/public/VehicleEntrySignPage.tsx");
     const mediaFunction = read("supabase/functions/vehicle-entry-signature-media/handler.ts");
     const config = read("supabase/config.toml");
 
-    expect(publicPage).toContain("loadVehicleSignatureMedia(token)");
+    expect(publicPage).toContain("LegacyUnifiedPortalRedirect");
+    expect(publicPage).not.toContain("loadVehicleSignatureMedia");
     expect(read("src/lib/vehicleSignatureMedia.ts")).toContain('supabase.functions.invoke("vehicle-entry-signature-media"');
     expect(read("supabase/functions/vehicle-entry-signature-media/index.ts")).toContain("Deno.serve(createSignatureMediaHandler");
-    expect(publicPage).toContain("صور المركبة عند الدخول / Entry Photos");
-    expect(publicPage).toContain('loading="lazy"');
-    expect(mediaFunction).toContain('.from("vehicle_entry_signature_links")');
-    expect(mediaFunction).toContain('.from("vehicle_entries")');
+    expect(mediaFunction).toContain('admin.rpc("customer_vehicle_portal_media_scope"');
+    expect(mediaFunction).toContain("body?.portal_token");
+    expect(mediaFunction).toContain("body?.portal_session");
+    expect(mediaFunction).not.toContain('.from("vehicle_entry_signature_links")');
     expect(mediaFunction).toContain('.from("vehicle_media")');
     expect(mediaFunction).toContain('.eq("media_type", "image")');
     expect(mediaFunction).toContain('.is("deleted_at", null)');
-    expect(mediaFunction).toContain("createSignedUrl(path, 900)");
+    expect(mediaFunction).toContain("createSignedUrl(path, 60)");
     expect(mediaFunction).toContain("path.startsWith(`${tenantId}/vehicle-entry/${entryId}/`)");
     expect(mediaFunction).not.toContain('"Access-Control-Allow-Origin": "*"');
     expect(config).toContain("[functions.vehicle-entry-signature-media]\nverify_jwt = false");

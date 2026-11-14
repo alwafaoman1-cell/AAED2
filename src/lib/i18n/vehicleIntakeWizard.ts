@@ -1,6 +1,8 @@
 import i18n from '@/i18n';
 
 const ar={
+  runningStatusRequired:"حدد هل المركبة تعمل أم لا قبل إصدار نموذج الاستلام.",
+  VEHICLE_INTAKE_RUNNING_STATUS_REQUIRED:"حدد هل المركبة تعمل أم لا قبل إصدار نموذج الاستلام.",
   saveBeforeTechnical:'احفظ تغييرات الزيارة أولًا قبل فتح مستند الإقرار الفني المنفصل.',
   sourceReview:'تعذر تأكيد روابط المطالبة أو أمر العمل. السجل يحتاج مراجعة؛ لم يُنشأ دخول جديد أو ربط تلقائي.',
   title:'دخول واستلام المركبة',editTitle:'تعديل نموذج الزيارة',step:'المرحلة {{current}} من 4',
@@ -30,6 +32,8 @@ const ar={
   VEHICLE_INTAKE_LINK_CONFLICT:'الرابط بالمطالبة أو أمر العمل يحتاج مراجعة.',VEHICLE_INTAKE_TECHNICAL_STALE:'تغير الإقرار الفني في صفحة أخرى؛ أعد فتحه قبل الحفظ.',VEHICLE_INTAKE_FORBIDDEN:'ليست لديك صلاحية حفظ هذه الزيارة.',VEHICLE_INTAKE_CLOSED:'الزيارة مغلقة؛ أنشئ زيارة جديدة بدل تغيير تاريخها.',
 };
 const en:Record<keyof typeof ar,string|string[]>={
+  runningStatusRequired:"Select whether the vehicle runs before issuing the intake form.",
+  VEHICLE_INTAKE_RUNNING_STATUS_REQUIRED:"Select whether the vehicle runs before issuing the intake form.",
   saveBeforeTechnical:'Save the visit changes before opening the separate technical declaration document.',
   sourceReview:'The claim or work order links could not be confirmed. Review is required; no new entry or automatic link was created.',
   title:'Vehicle Entry & Receipt',editTitle:'Edit visit form',step:'Step {{current}} of 4',stages:['Service and visit type','Customer and vehicle','Inspection and technical declaration','Photos and review'],

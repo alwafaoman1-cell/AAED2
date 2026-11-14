@@ -12,5 +12,10 @@ describe("confirmed historical arrival with unknown clock", () => {
     expect(vehicleEntryArrivalTime({ arrival_time: "08:42:17" }, "en")).toBe("08:42");
     expect(vehicleEntryArrivalTime({ ...entry, vehicle_condition: { arrival_time_precision: "minute" } }, "en")).toBe("11:10");
   });
+  it("can print observed seconds without exposing database fractional precision", () => {
+    expect(vehicleEntryArrivalTime({ arrival_time: "18:37:42.872092" }, "en", "second")).toBe("18:37:42");
+    expect(vehicleEntryArrivalTime(entry, "en", "second")).toBe("Time not recorded");
+    expect(vehicleEntryArrivalTime({}, "en", "second")).toBe("");
+  });
   it("does not invent a missing clock", () => expect(vehicleEntryArrivalTime({}, "en")).toBe(""));
 });

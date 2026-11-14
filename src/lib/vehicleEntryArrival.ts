@@ -6,8 +6,8 @@ i18n.addResourceBundle("en", "vehicleEntryArrival", { unknownTime: "Time not rec
 type Arrival = { arrival_time?: unknown; vehicle_condition?: { arrival_time_precision?: unknown } };
 
 /** Retain the legacy clock for audit, never present it as an observed arrival. */
-export function vehicleEntryArrivalTime(entry: Arrival, language = i18n.language): string {
+export function vehicleEntryArrivalTime(entry: Arrival, language = i18n.language, precision: "minute" | "second" = "minute"): string {
   return entry.vehicle_condition?.arrival_time_precision === "date_only"
     ? i18n.getFixedT(language, "vehicleEntryArrival")("unknownTime")
-    : String(entry.arrival_time || "").slice(0, 5);
+    : String(entry.arrival_time || "").slice(0, precision === "second" ? 8 : 5);
 }

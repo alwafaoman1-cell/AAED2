@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,10 @@ import {
 import { useFeatures } from "@/contexts/featureContextState";
 import { toE164 } from "@/lib/phoneUtils";
 import { useSystemPreferences } from "@/lib/systemPreferences";
-import { buildCustomerPortalUrl, buildWorkOrderSignatureUrl } from "@/lib/customerPortalTokens";
+import { buildCustomerPortalUrl } from "@/lib/customerPortalTokens";
+import { buildCustomerPortalInvitation } from "@/lib/customerPortalInvitation";
+import { useWorkOrderPortalToken } from "@/hooks/useWorkOrderPortalToken";
+import i18n from "@/i18n";
 
 interface Props {
   order: WorkOrder | null;
@@ -55,24 +59,11 @@ function appOrigin() {
 }
 
 function buildTrackingLinkMessage(o: WorkOrder) {
-  const link = o.trackingToken ? buildCustomerPortalUrl(o.trackingToken) : "";
-  return [
-    `مرحباً ${o.customer || ""}`,
-    `يمكنك متابعة حالة السيارة ${o.plate || ""} من الرابط التالي:`,
-    link || "سيتم إنشاء رابط المتابعة بعد حفظ رمز التتبع.",
-    "مع تحيات مركز الوفاء.",
-  ].join("\n");
+  return buildCustomerPortalInvitation({ customerName: o.customer, vehicleMake: o.vehicleType,
+    vehicleModel: o.model, vehicleYear: o.year, url: buildCustomerPortalUrl(o.trackingToken) }, i18n.language.startsWith("en") ? "en" : "ar");
 }
 
-function buildSignatureLinkMessage(o: WorkOrder) {
-  const link = o.trackingToken ? buildWorkOrderSignatureUrl(o.trackingToken) : "";
-  return [
-    `مرحباً ${o.customer || ""}`,
-    "يرجى مراجعة الأعمال المطلوبة واعتمادها بالتوقيع من الرابط التالي:",
-    link || "سيتم إنشاء رابط التوقيع بعد توفر رمز العميل.",
-    "شكراً لتعاونكم.",
-  ].join("\n");
-}
+const buildSignatureLinkMessage = buildTrackingLinkMessage;
 
 function buildInvoiceLinkMessage(o: WorkOrder) {
   const link = `${appOrigin()}/sales/invoices/new?fromWorkOrder=${encodeURIComponent(o.id)}`;
@@ -102,6 +93,8 @@ const ALL_TEMPLATES = [...TEMPLATES, ...LINK_TEMPLATES];
 export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab = "templates" }: Props) {
   const { isEnabled } = useFeatures();
   const { preferences } = useSystemPreferences();
+  const { i18n: translation } = useTranslation(); const en = translation.language.startsWith("en");
+  const portal = useWorkOrderPortalToken(order?.cloudId || "");
   const [tab, setTab] = useState<string>(defaultTab);
   const [activeTpl, setActiveTpl] = useState<TemplateKey>("parts_request");
   const [draft, setDraft] = useState("");
@@ -118,8 +111,9 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
   useEffect(() => {
     if (!order) return;
     const tpl = ALL_TEMPLATES.find((t) => t.key === activeTpl);
-    if (tpl) setDraft(tpl.build(order));
-  }, [order, activeTpl, open]);
+    // Legacy trackingToken is never a fallback for the protected portal.
+    if (tpl) setDraft(tpl.build(activeTpl === "tracking_link" || activeTpl === "signature_link" ? { ...order, trackingToken: portal.data?.token } : order));
+  }, [order, activeTpl, open, portal.data?.token, translation.language]);
 
   useEffect(() => {
     if (!order) return;
@@ -154,6 +148,8 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
   const partsForSupplier: NeededPart[] = (order.partsNeeded || []).filter((p) => selectedParts.has(p.id));
   const normalizedRecipientPhone = toE164(recipientPhone || order.phone, preferences.defaultCountryCode);
   const whatsappEnabled = isEnabled("whatsapp");
+  const isPortalTemplate = activeTpl === "tracking_link" || activeTpl === "signature_link";
+  const preparePortalLabel = portal.creating ? (en ? "Preparing…" : "جارٍ التجهيز…") : (en ? "Prepare customer portal link" : "تجهيز رابط بوابة العميل");
   const filteredSuppliers = suppliers.filter(
     (s) => !supplierSearch.trim() || s.name.includes(supplierSearch) || (s.notes || "").includes(supplierSearch)
   );
@@ -180,6 +176,14 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
     }
     const tpl = ALL_TEMPLATES.find((t) => t.key === activeTpl);
     try {
+      if (isPortalTemplate) {
+        const result = await portal.refetch(); const info = result.data;
+        if (result.error || !info?.token || info.enabled === false || (info.expires_at && !(Date.parse(info.expires_at) > Date.now()))
+          || !draft.includes(buildCustomerPortalUrl(info.token))) {
+          toast.error(en ? "Prepare and review the active customer portal link before sending" : "جهّز رابط بوابة العميل المتاح وراجعه قبل الإرسال");
+          return;
+        }
+      }
       await sendWhatsAppAndLog({
         message: draft,
         phone: normalizedRecipientPhone,
@@ -192,6 +196,14 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
     } catch (error: any) {
       toast.error(error?.message || "فشل إرسال الرسالة");
     }
+  }
+
+  async function handlePreparePortal() {
+    try {
+      const info = await portal.ensure();
+      if (info.enabled === false || (info.expires_at && !(Date.parse(info.expires_at) > Date.now()))) throw new Error(en ? "The customer portal is unavailable" : "بوابة العميل غير متاحة");
+      setDraft(buildTrackingLinkMessage({ ...order!, trackingToken: info.token }));
+    } catch (error) { toast.error(error instanceof Error ? error.message : en ? "Customer portal could not be prepared" : "تعذر تجهيز بوابة العميل"); }
   }
 
   async function handleSendToSuppliers() {
@@ -289,6 +301,7 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
 
           {/* ===== Templates ===== */}
           <TabsContent value="templates" className="flex-1 overflow-y-auto mt-3 space-y-3">
+            {isPortalTemplate && <Button type="button" variant="outline" disabled={!order.cloudId || portal.creating} onClick={handlePreparePortal}>{preparePortalLabel}</Button>}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
               {ALL_TEMPLATES.map((t) => {
                 const Icon = t.icon;
@@ -393,7 +406,7 @@ export default function WhatsAppCenter({ order, open, onOpenChange, defaultTab =
 
             <Button
               onClick={handleSendTemplate}
-              disabled={!whatsappEnabled || !normalizedRecipientPhone || !draft.trim()}
+              disabled={!whatsappEnabled || !normalizedRecipientPhone || !draft.trim() || (isPortalTemplate && !portal.data?.token)}
               className="w-full gap-2 gradient-gold text-primary-foreground disabled:opacity-50"
             >
               <Send size={14} /> إرسال عبر Edge Function وتسجيل الرسالة

@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
 import { supabase } from "@/integrations/supabase/client";
+import { buildUnifiedVehiclePortalUrl, ensureVehicleCustomerPortal } from "@/lib/unifiedVehiclePortal";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { getTemplateSettings } from "@/lib/pdfGenerator";
 import { generatePdfFromHtml, DEFAULT_MARGINS } from "@/lib/htmlToPdf";
@@ -201,11 +202,10 @@ export async function createInspectionReleaseLink(releaseId: string): Promise<{ 
   if (!/^[a-f0-9]{64}$/.test(response?.token||'')||response.release_id!==releaseId||!response.expires_at||!(new Date(response.expires_at).getTime()>Date.now())) throw new Error("تعذر إنشاء رابط التوقيع");
   const verified=await getInspectionReleaseById(releaseId);
   if(verified.tenant_id!==before.tenant_id||verified.vehicle_entry_id!==before.vehicle_entry_id||verified.status!=='awaiting_signature')throw new Error('INSPECTION_RELEASE_LINK_UNCONFIRMED');
-  const {data:publicRecord,error:publicError}=await supabase.rpc('get_vehicle_inspection_release_for_signature' as any,{p_token:response.token} as any);
-  if(publicError)throw publicError;
-  if(!(publicRecord as any)|| (publicRecord as any).error ||(publicRecord as any).release_number!==verified.release_number||(publicRecord as any).signed!==false)throw new Error('INSPECTION_RELEASE_LINK_UNCONFIRMED');
+  const portal = await ensureVehicleCustomerPortal(verified.vehicle_entry_id);
+  if (!portal?.token || portal.enabled === false || (portal.expires_at && !(Date.parse(portal.expires_at) > Date.now()))) throw new Error("CUSTOMER_PORTAL_UNAVAILABLE");
   return {
-    url: `${window.location.origin}/vehicle-entry/inspection-release/sign/${encodeURIComponent(response.token)}`,
+    url: buildUnifiedVehiclePortalUrl(portal.token),
     expires_at: response.expires_at,
   };
 }
@@ -217,7 +217,10 @@ export async function createInspectionReleaseViewLink(releaseId: string): Promis
   if(error) throw error;
   const response=data as any;
   if(response?.view_only!==true || response.release_id!==releaseId || !/^[a-f0-9]{64}$/.test(response.token || "") || !response.expires_at) throw new Error("INSPECTION_RELEASE_VIEW_LINK_UNCONFIRMED");
-  return {url:`${window.location.origin}/vehicle-entry/inspection-release/sign/${encodeURIComponent(response.token)}`,expires_at:response.expires_at};
+  const release = await getInspectionReleaseById(releaseId);
+  const portal = await ensureVehicleCustomerPortal(release.vehicle_entry_id);
+  if (!portal?.token || portal.enabled === false || (portal.expires_at && !(Date.parse(portal.expires_at) > Date.now()))) throw new Error("CUSTOMER_PORTAL_UNAVAILABLE");
+  return {url:buildUnifiedVehiclePortalUrl(portal.token),expires_at:response.expires_at};
 }
 
 export async function reopenInspectionRelease(releaseId: string): Promise<InspectionReleaseRecord> {

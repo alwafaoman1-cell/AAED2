@@ -1,3 +1,5 @@
+import { VehicleReviewWorkflowPanel } from "@/components/vehicle-entry/VehicleReviewWorkflowPanel";
+import { isVehicleReviewVisit } from "@/lib/vehicleReviewVisit";
 import { VehicleReviewReturnAction } from "@/components/vehicle-entry/VehicleReviewReturnAction";
 import { useCallback,useEffect,useRef,useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -115,13 +117,13 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
   // A list action only opens the canonical UI after a fresh read. Never submit
   // a transition, approval, arrival or handover from an effect or a stale card.
   useEffect(()=>{
-    if(!initialAction||initialActionHandled.current||!visit||detail.isFetching||detail.isError||supervisor)return;
+    if(isVehicleReviewVisit(entry)||!initialAction||initialActionHandled.current||!visit||detail.isFetching||detail.isError||supervisor)return;
     initialActionHandled.current=true;
     if(visit.reviewReason||visit.operationalStage!==initialAction.expectedStage)return;
     if(initialAction.intent==='arrival')locationActions.current?.openArrival();
     else if(initialAction.intent==='approval')inlineActions.current?.openApproval();
     else if(canAdvance)handleNext();
-  },[initialAction,visit,detail.isFetching,detail.isError,supervisor,canAdvance,handleNext]);
+  },[entry,initialAction,visit,detail.isFetching,detail.isError,supervisor,canAdvance,handleNext]);
   const reverseBlocker = getVehicleVisitReverseBlocker(previous, visit);
   const prerequisiteHref = supervisor ? `/supervisor/entry/${encodeURIComponent(entryId)}/complete` : nextBlocker === "claimApprovalRequired" && claim?.id ? `/insurance/${claim.id}`
     : ["cashWorkOrderRequired", "workOrderRequired", "workshopPresenceRequired"].includes(nextBlocker || "") ? `/vehicle-entry/${entryId}`
@@ -231,6 +233,8 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
 
   if (detail.isLoading) return <Card className="p-4 text-sm text-muted-foreground"><Loader2 className="me-2 inline h-4 w-4 animate-spin" />{t("vehicleEntry.loading")}</Card>;
   if (detail.isError || !visit) return <Card className="p-4 text-sm text-destructive">{t("vehicleEntry.loadError")}: {(detail.error as Error)?.message}</Card>;
+
+  if (isVehicleReviewVisit(entry)) return <VehicleReviewWorkflowPanel visit={visit} onChanged={refreshVisit}/>;
 
   const stageLabel = (stage: VisitStage | null | undefined) => stage ? t(`vehicleVisit.${stage}`) : "—";
   const presenceLabel = (presence: string | null | undefined) => presence === "داخل الورشة" || presence === "in_workshop"

@@ -19,3 +19,14 @@ export async function loadVehicleSignatureMedia(token: string, purpose?: "inspec
     return { data, error: response.ok ? null : new Error(data.error || "media_unavailable") };
   } catch (error) { return { data: null, error }; }
 }
+
+/** Session-bound media for the unified portal; legacy bearer tokens are rejected. */
+export async function loadUnifiedVehiclePortalMedia(token: string, session: string, entryId: string, revision?: number) {
+ const body = { portal_token: token, portal_session: session, entry_id: entryId, ...(revision == null ? {} : { revision }) };
+ const localUrl = localSignatureMediaUrl(import.meta.env.VITE_VEHICLE_SIGNATURE_MEDIA_LOCAL_URL, import.meta.env.VITE_SUPABASE_URL, window.location.hostname);
+ if (!localUrl) return supabase.functions.invoke("vehicle-entry-signature-media", { body });
+ try {
+  const response = await fetch(localUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "omit", cache: "no-store" });
+  const data = await response.json(); return { data, error: response.ok ? null : new Error(data.error || "media_unavailable") };
+ } catch (error) { return { data: null, error }; }
+}
