@@ -43,6 +43,13 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "إزالة المرفق": "Remove attachment",
+  "إزالة مرفق هوية المستلم": "Remove recipient ID attachment",
+  "فتح ملف المركبة": "Open vehicle file",
+  "المزيد": "More",
+  "شروط وملاحظات التقدير": "Estimate terms and notes",
+  "حذف قطعة الغيار": "Remove required part",
+  "التالي: التقدير": "Next: Estimate",
   "تحقق من الوصل": "Verify receipt",
   "إغلاق الكاميرا": "Close camera",
   "معاينة / تنزيل / طباعة الوصل": "Preview / download / print receipt",

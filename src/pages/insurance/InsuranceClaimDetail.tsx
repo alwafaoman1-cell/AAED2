@@ -6,7 +6,7 @@ import {
   ArrowRight, Save, FileText, Trash2, Upload, X, Plus, Printer, Camera,
   FileUp, Car, User, Building2, AlertCircle, Shield, ClipboardCheck,
   Calculator, CheckCircle2, Wrench, ArrowLeftRight, Search, Link as LinkIcon, Sparkles, Phone,
-  DollarSign, PackageCheck, Download, ChevronDown, Undo2, Pencil, Copy,
+  DollarSign, PackageCheck, Download, ChevronDown, Undo2, Pencil, Copy, MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,10 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import ClaimWorkspaceNavigation from "@/components/insurance/ClaimWorkspaceNavigation";
+import ClaimAmountSummary from "@/components/insurance/ClaimAmountSummary";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
@@ -162,6 +165,9 @@ async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
 
 export default function InsuranceClaimDetail() {
   const { t } = useTranslation();
+  const isEnglish = i18n.language.startsWith("en");
+  const workspaceText = (ar: string, en: string) => isEnglish ? en : ar;
+  const amountText = (value: number | null | undefined) => value != null && Number.isFinite(value) ? `${value.toFixed(3)} OMR` : "—";
   const { hasRole } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
@@ -179,6 +185,8 @@ export default function InsuranceClaimDetail() {
 
   // ── Core state ──
   const [tab, setTab] = useState<string>("inspect");
+  const [detailsOpen, setDetailsOpen] = useState(isNew);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   // Insurance company (primary "customer"/payer)
   const [company, setCompany] = useState("");
@@ -279,7 +287,7 @@ export default function InsuranceClaimDetail() {
     queryClient.invalidateQueries({ queryKey: queryKeys.claimDocuments(id) });
     queryClient.invalidateQueries({ queryKey: queryKeys.insuranceClaims.detail(id) });
   };
-  const [insuranceSectionOpen, setInsuranceSectionOpen] = useState(false);
+  const [insuranceSectionOpen, setInsuranceSectionOpen] = useState(isNew);
   const [ownerSectionOpen, setOwnerSectionOpen] = useState(false);
   const [vehicleSectionOpen, setVehicleSectionOpen] = useState(false);
 
@@ -1155,8 +1163,10 @@ export default function InsuranceClaimDetail() {
         await writeClaimAudit("claim_details_saved", {
           estimate_date: claimDetails.estimate_date || null,
         });
+        return true;
       } catch (e: any) {
         toast.error(e?.message || "فشل حفظ المطالبة");
+        return false;
       }
     }
   };
@@ -1845,7 +1855,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     queryFn: async () => {
       const { data } = await supabase
         .from("insurance_invoices" as any)
-        .select("id,invoice_number,total,paid_amount,settlement_discount_amount,status")
+        .select("id,invoice_number,total,subtotal,vat,paid_amount,settlement_discount_amount,status")
         .eq("claim_id", existing!.id)
         .neq("status", "cancelled")
         .maybeSingle();
@@ -2052,6 +2062,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       ownerPhone !== (existing.vehicle_owner_phone ?? ""),
       String(parseMoneyInput(estimatedCost) || 0) !== String(Number(existing.estimated_cost ?? existing.estimated_amount ?? 0) || 0),
       String(parseMoneyInput(approvedAmount) || 0) !== String(Number(existing.approved_amount ?? 0) || 0),
+      estimationType !== normalizeClaimEstimationType((existing as any).estimation_type),
+      JSON.stringify(uplItems) !== JSON.stringify((existing as any).upl_items ?? []),
+      JSON.stringify(neededParts) !== JSON.stringify(existing.needed_parts ?? []),
       vehicleMake !== ((existing as any).vehicle_make ?? ""),
       vehicleModel !== ((existing as any).vehicle_model ?? ""),
       vehiclePlate !== ((existing as any).vehicle_plate ?? ""),
@@ -2066,6 +2079,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
   }, [
     existing, isNew, company, companyId, insuranceEmployeeId, claimNumber, customerId, vehicleId,
     ownerName, ownerPhone, estimatedCost, approvedAmount, vehicleMake, vehicleModel, vehiclePlate,
+    estimationType, uplItems, neededParts,
     vehicleYear, vehicleColor, vehicleVin, estimateDate, workshopArrivalDate, workStartedAt,
     buildNotesWithLpo,
   ]);
@@ -2407,11 +2421,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
   // Status pill
   const statusMeta: Record<string, { label: string; cls: string }> = {
-    pending: { label: "بانتظار الموافقة", cls: "bg-warning/15 text-warning" },
-    approved: { label: "تمت الموافقة", cls: "bg-success/15 text-success" },
-    rejected: { label: "مرفوضة", cls: "bg-destructive/15 text-destructive" },
-    paid: { label: "مدفوعة", cls: "bg-info/15 text-info" },
-    cancelled: { label: "ملغاة", cls: "bg-muted text-muted-foreground line-through" },
+    pending: { label: workspaceText("بانتظار الموافقة", "Awaiting approval"), cls: "bg-warning/15 text-warning" },
+    approved: { label: workspaceText("تمت الموافقة", "Approved"), cls: "bg-success/15 text-success" },
+    rejected: { label: workspaceText("مرفوضة", "Rejected"), cls: "bg-destructive/15 text-destructive" },
+    paid: { label: workspaceText("مدفوعة", "Paid"), cls: "bg-info/15 text-info" },
+    cancelled: { label: workspaceText("ملغاة", "Cancelled"), cls: "bg-muted text-muted-foreground line-through" },
   };
   const invoiceTotal = Number((activeInvoice as any)?.total || 0);
   const paidTotal = (activeInvoice as any)?.paid_amount != null
@@ -2438,7 +2452,13 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             ? "Delivered - Awaiting Insurance Payment"
             : "Delivered - Invoice Issued"
     : "";
-  const isApprovedClaim = status === "approved";
+  const financialStatusText = ({
+    "Closed - Paid": workspaceText("مسلّمة ومدفوعة", "Delivered and paid"),
+    "Delivered - Waiting LPO": workspaceText("مسلّمة وبانتظار LPO", "Delivered · awaiting LPO"),
+    "Delivered - LPO Received": workspaceText("مسلّمة وLPO مستلم", "Delivered · LPO received"),
+    "Delivered - Awaiting Insurance Payment": workspaceText("مسلّمة وبانتظار دفع التأمين", "Delivered · awaiting insurance payment"),
+    "Delivered - Invoice Issued": workspaceText("مسلّمة والفاتورة صادرة", "Delivered · invoice issued"),
+  } as Record<string, string>)[insuranceFinancialStatus] || insuranceFinancialStatus;
   const auditActionLabels: Record<string, string> = {
     claim_details_saved: "تم حفظ بيانات المطالبة",
     claim_workflow_dates_updated: "تم تحديث تواريخ سير العملية",
@@ -2506,301 +2526,174 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
     }));
   };
 
-  return (
-    <div className="space-y-5 pb-12" dir="rtl">
-      {/* ── Header ── */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => {
-              if (confirmLeaveIfDirty()) smartBack(navigate, "/insurance");
-            }}
-          >
-            <ArrowRight size={18} />
-          </Button>
+  // LPO metadata is edited in its own fields and reattached by the existing
+  // save serializer; keep those internal markers out of the user's notes box.
+  const displayEstimateNotes = (notes || "").replace(/\[(?:LPO|LPO_DATE|LPO_AMOUNT|LPO_NOTE):[^\]]+\]\n?/g, "");
+  const lpoInvoiceSection = (
+      <Card className="min-w-0 p-4 space-y-3 border-primary/20">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Shield className="text-primary" size={24} />
-              {isNew ? "مطالبة تأمين جديدة" : `مطالبة ${claimNumber || "..."}`}
-            </h1>
-            <p className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
-              <Building2 size={12} /> {company || "—"}
-              {!isNew && (
-                <>
-                  <span className="opacity-50">•</span>
-                  <Badge className={statusMeta[status].cls}>{statusMeta[status].label}</Badge>
-                  <ClaimEstimateStatusBadge claim={existing} />
-                </>
-              )}
-              {!isNew && (existing as any)?.delivered_at && (
-                <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 border-0 shadow-sm">
-                  <PackageCheck size={11} /> تم التسليم • {new Date((existing as any).delivered_at).toLocaleDateString("en-GB")}
-                </Badge>
-              )}
-              {insuranceFinancialStatus && (
-                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
-                  {insuranceFinancialStatus}
-                </Badge>
-              )}
-            </p>
+            <div className="flex items-center gap-2 text-sm font-bold text-primary">
+              <FileUp size={16} /> LPO / أمر الشراء من شركة التأمين
+            </div>
+            <p className="text-xs text-muted-foreground">سجل بيانات LPO ثم أنشئ فاتورة التأمين الضريبية من نفس القسم.</p>
+          </div>
+          <Badge variant={hasRegisteredLpo ? "default" : "outline"}>
+            {hasRegisteredLpo ? "LPO مسجل" : "بانتظار LPO"}
+          </Badge>
+        </div>
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">رقم LPO</Label>
+            <Input ref={lpoNumberRef} value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">تاريخ LPO</Label>
+            <Input ref={lpoDateRef} type="date" value={lpoDate} onChange={(e) => setLpoDate(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">مبلغ LPO</Label>
+            <Input ref={lpoAmountRef} type="text" inputMode="decimal" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">تاريخ فاتورة التأمين</Label>
+            <Select value={invoiceDateMode} onValueChange={(value) => setInvoiceDateMode(value as "lpo" | "lpo_plus_one" | "custom")}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lpo">نفس تاريخ LPO</SelectItem>
+                <SelectItem value="lpo_plus_one">اليوم التالي لـ LPO</SelectItem>
+                <SelectItem value="custom">تاريخ مخصص</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {invoiceDateMode === "custom" && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">التاريخ المخصص</Label>
+              <Input type="date" value={customInvoiceDate} onChange={(e) => setCustomInvoiceDate(e.target.value)} />
+            </div>
+          )}
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label className="text-xs">ملاحظة LPO</Label>
+            <Input ref={lpoNoteRef} value={lpoNote} onChange={(e) => setLpoNote(e.target.value)} placeholder="ملاحظة داخلية اختيارية" />
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {!isNew && (
-            <Button
-              variant="outline"
-              onClick={() => navigate(`/insurance/${id}/archive`)}
-              className="gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-              title="أرشيف المطالبة (للعرض فقط)"
-            >
-              <FolderArchive size={16} /> الأرشيف
+        <div className="flex flex-wrap justify-end gap-2 border-t pt-2">
+          <TemplatePicker docType="insurance_tax_invoice" size="sm" />
+          <Button onClick={async () => { if (await handleSave()) await generateTaxInvoice(); }} disabled={isNew || updateClaim.isPending || !canIssueTaxInvoice || hasActiveInvoice} className="min-h-11 gap-2 whitespace-normal">
+            <FileText size={16} /> إنشاء الفاتورة الضريبية
+          </Button>
+          {activeInvoice && (
+            <Button variant="outline" onClick={() => navigate(`/insurance/accounting?invoice=${(activeInvoice as any).id || ""}`)} className="min-h-11 gap-2 whitespace-normal">
+              <FileText size={16} /> فتح الفاتورة
             </Button>
           )}
-          {!isNew && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowEstimateTerms(true)}
-              className="gap-1 text-xs text-muted-foreground hover:text-primary"
-              title="تحرير شروط/ملاحظات تقدير الإصلاح"
-            >
-              <FileText size={14} /> شروط التقدير
-            </Button>
-          )}
-          {!isNew && status !== "cancelled" && status !== "paid" && (
-            <Button
-              variant="outline"
-              onClick={() => setShowCancelDialog(true)}
-              className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
-            >
-              <XCircle size={16} /> إغلاق/إلغاء
-            </Button>
-          )}
-          {!isNew && status === "cancelled" && !(existing as any)?.deleted_at && (
-            <Button
-              variant="outline"
-              onClick={() => setShowReopenClaimDialog(true)}
-              className="gap-2 border-emerald-500/50 text-emerald-700 hover:bg-emerald-50"
-            >
-              <Undo2 size={16} /> إعادة المطالبة
-            </Button>
-          )}
-          {!isNew && (
-            <Can module="Insurance/Claims" action="Delete">
-              <Button variant="ghost" size="icon" className="text-destructive" onClick={handleDelete}>
-                <Trash2 size={16} />
-              </Button>
-            </Can>
-          )}
-
         </div>
+      </Card>
+  );
+
+  return (
+    <div className="min-w-0 space-y-4 pb-12" dir={isEnglish ? "ltr" : "rtl"}>
+      {/* ── Unified Claim Management Center ── */}
+      <Card className="min-w-0 overflow-hidden border-primary/20">
+        <div className="flex items-start gap-3 border-b bg-primary/5 p-4 sm:p-5">
+          <Button variant="ghost" size="icon" className="h-11 w-11 shrink-0" aria-label={workspaceText("رجوع", "Back")} onClick={() => { if (confirmLeaveIfDirty()) smartBack(navigate, "/insurance"); }}>
+            <ArrowRight size={18} className={isEnglish ? "rotate-180" : ""} />
+          </Button>
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="text-xs font-semibold text-primary">{workspaceText("مركز إدارة المطالبة", "Claim Management Center")}</div>
+            <h1 className="flex min-w-0 items-center gap-2 text-xl font-bold sm:text-2xl">
+              <Shield size={22} className="shrink-0 text-primary" />
+              <span className="break-words">{isNew ? workspaceText("مطالبة تأمين جديدة", "New insurance claim") : claimNumber || "—"}</span>
+            </h1>
+            {!isNew && <div className="flex flex-wrap items-center gap-2">
+              <Badge className={statusMeta[status]?.cls}>{statusMeta[status]?.label || status}</Badge>
+              <ClaimEstimateStatusBadge claim={existing} compact />
+              {isDeliveredClaim && <Badge className="gap-1 border-0 bg-emerald-600 text-white"><PackageCheck size={12} />{workspaceText("تم التسليم", "Delivered")} · {formatDateLatin((existing as any)?.delivered_at)}</Badge>}
+              {isReadyForDelivery && <Badge variant="outline" className="border-emerald-300 text-emerald-700">{workspaceText("جاهزة للتسليم", "Ready for delivery")}</Badge>}
+              {insuranceFinancialStatus && <Badge variant="outline" className="whitespace-normal border-amber-300 text-amber-700">{financialStatusText}</Badge>}
+            </div>}
+          </div>
+        </div>
+        {!isNew && <div className="space-y-4 p-4 sm:p-5">
+          <div className="flex min-w-0 items-start gap-3">
+            <VehicleAvatar
+              size="lg"
+              vehicleId={vehicleId || (vehicle as any)?.id || (existing as any)?.vehicle_id}
+              tenantId={(existing as any)?.tenant_id}
+              claimId={id}
+              workOrderId={linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id}
+              imageUrl={(vehicle as any)?.vehicle_thumbnail_url || (vehicle as any)?.vehicle_cover_image_url}
+              fallbackPhotos={damagePhotos}
+              label={`${vehicle?.brand || vehicleMake} ${vehicle?.model || vehicleModel}`.trim() || claimNumber}
+            />
+            <div className="min-w-0 flex-1 space-y-1">
+              <h2 className="break-words font-semibold">{vehicle?.brand || vehicleMake || "—"} {vehicle?.model || vehicleModel || ""}</h2>
+              <p className="break-all text-start font-mono text-sm" dir="ltr">{vehicle?.plate_number || vehiclePlate || "—"}</p>
+              <p className="break-all text-xs text-muted-foreground" dir="ltr">VIN: {(vehicle as any)?.vin_number || vehicleVin || "—"}</p>
+            </div>
+            {claimCopyReference && <Button type="button" variant="outline" size="icon" className="h-11 w-11 shrink-0" title={claimCopyReference} onClick={() => void copyClaimReference()} aria-label={workspaceText("نسخ بيانات المطالبة والمركبة", "Copy claim and vehicle reference")}><Copy size={15} /></Button>}
+          </div>
+          <dl className="grid min-w-0 grid-cols-2 gap-3 rounded-lg bg-muted/30 p-3 lg:grid-cols-4">
+            <div className="min-w-0"><dt className="text-xs text-muted-foreground">{workspaceText("شركة التأمين", "Insurer")}</dt><dd className="mt-1 break-words text-sm font-medium">{company || "—"}</dd></div>
+            <div className="min-w-0"><dt className="text-xs text-muted-foreground">{workspaceText("العميل", "Customer")}</dt><dd className="mt-1 break-words text-sm font-medium">{ownerName || customer?.name || "—"}</dd></div>
+            <div className="min-w-0"><dt className="text-xs text-muted-foreground">{workspaceText("رمز العميل", "Customer code")}</dt><dd className="mt-1 break-all font-mono text-xs" dir="ltr">{displayCustomerCode(customer || (existing as any)?.customer || { id: customerId })}</dd></div>
+            <div className="min-w-0"><dt className="text-xs text-muted-foreground">{workspaceText("أمر العمل", "Work order")}</dt><dd className="mt-1 break-all font-mono text-xs" dir="ltr">{(existing as any)?.job_order?.order_number || (linkedWorkOrderId && !isUuid(linkedWorkOrderId) ? linkedWorkOrderId : hasLinkedWorkOrder ? workspaceText("مرتبط", "Linked") : "—")}</dd></div>
+          </dl>
+          <div className="flex flex-col gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 space-y-2">
+              <div className="text-xs text-muted-foreground">{workspaceText("وصول المركبة", "Vehicle arrival")}: <span className="font-medium text-foreground">{workshopArrivalDate ? formatDateLatin(workshopArrivalDate) : workspaceText("لم يُسجل بعد", "Not recorded yet")}</span></div>
+              <VehicleVisitBadge source="claim" id={id} interactive={false} />
+            </div>
+            {vehicleEntryByClaimQuery.data ? <Button variant="outline" className="min-h-11 gap-2 whitespace-normal" onClick={() => navigate(`/vehicle-entry/${vehicleEntryByClaimQuery.data.id}`)}><Car size={16} className="shrink-0" />{workspaceText("فتح ملف المركبة", "Open vehicle file")}</Button> : <Button id="claim-record-vehicle-arrival" variant="outline" className="min-h-11 gap-2 whitespace-normal" onClick={() => { setConfirmedActualArrival(false); setConfirmArrivalOpen(true); }} disabled={registeringVehicleEntry || vehicleEntryByClaimQuery.isLoading || vehicleEntryByClaimQuery.isError || status === "cancelled"}><Car size={16} className="shrink-0" />{registeringVehicleEntry ? workspaceText("جارٍ تسجيل الدخول...", "Recording arrival…") : workspaceText("تسجيل دخول المركبة", "Record vehicle arrival")}</Button>}
+          </div>
+          {vehicleEntryByClaimQuery.isError && <p role="alert" className="text-sm text-destructive">{t("vehicleVisit.entryLinkReview")}</p>}
+        </div>}
+      </Card>
+
+      <div role="region" aria-label={workspaceText("إجراءات المطالبة", "Claim actions")} className="sticky top-16 z-20 flex flex-wrap items-center gap-2 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur-sm">
+        <div className={hasUnsavedChanges ? "flex min-w-0 basis-full items-center justify-between gap-2 text-xs sm:basis-auto sm:flex-1" : "hidden sm:block sm:flex-1"}>
+          {hasUnsavedChanges && <><Badge variant="outline" className="whitespace-normal border-amber-300 bg-amber-50 text-amber-700">{workspaceText("تعديلات غير محفوظة", "Unsaved changes")}</Badge><Button variant="ghost" size="sm" className="min-h-11 whitespace-normal" onClick={resetUnsavedChanges}>{workspaceText("إلغاء التعديلات", "Discard changes")}</Button></>}
+        </div>
+        <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="min-h-11 gap-2 whitespace-normal"><Save size={16} className="shrink-0" />{workspaceText("حفظ", "Save")}</Button>
+        {!isNew && <Button variant="outline" size="sm" className="min-h-11 gap-2 whitespace-normal" onClick={() => setShowSendEmail(true)}><Send size={15} className="shrink-0" />{workspaceText("التواصل", "Communication")}</Button>}
+        {!isNew && <DropdownMenu dir={isEnglish ? "ltr" : "rtl"}>
+          <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="min-h-11 gap-2"><MoreHorizontal size={17} />{workspaceText("المزيد", "More")}</Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => navigate(`/insurance/${id}/archive`)}><FolderArchive size={16} />{workspaceText("أرشيف المطالبة", "Claim archive")}</DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => { const params = new URLSearchParams(); if (existing?.id) params.set("claim_id", existing.id); if (linkedWorkOrderId) params.set("work_order_id", linkedWorkOrderId); if (customerId) params.set("customer_id", customerId); if (vehicleId) params.set("vehicle_id", vehicleId); navigate(`/accounting/expenses?${params.toString()}`); }}><DollarSign size={16} />{workspaceText("المصروفات المرتبطة", "Related expenses")}</DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => navigate("/vehicle-entry")}><Car size={16} />{workspaceText("مركز دورة المركبة", "Vehicle cycle center")}</DropdownMenuItem>
+            {status === "cancelled" && <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => setShowCancelledHandover(true)}><FileText size={16} />{workspaceText("ورقة تسليم المطالبة الملغاة", "Cancelled claim handover")}</DropdownMenuItem>}
+            <DropdownMenuSeparator />
+            {status !== "cancelled" && status !== "paid" && <DropdownMenuItem className="min-h-11 gap-2 text-destructive" onSelect={() => setShowCancelDialog(true)}><XCircle size={16} />{workspaceText("إغلاق أو إلغاء المطالبة", "Close or cancel claim")}</DropdownMenuItem>}
+            {status === "cancelled" && !(existing as any)?.deleted_at && <DropdownMenuItem className="min-h-11 gap-2" onSelect={() => setShowReopenClaimDialog(true)}><Undo2 size={16} />{workspaceText("إعادة المطالبة", "Reopen claim")}</DropdownMenuItem>}
+            <Can module="Insurance/Claims" action="Delete"><DropdownMenuItem className="min-h-11 gap-2 text-destructive" onSelect={handleDelete}><Trash2 size={16} />{workspaceText("حذف المطالبة", "Delete claim")}</DropdownMenuItem></Can>
+          </DropdownMenuContent>
+        </DropdownMenu>}
       </div>
 
-      {/* ── Unified Claim Management Center ── */}
-      {!isNew && (
-        <Card className="p-4 bg-gradient-to-l from-primary/5 via-card to-card border-primary/20">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div className="flex items-start gap-3 min-w-0">
-              <VehicleAvatar
-                size="lg"
-                vehicleId={vehicleId || (vehicle as any)?.id || (existing as any)?.vehicle_id}
-                tenantId={(existing as any)?.tenant_id}
-                claimId={id}
-                workOrderId={linkedWorkOrderId || (existing as any)?.job_order_id || (existing as any)?.auto_job_order_id}
-                imageUrl={(vehicle as any)?.vehicle_thumbnail_url || (vehicle as any)?.vehicle_cover_image_url}
-                fallbackPhotos={damagePhotos}
-                label={`${vehicle?.brand || vehicleMake} ${vehicle?.model || vehicleModel}`.trim() || claimNumber}
-              />
-              <div className="min-w-0">
-                  <div className="text-xs font-semibold text-primary">Claim Management Center</div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-xl font-bold text-foreground">{claimNumber || "مطالبة جديدة"}</h2>
-                    <Badge className={statusMeta[status]?.cls}>{statusMeta[status]?.label || status}</Badge>
-                    <ClaimEstimateStatusBadge claim={existing} compact />
-                    <Badge variant="outline">{activeInvoice ? `فاتورة #${(activeInvoice as any).invoice_number}` : "لا توجد فاتورة"}</Badge>
-                    <Badge variant={paymentRemaining <= 0 && paidTotal > 0 ? "default" : "secondary"}>{paymentStatusLabel}</Badge>
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-foreground truncate">
-                    {vehicle?.brand || vehicleMake || "—"} {vehicle?.model || vehicleModel || ""}
-                  </div>
-                  <div className="text-xs text-muted-foreground font-mono" dir="ltr">
-                    {(vehicle?.plate_number || vehiclePlate || "—")} · {(vehicle as any)?.vin_number || vehicleVin || "VIN —"}
-                  </div>
-                  {claimCopyReference && (
-                    <div className="mt-2 flex max-w-2xl items-center gap-2 rounded-lg border border-primary/20 bg-background/80 p-2 shadow-sm">
-                      <code
-                        dir="ltr"
-                        className="min-w-0 flex-1 select-all break-all text-left text-sm font-bold tracking-wide text-foreground"
-                      >
-                        {claimCopyReference}
-                      </code>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0 gap-1.5"
-                        onClick={() => void copyClaimReference()}
-                        aria-label="نسخ بيانات المطالبة والمركبة"
-                      >
-                        <Copy size={14} /> نسخ
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:min-w-[560px]">
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="text-[11px] text-muted-foreground">شركة التأمين</div>
-                  <div className="text-sm font-semibold truncate">{company || "—"}</div>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="text-[11px] text-muted-foreground">العميل</div>
-                  <div className="text-sm font-semibold truncate">{ownerName || customer?.name || "—"}</div>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="text-[11px] text-muted-foreground">Customer Code</div>
-                  <div className="font-mono text-xs truncate" dir="ltr">
-                    {displayCustomerCode(customer || (existing as any)?.customer || { id: customerId })}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="text-[11px] text-muted-foreground">اللوحة</div>
-                  <div className="font-mono text-xs truncate" dir="ltr">{vehicle?.plate_number || vehiclePlate || "—"}</div>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="text-[11px] text-muted-foreground">أمر العمل</div>
-                  <div className="font-mono text-xs truncate" dir="ltr">{(existing as any)?.job_order?.order_number || (linkedWorkOrderId && !isUuid(linkedWorkOrderId) ? linkedWorkOrderId : hasLinkedWorkOrder ? "Linked" : "—")}</div>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="text-[11px] text-muted-foreground">المصاريف</div>
-                  <div className="font-semibold" dir="ltr">{claimExpensesTotal.toFixed(3)} OMR</div>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="text-[11px] text-muted-foreground">آخر تحديث</div>
-                  <div className="text-xs font-semibold">{formatDateLatin((existing as any)?.updated_at || new Date().toISOString())}</div>
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
-              {hasUnsavedChanges && (
-                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
-                  تعديلات غير محفوظة
-                </Badge>
-              )}
-              <Button size="sm" onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-1.5">
-                <Save size={14} /> حفظ
-              </Button>
-              {hasUnsavedChanges && (
-                <Button variant="ghost" size="sm" onClick={resetUnsavedChanges}>
-                  إلغاء التعديلات
-                </Button>
-              )}
-              <VehicleVisitBadge source="claim" id={id} />
-              {vehicleEntryByClaimQuery.data ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigate(`/vehicle-entry/${vehicleEntryByClaimQuery.data.id}`)}
-                  className="gap-1.5"
-                >
-                  <Car size={14} /> فتح كرت الدخول {vehicleEntryByClaimQuery.data.entry_number}
-                </Button>
-              ) : (
-                <Button
-                  id="claim-record-vehicle-arrival"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => { setConfirmedActualArrival(false); setConfirmArrivalOpen(true); }}
-                  disabled={registeringVehicleEntry || vehicleEntryByClaimQuery.isLoading || vehicleEntryByClaimQuery.isError || status === "cancelled"}
-                  className="gap-1.5"
-                >
-                  <Car size={14} /> {registeringVehicleEntry ? "جارٍ تسجيل الدخول..." : "تسجيل دخول المركبة"}
-                </Button>
-              )}
-              {vehicleEntryByClaimQuery.isError && <span role="alert" className="text-sm text-destructive">{t("vehicleVisit.entryLinkReview")}</span>}
-              {status === "cancelled" && (
-                <Button variant="outline" size="sm" onClick={() => setShowCancelledHandover(true)} className="gap-1.5 border-red-300 text-red-700">
-                  <FileText size={14} /> ورقة تسليم المطالبة الملغاة
-                </Button>
-              )}
-              {isAwaitingApproval && (
-                <Button size="sm" onClick={openApproveDialog} disabled={updateStatus.isPending} className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground">
-                  <CheckCircle2 size={14} /> اعتماد المطالبة
-                </Button>
-              )}
-              {isReadyForDelivery && (
-                <Button variant="outline" size="sm" onClick={() => setTab("delivery")} className="gap-1.5">
-                  <PackageCheck size={14} /> تسليم المركبة
-                </Button>
-              )}
-              <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs">
-                <Switch
-                  id="claim-estimate-badge-toggle"
-                  checked={showEstimateBadgeInPdf}
-                  onCheckedChange={setShowEstimateBadgeInPdf}
-                />
-                <Label htmlFor="claim-estimate-badge-toggle" className="cursor-pointer whitespace-nowrap text-xs">
-                  إظهار شعار UPL / Lump Sum
-                </Label>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setShowPdf(true)} className="gap-1.5">
-                <Printer size={14} /> {claimEstimateLifecycle.status === "not_created" ? "إنشاء/معاينة تقدير الإصلاح" : "فتح/تحديث تقدير الإصلاح"}
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleDownloadEstimatePdf} className="gap-1.5">
-                <Download size={14} /> تحميل تقدير الإصلاح
-              </Button>
-              {claimEstimateLifecycle.status === "modified_after_send" && (
-                <div className="basis-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                  تم تعديل بيانات التقدير بعد آخر إرسال. افتح التقدير لمراجعة النسخة الحالية ثم أعد إرسالها لشركة التأمين.
-                </div>
-              )}
-              {hasLinkedWorkOrder ? (
-                <Button variant="outline" size="sm" onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)} className="gap-1.5">
-                  <Wrench size={14} /> فتح أمر العمل
-                </Button>
-              ) : (
-                <Button variant="outline" size="sm" onClick={handleConvertToWorkOrder} disabled={!isApprovedClaim} className="gap-1.5">
-                  <Wrench size={14} /> إنشاء أمر عمل
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => setShowSendEmail(true)}
-              >
-                <Send size={14} /> إرسال رسالة
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => {
-                  const params = new URLSearchParams();
-                  if (existing?.id) params.set("claim_id", existing.id);
-                  if (linkedWorkOrderId) params.set("work_order_id", linkedWorkOrderId);
-                  if (customerId) params.set("customer_id", customerId);
-                  if (vehicleId) params.set("vehicle_id", vehicleId);
-                  navigate(`/accounting/expenses?${params.toString()}`);
-                }}
-              >
-                <DollarSign size={14} /> Expenses
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
+      {!isNew && <ClaimAmountSummary items={[
+        { label: workspaceText("تقدير الإصلاح", "Repair estimate"), value: amountText(effectiveEstimate), detail: estimationType === "upl" ? "UPL" : estimationType === "lump_sum" ? "Lump Sum" : workspaceText("تقدير أولي", "Initial estimate") },
+        { label: workspaceText("المبلغ المعتمد", "Approved amount"), value: approvedAmount ? amountText(parseMoneyInput(approvedAmount)) : "—", tone: "success" },
+        { label: activeInvoice ? workspaceText("فاتورة التأمين", "Insurance invoice") : workspaceText("أمر الشراء النهائي LPO", "Final LPO"), value: activeInvoice ? amountText(invoiceTotal) : lpoAmount ? amountText(parseMoneyInput(lpoAmount)) : "—", detail: activeInvoice && lpoAmount ? `LPO: ${amountText(parseMoneyInput(lpoAmount))}` : hasRegisteredLpo ? workspaceText("LPO مسجّل", "LPO recorded") : workspaceText("بانتظار LPO", "Awaiting LPO") },
+        { label: workspaceText("المتبقي على المطالبة", "Claim balance"), value: amountText(paymentRemaining), detail: `${workspaceText("المحصّل", "Collected")}: ${amountText(paidTotal)}${settlementDiscountTotal > 0 ? ` · ${workspaceText("خصم التسوية", "Settlement discount")}: ${amountText(settlementDiscountTotal)}` : ""}`, tone: paymentRemaining > 0 ? "warning" : "success" },
+      ]} />}
 
+      <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <Card className="min-w-0 overflow-hidden">
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="h-auto min-h-14 w-full justify-between gap-3 whitespace-normal rounded-none p-4 text-start">
+              <span className="space-y-1"><span className="block font-semibold">{workspaceText("بيانات المطالبة والتأمين والمركبة", "Claim, insurer and vehicle details")}</span><span className="block text-xs font-normal text-muted-foreground">{workspaceText("مراجعة بيانات شركة التأمين والموظف المسؤول والعميل والمركبة", "Review the insurer, responsible contact, customer and vehicle")}</span></span>
+              <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${detailsOpen ? "rotate-180" : ""}`} />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent forceMount className="space-y-3 border-t p-3 data-[state=closed]:hidden sm:p-4">
       <Card className="p-5 grid md:grid-cols-2 gap-5 bg-gradient-to-l from-primary/5 to-transparent">
         {/* Insurance company (primary) */}
         <Collapsible open={insuranceSectionOpen} onOpenChange={setInsuranceSectionOpen} className="space-y-3">
           <CollapsibleTrigger asChild>
-            <Button type="button" variant="ghost" className="w-full justify-between px-0 text-primary hover:bg-transparent">
-              <span className="flex items-center gap-2 text-sm font-bold">
-                <Building2 size={16} /> شركة التأمين (الجهة الدافعة)
+            <Button type="button" variant="ghost" className="h-auto min-h-12 w-full justify-between gap-3 whitespace-normal px-0 text-start text-primary hover:bg-transparent">
+              <span className="flex min-w-0 items-start gap-2 text-start text-sm font-bold">
+                <Building2 size={16} className="shrink-0" />{workspaceText("التأمين والموظف المسؤول", "Insurer and responsible contact")}
               </span>
               <ChevronDown className={`h-4 w-4 transition-transform ${insuranceSectionOpen ? "rotate-180" : ""}`} />
             </Button>
@@ -2833,11 +2726,11 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </Collapsible>
 
         {/* Vehicle owner (secondary) — smart autocomplete */}
-        <Collapsible open={ownerSectionOpen} onOpenChange={setOwnerSectionOpen} className="space-y-3 border-r-0 md:border-r md:pr-5 border-border">
+        <Collapsible open={ownerSectionOpen} onOpenChange={setOwnerSectionOpen} className="space-y-3 border-s-0 md:border-s md:ps-5 border-border">
           <CollapsibleTrigger asChild>
-            <Button type="button" variant="ghost" className="w-full justify-between px-0 text-muted-foreground hover:bg-transparent">
-              <span className="flex items-center gap-2 text-sm font-bold">
-                <User size={16} /> مالك السيارة (اختياري — يُجلب تلقائياً من بيانات السيارة)
+            <Button type="button" variant="ghost" className="h-auto min-h-12 w-full justify-between gap-3 whitespace-normal px-0 text-start text-muted-foreground hover:bg-transparent">
+              <span className="flex min-w-0 items-start gap-2 text-start text-sm font-bold">
+                <User size={16} className="shrink-0" />{workspaceText("العميل ومالك المركبة", "Customer and vehicle owner")}
               </span>
               <ChevronDown className={`h-4 w-4 transition-transform ${ownerSectionOpen ? "rotate-180" : ""}`} />
             </Button>
@@ -2891,9 +2784,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       <Card className="p-5">
         <Collapsible open={vehicleSectionOpen} onOpenChange={setVehicleSectionOpen} className="space-y-3">
           <CollapsibleTrigger asChild>
-            <Button type="button" variant="ghost" className="w-full justify-between px-0 hover:bg-transparent">
-              <span className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
-                <Car size={16} /> بيانات السيارة (اختياري — تُحفظ مع المطالبة حتى دون ربط مركبة)
+            <Button type="button" variant="ghost" className="h-auto min-h-12 w-full justify-between gap-3 whitespace-normal px-0 text-start hover:bg-transparent">
+              <span className="flex min-w-0 items-start gap-2 text-start text-sm font-bold text-muted-foreground">
+                <Car size={16} className="shrink-0" />{workspaceText("بيانات المركبة", "Vehicle details")}
               </span>
               <ChevronDown className={`h-4 w-4 transition-transform ${vehicleSectionOpen ? "rotate-180" : ""}`} />
             </Button>
@@ -2919,103 +2812,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </Collapsible>
       </Card>
 
-      <Card className="mx-auto max-w-5xl p-4 space-y-3 border-primary/20">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-bold text-primary">
-              <FileUp size={16} /> LPO / أمر الشراء من شركة التأمين
-            </div>
-            <p className="text-xs text-muted-foreground">سجل بيانات LPO ثم أنشئ فاتورة التأمين الضريبية من نفس القسم.</p>
-          </div>
-          <Badge variant={hasRegisteredLpo ? "default" : "outline"}>
-            {hasRegisteredLpo ? "LPO مسجل" : "بانتظار LPO"}
-          </Badge>
-        </div>
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs">رقم LPO</Label>
-            <Input ref={lpoNumberRef} value={lpoNumber} onChange={(e) => setLpoNumber(e.target.value)} placeholder="LPO-2026-0001" dir="ltr" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">تاريخ LPO</Label>
-            <Input ref={lpoDateRef} type="date" value={lpoDate} onChange={(e) => setLpoDate(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">مبلغ LPO</Label>
-            <Input ref={lpoAmountRef} type="text" inputMode="decimal" value={lpoAmount} onChange={(e) => setLpoAmount(e.target.value)} placeholder="0.000" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">تاريخ فاتورة التأمين</Label>
-            <Select value={invoiceDateMode} onValueChange={(value) => setInvoiceDateMode(value as "lpo" | "lpo_plus_one" | "custom")}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="lpo">نفس تاريخ LPO</SelectItem>
-                <SelectItem value="lpo_plus_one">اليوم التالي لـ LPO</SelectItem>
-                <SelectItem value="custom">تاريخ مخصص</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {invoiceDateMode === "custom" && (
-            <div className="space-y-1.5">
-              <Label className="text-xs">التاريخ المخصص</Label>
-              <Input type="date" value={customInvoiceDate} onChange={(e) => setCustomInvoiceDate(e.target.value)} />
-            </div>
-          )}
-          <div className="space-y-1.5 md:col-span-2">
-            <Label className="text-xs">ملاحظة LPO</Label>
-            <Input ref={lpoNoteRef} value={lpoNote} onChange={(e) => setLpoNote(e.target.value)} placeholder="ملاحظة داخلية اختيارية" />
-          </div>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2 border-t pt-2">
-          <Button variant="outline" onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="gap-2">
-            <Save size={16} /> حفظ
-          </Button>
-          <Button onClick={async () => { await handleSave(); await generateTaxInvoice(); }} disabled={isNew || updateClaim.isPending || !canIssueTaxInvoice || hasActiveInvoice} className="gap-2">
-            <FileText size={16} /> إنشاء الفاتورة الضريبية
-          </Button>
-          {activeInvoice && (
-            <Button variant="outline" onClick={() => navigate(`/insurance/accounting?invoice=${(activeInvoice as any).id || ""}`)} className="gap-2">
-              <FileText size={16} /> فتح الفاتورة
-            </Button>
-          )}
-        </div>
-      </Card>
 
-      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div>
-          <h3 className="font-semibold">{t("vehicleVisit.operationalFile")}</h3>
-          <p className="text-sm text-muted-foreground">{t("vehicleVisit.claimCenterSource")}</p>
-        </div>
-        <Button type="button" variant="outline" onClick={() => navigate(vehicleEntryByClaimQuery.data ? `/vehicle-entry/${vehicleEntryByClaimQuery.data.id}` : "/vehicle-entry")}>
-          {t("vehicleVisit.openCenter")}
-        </Button>
-      </Card>
+            {isNew && lpoInvoiceSection}
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
+
       {/* ── Workflow Tabs ── */}
-      <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <div className="rounded-lg border border-border bg-muted/20 p-3">
-          <div className="text-sm font-bold text-foreground">إعدادات مراحل المطالبة</div>
-          <p className="text-xs text-muted-foreground">الإجراءات التفصيلية موحدة داخل هذه المراحل فقط لتجنب تكرار الأزرار في الصفحة.</p>
-        </div>
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="inspect" className="gap-1.5">
-            <ClipboardCheck size={14} /> 1. فحص
-          </TabsTrigger>
-          <TabsTrigger value="estimate" className="gap-1.5">
-            <Calculator size={14} /> 2. صور وتقدير
-          </TabsTrigger>
-          <TabsTrigger value="approval" className="gap-1.5">
-            <CheckCircle2 size={14} /> 3. موافقة
-          </TabsTrigger>
-          <TabsTrigger value="workorder" className="gap-1.5">
-            <Wrench size={14} /> 4. أمر عمل
-          </TabsTrigger>
-          <TabsTrigger value="delivery" className="gap-1.5" disabled={isNew}>
-            <PackageCheck size={14} /> 5. تسليم
-          </TabsTrigger>
-          <TabsTrigger value="payments" className="gap-1.5" disabled={isNew}>
-            <DollarSign size={14} /> 6. مدفوعات
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={tab} onValueChange={setTab} dir={isEnglish ? "ltr" : "rtl"} className="min-w-0 space-y-4">
+        <ClaimWorkspaceNavigation isNew={isNew} />
 
         {/* ── 1) Inspection: damage photos + needed parts (the "inspection result") ── */}
         <TabsContent value="inspect" className="space-y-4 mt-4">
@@ -3025,7 +2830,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               <span>{t("vehicleEntryInspection:linkedLoadFailed")}</span>
               <Button size="sm" variant="outline" onClick={() => void persistedInspection.refetch()}>{t("vehicleEntryInspection:retry")}</Button>
             </div>}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <ClipboardCheck size={16} className="text-primary" /> تقرير الفحص الفني
               </div>
@@ -3083,7 +2888,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
           {/* Damage photos */}
           <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Camera size={16} className="text-primary" /> صور الأضرار ({damagePhotos.length})
               </div>
@@ -3144,19 +2949,48 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
           <div className="flex justify-end">
             <Button onClick={() => setTab("estimate")} className="gap-2">
-              التالي: التقدير <ArrowLeftRight size={14} />
+              {workspaceText("التالي: التقدير", "Next: Estimate")} <ArrowLeftRight size={14} />
             </Button>
           </div>
         </TabsContent>
 
         {/* ── 2) Estimate: needed parts + cost estimate ── */}
         <TabsContent value="estimate" className="space-y-4 mt-4">
+          {!isNew && <Card className="min-w-0 space-y-3 p-4 sm:p-5">
+            <div><h2 className="font-semibold">{workspaceText("مستند تقدير الإصلاح", "Repair estimate document")}</h2><p className="mt-1 text-xs text-muted-foreground">{workspaceText("راجع التقدير الحالي ثم نزّله أو أرسله من قسم التواصل.", "Review the current estimate, download it, or send it through Communication.")}</p></div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-xs">
+                <Switch
+                  id="claim-estimate-badge-toggle"
+                  dir="ltr"
+                  checked={showEstimateBadgeInPdf}
+                  onCheckedChange={setShowEstimateBadgeInPdf}
+                />
+                <Label htmlFor="claim-estimate-badge-toggle" className="cursor-pointer whitespace-normal text-xs">
+                  إظهار شعار UPL / Lump Sum
+                </Label>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setShowPdf(true)} className="min-h-11 gap-1.5 whitespace-normal">
+                <Printer size={14} /> {claimEstimateLifecycle.status === "not_created" ? "إنشاء/معاينة تقدير الإصلاح" : "فتح/تحديث تقدير الإصلاح"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleDownloadEstimatePdf} className="min-h-11 gap-1.5 whitespace-normal">
+                <Download size={14} /> تحميل تقدير الإصلاح
+              </Button>
+              {claimEstimateLifecycle.status === "modified_after_send" && (
+                <div className="basis-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                  تم تعديل بيانات التقدير بعد آخر إرسال. افتح التقدير لمراجعة النسخة الحالية ثم أعد إرسالها لشركة التأمين.
+                </div>
+              )}
+
+              <Button variant="ghost" className="min-h-11 gap-2 whitespace-normal" onClick={() => setShowEstimateTerms(true)}><FileText size={15} />{workspaceText("شروط وملاحظات التقدير", "Estimate terms and notes")}</Button>
+            </div>
+          </Card>}
           <Card className="p-4">
             <Label htmlFor="claim-estimate-date">{t("vehicleVisit.estimateDate")}</Label>
             <Input id="claim-estimate-date" className="mt-2 max-w-xs" type="date" value={estimateDate} onChange={(event) => setEstimateDate(event.target.value)} />
           </Card>
           <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Car size={16} className="text-primary" /> قطع الغيار المطلوبة ({neededParts.length})
               </div>
@@ -3171,21 +3005,21 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             ) : (
               <div className="space-y-2">
                 {neededParts.map((p, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-12 md:col-span-5 space-y-1">
+                  <div key={i} className="grid min-w-0 grid-cols-2 items-end gap-3 rounded-lg border p-3 md:grid-cols-12">
+                    <div className="col-span-2 min-w-0 space-y-1 md:col-span-5">
                       <Label className="text-xs">اسم القطعة</Label>
                       <Input value={p.name} onChange={(e) => updatePart(i, { name: e.target.value })} placeholder="مثال: مصد أمامي" />
                     </div>
-                    <div className="col-span-4 md:col-span-2 space-y-1">
+                    <div className="min-w-0 space-y-1 md:col-span-2">
                       <Label className="text-xs">الكمية</Label>
                       <Input type="number" min={1} value={p.quantity} onChange={(e) => updatePart(i, { quantity: parseInt(e.target.value) || 1 })} />
                     </div>
-                    <div className="col-span-7 md:col-span-4 space-y-1">
+                    <div className="min-w-0 space-y-1 md:col-span-4">
                       <Label className="text-xs">ملاحظات</Label>
                       <Input value={p.notes ?? ""} onChange={(e) => updatePart(i, { notes: e.target.value })} placeholder="جديد / مستعمل ..." />
                     </div>
-                    <div className="col-span-1 flex justify-end">
-                      <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" onClick={() => removePart(i)}>
+                    <div className="col-span-2 flex justify-end md:col-span-1">
+                      <Button variant="ghost" size="icon" aria-label={workspaceText("حذف قطعة الغيار", "Remove required part")} className="h-11 w-11 shrink-0 text-destructive" onClick={() => removePart(i)}>
                         <Trash2 size={14} />
                       </Button>
                     </div>
@@ -3197,7 +3031,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
           {/* Cost estimate */}
           <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Calculator size={16} className="text-primary" /> تقدير التكلفة
               </div>
@@ -3229,7 +3063,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 </div>
                 <div className="space-y-1.5">
                   <Label>ملاحظات</Label>
-                  <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="ملاحظات على التقدير..." />
+                  <Textarea value={displayEstimateNotes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder={workspaceText("ملاحظات على التقدير...", "Notes about the estimate…")} />
                 </div>
               </div>
             ) : (
@@ -3237,18 +3071,17 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 <UplItemsEditor items={uplItems} onChange={setUplItems} suggestedAmount={parseMoneyInput(estimatedCost) || 0} />
                 <div className="space-y-1.5">
                   <Label>ملاحظات</Label>
-                  <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="ملاحظات على التقدير..." />
+                  <Textarea value={displayEstimateNotes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder={workspaceText("ملاحظات على التقدير...", "Notes about the estimate…")} />
                 </div>
               </div>
             )}
           </Card>
 
           <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setTab("inspect")}>السابق</Button>
+            <Button variant="outline" onClick={() => setTab("inspect")}>{workspaceText("السابق", "Previous")}</Button>
             <div className="flex gap-2 flex-wrap items-center">
-              <TemplatePicker docType="insurance_tax_invoice" size="sm" />
               <Button onClick={() => setTab("approval")} className="gap-2">
-                التالي: الموافقة <ArrowLeftRight size={14} />
+                {workspaceText("التالي: الموافقة", "Next: Approval")} <ArrowLeftRight size={14} />
               </Button>
             </div>
           </div>
@@ -3264,7 +3097,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label>المبلغ المقدر</Label>
-                  <Input value={estimatedCost} disabled className="bg-muted/40" data-amount="true" />
+                  <Input value={effectiveEstimate.toFixed(3)} disabled className="bg-muted/40" data-amount="true" />
                 </div>
                 <div className="space-y-1.5">
                   <Label>المبلغ الموافق عليه (ر.ع) *</Label>
@@ -3280,9 +3113,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             )}
 
             <div className="flex flex-wrap gap-2 pt-2">
-              <div className="text-xs text-muted-foreground rounded-lg border border-border bg-secondary/20 px-3 py-2">
-                يتم تنفيذ الاعتماد من بطاقة التحكم الرئيسية أعلى الصفحة حتى لا تتكرر الأزرار.
-              </div>
+              {isAwaitingApproval && <Button onClick={openApproveDialog} disabled={updateStatus.isPending} className="min-h-11 gap-2 bg-success text-success-foreground hover:bg-success/90"><CheckCircle2 size={16} />{workspaceText("اعتماد المطالبة", "Approve claim")}</Button>}
               <Button variant="outline" onClick={() => setStatus("rejected")} disabled={status === "rejected" || isNew}>
                 رفض
               </Button>
@@ -3301,10 +3132,10 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
           </Card>
 
           <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setTab("estimate")}>السابق</Button>
+            <Button variant="outline" onClick={() => setTab("estimate")}>{workspaceText("السابق", "Previous")}</Button>
             {status === "approved" && (
               <Button onClick={() => setTab("workorder")} className="gap-2">
-                التالي: أمر العمل <ArrowLeftRight size={14} />
+                {workspaceText("التالي: أمر العمل", "Next: Work order")} <ArrowLeftRight size={14} />
               </Button>
             )}
           </div>
@@ -3347,7 +3178,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <Button
                     onClick={() => setShowWorkOrderInline((v) => !v)}
                     variant={showWorkOrderInline ? "default" : "outline"}
-                    className="gap-2"
+                    className="h-auto min-h-11 gap-2 whitespace-normal"
                     size="sm"
                   >
                     <Wrench size={16} /> {showWorkOrderInline ? "إخفاء العرض هنا" : "فتح أمر العمل هنا"}
@@ -3355,7 +3186,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <Button
                     onClick={() => navigate(`/work-orders/${effectiveWorkOrderId}`)}
                     variant="outline"
-                    className="gap-2"
+                    className="h-auto min-h-11 gap-2 whitespace-normal"
                     size="sm"
                   >
                     <LinkIcon size={16} /> الانتقال لصفحة أمر العمل
@@ -3363,7 +3194,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                   <Button
                     onClick={() => setTab("delivery")}
                     variant="outline"
-                    className="gap-2"
+                    className="h-auto min-h-11 gap-2 whitespace-normal"
                     size="sm"
                   >
                     <PackageCheck size={16} /> الانتقال للتسليم
@@ -3377,7 +3208,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 onClick={handleConvertToWorkOrder}
                 disabled={status !== "approved"}
                 variant="outline"
-                className="gap-2"
+                className="h-auto min-h-11 gap-2 whitespace-normal"
                 size="sm"
               >
                 <Wrench size={18} /> إنشاء أمر العمل هنا
@@ -3387,7 +3218,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             {!workshopArrivalDate && (
               <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg flex items-center gap-2 text-destructive text-sm">
                 <AlertCircle size={16} />
-                تحذير: لم يتم تسجيل <strong>تاريخ وصول السيارة للورشة</strong> — يُفضّل إدخاله من تبويب «تفاصيل» قبل إنشاء أمر العمل.
+                {workspaceText("لم يُسجّل وصول المركبة إلى الورشة بعد. استخدم تسجيل دخول المركبة في ملخص الملف عند وصولها فعليًا.", "Vehicle arrival has not been recorded. Use Record vehicle arrival in the file summary once it actually arrives.")}
               </div>
             )}
             {workshopArrivalDate && status !== "approved" && status !== "paid" && (
@@ -3489,6 +3320,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
         {/* ── 6) Payments tab ── */}
         <TabsContent value="payments" className="space-y-4 mt-4">
+          {!isNew && lpoInvoiceSection}
+
+
           {!isNew && id && (
             <PaymentsSection
               claimId={id}
@@ -3504,14 +3338,15 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       </Tabs>
 
       {!isNew && (
-        <Card className="p-5 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="font-bold text-foreground">Timeline / Audit Log</h3>
-              <p className="text-xs text-muted-foreground">سجل زمني من Supabase لكل إجراء على المطالبة.</p>
-            </div>
-            <Badge variant="outline">{claimAudit.length} إجراء</Badge>
-          </div>
+        <Collapsible open={auditOpen} onOpenChange={setAuditOpen}>
+        <Card className="min-w-0 p-4 sm:p-5">
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="h-auto min-h-12 w-full justify-between gap-3 whitespace-normal px-0 text-start">
+              <span><span className="block font-semibold">{workspaceText("سجل المطالبة", "Claim history")}</span><span className="mt-1 block text-xs font-normal text-muted-foreground">{workspaceText("الإجراءات والتعديلات المحفوظة", "Recorded actions and changes")}</span></span>
+              <span className="flex shrink-0 items-center gap-2"><Badge variant="outline">{claimAudit.length}</Badge><ChevronDown className={`h-4 w-4 transition-transform ${auditOpen ? "rotate-180" : ""}`} /></span>
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-4">
           <div className="space-y-2 max-h-80 overflow-y-auto">
             {claimAudit.length === 0 ? (
               <div className="text-sm text-muted-foreground border rounded-lg p-4 text-center">لا توجد أحداث مسجلة بعد</div>
@@ -3543,7 +3378,9 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
               );
             })}
           </div>
+          </CollapsibleContent>
         </Card>
+        </Collapsible>
       )}
 
       {/* Estimate PDF — auto-saves to archive as claim_estimate */}
@@ -4232,8 +4069,8 @@ function PaymentsSection({
         </div>
       </div>
 
-      <div className="border border-border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+      <div role="region" aria-label={i18n.language.startsWith("en") ? "Insurance payments" : "مدفوعات التأمين"} tabIndex={0} className="max-w-full overflow-x-auto rounded-lg border border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <table className="w-full min-w-[720px] text-sm">
           <thead>
             <tr className="bg-secondary/30 border-b border-border">
               <th className="text-right py-2 px-3 text-xs text-muted-foreground">رقم</th>
@@ -4294,7 +4131,7 @@ function PaymentsSection({
                   <td className="py-2 px-3">
                     {p.payment_method === "cheque" && p.status === "pending" && (
                       <Button
-                        variant="outline" size="sm" className="me-1 h-7 gap-1 text-success"
+                        variant="outline" size="sm" className="me-1 min-h-11 gap-1 text-success"
                         onClick={() => setChequeToClear(p)}
                       >
                         <CheckCircle2 size={13} /> تحصيل
@@ -4302,14 +4139,14 @@ function PaymentsSection({
                     )}
                     {canEditPayments && (
                       <Button
-                        variant="outline" size="sm" className="me-1 h-7 gap-1"
+                        variant="outline" size="sm" className="me-1 min-h-11 gap-1"
                         onClick={() => setPaymentToEdit(p)}
                       >
                         <Pencil size={13} /> تعديل
                       </Button>
                     )}
                     <Button
-                      variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                      variant="ghost" size="icon" className="h-11 w-11 text-destructive" aria-label={i18n.language.startsWith("en") ? "Delete payment" : "حذف الدفعة"}
                       onClick={() => { if (confirm("حذف هذه الدفعة؟")) del.mutate(p.id); }}
                     >
                       <Trash2 size={14} />

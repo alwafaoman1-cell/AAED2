@@ -79,7 +79,9 @@ describe("vehicle entry receipt contract", () => {
     expect(service).toContain("getVehicleEntryByClaimId");
     expect(detail).toContain("handleRegisterVehicleEntry");
     expect(detail).toContain('vehicle_presence_status: "in_workshop"');
-    expect(detail).toContain("فتح كرت الدخول");
+    expect(detail).toContain("فتح ملف المركبة");
+    expect(detail).toContain("Open vehicle file");
+    expect(detail).toContain('navigate(`/vehicle-entry/${vehicleEntryByClaimQuery.data.id}`)');
     expect(guard).toContain("pg_advisory_xact_lock");
     expect(guard).toContain("Vehicle entry already exists for this claim");
     expect(guard.toLowerCase()).not.toContain("delete from");

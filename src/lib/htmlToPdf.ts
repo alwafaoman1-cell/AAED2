@@ -263,13 +263,15 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
 
   try {
     const doc = iframe.contentDocument!;
+    // Listen before writing: complete on the initial about:blank document can
+    // precede imported font CSS, while a listener added after close can miss
+    // an already-fired load. Await the written document before its font set.
+    const documentLoaded = new Promise<void>((resolve) => {
+      iframe.addEventListener("load", () => setTimeout(resolve, 50), { once: true });
+    });
     doc.open(); doc.write(fastHtmlContent); doc.close();
 
-    await withTimeout(new Promise<void>((resolve) => {
-      const ready = () => setTimeout(() => resolve(), 50);
-      if (doc.readyState === "complete") ready();
-      else iframe.addEventListener("load", ready, { once: true });
-    }), 5000, i18n.t("pdfDownload.documentStage"));
+    await withTimeout(documentLoaded, 5000, i18n.t("pdfDownload.documentStage"));
     await waitForPdfAssets(doc);
 
     doc.documentElement.classList.add("pdf-export");
@@ -327,6 +329,7 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
         const captureWidth = Math.max(el.scrollWidth, el.offsetWidth);
         const captureHeight = Math.max(el.scrollHeight, el.offsetHeight);
         surface = createPdfCaptureSurface(el);
+        await withTimeout(surface.ready, 5000, i18n.t("pdfDownload.documentStage"));
         return await withTimeout(html2canvas(surface.element, {
           scale: pdfCaptureScale(captureWidth, captureHeight),
           useCORS: true,

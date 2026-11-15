@@ -5,7 +5,7 @@ import { getLinkedVehicleVisit } from "@/lib/vehicleVisitLifecycle";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function VehicleVisitBadge({ source, id }: { source: "claim" | "work_order"; id?: string | null }) {
+export function VehicleVisitBadge({ source, id, interactive = true }: { source: "claim" | "work_order"; id?: string | null; interactive?: boolean }) {
   const { t } = useTranslation();
   const query = useQuery({
     queryKey: ["vehicle_visit", "linked", source, id],
@@ -24,9 +24,12 @@ export function VehicleVisitBadge({ source, id }: { source: "claim" | "work_orde
     ? [number, t("vehicleEntry.reviewLocation")].filter(Boolean).join(" · ")
     : [number, stage ? t(`vehicleVisit.${stage}`) : t("vehicleVisit.legacyUnrecorded"), custody].filter(Boolean).join(" · ");
   return entryId
-    ? <Link className="inline-flex rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10" to={`/vehicle-entry/${entryId}`}>
+    ? interactive ? <Link className="inline-flex rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10" to={`/vehicle-entry/${entryId}`}>
         {[label, reviewReason && stage !== "needs_review" ? t("vehicleEntry.reviewLocation") : ""].filter(Boolean).join(" · ")}
       </Link>
+      : <span className="inline-flex rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-xs font-semibold text-primary">
+          {[label, reviewReason && stage !== "needs_review" ? t("vehicleEntry.reviewLocation") : ""].filter(Boolean).join(" · ")}
+        </span>
     : <span className="inline-flex rounded-full border border-warning/40 bg-warning/5 px-2 py-1 text-xs font-semibold text-warning">
         {[label, t("vehicleVisit.claimOnlyCard")].filter(Boolean).join(" · ")}
       </span>;

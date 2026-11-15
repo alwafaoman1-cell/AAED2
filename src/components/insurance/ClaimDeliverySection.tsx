@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, Upload, X, Loader2, PackageCheck, FileSignature, FileCheck2 } from "lucide-react";
+import { Upload, X, Loader2, PackageCheck, FileSignature } from "lucide-react";
 import { toast } from "sonner";
 import type { WorkOrder } from "@/lib/workOrdersStore";
 import { fetchWorkOrderFromCloudByIdentifier } from "@/lib/workOrdersStore";
@@ -46,6 +47,9 @@ async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
 
 export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, initial, onSaved }: Props) {
   const navigate = useNavigate();
+  const { i18n } = useTranslation();
+  const isArabic = i18n.language.startsWith("ar");
+  const tr = (ar: string, en: string) => isArabic ? ar : en;
   const [deliveryPhotos, setDeliveryPhotos] = useState<string[]>(initial?.delivery_photos ?? []);
   const [satisfactionPhotos, setSatisfactionPhotos] = useState<string[]>(initial?.satisfaction_photos ?? []);
   const [receiverIdPhoto, setReceiverIdPhoto] = useState<string | null>(initial?.receiver_id_photo ?? null);
@@ -74,23 +78,23 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
   /** Verify the linked order in Supabase before opening an editable handover. */
   async function ensureWorkOrder(): Promise<WorkOrder | null> {
     if (!workOrderId) {
-      toast.error("لا يوجد أمر عمل مرتبط بهذه المطالبة");
+      toast.error(tr("لا يوجد أمر عمل مرتبط بهذه المطالبة", "No work order is linked to this claim"));
       return null;
     }
     setLoadingWo(true);
     try {
       const order = await fetchWorkOrderFromCloudByIdentifier(workOrderId);
       if (!order) {
-        toast.error("تعذر تحميل أمر العمل");
+        toast.error(tr("تعذر تحميل أمر العمل", "Unable to load the work order"));
         return null;
       }
       if (order.deletedAt) {
-        toast.error("أمر العمل المرتبط محذوف في Supabase. تحقّق من سبب الحذف قبل استعادته أو إصدار إقرار تسليم.");
+        toast.error(tr("أمر العمل المرتبط محذوف في Supabase. تحقّق من سبب الحذف قبل استعادته أو إصدار إقرار تسليم.", "The linked work order has been deleted. Review the deletion before restoring it or issuing a handover."));
         return null;
       }
       return order;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "تعذر تحميل أمر العمل");
+      toast.error(error instanceof Error ? error.message : tr("تعذر تحميل أمر العمل", "Unable to load the work order"));
       return null;
     } finally {
       setLoadingWo(false);
@@ -128,7 +132,7 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
     const path = `claims/${claimId}/${category}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     const { error } = await supabase.storage.from("insurance-docs").upload(path, toUpload, { contentType: toUpload.type });
     if (error) {
-      toast.error("فشل الرفع: " + error.message);
+      toast.error(tr("فشل الرفع: ", "Upload failed: ") + error.message);
       return null;
     }
     const { data: tenant } = await supabase.rpc("get_user_tenant_id");
@@ -190,7 +194,7 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
       .eq("id", claimId);
     setSaving(false);
     if (error) {
-      toast.error("فشل الحفظ: " + error.message);
+      toast.error(tr("فشل الحفظ: ", "Save failed: ") + error.message);
       return;
     }
     const { data: tenant } = await supabase.rpc("get_user_tenant_id");
@@ -211,13 +215,13 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
         },
       } as any);
     }
-    toast.success("تم حفظ صور وملاحظات مسودة التسليم");
+    toast.success(tr("تم حفظ صور وملاحظات مسودة التسليم", "Delivery draft photos and notes saved"));
     onSaved?.();
   }
 
   const isPdfUrl = (u: string) => /\.pdf(\?|$)/i.test(u);
   const PhotoGrid = ({ urls, onRemove }: { urls: string[]; onRemove: (i: number) => void }) => (
-    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
+    <div className="grid grid-cols-2 min-[400px]:grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
       {urls.map((u, i) => (
         <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-border bg-muted">
           {isPdfUrl(u) ? (
@@ -231,9 +235,10 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
           <button
             type="button"
             onClick={() => onRemove(i)}
-            className="absolute top-1 left-1 p-1 rounded-full bg-destructive/90 text-destructive-foreground opacity-0 group-hover:opacity-100 transition"
+            aria-label={`${tr("إزالة المرفق", "Remove attachment")} ${i + 1}`}
+            className="absolute top-1 left-1 inline-flex h-11 w-11 items-center justify-center rounded-full bg-destructive/90 text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <X className="w-3 h-3" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       ))}
@@ -241,43 +246,36 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
   );
 
   return (
-    <Card className="border-emerald-500/30">
+    <Card className="border-emerald-500/30" dir={isArabic ? "rtl" : "ltr"}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <PackageCheck className="w-5 h-5 text-emerald-600" />
-          تسليم المركبة
+        <CardTitle className="flex flex-wrap items-center gap-2 text-lg">
+          <PackageCheck className="w-5 h-5 shrink-0 text-emerald-600" />
+          <span className="min-w-0 break-words">{tr("تسليم المركبة", "Vehicle delivery")}</span>
           {initial?.delivered_at && (
-            <span className="text-xs font-normal text-emerald-600 mr-2">
-              (تم التسليم: {new Date(initial.delivered_at).toLocaleString("ar")})
+            <span className="text-xs font-normal text-emerald-600">
+              ({tr("تم التسليم", "Delivered")}: {new Date(initial.delivered_at).toLocaleString(isArabic ? "ar-OM" : "en-GB")})
             </span>
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-5" dir="rtl">
-        {/* Quick actions: delivery receipt + delivery documents for insurer */}
-        <div className="grid sm:grid-cols-2 gap-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/30">
+      <CardContent className="space-y-5" dir={isArabic ? "rtl" : "ltr"}>
+        {/* One entry point to the canonical signed handover page. */}
+        <div className="space-y-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/30">
           <Button
             type="button"
             onClick={openReceiptDialog}
-            disabled={loadingWo || !workOrderId}
-            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+            disabled={saving || loadingWo || !workOrderId}
+            className="h-auto min-h-11 w-full justify-start gap-2 whitespace-normal px-4 py-3 text-start bg-emerald-600 hover:bg-emerald-700 text-white"
           >
-            {loadingWo ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSignature className="w-4 h-4" />}
-            نموذج خروج وتسليم المركبة
+            {loadingWo ? <Loader2 className="w-4 h-4 shrink-0 animate-spin" /> : <FileSignature className="w-4 h-4 shrink-0" />}
+            {tr("متابعة واعتماد الخروج والتسليم", "Continue to vehicle handover")}
           </Button>
-          <Button
-            type="button"
-            onClick={openReceiptDialog}
-            disabled={loadingWo || !workOrderId}
-            variant="outline"
-            className="gap-2"
-          >
-            {loadingWo ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck2 className="w-4 h-4" />}
-            تجهيز أوراق التسليم للتأمين
-          </Button>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {tr("يفتح نموذج خروج وتسليم المركبة لمراجعة بيانات المستلم والتوقيع واعتماد التسليم.", "Open the vehicle handover form to review recipient details, sign and finalize delivery.")}
+          </p>
           {!workOrderId && (
-            <p className="text-xs text-muted-foreground sm:col-span-2">
-              يلزم وجود أمر عمل مرتبط بالمطالبة لإصدار إقرار التسليم وتجهيز أوراق التسليم.
+            <p className="text-xs text-muted-foreground">
+              {tr("يلزم وجود أمر عمل مرتبط بالمطالبة لإصدار إقرار التسليم وتجهيز أوراق التسليم.", "A linked work order is required to prepare the vehicle handover documents.")}
             </p>
           )}
         </div>
@@ -285,8 +283,9 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
         <div className="p-3 rounded-lg border border-primary/30 bg-primary/5">
           <AiExtractButton
             schema="delivery_receipt"
-            label="استخراج بيانات التسليم بالذكاء"
-            hint="ارفع صورة الهوية أو إقرار التسليم — سيتم تعبئة اسم المستلم ورقم الهوية وتاريخ التسليم تلقائياً."
+            label={tr("استخراج بيانات التسليم بالذكاء", "Extract delivery details with AI")}
+            hint={tr("ارفع صورة الهوية أو إقرار التسليم — سيتم تعبئة اسم المستلم ورقم الهوية وتاريخ التسليم تلقائياً.", "Upload the recipient's ID or handover form to fill in their name, ID number and delivery date.")}
+            className="h-auto min-h-11 whitespace-normal text-start"
             onExtracted={(data) => {
               if (data.receiver_name) setReceiverName(data.receiver_name);
               if (data.receiver_id_number) setReceiverIdNumber(data.receiver_id_number);
@@ -302,16 +301,18 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
 
         <div className="grid sm:grid-cols-2 gap-3">
           <div>
-            <Label>تاريخ التسليم</Label>
-            <Input type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+            <Label htmlFor="claim-delivery-date">{tr("تاريخ التسليم", "Delivery date")}</Label>
+            <Input id="claim-delivery-date" className="min-h-11" type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
           </div>
           <div>
-            <Label>اسم المستلم</Label>
-            <Input value={receiverName} onChange={(e) => setReceiverName(e.target.value)} placeholder="الاسم الكامل" />
+            <Label htmlFor="claim-delivery-recipient">{tr("اسم المستلم", "Recipient name")}</Label>
+            <Input id="claim-delivery-recipient" className="min-h-11" value={receiverName} onChange={(e) => setReceiverName(e.target.value)} placeholder={tr("الاسم الكامل", "Full name")} />
           </div>
           <div className="sm:col-span-2">
-            <Label>رقم هوية المستلم</Label>
+            <Label htmlFor="claim-delivery-recipient-id">{tr("رقم هوية المستلم", "Recipient ID number")}</Label>
             <Input
+              id="claim-delivery-recipient-id"
+              className="min-h-11"
               dir="ltr"
               value={receiverIdNumber}
               onChange={(e) => setReceiverIdNumber(e.target.value)}
@@ -322,7 +323,7 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
 
         {/* Delivery photos */}
         <div>
-          <Label>صور التسليم (المركبة بعد التسليم)</Label>
+          <Label>{tr("صور التسليم (المركبة بعد التسليم)", "Delivery photos (vehicle after delivery)")}</Label>
           <input
             id="del-photos"
             type="file"
@@ -335,19 +336,19 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
             type="button"
             variant="outline"
             size="sm"
-            className="mt-1"
+            className="mt-1 h-auto min-h-11 gap-2 whitespace-normal py-2"
             onClick={() => document.getElementById("del-photos")?.click()}
             disabled={uploading === "delivery_photos"}
           >
-            {uploading === "delivery_photos" ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Upload className="w-4 h-4 ml-2" />}
-            رفع صور / PDF
+            {uploading === "delivery_photos" ? <Loader2 className="w-4 h-4 shrink-0 animate-spin" /> : <Upload className="w-4 h-4 shrink-0" />}
+            {tr("رفع صور / PDF", "Upload photos / PDF")}
           </Button>
           <PhotoGrid urls={deliveryPhotos} onRemove={(i) => setDeliveryPhotos((p) => p.filter((_, x) => x !== i))} />
         </div>
 
         {/* Satisfaction photos */}
         <div>
-          <Label>صور إقرار رضا العميل</Label>
+          <Label>{tr("صور إقرار رضا العميل", "Customer satisfaction acknowledgment photos")}</Label>
           <input
             id="sat-photos"
             type="file"
@@ -360,19 +361,19 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
             type="button"
             variant="outline"
             size="sm"
-            className="mt-1"
+            className="mt-1 h-auto min-h-11 gap-2 whitespace-normal py-2"
             onClick={() => document.getElementById("sat-photos")?.click()}
             disabled={uploading === "satisfaction_photos"}
           >
-            {uploading === "satisfaction_photos" ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Upload className="w-4 h-4 ml-2" />}
-            رفع صور / PDF
+            {uploading === "satisfaction_photos" ? <Loader2 className="w-4 h-4 shrink-0 animate-spin" /> : <Upload className="w-4 h-4 shrink-0" />}
+            {tr("رفع صور / PDF", "Upload photos / PDF")}
           </Button>
           <PhotoGrid urls={satisfactionPhotos} onRemove={(i) => setSatisfactionPhotos((p) => p.filter((_, x) => x !== i))} />
         </div>
 
         {/* Receiver ID */}
         <div>
-          <Label>صورة هوية المستلم</Label>
+          <Label>{tr("صورة هوية المستلم", "Recipient ID attachment")}</Label>
           <input
             id="id-photo"
             type="file"
@@ -384,12 +385,12 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
             type="button"
             variant="outline"
             size="sm"
-            className="mt-1"
+            className="mt-1 h-auto min-h-11 gap-2 whitespace-normal py-2"
             onClick={() => document.getElementById("id-photo")?.click()}
             disabled={uploading === "receiver_id_photo"}
           >
-            {uploading === "receiver_id_photo" ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Upload className="w-4 h-4 ml-2" />}
-            رفع صورة / PDF
+            {uploading === "receiver_id_photo" ? <Loader2 className="w-4 h-4 shrink-0 animate-spin" /> : <Upload className="w-4 h-4 shrink-0" />}
+            {tr("رفع صورة / PDF", "Upload photo / PDF")}
           </Button>
           {receiverIdPhoto && (
             <div className="relative mt-2 inline-block">
@@ -404,27 +405,24 @@ export default function ClaimDeliverySection({ claimId, workOrderId, vehicleId, 
               <button
                 type="button"
                 onClick={() => setReceiverIdPhoto(null)}
-                className="absolute top-1 left-1 p-1 rounded-full bg-destructive text-destructive-foreground"
+                aria-label={tr("إزالة مرفق هوية المستلم", "Remove recipient ID attachment")}
+                className="absolute top-1 left-1 inline-flex h-11 w-11 items-center justify-center rounded-full bg-destructive text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <X className="w-3 h-3" />
+                <X className="w-4 h-4" />
               </button>
             </div>
           )}
         </div>
 
         <div>
-          <Label>ملاحظات التسليم</Label>
-          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+          <Label htmlFor="claim-delivery-notes">{tr("ملاحظات التسليم", "Delivery notes")}</Label>
+          <Textarea id="claim-delivery-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
         </div>
 
-        <div className="flex gap-2 pt-2 border-t">
-          <Button variant="outline" onClick={() => handleSave()} disabled={saving}>
-            {saving && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
-            حفظ المسودة
-          </Button>
-          <Button onClick={() => void openReceiptDialog()} disabled={saving || loadingWo || !workOrderId} className="bg-emerald-600 hover:bg-emerald-700">
-            <CheckCircle2 className="w-4 h-4 ml-2" />
-            متابعة واعتماد الخروج والتسليم
+        <div className="flex flex-wrap gap-2 pt-2 border-t">
+          <Button type="button" variant="outline" onClick={() => handleSave()} disabled={saving} className="h-auto min-h-11 w-full gap-2 whitespace-normal py-2 sm:w-auto">
+            {saving && <Loader2 className="w-4 h-4 shrink-0 animate-spin" />}
+            {tr("حفظ المسودة", "Save draft")}
           </Button>
         </div>
       </CardContent>
