@@ -29,7 +29,7 @@ describe("recorded running condition in intake print", () => {
     const html = buildVehicleEntryHtml(entry({ running_status: "not_running", condition_description: "Engine noise recorded" }), "en");
     expect(cell(html, "Running Condition")).toBe("Vehicle does not run");
     expect(cell(html, "Vehicle condition")).toBe("Engine noise recorded");
-    expect(cell(html, "Odometer")).toBe("0");
+    expect(cell(html, "Odometer (km)")).toBe("0");
     expect(html).not.toMatch(/[\u0600-\u06ff]/);
   });
 

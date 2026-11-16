@@ -13,6 +13,7 @@ import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { queryKeys } from "@/lib/queryKeys";
 import { getVehicleVisitDetail } from "@/lib/vehicleVisitLifecycle";
 import { buildVehicleEntryHtml, getVehicleEntry } from "@/lib/vehicleEntryService";
+import { getVehicleEntryPrintSource } from "@/lib/vehicleEntryPrintSource";
 import { getTemplateSettingsAsync } from "@/lib/pdfGenerator";
 import { downloadSanitizedPdf, openAndPrintWindow, openSanitizedPdfWindow } from "@/lib/safePdfWindow";
 import "@/lib/i18n/supervisorEntry";
@@ -91,10 +92,11 @@ function SupervisorEntryReceipt() {
     try {
       const [fresh] = await Promise.all([detail.refetch(), getTemplateSettingsAsync()]);
       if (fresh.error || !fresh.data) throw fresh.error || new Error(t("supervisorEntry:failed"));
-      const html = buildVehicleEntryHtml(fresh.data);
+      const source = await getVehicleEntryPrintSource(fresh.data);
+      const html = buildVehicleEntryHtml(source);
       if (action === "preview" && preview) openSanitizedPdfWindow(html, preview);
       else if (action === "print") await openAndPrintWindow(html);
-      else await downloadSanitizedPdf(html, fresh.data.entry_number || "vehicle-entry");
+      else await downloadSanitizedPdf(html, source.entry_number || "vehicle-entry");
     } catch (error) {
       preview?.close();
       toast.error(error instanceof Error ? error.message : t("supervisorEntry:failed"));

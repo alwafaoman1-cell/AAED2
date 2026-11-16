@@ -5,6 +5,7 @@ import { escapeHtml as esc, safePdfImageSrc } from "@/lib/safeHtml";
 import { resolveVehicleMediaUrls } from "@/lib/vehicleMediaUrls";
 import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 import { vehicleRunningStatusLabel } from "@/lib/vehicleRunningStatus";
+import { resolveVehicleIntakePresentation } from "@/lib/vehicleIntakePresentation";
 
 export type IntakeReceiptAction = "Issue" | "Print" | "Verify" | "Deliver" | "Cancel" | "History" | "Legacy exception";
 export type IntakeReceiptPermissions = Partial<Record<IntakeReceiptAction, boolean>>;
@@ -56,6 +57,7 @@ export function receiptDateTime(value: unknown, language: "ar" | "en") {
 export async function buildIntakeReceiptHtml(document: IntakeReceiptDocument, language: "ar" | "en", combined = false) {
   const { default: QRCode } = await import("qrcode");
   const { receipt, entry, revision } = document;
+  const intakePresentation = resolveVehicleIntakePresentation(entry, language);
   const qr = await QRCode.toDataURL(intakeReceiptVerifyUrl(String(entry.id), receipt.verification_token), { width: 240, margin: 1, errorCorrectionLevel: "M" });
   const text = (ar: string, en: string) => language === "en" ? en : ar;
   const signature = (entry.vehicle_entry_signatures || []).find((s: any) => s.id === (receipt as any).signature_id) || (entry.vehicle_entry_signatures || []).find((s: any) => s.signature_role === "delivered_by");
@@ -76,7 +78,8 @@ export async function buildIntakeReceiptHtml(document: IntakeReceiptDocument, la
     ${field(text("المركبة", "Vehicle"), [vehicle.make || vehicle.brand, vehicle.model, vehicle.year].filter(Boolean).join(" "))}
     ${field(text("اللوحة / الدولة", "Plate / Country"), [vehicle.plate_number, vehicle.plate_letters, vehicle.plate_country].filter(Boolean).join(" "))}
     ${field(text("رقم الشاصي", "VIN"), vehicle.vin || vehicle.vin_number)}
-    ${field(text("قراءة العداد (كم)", "Odometer (km)"), vehicle.mileage ?? review?.mileage)}
+    ${field(text("قراءة العداد (كم)", "Odometer (km)"), intakePresentation.odometer)}
+    ${field(text("موقع المركبة عند الدخول", "Vehicle location at intake"), intakePresentation.locationAtIntake)}
     ${field(text("حالة التشغيل", "Running condition"), vehicleRunningStatusLabel(entry.vehicle_condition?.running_status ?? review?.running_status, language))}
     ${field(text("تاريخ ووقت الدخول", "Arrival date and time"), `${entry.arrival_date} ${vehicleEntryArrivalTime(entry, language, "second")}`)}
     ${field(text("المطالبة", "Claim"), entry.claim?.claim_number || entry.insurance_snapshot?.claim_number)}

@@ -16,6 +16,13 @@ vi.mock('@/lib/vehicleVisitLifecycle',()=>({getVehicleVisitDetail:vi.fn()}));
 vi.mock('@/lib/vehicleEntryService',async importOriginal=>({...await importOriginal<any>(),saveVehicleEntry:mock.save,getVehicleEntry:mock.get}));
 beforeEach(()=>{vi.clearAllMocks();mock.params={};mock.data=undefined;});
 describe('visit editor identity and wizard',()=>{
+  it.each([[0,'0'],['0','0'],[5400,'5400'],[null,''],[undefined,''],['',''],['   ','']])('retains a selected vehicle odometer %j without borrowing the previous vehicle reading', (mileage,expected)=>{
+    const {result}=renderHook(()=>useVehicleEntryEditor());
+    act(()=>result.current.patchVehicle({mileage:'99999'}));
+    act(()=>result.current.selectVehicle({id:'selected-vehicle',mileage}));
+    expect(result.current.form.vehicle_id).toBe('selected-vehicle');
+    expect(result.current.form.vehicle.mileage).toBe(expected);
+  });
   it('resolves a new visitor after changing the phone without editing the previously selected customer',()=>{
     const {result}=renderHook(()=>useVehicleEntryEditor());
     act(()=>result.current.selectCustomer({id:'previous',name:'Visitor',phone:'99112233',customer_code:'CUST-0022'}));

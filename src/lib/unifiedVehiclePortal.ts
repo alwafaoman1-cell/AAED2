@@ -4,6 +4,7 @@ import { extractPlateDigits, extractPlateLetters } from "@/lib/plateUtils";
 import { buildCustomerPortalInvitation } from "@/lib/customerPortalInvitation";
 import { loadUnifiedVehiclePortalMedia } from "@/lib/vehicleSignatureMedia";
 import type { InspectionReleaseForm } from "@/lib/vehicleInspectionRelease";
+import { normalizeIntakeSignerIdentity } from "@/lib/intakeSignerIdentity";
 
 export interface VehiclePortalRelease {
   id: string; release_number: string; status: string; declaration_ar?: string; declaration_en?: string;
@@ -16,6 +17,8 @@ export interface VehiclePortalEntry {
   condition?: string; notes?: string; new_damage?: boolean | null; new_damage_notes?: string; review_reason?: string;
   declaration_ar?: string; declaration_en?: string;
   signed: boolean; signer_name?: string; signed_at?: string; signature_data_url?: string;
+  signer_id_number?: string; signature_id?: string; receipt_id?: string;
+  delivered_by?: { full_name?: string; id_number?: string };
   legacy_signature?: boolean; has_frozen_document?: boolean;
   receipt_number?: string; review_source_entry_id?: string | null; releases?: VehiclePortalRelease[];
 }
@@ -36,12 +39,12 @@ export interface StaffVehiclePortalContext {
   vehicle_year?: number | string | null; customer_name?: string; pending_handover_id?: string | null;
 }
 export class VehiclePortalError extends Error {
-  constructor(public code: "unavailable" | "expired" | "disabled" | "credentials" | "session" | "changed" | "failed") { super(code); }
+  constructor(public code: "unavailable" | "expired" | "disabled" | "credentials" | "session" | "changed" | "identity" | "failed") { super(code); }
 }
 function portalError(error: unknown) {
   const message = typeof error === "string" ? error : String((error as { message?: string })?.message || "");
   const code = /expired/i.test(message) ? "expired" : /disabled|revoked|paused/i.test(message) ? "disabled"
-    : /order_changed|release_changed|revision_changed|stale/i.test(message) ? "changed" : /plate|credential|attempt|rate.limit|locked/i.test(message) ? "credentials" : /session|unlock|unauthorized|portal_access_required/i.test(message) ? "session"
+    : /order_changed|release_changed|revision_changed|already_signed|stale/i.test(message) ? "changed" : /signer_(?:id|name)_required|invalid_signer_identity|invalid_signer_name/i.test(message) ? "identity" : /plate|credential|attempt|rate.limit|locked/i.test(message) ? "credentials" : /session|unlock|unauthorized|portal_access_required/i.test(message) ? "session"
       : /portal_not_found|portal_invalid|invalid.token|portal_unavailable/i.test(message) ? "unavailable" : "failed";
   return new VehiclePortalError(code);
 }
@@ -66,10 +69,22 @@ export async function readVehiclePortal(token: string, session: string) {
   if (!data?.vehicle || !data.customer || !Array.isArray(data.entries)) throw new VehiclePortalError("unavailable");
   return data;
 }
-export async function signVehiclePortalEntry(token: string, session: string, entry: VehiclePortalEntry, name: string, signature: string, consent: boolean) {
+export interface VehiclePortalIntakeSignature {
+  signed: true; entry_id: string; revision: number; signer_name: string; signer_id_number: string;
+  signature_id: string; receipt_id: string; receipt_number: string;
+}
+export async function signVehiclePortalEntry(token: string, session: string, entry: VehiclePortalEntry, name: string, idNumber: string, signature: string, consent: boolean): Promise<VehiclePortalIntakeSignature> {
   if (entry.legacy_signature) throw new VehiclePortalError("failed");
-  const result = await rpc<{ signed: boolean }>("customer_vehicle_portal_sign", { p_token: token, p_session: session, p_entry_id: entry.id, p_revision: entry.revision, p_name: name.trim(), p_signature: signature, p_consent: consent });
-  if (!result?.signed) throw new VehiclePortalError("failed");
+  const identity = normalizeIntakeSignerIdentity(name, idNumber);
+  if (!identity.valid) throw new VehiclePortalError("identity");
+  if (!signature || consent !== true) throw new VehiclePortalError("failed");
+  const result = await rpc<VehiclePortalIntakeSignature>("customer_vehicle_portal_sign", { p_token: token, p_session: session, p_entry_id: entry.id, p_revision: entry.revision, p_name: identity.fullName, p_id_number: identity.idNumber, p_signature: signature, p_consent: consent });
+  // Identity finalization can advance the material revision once, before signing.
+  if (result?.signed !== true || result.entry_id !== entry.id || !Number.isInteger(result.revision)
+    || (result.revision !== entry.revision && result.revision !== entry.revision + 1)
+    || result.signer_name !== identity.fullName || result.signer_id_number !== identity.idNumber
+    || [result.signature_id, result.receipt_id, result.receipt_number].some((value) => typeof value !== "string" || !value.trim())) throw new VehiclePortalError("failed");
+  return result;
 }
 export async function signVehiclePortalOrder(token: string, session: string, order: NonNullable<VehiclePortalData["order"]>, name: string, signature: string, consent: boolean) {
   if (!order.enabled || !order.id || !order.digest) throw new VehiclePortalError("failed");

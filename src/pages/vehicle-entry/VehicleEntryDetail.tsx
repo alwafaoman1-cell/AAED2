@@ -27,7 +27,7 @@ import { toast } from "sonner";
 import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 import VehicleIntakeReceiptPanel from "@/components/vehicle-entry/VehicleIntakeReceiptPanel";
 import VehicleCustomerPortalPanel from "@/components/vehicle-entry/VehicleCustomerPortalPanel";
-import { getIntakeReceiptContext, getIntakeReceiptDocument } from "@/lib/vehicleIntakeReceipt";
+import { getVehicleEntryPrintSource } from "@/lib/vehicleEntryPrintSource";
 
 function fmtDateTime(value?: string | null) {
   if (!value) return "—";
@@ -85,13 +85,7 @@ export default function VehicleEntryDetail() {
     const [refreshed] = await Promise.all([detail.refetch(), getTemplateSettingsAsync()]);
     if (refreshed.error) throw refreshed.error;
     if (!refreshed.data) throw new Error(t("vehicleEntry.pdfSourceMissing"));
-    let source = refreshed.data;
-    if ((refreshed.data.vehicle_entry_signatures || []).some((s: any) => s.signature_role === "delivered_by" && s.intake_revision != null && s.intake_revision === refreshed.data.intake_revision)) {
-      const receiptContext = await getIntakeReceiptContext(refreshed.data.id);
-      const signed = receiptContext.receipts.find((r) => r.revision === refreshed.data.intake_revision);
-      if (!signed) throw new Error(t("vehicleEntry.pdfSourceMissing"));
-      source = (await getIntakeReceiptDocument(signed.id)).entry;
-    }
+    const source = await getVehicleEntryPrintSource(refreshed.data);
     return { html: buildVehicleEntryHtml(source), entry: source };
   }
 
@@ -235,7 +229,8 @@ export default function VehicleEntryDetail() {
           <Info label="الاسم" value={customer.name || entry.customer_snapshot?.name} />
           <Info label="الهاتف" value={customer.phone || entry.customer_snapshot?.phone} />
           <Info label="الكود" value={customer.customer_code || "—"} />
-          <Info label="المستلم من" value={deliveredBy.full_name} />
+          <Info label={english ? "Vehicle intake signer" : "مُسلّم المركبة"} value={deliveredBy.full_name} />
+          <Info label={english ? "Intake signer ID number" : "رقم هوية مُسلّم المركبة"} value={deliveredBy.id_number} />
         </Card>
         <Card className="p-4 space-y-3">
           {cardTitle("المركبة", "Vehicle")}

@@ -33,8 +33,12 @@ describe("vehicle entry PDF download", () => {
     const page = readFileSync("src/pages/vehicle-entry/VehicleEntryDetail.tsx", "utf8");
     expect(page).toContain("await Promise.all([detail.refetch(), getTemplateSettingsAsync()])");
     expect(page).toContain("downloadSanitizedPdf(");
-    expect(page).toContain("getIntakeReceiptDocument(signed.id)");
+    expect(page).toContain("await getVehicleEntryPrintSource(refreshed.data)");
     expect(page).toContain("buildVehicleEntryHtml(source)");
     expect(page).toContain('t("vehicleEntry.downloadPdf")');
+    const supervisor = readFileSync("src/pages/apps/SupervisorEntryWorkspace.tsx", "utf8");
+    expect(supervisor).toContain("await getVehicleEntryPrintSource(fresh.data)");
+    expect(supervisor).toContain("buildVehicleEntryHtml(source)");
+    expect(supervisor).not.toContain("buildVehicleEntryHtml(fresh.data)");
   });
 });

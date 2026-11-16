@@ -11,21 +11,31 @@ import VehiclePortalOrderTracking from "@/components/vehicle-entry/VehiclePortal
 import { buildIntakeReceiptHtml } from "@/lib/vehicleIntakeReceipt";
 import { extractPlateDigits, extractPlateLetters, formatPlate } from "@/lib/plateUtils";
 import { inspectionReleaseDisplayValue } from "@/lib/inspectionReleaseOptions";
+import { normalizeIntakeSignerIdentity } from "@/lib/intakeSignerIdentity";
+import type { VehiclePortalIntakeSignature } from "@/lib/unifiedVehiclePortal";
 import { readVehiclePortal, readVehiclePortalDocument, readVehiclePortalMedia, signVehiclePortalEntry, signVehiclePortalOrder, signVehiclePortalRelease, submitVehiclePortalFeedback, submitVehiclePortalNote, unlockVehiclePortal, VehiclePortalError, type VehiclePortalData, type VehiclePortalEntry, type VehiclePortalMedia, type VehiclePortalRelease } from "@/lib/unifiedVehiclePortal";
 
 type Translate = (ar: string, en: string) => string;
 type Access = { session: string; expiresAt: string | null; data: VehiclePortalData };
+
+function intakeConsentLabel(text: Translate, isReview: boolean) {
+  return text(
+    `قرأت بيانات الدخول وحالة المركبة والملاحظات والأضرار ${isReview ? "الجديدة" : "المسجلة"}، وأقر بصحتها وبصحة اسمي ورقم بطاقتي، وأوافق على حفظ بياناتي وتوقيعي على هذا الإصدار وإصدار وصل الاستلام.`,
+    `I have reviewed the intake details, running status, notes and ${isReview ? "new" : "recorded"} damage. I confirm these details, my name and my ID number are correct, and agree to save my details and signature on this revision and issue the intake receipt.`,
+  );
+}
 
 function safeSignature(source?: string) {
   // Only stored signature pixels are accepted here; no external tracking URLs or SVG.
   return source && /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=\r\n]+$/.test(source) ? source : undefined;
 }
 
-function SignatureRecord({ name, at, signature, text, en }: { name?: string; at?: string; signature?: string; text: Translate; en: boolean }) {
+function SignatureRecord({ name, idNumber, at, signature, text, en }: { name?: string; idNumber?: string; at?: string; signature?: string; text: Translate; en: boolean }) {
   const image = safeSignature(signature);
   return <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900 dark:bg-emerald-950/20">
     <p className="flex items-center gap-2 font-medium"><CheckCircle2 className="h-5 w-5 text-emerald-600" />{text("موقّع ومحفوظ", "Signed and saved")}</p>
     {name && <p>{text("اسم الموقّع", "Signer")}: {name}</p>}
+    {idNumber && <p>{text("رقم البطاقة / الهوية", "ID card / identity number")}: <bdi>{idNumber}</bdi></p>}
     {at && <p className="text-sm text-muted-foreground">{new Date(at).toLocaleString(en ? "en-GB" : "ar-OM")}</p>}
     {image && <img src={image} alt={text("التوقيع المحفوظ", "Saved signature")} className="h-24 max-w-full rounded bg-white object-contain" />}
   </div>;
@@ -64,20 +74,26 @@ function ReleaseReport({ release, text, en }: { release: VehiclePortalRelease; t
   return <dl className="grid gap-3 rounded-lg bg-muted/40 p-3 text-sm sm:grid-cols-2">{fields.map(([key, label]) => <div key={key}><dt className="font-semibold">{label}</dt><dd className="whitespace-pre-wrap pt-1">{inspectionReleaseDisplayValue(key, release.form_data?.[key] || (key === "recipient_name" ? release.recipient_name || "" : ""), en ? "en" : "ar") || "—"}</dd></div>)}</dl>;
 }
 
-function SignatureForm({ text, name: initialName, disabled, consentLabel, onSubmit }: { text: Translate; name?: string; disabled: boolean; consentLabel: string; onSubmit: (name: string, signature: string, consent: boolean) => Promise<boolean> }) {
+function SignatureForm({ text, name: initialName, idNumber: initialIdNumber, requireIdentity = false, disabled, consentLabel, onSubmit }: { text: Translate; name?: string; idNumber?: string; requireIdentity?: boolean; disabled: boolean; consentLabel: string; onSubmit: (name: string, signature: string, consent: boolean, idNumber?: string) => Promise<boolean> }) {
   const [name, setName] = useState(initialName || "");
+  const [idNumber, setIdNumber] = useState(initialIdNumber || "");
   const [signature, setSignature] = useState("");
   const [consent, setConsent] = useState(false);
+  const identity = normalizeIntakeSignerIdentity(name, idNumber);
+  const validIdentity = !requireIdentity || identity.valid;
+  const clearIdentityConsent = () => { if (requireIdentity) { setSignature(""); setConsent(false); } };
   const submitLabel = text("إرسال التوقيع وحفظه", "Submit and save signature");
   return <form className="space-y-3 border-t pt-4" onSubmit={async (event) => {
     event.preventDefault();
-    if (disabled || !name.trim() || !signature || !consent) return;
-    if (await onSubmit(name, signature, consent)) { setSignature(""); setConsent(false); }
+    if (disabled || !name.trim() || !validIdentity || !signature || !consent) return;
+    if (await onSubmit(name, signature, consent, requireIdentity ? identity.idNumber : undefined)) { setSignature(""); setConsent(false); }
   }}>
-    <label className="block space-y-1"><span>{text("اسم الموقّع الكامل", "Signer's full name")}</span><Input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} maxLength={150} required disabled={disabled} /></label>
+    {requireIdentity && <p className="text-sm text-muted-foreground">{text("أدخل بيانات الشخص الذي سلّم المركبة فعليًا. ستُحفظ مع توقيعه وتظهر في نموذج الاستلام والوصل.", "Enter the details of the person who actually delivered the vehicle. They will be saved with the signature and shown on the intake form and receipt.")}</p>}
+    <label className="block space-y-1"><span>{requireIdentity ? text("اسم مُسلّم المركبة الكامل", "Vehicle deliverer's full name") : text("اسم الموقّع الكامل", "Signer's full name")}</span><Input autoComplete="name" value={name} onChange={(event) => { setName(event.target.value); clearIdentityConsent(); }} maxLength={requireIdentity ? 160 : 150} required disabled={disabled} /></label>
+    {requireIdentity && <label className="block space-y-1"><span>{text("رقم بطاقة مُسلّم المركبة", "Vehicle deliverer's ID number")}</span><Input dir="ltr" autoComplete="off" spellCheck={false} value={idNumber} onChange={(event) => { setIdNumber(event.target.value); clearIdentityConsent(); }} maxLength={80} required disabled={disabled} /></label>}
     <ElectronicSignaturePad value={signature} onChange={setSignature} disabled={disabled} compactOutput={false} title={text("التوقيع الإلكتروني", "Electronic signature")} description={text("وقّع داخل المربع باستخدام الإصبع أو الفأرة.", "Sign inside the box with your finger or mouse.")} clearLabel={text("مسح التوقيع", "Clear signature")} savedLabel={text("التوقيع جاهز للإرسال. لم يُحفظ بعد.", "Your signature is ready to submit. It has not been saved yet.")} emptyLabel={text("التوقيع مطلوب.", "A signature is required.")} />
     <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} disabled={disabled} required className="mt-1 h-4 w-4" /><span>{consentLabel}</span></label>
-    <Button type="submit" disabled={disabled || !name.trim() || !signature || !consent} className="gap-2">{disabled ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}{submitLabel}</Button>
+    <Button type="submit" disabled={disabled || !name.trim() || !validIdentity || !signature || !consent} className="gap-2">{disabled ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}{submitLabel}</Button>
   </form>;
 }
 
@@ -116,7 +132,7 @@ function VehiclePortalSession({ token }: { token: string }) {
 
   const fail = useCallback((cause: unknown) => {
     const code = cause instanceof VehiclePortalError ? cause.code : "failed";
-    if (code !== "failed" && code !== "changed") lock();
+    if (code !== "failed" && code !== "changed" && code !== "identity") lock();
     setError(code);
   }, [lock]);
 
@@ -196,6 +212,20 @@ function VehiclePortalSession({ token }: { token: string }) {
     finally { if (mounted.current && generation.current === requestGeneration) { working.current = false; setBusy(false); } }
   }
 
+  function signIntake(entry: VehiclePortalEntry, name: string, idNumber: string, signature: string, consent: boolean) {
+    let result: VehiclePortalIntakeSignature | undefined;
+    return authenticated(async (session) => {
+      result = await signVehiclePortalEntry(token, session, entry, name, idNumber, signature, consent);
+    }, (saved) => {
+      const signed = result;
+      return !!signed && saved.entries.some((row) => row.id === signed.entry_id && row.revision === signed.revision
+        && row.signed && !row.legacy_signature && row.has_frozen_document === true
+        && row.signature_id === signed.signature_id && row.receipt_id === signed.receipt_id && row.receipt_number === signed.receipt_number
+        && row.signer_name === signed.signer_name && row.signer_id_number === signed.signer_id_number
+        && row.delivered_by?.full_name === signed.signer_name && row.delivered_by?.id_number === signed.signer_id_number);
+    });
+  }
+
   async function showPhotos(entry: VehiclePortalEntry) {
     let media: VehiclePortalMedia[] = [];
     const operation = authenticated(async (activeSession) => { media = await readVehiclePortalMedia(token, activeSession, entry.id, entry.revision); });
@@ -230,6 +260,7 @@ function VehiclePortalSession({ token }: { token: string }) {
     credentials: text("تعذّر التحقق من اللوحة. تأكد من الأرقام والحروف وحاول لاحقًا.", "The plate could not be verified. Check the digits and letters and try again later."),
     session: text("انتهت جلسة الدخول. أدخل رقم اللوحة وحروفها مجددًا.", "Your access session ended. Enter the plate digits and letters again."),
     changed: text("تغيّر المستند قبل الحفظ. راجع أحدث البيانات ووقّع الإصدار الجديد مجددًا.", "The document changed before saving. Review the latest details and sign the new revision again."),
+    identity: text("أدخل اسم مُسلّم المركبة ورقم بطاقته بشكل صحيح، ثم وقّع وأرسل النموذج مجددًا.", "Enter the vehicle deliverer's name and ID number correctly, then sign and submit the form again."),
     failed: text("تعذّر إكمال العملية. تحقق من الاتصال وأعد المحاولة.", "The operation could not be completed. Check your connection and try again."),
   };
   const data = access?.data;
@@ -260,23 +291,24 @@ function VehiclePortalSession({ token }: { token: string }) {
         {selectedTab === "intake" && <section aria-label={text("نماذج الدخول والمراجعات", "Intake and review forms")} className="space-y-4">
           {data.entries.length === 0 && <Card className="p-4">{text("لا توجد نماذج دخول متاحة حاليًا.", "No intake forms are currently available.")}</Card>}
           {data.entries.map((entry) => {
+            const isReview = !!entry.review_source_entry_id?.trim();
             const running = entry.running_status === "running";
             const stopped = entry.running_status === "not_running";
             const StatusIcon = running ? Power : stopped ? PowerOff : CircleHelp;
             return <Card key={`${entry.id}:${entry.revision}`} className="space-y-4 p-4 sm:p-5">
-              <header className="space-y-1"><p className="text-xs font-medium text-primary">{entry.review_source_entry_id ? text("زيارة مراجعة مرتبطة بالدخول السابق", "Review visit linked to the previous intake") : text("دخول واستلام المركبة", "Vehicle intake")}</p><h3 className="font-semibold">{entry.entry_number} · {text("الإصدار", "Revision")} {entry.revision}</h3><p className="text-sm text-muted-foreground">{entry.arrival_date} {entry.arrival_time}</p></header>
-              <div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg bg-muted/60 p-3"><p className="text-xs text-muted-foreground">{text("حالة المركبة", "Vehicle running status")}</p><p className="mt-1 flex items-center gap-2 font-medium"><StatusIcon className={`h-5 w-5 ${running ? "text-emerald-600" : stopped ? "text-red-600" : "text-muted-foreground"}`} />{running ? text("تعمل", "Running") : stopped ? text("لا تعمل", "Not running") : text("غير موثّقة في النموذج السابق", "Not recorded in this previous form")}</p></div><div className="rounded-lg bg-muted/60 p-3"><p className="text-xs text-muted-foreground">{text("قراءة العداد", "Odometer")}</p><p className="mt-1 font-medium">{entry.mileage == null ? "—" : `${entry.mileage.toLocaleString(en ? "en-GB" : "ar-OM")} ${text("كم", "km")}`}</p></div></div>
+              <header className="space-y-1"><p className="text-xs font-medium text-primary">{isReview ? text("زيارة مراجعة مرتبطة بالدخول السابق", "Review visit linked to the previous intake") : text("دخول واستلام المركبة", "Vehicle intake")}</p><h3 className="font-semibold">{entry.entry_number} · {text("الإصدار", "Revision")} {entry.revision}</h3><p className="text-sm text-muted-foreground">{entry.arrival_date} {entry.arrival_time}</p></header>
+              <div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg bg-muted/60 p-3"><p className="text-xs text-muted-foreground">{text("حالة المركبة", "Vehicle running status")}</p><p className="mt-1 flex items-center gap-2 font-medium"><StatusIcon className={`h-5 w-5 ${running ? "text-emerald-600" : stopped ? "text-red-600" : "text-muted-foreground"}`} />{running ? text("تعمل", "Running") : stopped ? text("لا تعمل", "Not running") : text("غير مسجلة", "Not recorded")}</p></div><div className="rounded-lg bg-muted/60 p-3"><p className="text-xs text-muted-foreground">{text("قراءة العداد", "Odometer")}</p><p className="mt-1 font-medium">{entry.mileage == null ? "—" : `${entry.mileage.toLocaleString(en ? "en-GB" : "ar-OM")} ${text("كم", "km")}`}</p></div></div>
               {entry.condition && <div><h4 className="text-sm font-semibold">{text("وصف حالة المركبة", "Vehicle condition")}</h4><p className="whitespace-pre-wrap text-sm">{entry.condition}</p></div>}
               {entry.review_reason && <div><h4 className="text-sm font-semibold">{text("سبب الرجوع للمراجعة", "Reason for review")}</h4><p className="whitespace-pre-wrap text-sm">{entry.review_reason}</p></div>}
               <div><h4 className="text-sm font-semibold">{text("الملاحظات", "Notes")}</h4><p className="whitespace-pre-wrap text-sm">{entry.notes || "—"}</p></div>
-              <div className={`rounded-lg border p-3 ${entry.new_damage === true ? "border-amber-400 bg-amber-50/60 dark:bg-amber-950/20" : ""}`}><h4 className="font-semibold">{text("هل توجد أضرار جديدة؟", "Any new damage?")}</h4><p>{entry.new_damage === true ? text("نعم، توجد أضرار جديدة", "Yes, new damage is recorded") : entry.new_damage === false ? text("لا توجد أضرار جديدة", "No new damage") : text("لم يُسجّل في النموذج السابق", "Not recorded in this previous form")}</p>{entry.new_damage_notes && <p className="mt-2 whitespace-pre-wrap text-sm">{entry.new_damage_notes}</p>}</div>
+              {isReview && <div className={`rounded-lg border p-3 ${entry.new_damage === true ? "border-amber-400 bg-amber-50/60 dark:bg-amber-950/20" : ""}`}><h4 className="font-semibold">{text("هل توجد أضرار جديدة؟", "Any new damage?")}</h4><p>{entry.new_damage === true ? text("نعم، توجد أضرار جديدة", "Yes, new damage is recorded") : entry.new_damage === false ? text("لا توجد أضرار جديدة", "No new damage") : text("لم يُسجّل تقييم الأضرار لهذه الزيارة.", "Damage assessment not recorded for this visit.")}</p>{entry.new_damage_notes && <p className="mt-2 whitespace-pre-wrap text-sm">{entry.new_damage_notes}</p>}</div>}
               <Button variant="outline" size="sm" className="gap-2" disabled={busy} onClick={() => void showPhotos(entry)}><Images className="h-4 w-4" />{labels.photos}</Button>
               {photos[entry.id + ":" + entry.revision] && <div className="grid grid-cols-2 gap-2">
                 {photos[entry.id + ":" + entry.revision].length === 0 && <p className="col-span-2 text-sm text-muted-foreground">{text("لا توجد صور محفوظة لهذا النموذج.", "No photos are saved for this form.")}</p>}
                 {photos[entry.id + ":" + entry.revision].map((photo) => <figure key={photo.id} className="space-y-1"><img src={photo.url} alt={photo.caption || text("صورة حالة المركبة", "Vehicle condition photo")} className="aspect-video w-full rounded-lg border object-contain" referrerPolicy="no-referrer" />{photo.caption && <figcaption className="text-xs">{photo.caption}</figcaption>}</figure>)}
               </div>}
               {(en ? entry.declaration_en : entry.declaration_ar) && <p className="whitespace-pre-wrap rounded-lg border p-3 text-sm">{en ? entry.declaration_en : entry.declaration_ar}</p>}
-              {entry.legacy_signature ? <LegacyIntakeSignatureRecord entry={entry} text={text} en={en} /> : entry.signed ? <><SignatureRecord name={entry.signer_name} at={entry.signed_at} signature={entry.signature_data_url} text={text} en={en} />{entry.has_frozen_document !== false ? <Button variant="outline" disabled={busy} className="gap-2" onClick={() => void preview(entry)}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}{labels.document}</Button> : <p className="text-sm text-muted-foreground">{text("النسخة الأصلية الموقّعة غير متاحة للتنزيل.", "The original signed document is unavailable for download.")}</p>}</> : <SignatureForm text={text} name={data.customer.name} disabled={busy} consentLabel={text("قرأت بيانات الدخول وحالة المركبة والملاحظات والأضرار الجديدة، وأقر بصحتها وأوافق على حفظ توقيعي على هذا الإصدار وإصدار وصل الاستلام.", "I have reviewed the intake details, running status, notes and new damage. I confirm they are correct and agree to save my signature on this revision and issue the intake receipt.")} onSubmit={(name, signature, consent) => authenticated((session) => signVehiclePortalEntry(token, session, entry, name, signature, consent), (saved) => saved.entries.some((row) => row.id === entry.id && row.revision === entry.revision && row.signed && !row.legacy_signature))} />}
+              {entry.legacy_signature ? <LegacyIntakeSignatureRecord entry={entry} text={text} en={en} /> : entry.signed ? <><SignatureRecord name={entry.signer_name} idNumber={entry.signer_id_number} at={entry.signed_at} signature={entry.signature_data_url} text={text} en={en} />{entry.has_frozen_document !== false ? <Button variant="outline" disabled={busy} className="h-auto min-h-11 max-w-full gap-2 whitespace-normal text-start" onClick={() => void preview(entry)}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}{labels.document}</Button> : <p className="text-sm text-muted-foreground">{text("النسخة الأصلية الموقّعة غير متاحة للتنزيل.", "The original signed document is unavailable for download.")}</p>}</> : <SignatureForm text={text} name={entry.delivered_by?.full_name} idNumber={entry.delivered_by?.id_number} requireIdentity disabled={busy} consentLabel={intakeConsentLabel(text, isReview)} onSubmit={(name, signature, consent, idNumber) => signIntake(entry, name, idNumber || "", signature, consent)} />}
               {entry.releases?.map((release) => <section key={release.id} className="space-y-3 rounded-lg border p-3"><h4 className="font-semibold">{text("إذن الخروج المؤقت للفحص", "Temporary inspection release")} · {release.release_number}</h4><ReleaseReport release={release} text={text} en={en} /><p className="whitespace-pre-wrap text-sm">{en ? release.declaration_en : release.declaration_ar}</p>{release.signed_at ? <SignatureRecord name={release.signer_name} at={release.signed_at} signature={release.signature_data_url} text={text} en={en} /> : release.status === "awaiting_signature" ? <SignatureForm key={`${release.id}:${release.digest}`} text={text} name={release.recipient_name || release.form_data?.recipient_name} disabled={busy} consentLabel={text("قرأت إذن الخروج المؤقت وأوافق على إقراره وحفظ توقيعي عليه.", "I have read the temporary release and agree to its declaration and to save my signature.")} onSubmit={(name, signature, consent) => authenticated((session) => signVehiclePortalRelease(token, session, release, name, signature, consent), (saved) => saved.entries.some((row) => row.releases?.some((item) => item.id === release.id && item.digest === release.digest && !!item.signed_at)))} /> : <p className="text-sm text-muted-foreground">{text("لم يجهّز إذن الخروج للتوقيع بعد.", "The release is not ready for signature yet.")}</p>}</section>)}
             </Card>;
           })}

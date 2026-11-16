@@ -260,7 +260,10 @@ describe("vehicle entry receipt contract", () => {
     expect(read("src/components/LegacyUnifiedPortalRedirect.tsx")).toContain("customer_vehicle_portal_resolve");
     expect(detail).toContain("<VehicleCustomerPortalPanel");
     expect(service).toContain("createVehicleEntryCustomerSignatureLink");
-    expect(realtime).toContain('vehicle_entry_signatures: ["vehicle_entries", "vehicle_360"]');
+    const signatureQueryKeys = JSON.parse(`[${realtime.match(/vehicle_entry_signatures:\s*\[([^\]]*)\]/)?.[1] || ""}]`);
+    expect(signatureQueryKeys).toEqual(expect.arrayContaining([
+      "vehicle_entries", "vehicle_360", "vehicle-intake-receipts", "intake-receipt-history",
+    ]));
   });
 
   it("keeps media storage scoped and legacy public routes free of bearer media loaders", () => {

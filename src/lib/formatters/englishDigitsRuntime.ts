@@ -23,9 +23,17 @@ function normalizeEditableValue(el: HTMLInputElement | HTMLTextAreaElement) {
   if (before === normalized) return;
   const start = el.selectionStart;
   const end = el.selectionEnd;
-  el.value = normalized;
+  const direction = el.selectionDirection;
+  // React tracks writes through the element's own value setter. Normalizing
+  // through that setter during capture would make the original input/change
+  // event appear unchanged, so controlled state and onChange would stay stale.
+  // Use the native setter and let React consume the original event once.
+  const prototype = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+  const setNativeValue = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+  if (!setNativeValue) return;
+  setNativeValue.call(el, normalized);
   try {
-    if (typeof start === "number" && typeof end === "number") el.setSelectionRange(start, end);
+    if (typeof start === "number" && typeof end === "number") el.setSelectionRange(start, end, direction || undefined);
   } catch {
     // Some input types do not support selection ranges.
   }

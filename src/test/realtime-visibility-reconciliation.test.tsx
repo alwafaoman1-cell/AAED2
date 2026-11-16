@@ -86,6 +86,41 @@ describe("realtime visibility reconciliation", () => {
     expect(lastBatchMatches("vehicles")).toBe(true);
   });
 
+  it.each(["/vehicle-entry/entry-1", "/supervisor/entry/entry-1"])("refreshes the existing receipt and history readers after intake/signature events on %s", (pathname) => {
+    cleanup();
+    realtime.callbacks.clear();
+    realtime.pathname = pathname;
+    render(<QueryClientProvider client={client}><MountedSync /></QueryClientProvider>);
+    expect(realtime.filters.get("vehicle_entry_signatures")).toBe("tenant_id=eq.tenant-1");
+    act(() => {
+      realtime.callbacks.get("vehicle_entries")?.({});
+      realtime.callbacks.get("vehicle_entry_signatures")?.({});
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    for (const key of ["vehicle_entries", "vehicle-intake-receipts", "intake-receipt-history"]) {
+      expect(lastBatchMatches(key)).toBe(true);
+    }
+    expect(lastBatchMatches("insurance_invoices")).toBe(false);
+  });
+
+  it("queues receipt and history updates until a dirty staff intake becomes clean", () => {
+    cleanup();
+    realtime.callbacks.clear();
+    realtime.pathname = "/vehicle-entry/entry-1/edit";
+    render(<QueryClientProvider client={client}><MountedSync /></QueryClientProvider>);
+    act(() => {
+      markDirty("realtime-test-draft");
+      realtime.callbacks.get("vehicle_entry_signatures")?.({});
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    act(() => { markClean("realtime-test-draft"); vi.advanceTimersByTime(1_500); });
+    expect(lastBatchMatches("vehicle_entries")).toBe(true);
+    expect(lastBatchMatches("vehicle-intake-receipts")).toBe(true);
+    expect(lastBatchMatches("intake-receipt-history")).toBe(true);
+  });
+
   it("invalidates expense lists and financial reports after an expense changes", async () => {
     cleanup();
     realtime.pathname = "/accounting/reports/monthly-vehicle-profitability";

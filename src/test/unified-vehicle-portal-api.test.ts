@@ -4,6 +4,12 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: api.rpc } })
 vi.mock("@/lib/vehicleSignatureMedia", () => ({ loadUnifiedVehiclePortalMedia: api.media }));
 import { buildUnifiedVehiclePortalUrl, buildVehiclePortalWhatsAppMessage, readVehiclePortalDocument, signVehiclePortalEntry, signVehiclePortalOrder, signVehiclePortalRelease, submitVehiclePortalFeedback, submitVehiclePortalNote, unlockVehiclePortal } from "@/lib/unifiedVehiclePortal";
 
+const intakeSignature = (overrides: Record<string, unknown> = {}) => ({
+  signed: true, entry_id: "entry", revision: 4, signer_name: "Actual Deliverer", signer_id_number: "00123AB",
+  signature_id: "signature-1", receipt_id: "receipt-1", receipt_number: "RCPT-1", ...overrides,
+});
+const ink = "data:image/png;base64,AA==";
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { "Content-Type": "image/png" } })));
@@ -28,18 +34,52 @@ describe("unified vehicle portal API boundaries", () => {
     expect(buildVehiclePortalWhatsAppMessage(context, url, "en")).not.toMatch(/[\u0600-\u06ff]/);
   });
   it("binds each new intake signature to the unlocked session and exact revision", async () => {
-    api.rpc.mockResolvedValue({ data: { signed: true }, error: null });
-    await signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, " Customer ", "data:image/png;base64,AA==", true);
-    expect(api.rpc).toHaveBeenCalledWith("customer_vehicle_portal_sign", { p_token: "token", p_session: "session", p_entry_id: "entry", p_revision: 4, p_name: "Customer", p_signature: "data:image/png;base64,AA==", p_consent: true });
+    api.rpc.mockResolvedValue({ data: intakeSignature(), error: null });
+    const result = await signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, " Actual Deliverer ", " ٠٠١۲۳AB ", ink, true);
+    expect(result).toEqual(intakeSignature());
+    expect(api.rpc).toHaveBeenCalledWith("customer_vehicle_portal_sign", { p_token: "token", p_session: "session", p_entry_id: "entry", p_revision: 4, p_name: "Actual Deliverer", p_id_number: "00123AB", p_signature: ink, p_consent: true });
     api.rpc.mockResolvedValueOnce({ data: { signed: false }, error: null });
-    await expect(signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, "Customer", "signature", true)).rejects.toMatchObject({ code: "failed" });
+    await expect(signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, "Actual Deliverer", "00123AB", ink, true)).rejects.toMatchObject({ code: "failed" });
+  });
+  it("accepts the one material revision returned when the actual identity is finalized", async () => {
+    api.rpc.mockResolvedValue({ data: intakeSignature({ revision: 5 }), error: null });
+    expect(await signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, "Actual Deliverer", "00123AB", ink, true)).toMatchObject({ revision: 5, signature_id: "signature-1", receipt_id: "receipt-1" });
+    expect(api.rpc).toHaveBeenCalledWith("customer_vehicle_portal_sign", expect.objectContaining({ p_revision: 4 }));
+  });
+  it.each([
+    ["", "00123AB"], ["   ", "00123AB"], ["Actual Deliverer", ""], ["Actual Deliverer", "   "],
+    ["A".repeat(161), "00123AB"], ["Actual Deliverer", "0".repeat(81)],
+    ["Actual\u0000Deliverer", "00123AB"], ["Actual Deliverer", "00\u001f123AB"],
+    ["Actual\u007fDeliverer", "00123AB"], ["Actual Deliverer", "00\u009f123AB"],
+  ])("rejects invalid intake identity before any RPC (%j / %j)", async (name, idNumber) => {
+    await expect(signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, name, idNumber, ink, true)).rejects.toMatchObject({ code: "identity" });
+    expect(api.rpc).not.toHaveBeenCalled();
+  });
+  it.each([
+    { signed: false }, { entry_id: "another-entry" }, { revision: 3 }, { revision: 6 }, { revision: 4.5 },
+    { signer_name: "Vehicle owner" }, { signer_id_number: "123AB" },
+    { signature_id: undefined }, { receipt_id: undefined }, { receipt_number: "" },
+    { signature_id: " " }, { receipt_id: "\t" }, { receipt_number: "  " },
+  ])("rejects an incomplete or mismatched canonical signing result %j", async (overrides) => {
+    api.rpc.mockResolvedValue({ data: intakeSignature(overrides), error: null });
+    await expect(signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, "Actual Deliverer", "00123AB", ink, true)).rejects.toMatchObject({ code: "failed" });
+  });
+  it("requires existing ink and affirmative consent before an intake RPC", async () => {
+    for (const [signature, consent] of [["", true], [ink, false]] as const) {
+      await expect(signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, "Actual Deliverer", "00123AB", signature, consent)).rejects.toMatchObject({ code: "failed" });
+    }
+    expect(api.rpc).not.toHaveBeenCalled();
+  });
+  it.each(["PORTAL_SIGNER_ID_REQUIRED", "PORTAL_SIGNER_NAME_REQUIRED"])("maps server identity rejection %s to a safe public error", async error => {
+    api.rpc.mockResolvedValue({ data: { error: `${error} SECRET_INTERNAL_ID` }, error: null });
+    await expect(signVehiclePortalEntry("token", "session", { id: "entry", revision: 4 } as never, "Actual Deliverer", "00123AB", ink, true)).rejects.toMatchObject({ code: "identity", message: "identity" });
   });
   it("never submits retained legacy ink as a new intake signature", async () => {
-    await expect(signVehiclePortalEntry("token", "session", { id: "entry", revision: 1, legacy_signature: true } as never, "Customer", "old-signature", true)).rejects.toMatchObject({ code: "failed" });
+    await expect(signVehiclePortalEntry("token", "session", { id: "entry", revision: 1, legacy_signature: true } as never, "Actual Deliverer", "00123AB", "old-signature", true)).rejects.toMatchObject({ code: "failed" });
     expect(api.rpc).not.toHaveBeenCalled();
-    api.rpc.mockResolvedValue({ data: { signed: true }, error: null });
-    await signVehiclePortalEntry("token", "session", { id: "entry", revision: 2, legacy_signature: false } as never, "Customer", "new-signature", true);
-    expect(api.rpc).toHaveBeenCalledExactlyOnceWith("customer_vehicle_portal_sign", expect.objectContaining({ p_entry_id: "entry", p_revision: 2, p_signature: "new-signature" }));
+    api.rpc.mockResolvedValue({ data: intakeSignature({ revision: 2 }), error: null });
+    await signVehiclePortalEntry("token", "session", { id: "entry", revision: 2, legacy_signature: false } as never, "Actual Deliverer", "00123AB", "new-signature", true);
+    expect(api.rpc).toHaveBeenCalledExactlyOnceWith("customer_vehicle_portal_sign", expect.objectContaining({ p_entry_id: "entry", p_revision: 2, p_id_number: "00123AB", p_signature: "new-signature" }));
   });
   it("replaces raw snapshot URLs with session-authorized frozen media", async () => {
     api.rpc.mockResolvedValue({ data: { entry: { id: "entry", vehicle_media: [{ url: "https://raw-private-object" }] }, receipt: { receipt_number: "R1" }, revision: 2 }, error: null });

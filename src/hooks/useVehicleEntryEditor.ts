@@ -440,7 +440,7 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor";sourc
         year: vehicle.year ? String(vehicle.year) : "",
         color: vehicle.color || "",
         vin: vehicle.vin_number || vehicle.vin || "",
-        mileage: vehicle.mileage ? String(vehicle.mileage) : "",
+        mileage: vehicle.mileage != null && String(vehicle.mileage).trim() !== "" ? String(vehicle.mileage) : "",
         current_owner_name: vehicle.customers?.name || form.vehicle.current_owner_name,
       },
     });
