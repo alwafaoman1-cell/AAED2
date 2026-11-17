@@ -6,6 +6,7 @@ import { getPrivateDocumentUrl } from "@/lib/documentExtraction/persistence";
 import {workshopDateTime} from "@/lib/workshopDateTime";
 import {hasConfirmedVehicleEntryWorkOrderLink} from "@/lib/vehicleEntryWorkOrderLink";
 import {isVehicleVisitAwaitingArrival} from "@/lib/vehicleVisitIntake";
+import { hasVehicleVisitManagerPresenceAttestation } from "@/lib/vehicleVisitManagerProjection";
 
 export const VISIT_STAGES = ["arrived", "approved", "in_progress", "ready", "delivered", "cancelled", "needs_review"] as const;
 export type VisitStage = typeof VISIT_STAGES[number];
@@ -22,6 +23,9 @@ export interface VehicleVisitWorkflow {
   review_reason: string | null;
   changed_at: string;
   changed_by: string | null;
+  manager_adjustment?: Record<string, unknown> | null;
+  /** Read-only operational dates projected by the center RPC; signed intake fields stay original. */
+  effective_stage_dates?: Partial<Record<Exclude<PersistedVisitStage, "cancelled">, string | null>>;
 }
 
 export interface VehicleVisitTransition {
@@ -92,6 +96,8 @@ export function getVehicleCenterTab(visit: VehicleVisitItem): VehicleCenterTab {
   if (visit.reviewReason) return "needs_review";
   const presence = getVehicleEntryPresence(visit.entry);
   if (presence === "in_workshop") return "in_workshop";
+  if (presence === "with_customer" && (visit.hasSignedTemporaryRelease
+    || hasVehicleVisitManagerPresenceAttestation(visit.entry, visit.workflow, presence, visit.hasFinalHandover))) return "with_customer";
   if (isVehicleVisitAwaitingArrival(visit.entry)) return "awaiting_arrival";
   return presence === "with_customer" && visit.hasSignedTemporaryRelease ? "with_customer" : "needs_review";
 }
@@ -222,6 +228,7 @@ export function resolveVehicleVisit(entry: any, workflow: VehicleVisitWorkflow |
     reviewReason = "delivery_without_signed_handover";
   if (workflow?.stage === "delivered" && !hasFinalHandover) reviewReason ||= "delivery_without_signed_handover";
   if (getVehicleEntryPresence(entry) === "with_customer" && !hasFinalHandover && !hasSignedTemporaryRelease
+    && !hasVehicleVisitManagerPresenceAttestation(entry, workflow, "with_customer", hasFinalHandover)
     && !claim?.cancelled_handover_signed_at && !isVehicleVisitAwaitingArrival(entry)) reviewReason ||= "exit_without_signed_release";
   // A legacy entry with no persisted workflow is a read-only projection. Never
   // rewrite or advance its history simply because the dashboard was opened.
@@ -253,7 +260,8 @@ export function resolveVehicleVisit(entry: any, workflow: VehicleVisitWorkflow |
       operationalStage = "in_progress";
     }
   }
-  return { entry, workflow, stage: reviewReason ? "needs_review" : stage, operationalStage, reviewReason, hasFinalHandover };
+  return { entry, workflow, stage: reviewReason ? "needs_review" : stage, operationalStage, reviewReason, hasFinalHandover,
+    ...(hasSignedTemporaryRelease ? { hasSignedTemporaryRelease: true } : {}) };
 }
 
 function omanDateTime(value: string | null | undefined): { date: string; time: string } {
@@ -443,7 +451,7 @@ export async function listVehicleVisitCenter(): Promise<VehicleVisitItem[]> {
   const releases: Array<{ vehicle_entry_id: string }> = [];
   for (const ids of chunk(entries.map((entry) => entry.id))) {
     const [workflowsResult, handoversResult, releasesResult] = await Promise.all([
-      supabase.from("vehicle_visit_workflows" as any).select("entry_id,tenant_id,vehicle_id,stage,revision,review_reason,changed_at,changed_by")
+      supabase.from("vehicle_visit_workflows" as any).select("entry_id,tenant_id,vehicle_id,stage,revision,review_reason,changed_at,changed_by,manager_adjustment")
         .eq("tenant_id", tenantId).in("entry_id", ids),
       supabase.from("vehicle_handover_records" as any).select("vehicle_entry_id,work_order_id")
         .eq("tenant_id", tenantId).eq("status", "finalized").in("vehicle_entry_id", ids),
@@ -661,7 +669,7 @@ export async function getLinkedVehicleVisit(source: "claim" | "work_order", id: 
     supabase.from("vehicle_entries" as any).select(
       "id,entry_number,arrival_date,arrival_time,vehicle_id,vehicle_location,vehicle_condition,status,insurance_company_id,insurance_snapshot,insurance_claim_id,converted_claim_id,work_order_id,converted_work_order_id,claim:insurance_claims!vehicle_entries_insurance_claim_id_fkey(id,vehicle_id,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),converted_claim:insurance_claims!vehicle_entries_converted_claim_id_fkey(id,vehicle_id,status,repair_stage,approved_at,insurance_approved_at,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at,delivered_at,cancelled_handover_signed_at),work_order:job_orders!vehicle_entries_work_order_id_fkey(id,vehicle_id,status,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at),converted_work_order:job_orders!vehicle_entries_converted_work_order_id_fkey(id,vehicle_id,status,work_order_type,claim_id,work_started_at,work_completed_at,vehicle_presence_status,vehicle_delivered_at)"
     ).eq("tenant_id", tenantId).eq("id", entryId).is("deleted_at", null).maybeSingle(),
-    supabase.from("vehicle_visit_workflows" as any).select("entry_id,tenant_id,vehicle_id,stage,revision,review_reason,changed_at,changed_by")
+    supabase.from("vehicle_visit_workflows" as any).select("entry_id,tenant_id,vehicle_id,stage,revision,review_reason,changed_at,changed_by,manager_adjustment")
       .eq("tenant_id", tenantId).eq("entry_id", entryId).maybeSingle(),
     supabase.from("vehicle_handover_records" as any).select("work_order_id")
       .eq("tenant_id", tenantId).eq("vehicle_entry_id", entryId).eq("status", "finalized").limit(2),

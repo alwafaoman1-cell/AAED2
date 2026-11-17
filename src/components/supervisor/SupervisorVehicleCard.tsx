@@ -9,7 +9,7 @@ import "@/lib/i18n/supervisorWorkspace";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SupervisorVisitClocks } from "./SupervisorVisitClocks";
 import type { SupervisorMilestone } from "@/lib/supervisorVisitTiming";
-import { isVehicleVisitAwaitingArrival } from "@/lib/vehicleVisitIntake";
+import { getVehicleCenterTab } from "@/lib/vehicleVisitLifecycle";
 import "@/lib/i18n/vehicleEntryLabels";
 
 export interface SupervisorPermissions {
@@ -53,7 +53,7 @@ export function SupervisorVehicleCard({ row, permissions, photoUrl, onAction, on
         aria-label={`${t("locationAction")}: ${t(row.custody)}`} onClick={() => onAction("location", row)}>
         <MapPin className="h-3.5 w-3.5" aria-hidden="true" />{t(row.custody)}
       </Button>
-      <span className="ms-auto rounded-md bg-muted px-2 py-1 text-xs font-semibold">{t(row.stage === "arrived" && isVehicleVisitAwaitingArrival(row.visit?.entry) ? "awaiting_arrival" : row.stage || "unknown")}</span>
+      <span className="ms-auto rounded-md bg-muted px-2 py-1 text-xs font-semibold">{t(row.stage === "arrived" && row.visit && getVehicleCenterTab(row.visit) === "awaiting_arrival" ? "awaiting_arrival" : row.stage || "unknown")}</span>
     </div>
     <SupervisorVisitClocks row={row} milestones={milestones} now={now} />
     {(row.legacy || !row.entryId || row.review) && <p className="text-xs text-warning" role="status">

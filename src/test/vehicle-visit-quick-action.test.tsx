@@ -7,7 +7,8 @@ import { VehicleVisitQuickActionDialog } from "@/pages/vehicle-entry/VehicleVisi
 import i18n from "@/i18n";
 import type { VehicleCenterActionRequest } from "@/lib/vehicleCenterPresentation";
 
-const mocks = vi.hoisted(() => ({ detail: vi.fn(), advance: vi.fn(), markReturn: vi.fn(), reconcile: vi.fn(), staff: vi.fn(), order: vi.fn(), permitted: true }));
+const mocks = vi.hoisted(() => ({ detail: vi.fn(), advance: vi.fn(), markReturn: vi.fn(), reconcile: vi.fn(), staff: vi.fn(), order: vi.fn(), managerContext:vi.fn(),managerAdjust:vi.fn(),role:'admin', permitted: true }));
+vi.mock('@/lib/vehicleVisitManager',async original=>({...await original<object>(),getVehicleVisitManagerContext:mocks.managerContext,adjustVehicleVisitManager:mocks.managerAdjust}));
 vi.mock("@/components/supervisor/SupervisorClaimApproval", () => ({ SupervisorClaimApproval: () => <p>Canonical approval form</p> }));
 vi.mock("@/lib/workOrderListActions", () => ({ resolveWorkOrderListAction: mocks.order }));
 vi.mock("@/components/workorders/VehicleDeliveryReceiptDialog", () => ({ default: () => <p>Canonical handover form</p> }));
@@ -21,7 +22,7 @@ vi.mock("@/lib/vehicleVisitLifecycle", async (importOriginal) => ({
 vi.mock("@/lib/vehicleInspectionRelease", () => ({ markInspectionVehicleReturned: mocks.markReturn }));
 vi.mock("@/pages/vehicle-entry/VehicleInspectionReleasePage",()=>({default:()=> <p>Embedded temporary release</p>}));
 vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "user-1" }, profile: { tenant_id: "tenant-1" }, hasRole: (...roles: string[]) => mocks.permitted && roles.includes("admin") }),
+  useAuth: () => ({ user: { id: "user-1" }, profile: { tenant_id: "tenant-1" }, hasRole: (...roles: string[]) => mocks.permitted && roles.includes(mocks.role) }),
 }));
 
 function visit(status: string, stage: "arrived" | "approved", location = "داخل الورشة") {
@@ -49,6 +50,7 @@ beforeEach(async () => {
   await i18n.changeLanguage("ar");
   mocks.detail.mockReset(); mocks.advance.mockReset(); mocks.markReturn.mockReset(); mocks.reconcile.mockReset(); mocks.staff.mockReset(); mocks.order.mockReset();
   mocks.permitted = true;
+  mocks.role='admin';mocks.managerContext.mockReset();mocks.managerAdjust.mockReset();
   mocks.staff.mockResolvedValue([{ user_id: "user-1", full_name: "Manager" }]);
   Object.defineProperty(window, "matchMedia", { writable: true, value: vi.fn().mockImplementation(() => ({
     matches: false, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(),
@@ -70,6 +72,7 @@ describe("vehicle visit quick action", () => {
     expect(mocks.advance).not.toHaveBeenCalled();
   });
   it("opens physical-arrival confirmation without registering a return", async () => {
+    mocks.role='supervisor';
     const outside = visit("approved", "approved", "مع العميل");
     outside.entry.work_order.vehicle_presence_status = "with_customer";
     outside.releases = [{ id: "release-1", status: "signed", returned_at: null }] as any;
@@ -78,6 +81,12 @@ describe("vehicle visit quick action", () => {
     expect(await screen.findByRole("button", { name: "تسجيل دخول المركبة للورشة" })).toBeDisabled();
     expect(mocks.markReturn).not.toHaveBeenCalled();
     expect(mocks.advance).not.toHaveBeenCalled();
+  });
+  it("opens the audited manager arrival correction from the shortcut with a fresh context and no write",async()=>{
+    const outside=visit('approved','approved','مع العميل');outside.entry.work_order.vehicle_presence_status='with_customer';outside.releases=[{id:'release-1',status:'signed',returned_at:null}] as any;mocks.detail.mockResolvedValue(outside);
+    mocks.managerContext.mockResolvedValue({entry_id:'entry-1',tenant_id:'tenant-1',vehicle_id:'vehicle-1',stage:'approved',presence:'with_customer',workflow_revision:0,entry_updated_at:'2026-11-15T06:00:00Z',editable:true,is_review:false,intake_signed:true,stage_dates:{arrived:'2026-11-15T04:00:00Z',approved:'2026-11-15T05:00:00Z'},manager_adjustment:null,last_changed_at:null});
+    renderDialog({intent:'arrival',expectedStage:'approved'});expect(await screen.findByLabelText('موقع المركبة الفعلي')).toHaveValue('in_workshop');
+    expect(screen.getByRole('button',{name:'حفظ تصحيح المدير'})).toBeDisabled();expect(mocks.managerContext).toHaveBeenCalledWith('entry-1','tenant-1');expect(mocks.managerAdjust).not.toHaveBeenCalled();expect(mocks.markReturn).not.toHaveBeenCalled();expect(mocks.advance).not.toHaveBeenCalled();
   });
   it("opens the original handover UI only after a fresh confirmed order link", async () => {
     const ready: any = visit("approved", "approved");
@@ -147,6 +156,7 @@ describe("vehicle visit quick action", () => {
   });
 
   it("opens the existing temporary release in place rather than changing custody or navigating", async () => {
+    mocks.role='supervisor';
     mocks.detail.mockResolvedValue(visit("approved", "approved"));
     renderDialog();
     fireEvent.click(await screen.findByRole("button", { name: "محضر المعاينة والخروج المؤقت" }));
@@ -157,6 +167,7 @@ describe("vehicle visit quick action", () => {
   });
 
   it("keeps the custody actions English-only in the English UI", async () => {
+    mocks.role='supervisor';
     await i18n.changeLanguage("en");
     mocks.detail.mockResolvedValue(visit("approved", "approved"));
     renderDialog();
@@ -165,6 +176,7 @@ describe("vehicle visit quick action", () => {
   });
 
   it("requires a physical confirmation before recording return from a signed release", async () => {
+    mocks.role='supervisor';
     const outside = visit("approved", "approved", "مع العميل");
     outside.entry.work_order.vehicle_presence_status = "with_customer";
     outside.releases = [{ id: "release-1", status: "signed", returned_at: null }] as any;
@@ -185,6 +197,7 @@ describe("vehicle visit quick action", () => {
   });
 
   it("refuses a stale return when the release was already returned elsewhere", async () => {
+    mocks.role='supervisor';
     const outside = visit("approved", "approved", "مع العميل");
     outside.entry.work_order.vehicle_presence_status = "with_customer";
     outside.releases = [{ id: "release-1", status: "signed", returned_at: null }] as any;

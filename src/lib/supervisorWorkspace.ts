@@ -104,7 +104,9 @@ export async function listSupervisorMilestones(tenantId: string, entryIds: strin
   const ids = [...new Set(entryIds)];
   if (!tenantId || ids.length > SUPERVISOR_PAGE_SIZE) throw new Error("SUPERVISOR_TIMING_SCOPE_INVALID");
   if (!ids.length) return [];
-  const { data, error } = await supabase.from("vehicle_visit_transitions").select("tenant_id,entry_id,from_stage,to_stage,occurred_at,revision")
+  // Bound this JSON-path projection here to avoid recursive generated query types.
+  // The visible-page scope and response are checked below.
+  const { data, error } = await (supabase.from("vehicle_visit_transitions") as any).select("tenant_id,entry_id,from_stage,to_stage,occurred_at,revision,action:requirements->>action")
     .eq("tenant_id", tenantId).in("entry_id", ids).in("to_stage", ["approved", "delivered", "cancelled"])
     .order("revision", { ascending: false }).limit(501);
   if (error) throw error;

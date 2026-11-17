@@ -31,13 +31,18 @@ export async function getReviewVisitIntakeSignatureState(entryId: string): Promi
   if (signature.error) throw signature.error;
   return { revision, signed: Boolean((signature.data as any)?.id) };
 }
-export async function deliverReviewVisit(input: { entryId: string; requestId: string; receiptId: string; recipient: string; signature: string; notes: string }) {
+export async function deliverReviewVisit(input: { entryId: string; requestId: string; receiptId: string; recipient: string; signature: string; notes: string; occurredAt?: string }) {
+  if (input.occurredAt !== undefined && (!Number.isFinite(Date.parse(input.occurredAt)) || Date.parse(input.occurredAt) > Date.now() + 300_000)) {
+    throw new Error("REVIEW_RETURN_TIME_INVALID");
+  }
   const { data, error } = await supabase.rpc("deliver_vehicle_review_visit" as any, {
     p_entry_id: input.entryId, p_request_id: input.requestId, p_receipt_id: input.receiptId,
     p_recipient: input.recipient.trim(), p_signature: input.signature, p_notes: input.notes.trim(),
+    ...(input.occurredAt !== undefined ? { p_occurred_at: input.occurredAt } : {}),
   } as any);
   if (error) throw error;
-  const row = data as unknown as { id: string; vehicle_entry_id: string; status: string };
+  const row = data as unknown as { id: string; vehicle_entry_id: string; status: string; delivered_at?: string };
   if (!row?.id || row.vehicle_entry_id !== input.entryId || row.status !== "finalized") throw new Error("REVIEW_RETURN_SAVE_NOT_CONFIRMED");
+  if (input.occurredAt !== undefined && (!row.delivered_at || Date.parse(row.delivered_at) !== Date.parse(input.occurredAt))) throw new Error("REVIEW_RETURN_SAVE_NOT_CONFIRMED");
   return row;
 }

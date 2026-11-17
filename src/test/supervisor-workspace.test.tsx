@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({ page: vi.fn(), legacy: vi.fn(), linked: vi.fn(
 vi.mock("@/lib/vehicleVisitLifecycle", () => ({
   VISIT_STAGES: ["arrived", "approved", "in_progress", "ready", "delivered", "cancelled", "needs_review"],
   listVehicleVisitCenterPage: mocks.page, getLinkedVehicleVisit: mocks.linked,
+  getVehicleCenterTab: vi.fn().mockReturnValue("with_customer"),
   getVehicleVisitBillingKind: (entry: any) => entry.insurance_claim_id ? "insurance" : "cash",
 }));
 vi.mock("@/lib/vehicleEntryService", () => ({ getVehicleEntryPresence: (entry: any) => entry.vehicle_location === "مع العميل" ? "with_customer" : "in_workshop" }));

@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { VehicleEntryInspectionAction } from "@/components/vehicle-entry/VehicleEntryInspectionAction";
 import { VehicleVisitInlineActions,type VehicleVisitInlineActionHandle } from "@/components/vehicle-entry/VehicleVisitInlineActions";
 import { VehicleVisitLocationPanel, type VehicleVisitLocationHandle } from "@/components/vehicle-entry/VehicleVisitLocationPanel";
+import { VehicleVisitManagerControls, type VehicleVisitManagerControlsHandle } from "@/components/vehicle-entry/VehicleVisitManagerControls";
 import type { VehicleCenterActionRequest } from "@/lib/vehicleCenterPresentation";
 import {vehicleVisitActionTime} from '@/lib/vehicleVisitIntake';
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -49,6 +50,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
   const { user, profile, hasRole } = useAuth();
   const inlineActions=useRef<VehicleVisitInlineActionHandle>(null);
   const locationActions=useRef<VehicleVisitLocationHandle>(null);
+  const managerActions=useRef<VehicleVisitManagerControlsHandle>(null);
   const initialActionHandled=useRef(false);
   const qc = useQueryClient();
   const [target, setTarget] = useState<PersistedVisitStage | null>(null);
@@ -98,6 +100,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
     ? transitions[0]?.from_stage || undefined
     : current ? ORDER[ORDER.indexOf(current) - 1] : undefined;
   const canManage = hasRole("admin", "manager");
+  const managerControlsAvailable = canManage && Boolean(profile?.tenant_id);
   const canConfirmExistingOrder=canManage && visit?.reviewReason==="work_order_link_conflict"
     && entry?.__inferredOrderLink && order?.id && order.vehicle_id===entry.vehicle_id
     && order.work_order_type==="insurance" && order.claim_id===(entry.insurance_claim_id || entry.converted_claim_id)
@@ -307,17 +310,18 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
       </details>}
     {entry.vehicle_condition?.review_return && <section className="rounded-lg border p-3 text-sm space-y-2"><h3 className="font-semibold">{i18n.language.startsWith("en") ? "Review visit after delivery" : "زيارة مراجعة بعد التسليم"}</h3><Link className="text-primary underline" to={`/vehicle-entry/${entry.vehicle_condition.review_return.source_entry_id}`}>{entry.vehicle_condition.review_return.source_entry_number} / {entry.vehicle_condition.review_return.source_handover_number}</Link><p>{entry.vehicle_condition.review_return.reason}</p><p>{entry.vehicle_condition.review_return.arrival_condition}</p><p className="whitespace-pre-wrap">{entry.vehicle_condition.review_return.notes}</p></section>}
     {current === "delivered" && <VehicleReviewReturnAction entryId={entryId} />}
-    <VehicleVisitLocationPanel ref={locationActions} visit={visit} onChanged={refreshVisit}/>
+    <VehicleVisitLocationPanel ref={locationActions} visit={visit} onChanged={refreshVisit} onManagerLocation={managerControlsAvailable?presence=>managerActions.current?.open({presence}):undefined}/>
+    <VehicleVisitManagerControls ref={managerActions} visit={visit} onChanged={refreshVisit}/>
     {!supervisor && <VehicleVisitInlineActions ref={inlineActions} entry={entry} onChanged={refreshVisit} hideDeliveryAction={Boolean(canOpenHandover)}/>}
     <div className="flex flex-wrap gap-2">
       {!supervisor && <VehicleEntryInspectionAction entry={visit.entry} />}
       {canAdvance && next && <Button variant={supervisor ? "default" : "outline"} disabled={(Boolean(nextBlocker)&&!canOpenHandover&&!canReviewOrder) || mutation.isPending} onClick={handleNext}><ArrowRight className="me-2 h-4 w-4 rtl:rotate-180" aria-hidden="true" />{canReviewOrder?t('vehicleVisitWorkspace.reviewOrder'):`${t("vehicleVisit.next")}: ${stageLabel(next)}`}</Button>}
-      {!supervisor && canManage && current && previous && <Button variant="outline" disabled={Boolean(reverseBlocker)} onClick={() => beginTransition(previous)}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
+      {!supervisor && canManage && !managerControlsAvailable && current && previous && <Button variant="outline" disabled={Boolean(reverseBlocker)} onClick={() => beginTransition(previous)}><ArrowDown className="me-2 h-4 w-4" />{t("vehicleVisit.back")}</Button>}
       {!supervisor && !claim && canManage && !visit.reviewReason && current !== "cancelled" && current !== "delivered" && current &&
         <Button variant="outline" disabled={Boolean(cancelBlocker)} onClick={() => beginTransition('cancelled')}>{t("vehicleVisit.cancel")}</Button>}
     </div>
     {supervisorActions}
-    {!supervisor && canManage && reverseBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/40 p-3 text-sm">
+    {!supervisor && canManage && !managerControlsAvailable && reverseBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/40 p-3 text-sm">
       <p>{t("supervisorWorkspace:reverseSourceFirst")}</p>
     </div>}
     {canAdvance && nextBlocker && <div role="status" className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm">{nextBlocker==='deliveryWorkOrderConflict'?t('vehicleVisitWorkspace.deliveryConflict'):t(`vehicleVisit.${nextBlocker}`)}{supervisor && prerequisiteHref && !canReviewOrder && <>{" "}{supervisor && nextBlocker === "claimApprovalRequired"
@@ -331,11 +335,11 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
       <summary className="cursor-pointer py-2 text-xs font-medium">{t("supervisorWorkspace:advancedActions")}</summary>
       <div className="space-y-2 pt-2">
         <div className="flex flex-wrap gap-2">
-          {previous && <Button variant="outline" disabled={Boolean(reverseBlocker) || mutation.isPending} onClick={() => beginTransition(previous)}>{t("vehicleVisit.back")}</Button>}
+          {previous && !managerControlsAvailable && <Button variant="outline" disabled={Boolean(reverseBlocker) || mutation.isPending} onClick={() => beginTransition(previous)}>{t("vehicleVisit.back")}</Button>}
           {!visit.reviewReason && current !== "cancelled" && current !== "delivered" && <Button variant="outline" disabled={Boolean(cancelBlocker) || mutation.isPending} onClick={() => beginTransition('cancelled')}>{t("vehicleVisit.cancel")}</Button>}
         </div>
-        {reverseBlocker && <p role="status" className="text-xs leading-5 text-muted-foreground">{t("supervisorWorkspace:reverseSourceFirst")}</p>}
-        {reverseBlocker && onRequestWorkOrderStatus && <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("supervisorWorkspace:reviewSource")}</Button>}
+        {reverseBlocker && !managerControlsAvailable && <p role="status" className="text-xs leading-5 text-muted-foreground">{t("supervisorWorkspace:reverseSourceFirst")}</p>}
+        {reverseBlocker && !managerControlsAvailable && onRequestWorkOrderStatus && <Button variant="outline" onClick={onRequestWorkOrderStatus}>{t("supervisorWorkspace:reviewSource")}</Button>}
         {cancelBlocker && <p className="text-xs text-muted-foreground">{t(`vehicleVisit.${cancelBlocker}`)}</p>}
       </div>
     </details>}

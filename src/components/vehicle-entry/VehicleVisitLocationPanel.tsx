@@ -18,7 +18,7 @@ import '@/lib/i18n/vehicleVisitWorkspace';
 const ReleasePage=lazy(()=>import('@/pages/vehicle-entry/VehicleInspectionReleasePage'));
 type Visit=VehicleVisitItem&{releases?:Array<{id:string;status:string;returned_at:string|null}>};
 export type VehicleVisitLocationHandle={openArrival:()=>void};
-export const VehicleVisitLocationPanel=forwardRef<VehicleVisitLocationHandle,{visit:Visit;onChanged:()=>Promise<unknown>|void}>(function VehicleVisitLocationPanel({visit,onChanged},ref){
+export const VehicleVisitLocationPanel=forwardRef<VehicleVisitLocationHandle,{visit:Visit;onChanged:()=>Promise<unknown>|void;onManagerLocation?:(presence:'in_workshop'|'with_customer')=>void}>(function VehicleVisitLocationPanel({visit,onChanged,onManagerLocation},ref){
   const {t}=useTranslation(),{hasRole}=useAuth();
   const [confirmed,setConfirmed]=useState(false),[releaseOpen,setReleaseOpen]=useState(false),[entryOpen,setEntryOpen]=useState(false);
   const [releaseDirty,setReleaseDirty]=useState(false),[discardOpen,setDiscardOpen]=useState(false);
@@ -30,6 +30,7 @@ export const VehicleVisitLocationPanel=forwardRef<VehicleVisitLocationHandle,{vi
   const release=visit.releases?.find(r=>r.status==='signed'&&!r.returned_at);
   const canManage=hasRole('admin','manager','insurance','supervisor');
   const terminal=['delivered','cancelled'].includes(visit.operationalStage);
+  const managerOverride=Boolean(onManagerLocation)&&hasRole('admin','manager');
   // Confirming a prepared visit's real arrival may resolve the old claim's
   // inside/default marker. Never permit other link, identity or history conflicts.
   const arrivalBlocked=Boolean(visit.reviewReason&&!(pending&&visit.reviewReason==='custody_conflict'));
@@ -50,15 +51,15 @@ export const VehicleVisitLocationPanel=forwardRef<VehicleVisitLocationHandle,{vi
   },onSuccess:()=>toast.success(t('vehicleVisitWorkspace.saved')),onError:(e:Error)=>{toast.error(e.message);void onChanged();}});
   const canEnter=(presence==='with_customer'||pending)&&(pending||release)&&!terminal&&!arrivalBlocked&&canManage;
   const canExit=presence==='in_workshop'&&!terminal&&canManage&&!visit.reviewReason;
-  useImperativeHandle(ref,()=>({openArrival:()=>{if(canEnter){setConfirmed(false);setEntryOpen(true);}}}),[canEnter]);
+  useImperativeHandle(ref,()=>({openArrival:()=>{if(managerOverride){onManagerLocation?.('in_workshop');}else if(canEnter){setConfirmed(false);setEntryOpen(true);}}}),[canEnter,managerOverride,onManagerLocation]);
   const refreshAfterExit=()=>{setReleaseOpen(false);void Promise.resolve().then(onChanged).catch(()=>toast.error(t('vehicleVisitWorkspace.failed')));};
   return <section className="space-y-3 rounded-lg border border-border p-3" aria-label={t('vehicleVisitWorkspace.location')}>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <strong className="text-sm">{t('vehicleVisitWorkspace.location')}: {t(presence==='in_workshop'?'vehicleEntry.workshopTab':presence==='with_customer'?'vehicleEntry.customerTab':'vehicleEntry.reviewLocation')}</strong>
     </div>
     {!terminal&&<div className="flex flex-wrap gap-2" role="group" aria-label={t('vehicleVisitWorkspace.chooseLocation')}>
-      <Button size="sm" variant={presence==='in_workshop'?'default':'outline'} aria-pressed={presence==='in_workshop'} disabled={!canEnter} onClick={()=>{setConfirmed(false);setEntryOpen(true);}}><LogIn className="me-2 h-4 w-4"/>{t('vehicleEntry.workshopTab')}</Button>
-      <Button size="sm" variant={presence==='with_customer'?'default':'outline'} aria-label={canExit?t('vehicleVisitWorkspace.temporaryExit'):t('vehicleEntry.customerTab')} aria-pressed={presence==='with_customer'} disabled={!canExit} onClick={()=>setReleaseOpen(true)}><LogOut className="me-2 h-4 w-4"/>{t('vehicleEntry.customerTab')}{canExit?` · ${t('vehicleVisitWorkspace.temporaryExit')}`:''}</Button>
+      <Button size="sm" variant={presence==='in_workshop'?'default':'outline'} aria-pressed={presence==='in_workshop'} disabled={!managerOverride&&!canEnter} onClick={()=>{if(managerOverride)onManagerLocation?.('in_workshop');else{setConfirmed(false);setEntryOpen(true);}}}><LogIn className="me-2 h-4 w-4"/>{t('vehicleEntry.workshopTab')}</Button>
+      <Button size="sm" variant={presence==='with_customer'?'default':'outline'} aria-label={!managerOverride&&canExit?t('vehicleVisitWorkspace.temporaryExit'):t('vehicleEntry.customerTab')} aria-pressed={presence==='with_customer'} disabled={!managerOverride&&!canExit} onClick={()=>{if(managerOverride)onManagerLocation?.('with_customer');else setReleaseOpen(true);}}><LogOut className="me-2 h-4 w-4"/>{t('vehicleEntry.customerTab')}{!managerOverride&&canExit?` · ${t('vehicleVisitWorkspace.temporaryExit')}`:''}</Button>
     </div>}
     {pending&&!terminal&&<p className="text-sm text-muted-foreground">{t('vehicleVisitWorkspace.arrivalPending')}</p>}
     <Dialog open={entryOpen} onOpenChange={open=>{if(!enter.isPending)setEntryOpen(open);}}><DialogContent><DialogHeader><DialogTitle>{t('vehicleVisitWorkspace.confirmEntry')}</DialogTitle><DialogDescription>{t('vehicleVisitWorkspace.location')}</DialogDescription></DialogHeader>

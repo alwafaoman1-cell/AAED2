@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { deriveClaimOnlyStage, getVehicleVisitBillingKind, projectClaimWithoutEntry, resolveVehicleVisit, type VehicleVisitWorkflow } from "@/lib/vehicleVisitLifecycle";
+import { deriveClaimOnlyStage, getVehicleCenterTab, getVehicleVisitBillingKind, projectClaimWithoutEntry, resolveVehicleVisit, type VehicleVisitWorkflow } from "@/lib/vehicleVisitLifecycle";
 import { getVehicleEntryPresence } from "@/lib/vehicleEntryService";
 
 const vehicle = "vehicle-1";
@@ -78,6 +78,36 @@ describe("vehicle visit stage projection", () => {
     expect(resolveVehicleVisit({ ...base, vehicle_condition: { visit_purpose: "inspection" } }, workflow("arrived"), false).stage).toBe("arrived");
     expect(resolveVehicleVisit({ ...base, vehicle_location: "مع العميل" }, workflow("arrived"), false).stage).toBe("needs_review");
     expect(resolveVehicleVisit({ ...base, vehicle_location: "مع العميل" }, workflow("arrived"), false, true).stage).toBe("arrived");
+  });
+  it("projects an audited manager location independently of stage without rewriting signed pending-arrival details", () => {
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const entry = { ...base, id: id(1), tenant_id: id(2), vehicle_id: id(3), vehicle_location: "مع العميل",
+      vehicle_condition: { visit_purpose: "inspection", arrival_confirmation: "pending" } };
+    const state: VehicleVisitWorkflow = { ...workflow("ready"), entry_id: entry.id, tenant_id: entry.tenant_id,
+      vehicle_id: entry.vehicle_id, manager_adjustment: { version: 1, entry_id: entry.id, tenant_id: entry.tenant_id,
+        vehicle_id: entry.vehicle_id, request_id: id(4), actor_id: id(5), reason: "Physical custody verified",
+        recorded_at: "2026-11-17T08:00:00Z", presence_attested: true, presence: "with_customer",
+        presence_occurred_at: "2026-11-17T07:00:00Z" } };
+    const signed = structuredClone(entry);
+    const outside = resolveVehicleVisit(entry, state, false);
+    expect(outside).toMatchObject({ stage: "ready", reviewReason: null });
+    expect(getVehicleCenterTab(outside)).toBe("with_customer");
+    expect(entry).toEqual(signed);
+    state.revision++;
+    expect(getVehicleCenterTab(resolveVehicleVisit(entry, state, false))).toBe("with_customer");
+    const inside = resolveVehicleVisit({ ...entry, vehicle_location: "داخل الورشة" }, state, false);
+    expect(getVehicleCenterTab(inside)).toBe("in_workshop");
+    const delivered = resolveVehicleVisit(entry, { ...state, stage: "delivered" }, true);
+    expect(getVehicleCenterTab(delivered)).toBe("delivered");
+    const cancelled = resolveVehicleVisit({ ...entry, status: "Cancelled" }, { ...state, stage: "cancelled" }, false);
+    expect(getVehicleCenterTab(cancelled)).toBe("cancelled");
+    state.manager_adjustment = { ...state.manager_adjustment, entry_id: id(9) };
+    expect(getVehicleCenterTab(resolveVehicleVisit(entry, state, false))).toBe("awaiting_arrival");
+    // A later actual signed release supersedes the preserved pending marker,
+    // even after the earlier manager attestation has been invalidated.
+    expect(getVehicleCenterTab(resolveVehicleVisit(entry, state, false, true))).toBe("with_customer");
+    const unconfirmedExit = { ...entry, vehicle_condition: {} };
+    expect(resolveVehicleVisit(unconfirmedExit, state, false)).toMatchObject({ stage: "needs_review", reviewReason: "exit_without_signed_release" });
   });
   it("quarantines mismatched links and regression flags without changing the workflow", () => {
     expect(resolveVehicleVisit({ ...base, work_order_id: "other", work_order: { vehicle_id: "different" } }, workflow("in_progress"), false).stage).toBe("needs_review");

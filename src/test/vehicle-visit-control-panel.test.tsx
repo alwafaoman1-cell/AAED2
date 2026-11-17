@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VehicleVisitControlPanel } from "@/pages/vehicle-entry/VehicleVisitControlPanel";
 import i18n from "@/i18n";
 
-const mocks = vi.hoisted(() => ({ detail: vi.fn(), advance: vi.fn(), reconcile: vi.fn(), staff: vi.fn(), resolveOrder:vi.fn(), roles: ["admin"] as string[] }));
+const mocks = vi.hoisted(() => ({ detail: vi.fn(), advance: vi.fn(), reconcile: vi.fn(), staff: vi.fn(), resolveOrder:vi.fn(), managerContext:vi.fn(), managerAdjust:vi.fn(), profile:null as any, roles: ["admin"] as string[] }));
+vi.mock('@/lib/vehicleVisitManager',async original=>({...await original<object>(),getVehicleVisitManagerContext:mocks.managerContext,adjustVehicleVisitManager:mocks.managerAdjust}));
 vi.mock('@/lib/workOrderListActions',()=>({resolveWorkOrderListAction:mocks.resolveOrder}));
 vi.mock('@/components/workorders/VehicleDeliveryReceiptDialog',()=>({default:()=> <div>Canonical vehicle handover form</div>}));
 vi.mock('@/components/workorders/WorkOrderStatusDialog',()=>({default:()=> <div>Canonical work order review form</div>}));
@@ -21,7 +22,7 @@ vi.mock("@/lib/vehicleVisitLifecycle", async (importOriginal) => {
   };
 });
 vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "user-1" }, hasRole: (...roles: string[]) => roles.some((role) => mocks.roles.includes(role)) }),
+  useAuth: () => ({ user: { id: "user-1" }, profile:mocks.profile, hasRole: (...roles: string[]) => roles.some((role) => mocks.roles.includes(role)) }),
 }));
 
 function visit(stage: "arrived" | "approved", revision: number, persisted = true) {
@@ -44,11 +45,21 @@ beforeEach(async () => {
   await i18n.changeLanguage("ar");
   mocks.detail.mockReset(); mocks.advance.mockReset(); mocks.reconcile.mockReset(); mocks.staff.mockReset();
   mocks.roles = ["admin"];mocks.resolveOrder.mockReset();mocks.resolveOrder.mockResolvedValue({cloudId:'order-1',vehicleId:'vehicle-1'});
+  mocks.profile=null;mocks.managerContext.mockReset();mocks.managerAdjust.mockReset();
   mocks.staff.mockResolvedValue([{ user_id: "user-1", full_name: "Test Manager" }]);
   Object.defineProperty(window, "matchMedia", { writable: true, value: vi.fn().mockImplementation(() => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() })) });
 });
 
 describe("vehicle visit transition panel", () => {
+  it('uses the existing location choices to open a fresh audited manager correction at a later stage and hides the old blocked Back action',async()=>{
+    mocks.profile={tenant_id:'tenant-1',user_id:'user-1',role:'manager'};mocks.roles=['manager'];
+    const ready:any={...visit('approved',2),stage:'ready',operationalStage:'ready'};ready.workflow.stage='ready';ready.entry.work_order.status='completed';
+    mocks.detail.mockResolvedValue(ready);mocks.managerContext.mockResolvedValue({entry_id:'entry-1',tenant_id:'tenant-1',vehicle_id:'vehicle-1',stage:'ready',presence:'in_workshop',workflow_revision:2,entry_updated_at:'2026-11-15T07:00:00Z',stage_dates:{arrived:'2026-11-15T04:00:00Z',ready:'2026-11-15T07:00:00Z'},editable:true,is_review:false,intake_signed:true,manager_adjustment:null,last_changed_at:null});
+    renderPanel();fireEvent.click(await screen.findByRole('button',{name:'مع العميل'}));
+    expect(await screen.findByLabelText('موقع المركبة الفعلي')).toHaveValue('with_customer');
+    expect(mocks.managerContext).toHaveBeenCalledWith('entry-1','tenant-1');expect(mocks.managerAdjust).not.toHaveBeenCalled();expect(mocks.advance).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button',{name:i18n.t('vehicleVisit.back')})).toBeNull();expect(screen.queryByText(i18n.t('supervisorWorkspace:reverseSourceFirst'))).toBeNull();
+  });
   it('opens the existing handover form from the next-stage button without creating a delivery transition first',async()=>{
     const ready:any={...visit('approved',2),stage:'ready',operationalStage:'ready'};ready.workflow.stage='ready';
     Object.assign(ready.entry,{tenant_id:'tenant-1',work_order_id:'order-1'});

@@ -3,15 +3,15 @@ import {render,screen,fireEvent,waitFor} from '@testing-library/react';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
 import {beforeEach,describe,it,expect,vi} from 'vitest';
 import i18n from '@/i18n';
-const mocks=vi.hoisted(()=>({role:true,changed:vi.fn(),detail:vi.fn(),returned:vi.fn(),arrival:vi.fn()}));
-vi.mock('@/contexts/AuthContext',()=>({useAuth:()=>({hasRole:()=>mocks.role})}));
+const mocks=vi.hoisted(()=>({role:true,manager:false,changed:vi.fn(),detail:vi.fn(),returned:vi.fn(),arrival:vi.fn(),managerLocation:vi.fn()}));
+vi.mock('@/contexts/AuthContext',()=>({useAuth:()=>({hasRole:(...roles:string[])=>mocks.role&&(mocks.manager||roles.some(role=>['insurance','supervisor'].includes(role)))})}));
 vi.mock('@/lib/vehicleVisitLifecycle',async original=>({...await original<object>(),getVehicleVisitDetail:mocks.detail,registerVehicleVisitArrival:mocks.arrival}));
 vi.mock('@/lib/vehicleInspectionRelease',async original=>({...await original<object>(),markInspectionVehicleReturned:mocks.returned}));
 vi.mock('@/pages/vehicle-entry/VehicleInspectionReleasePage',()=>({default:()=> <div>Canonical temporary release form</div>}));
 import {VehicleVisitLocationPanel} from '@/components/vehicle-entry/VehicleVisitLocationPanel';
 const inside:any={entry:{id:'entry',vehicle_id:'vehicle',vehicle_location:'داخل الورشة'},stage:'arrived',operationalStage:'arrived',reviewReason:null,hasFinalHandover:false,releases:[]};
-function show(visit=inside){render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})}><VehicleVisitLocationPanel visit={visit} onChanged={mocks.changed}/></QueryClientProvider>);}
-beforeEach(async()=>{vi.clearAllMocks();mocks.role=true;mocks.changed.mockResolvedValue(undefined);await i18n.changeLanguage('en');});
+function show(visit=inside,managerAction=false){render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})}><VehicleVisitLocationPanel visit={visit} onChanged={mocks.changed} onManagerLocation={managerAction?mocks.managerLocation:undefined}/></QueryClientProvider>);}
+beforeEach(async()=>{vi.clearAllMocks();mocks.role=true;mocks.manager=false;mocks.changed.mockResolvedValue(undefined);await i18n.changeLanguage('en');});
 describe('canonical location choices',()=>{
  it('opens the release document instead of directly changing custody when With customer is selected',async()=>{
   show();fireEvent.click(screen.getByRole('button',{name:'Inspection and temporary release'}));await screen.findByText('Canonical temporary release form');
@@ -29,5 +29,19 @@ describe('canonical location choices',()=>{
  it('does not offer a writable custody choice to an unauthorized role',()=>{
   mocks.role=false;show();expect(screen.getByRole('button',{name:/With customer/}).hasAttribute('disabled')).toBe(true);
   expect(mocks.arrival).not.toHaveBeenCalled();expect(mocks.returned).not.toHaveBeenCalled();
+ });
+ it('routes either location choice on an active later stage to the same manager correction without a custody write',()=>{
+  mocks.manager=true;show({...inside,stage:'ready',operationalStage:'ready'},true);
+  fireEvent.click(screen.getByRole('button',{name:'With customer'}));fireEvent.click(screen.getByRole('button',{name:'In workshop'}));
+  expect(mocks.managerLocation.mock.calls).toEqual([['with_customer'],['in_workshop']]);
+  expect(mocks.arrival).not.toHaveBeenCalled();expect(mocks.returned).not.toHaveBeenCalled();expect(mocks.changed).not.toHaveBeenCalled();
+ });
+ it('keeps the canonical release flow for a supervisor even when a manager callback exists',async()=>{
+  show(inside,true);fireEvent.click(screen.getByRole('button',{name:'Inspection and temporary release'}));
+  await screen.findByText('Canonical temporary release form');expect(mocks.managerLocation).not.toHaveBeenCalled();
+ });
+ it('does not reopen delivered visits through manager location choices',()=>{
+  mocks.manager=true;show({...inside,stage:'delivered',operationalStage:'delivered',hasFinalHandover:true},true);
+  expect(screen.queryByRole('group',{name:'Choose actual location'})).toBeNull();expect(mocks.managerLocation).not.toHaveBeenCalled();
  });
 });

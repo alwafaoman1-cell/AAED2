@@ -8,8 +8,8 @@ vi.mock("@/lib/claimWorkOrderUnified", () => ({ addUnifiedVehicleMedia: vi.fn(),
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: db.rpc, from: db.from, auth: { onAuthStateChange: vi.fn() } } }));
 const page = readFileSync("src/pages/WorkOrders.tsx", "utf8");
 const migrationName = readdirSync("supabase/migrations").find(name => name.endsWith("_work_orders_light_summary_page.sql"))!;
-const migration = readFileSync(`supabase/migrations/${migrationName}`, "utf8").replaceAll("\r\n", "\n");
-const legacy = readFileSync("supabase/migrations/20260928140000_work_orders_list_channel_filter_alignment.sql", "utf8").replaceAll("\r\n", "\n");
+const migration = readFileSync(`supabase/migrations/${migrationName}`, "utf8").replace(/\r\n/g, "\n");
+const legacy = readFileSync("supabase/migrations/20260928140000_work_orders_list_channel_filter_alignment.sql", "utf8").replace(/\r\n/g, "\n");
 const payload = { rows: [{ id: "uuid", order_number: "WO-C-26-0001", customer_id: "customer", vehicle_id: "vehicle", status: "received", actual_expense_cost: 28.8, _customer: { name: "Synthetic", phone: "80000971" }, _vehicle: { plateNumber: "999400", plateLetters: "QA" } }], pagination: { page: 1, pageSize: 20, totalRows: 26, totalPages: 2 }, summary: { total: 26, cash: 13, insurance: 13 }, filterOptions: {} };
 beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); db.tenant.mockResolvedValue("tenant"); db.rpc.mockResolvedValue({ data: payload, error: null }); });
 describe("bounded lightweight work-order list", () => {

@@ -1,5 +1,6 @@
 import { workshopDateTime } from "@/lib/workshopDateTime";
-import { isVehicleVisitAwaitingArrival } from "@/lib/vehicleVisitIntake";
+import { getVehicleCenterTab } from "@/lib/vehicleVisitLifecycle";
+import { getVehicleVisitManagerOperationalDate } from "@/lib/vehicleVisitManagerProjection";
 import type { SupervisorVehicle } from "@/lib/supervisorWorkspace";
 
 export interface SupervisorMilestone {
@@ -8,6 +9,7 @@ export interface SupervisorMilestone {
   to_stage: string;
   occurred_at: string;
   revision: number;
+  action?: string | null;
 }
 export type SupervisorClockTone = "normal" | "overdue" | "critical" | "unknown";
 export interface SupervisorVisitClock {
@@ -57,18 +59,22 @@ export function getSupervisorVisitTiming(row: SupervisorVehicle, milestones: Sup
   const order = entry?.work_order || entry?.converted_work_order;
   const events = (milestones || []).filter(event => event.entry_id === row.entryId).sort((a, b) => b.revision - a.revision);
   // Restoring a cancelled visit to Approved is not a new approval date.
-  const approvalEvent = events.find(event => event.to_stage === "approved" && event.from_stage === "arrived");
-  const approval = row.channel === "insurance" ? claim?.insurance_approved_at || claim?.approved_at || approvalEvent?.occurred_at
-    : approvalEvent?.occurred_at;
+  const approvalEvent = events.find(event => event.to_stage === "approved" && event.from_stage === "arrived" && event.action !== "manager_adjustment");
+  const approvalOverlay = getVehicleVisitManagerOperationalDate(entry, row.visit?.workflow, "approved");
+  const approval = approvalOverlay !== undefined ? approvalOverlay : row.channel === "insurance"
+    ? claim?.insurance_approved_at || claim?.approved_at || approvalEvent?.occurred_at : approvalEvent?.occurred_at;
   const terminal = row.stage === "delivered" || row.stage === "cancelled";
   const terminalEvent = terminal ? events.find(event => event.to_stage === row.stage) : undefined;
-  const end = !terminal ? now : instant(terminalEvent?.occurred_at || (row.stage === "delivered"
+  const deliveryOverlay = row.stage === "delivered" ? getVehicleVisitManagerOperationalDate(entry, row.visit?.workflow, "delivered") : undefined;
+  const end = !terminal ? now : deliveryOverlay !== undefined ? instant(deliveryOverlay) : instant(terminalEvent?.occurred_at || (row.stage === "delivered"
     ? order?.vehicle_delivered_at || claim?.vehicle_delivered_at || claim?.delivered_at : claim?.cancelled_at));
   // Claim-only projections may contain a registration date, but no confirmed arrival.
-  const pendingArrival = isVehicleVisitAwaitingArrival(entry);
-  const arrival = row.legacy || row.visit?.entry?._claimOnly || pendingArrival ? undefined : row.arrivalDate;
+  const pendingArrival = Boolean(row.visit && getVehicleCenterTab(row.visit) === "awaiting_arrival");
+  const arrivalOverlay = getVehicleVisitManagerOperationalDate(entry, row.visit?.workflow, "arrived");
+  const arrival = row.legacy || row.visit?.entry?._claimOnly || pendingArrival ? undefined
+    : arrivalOverlay !== undefined ? arrivalOverlay : row.arrivalDate;
   return {
     arrival: clock(arrival, end, now, terminal, pendingArrival || (terminal && end === null)),
-    approval: clock(approval, end, now, terminal, !approval && Boolean(row.entryId) && milestones === undefined),
+    approval: clock(approval, end, now, terminal, approvalOverlay === undefined && !approval && Boolean(row.entryId) && milestones === undefined),
   };
 }

@@ -11,6 +11,7 @@ vi.mock("@/contexts/useAuth", () => ({ useAuth: () => ({ profile: { tenant_id: "
 vi.mock("sonner", () => ({ toast: { success: api.success, error: api.failure, info: vi.fn() } }));
 vi.mock("@/lib/vehicleIntakeReceipt", () => ({ buildIntakeReceiptHtml: api.html }));
 vi.mock("@/lib/partsWhatsApp", () => ({ sendWhatsAppMessage: api.send }));
+vi.mock("@/components/vehicle-entry/VehicleCustomerMessageCenter", () => ({ default: () => null }));
 vi.mock("@/components/ElectronicSignaturePad", () => ({ default: ({ onChange, value, compactOutput }: { onChange: (value: string) => void; value: string; compactOutput: boolean }) => { api.pad(compactOutput); return <div><button type="button" onClick={() => onChange("data:image/png;base64,AA==")}>Draw signature</button><output data-testid="signature-value">{value}</output></div>; } }));
 vi.mock("@/components/PdfPreviewDialog", () => ({ default: ({ open, htmlContent, allowShare }: { open: boolean; htmlContent: string; allowShare: boolean }) => open ? <div data-testid="document-preview" data-share={String(allowShare)}>{htmlContent}</div> : null }));
 vi.mock("@/lib/unifiedVehiclePortal", async () => {
@@ -427,7 +428,7 @@ describe("protected vehicle portal UI", () => {
 describe("staff portal lifecycle controls", () => {
   it("treats non-date closed-only expiry as expired and disables sharing", async () => {
     staff!.expires_at = "-infinity"; renderStaff(); await screen.findByRole("textbox", { name: "Customer portal link" });
-    expect(screen.getByRole("button", { name: "Copy link" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Send portal by WhatsApp" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Reactivate link" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Customer WhatsApp center" })).toBeEnabled(); expect(screen.getByRole("button", { name: "Reactivate link" })).toBeVisible();
     expect(screen.queryByText(/Invalid Date/)).toBeNull();
   });
   it("reads without automatically preparing a token or sending messages", async () => {

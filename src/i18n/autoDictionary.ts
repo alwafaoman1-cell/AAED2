@@ -1047,6 +1047,7 @@ const COMMON_UI_OVERRIDES: Record<string, string> = {
   "رفع مستند": "Upload Document",
   "رفع صورة": "Upload Photo",
   "إرسال واتساب": "Send WhatsApp",
+  "مركز رسائل واتساب للعميل": "Customer WhatsApp center",
   "إشعارات المدير": "Manager Notifications",
   "إدارة الفريق": "Team Management",
   "النسخ الاحتياطي": "Backup",
