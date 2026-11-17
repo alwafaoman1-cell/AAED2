@@ -1,4 +1,9 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "codex/finance-security-development": false
+    }
+  },
   "daemons": {
     "temo-document-ocr": {
       "root": "services/document-ocr/",
