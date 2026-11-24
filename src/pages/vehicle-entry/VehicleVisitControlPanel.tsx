@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowRight, ClipboardList, Loader2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +49,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
 }) {
   const { t, i18n } = useTranslation();
   const { user, profile, hasRole } = useAuth();
+  const { requirementsEnabled } = useWorkflowRequirements();
   const inlineActions=useRef<VehicleVisitInlineActionHandle>(null);
   const locationActions=useRef<VehicleVisitLocationHandle>(null);
   const managerActions=useRef<VehicleVisitManagerControlsHandle>(null);
@@ -107,8 +109,8 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
     && (!order.vehicle_entry_id || order.vehicle_entry_id===entryId)
     && !entry.work_order_id && !entry.converted_work_order_id;
   const canAdvance = !visit?.reviewReason && Boolean(current) && current !== "cancelled" && current !== "delivered";
-  const nextBlocker = getVehicleVisitNextBlocker(next, entry, hasRole, Boolean(visit?.hasFinalHandover));
-  const canOpenHandover=canAdvance&&next==='delivered'&&nextBlocker==='signedHandoverRequired'&&order?.status==='completed'
+  const nextBlocker = getVehicleVisitNextBlocker(next, entry, hasRole, Boolean(visit?.hasFinalHandover), requirementsEnabled);
+  const canOpenHandover=canAdvance&&next==='delivered'&&nextBlocker==='signedHandoverRequired'&&(!requirementsEnabled||order?.status==='completed')
     &&safeOrderLink&&hasRole('admin','manager','supervisor')&&(!supervisor||Boolean(onRequestHandover));
   const canReviewOrder=canAdvance&&['finishWorkFirst','workOrderStatusInvalid','deliveryWorkOrderConflict'].includes(nextBlocker||'')
     &&safeOrderLink&&hasRole('admin','manager','supervisor','technician')&&(!supervisor||Boolean(onRequestWorkOrderStatus));
@@ -375,7 +377,7 @@ export function VehicleVisitControlPanel({ entryId, supervisor = false, onReques
           {(target === "cancelled" || (current && target && ORDER.indexOf(target) < ORDER.indexOf(current))) && <label className="block text-sm">{t("vehicleVisit.reason")}<Textarea required value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} /></label>}
           {target === "ready" && order?.status !== "completed" && <p className="text-sm text-warning">{t("vehicleVisit.finishWorkFirst")}</p>}
           {target === "delivered" && !visit.hasFinalHandover && <p className="text-sm text-warning">{t("vehicleVisit.signedHandoverRequired")}</p>}
-          <Button type="submit" disabled={mutation.isPending || !responsible || !occurredAt || (target === "approved" && billingKind === "cash" && !customerApproved) || (target === "delivered" && !visit.hasFinalHandover)}>
+          <Button type="submit" disabled={mutation.isPending || !responsible || !occurredAt || (requirementsEnabled && target === "approved" && billingKind === "cash" && !customerApproved) || (target === "delivered" && !visit.hasFinalHandover)}>
             {mutation.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}{t("vehicleVisit.save")}
           </Button>
         </form>

@@ -68,6 +68,9 @@ import ChequeClearanceDialog from "@/components/insurance/ChequeClearanceDialog"
 import EditClaimPaymentDialog from "@/components/insurance/EditClaimPaymentDialog";
 import { usePaymentsByClaim, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, useDeleteClaimPayment, type ClaimPayment } from "@/hooks/useClaimPayments";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
+import { readWorkflowRequirementPolicy } from "@/lib/workflowRequirements";
+import WorkflowRequirementsBanner from "@/components/WorkflowRequirementsBanner";
 import { findOrCreateInsuranceCompany, useInsuranceCompany } from "@/hooks/useInsuranceCompanies";
 import { useCreateInsuranceInvoice } from "@/hooks/useInsuranceInvoices";
 import CancelClaimDialog from "@/components/insurance/CancelClaimDialog";
@@ -165,6 +168,7 @@ async function insertClaimAuditWithVehicle(payload: Record<string, unknown>) {
 
 export default function InsuranceClaimDetail() {
   const { t } = useTranslation();
+  const { requirementsEnabled, policy: workflowPolicy } = useWorkflowRequirements();
   const isEnglish = i18n.language.startsWith("en");
   const workspaceText = (ar: string, en: string) => isEnglish ? en : ar;
   const amountText = (value: number | null | undefined) => value != null && Number.isFinite(value) ? `${value.toFixed(3)} OMR` : "—";
@@ -1340,7 +1344,18 @@ export default function InsuranceClaimDetail() {
 
   // ── Convert to Work Order ──
   const handleConvertToWorkOrder = async () => {
-    if (status !== "approved") {
+    let enforce = requirementsEnabled;
+    if (!enforce) {
+      try {
+        const tenantId = (existing as any)?.tenant_id || await getCurrentTenantId();
+        if (!tenantId) throw new Error("WORKFLOW_POLICY_SCOPE_CHANGED");
+        enforce = (await readWorkflowRequirementPolicy(tenantId)).requirements_enabled;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : workspaceText("تعذر التحقق من شروط سير العمل", "Could not confirm workflow requirements"));
+        return;
+      }
+    }
+    if (enforce && !["approved", "paid"].includes(status)) {
       toast.error("يجب الموافقة على المطالبة أولاً");
       return;
     }
@@ -2593,6 +2608,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
   return (
     <div className="min-w-0 space-y-4 pb-12" dir={isEnglish ? "ltr" : "rtl"}>
+      <WorkflowRequirementsBanner requirementsEnabled={requirementsEnabled} policy={workflowPolicy} />
       {/* ── Unified Claim Management Center ── */}
       <Card className="min-w-0 overflow-hidden border-primary/20">
         <div className="flex items-start gap-3 border-b bg-primary/5 p-4 sm:p-5">
@@ -3133,7 +3149,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
 
           <div className="flex justify-between">
             <Button variant="outline" onClick={() => setTab("estimate")}>{workspaceText("السابق", "Previous")}</Button>
-            {status === "approved" && (
+            {(["approved", "paid"].includes(status) || !requirementsEnabled) && (
               <Button onClick={() => setTab("workorder")} className="gap-2">
                 {workspaceText("التالي: أمر العمل", "Next: Work order")} <ArrowLeftRight size={14} />
               </Button>
@@ -3206,7 +3222,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
             ) : (
               <Button
                 onClick={handleConvertToWorkOrder}
-                disabled={status !== "approved"}
+                disabled={requirementsEnabled && !["approved", "paid"].includes(status)}
                 variant="outline"
                 className="h-auto min-h-11 gap-2 whitespace-normal"
                 size="sm"
@@ -3221,7 +3237,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
                 {workspaceText("لم يُسجّل وصول المركبة إلى الورشة بعد. استخدم تسجيل دخول المركبة في ملخص الملف عند وصولها فعليًا.", "Vehicle arrival has not been recorded. Use Record vehicle arrival in the file summary once it actually arrives.")}
               </div>
             )}
-            {workshopArrivalDate && status !== "approved" && status !== "paid" && (
+            {requirementsEnabled && workshopArrivalDate && status !== "approved" && status !== "paid" && (
               <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg flex items-center gap-2 text-warning text-sm">
                 <AlertCircle size={16} /> يجب الموافقة على المطالبة أولاً قبل التحويل لأمر عمل.
               </div>

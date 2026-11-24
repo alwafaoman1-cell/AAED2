@@ -15,6 +15,7 @@ import { COUNTRY_DIALS } from "@/lib/countries";
 import { useSystemPreferences, type SystemThemePreset } from "@/lib/systemPreferences";
 import SecurityDangerZone from "@/components/settings/SecurityDangerZone";
 import AccountingSettingsPanel from "@/components/settings/AccountingSettingsPanel";
+import WorkflowRequirementsSettingsPanel from "@/components/settings/WorkflowRequirementsSettingsPanel";
 
 const colorPresets = [
   { label: "ذهبي", value: "#d4a537" },
@@ -375,6 +376,8 @@ export default function SettingsPage() {
       </div>
 
       <AccountingSettingsPanel />
+
+      <WorkflowRequirementsSettingsPanel />
 
       <SecurityDangerZone />
 

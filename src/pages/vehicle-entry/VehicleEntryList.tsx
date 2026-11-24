@@ -26,6 +26,8 @@ import { VehicleCenterCard } from "@/components/vehicle-entry/VehicleCenterCard"
 import { VehicleCenterRowActions } from "@/components/vehicle-entry/VehicleCenterRowActions";
 import { VehicleCenterNavigation } from "@/components/vehicle-entry/VehicleCenterNavigation";
 import { CENTER_LOCATION_TABS, CENTER_WORK_STAGES, type VehicleCenterActionRequest } from "@/lib/vehicleCenterPresentation";
+import WorkflowRequirementsBanner from "@/components/WorkflowRequirementsBanner";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
 import { isVehicleVisitAwaitingArrival } from "@/lib/vehicleVisitIntake";
 import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,6 +37,7 @@ const VehicleVisitQuickActionDialog=lazy(()=>import('./VehicleVisitQuickActionDi
 
 export default function VehicleEntryList() {
   const { t, i18n } = useTranslation();
+  const workflowRequirements = useWorkflowRequirements();
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isMobile = useIsMobile();
@@ -247,6 +250,7 @@ export default function VehicleEntryList() {
 
   return (
     <div className="vehicle-center-page min-w-0 space-y-3 md:space-y-5" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
+      <WorkflowRequirementsBanner {...workflowRequirements} />
       {quickActionRow&&<Suspense fallback={<p role="status">{t('vehicleEntry.loading')}</p>}><VehicleVisitQuickActionDialog row={quickActionRow} initialAction={quickActionRow._centerAction} open onOpenChange={(open) => { if (!open) setQuickActionRow(null); }} /></Suspense>}
       <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
         <div className="min-w-0">

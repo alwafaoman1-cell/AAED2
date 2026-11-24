@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from worker import ENGINE_VERSIONS, Config, InvalidDocument, claim_next, download, run
+from worker import (ENGINE_VERSIONS, ENGLISH_ENGINE_VERSION, LEGACY_ENGINE_VERSIONS,
+                    Config, InvalidDocument, _run_ocr, claim_next, download, run)
 
 
 class FakeConnection:
-    def __init__(self):
+    def __init__(self, row=None):
         self.statements: list[str] = []
+        self.parameters: list[tuple] = []
+        self.row = row
 
     def transaction(self):
         return self
@@ -23,10 +26,11 @@ class FakeConnection:
 
     def execute(self, sql, _parameters):
         self.statements.append(sql)
+        self.parameters.append(_parameters)
         return self
 
     def fetchone(self):
-        return None
+        return self.row
 
 
 class WorkerTests(unittest.TestCase):
@@ -128,11 +132,53 @@ class WorkerTests(unittest.TestCase):
     def test_claim_reaps_expired_lease_and_can_retry_stale_job(self):
         connection = FakeConnection()
         self.assertIsNone(claim_next(connection))
-        self.assertEqual(ENGINE_VERSIONS, ["1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker", "1.0.4-worker", "1.0.5-worker", "1.0.6-worker"])
+        self.assertEqual(set(ENGINE_VERSIONS), LEGACY_ENGINE_VERSIONS | {ENGLISH_ENGINE_VERSION})
         self.assertEqual(len(connection.statements), 2)
         self.assertIn("DOCUMENT_OCR_WORKER_LOST", connection.statements[0])
         self.assertIn("skip locked", connection.statements[1].lower())
         self.assertIn("processing_started_at < now() - interval '6 minutes'", connection.statements[1])
+
+    def test_claim_preserves_requested_version_while_draining_all_supported_live_versions(self):
+        for version in ENGINE_VERSIONS:
+            with self.subTest(version=version):
+                row = ("extraction", "tenant", "file", 0, "temo-documents", "tenant/file.png",
+                       "image/png", "a" * 64, "file.png", version)
+                connection = FakeConnection(row)
+                claimed = claim_next(connection)
+                self.assertEqual(claimed["engine_version"], version)
+                self.assertEqual(claimed["id"], row[0])
+                self.assertTrue(claimed["lease"])
+                self.assertIn(version, connection.parameters[0][0])
+                self.assertIn(version, connection.parameters[1][0])
+                self.assertIn("e.status in ('queued', 'retryable_failed')", connection.statements[1])
+                self.assertIn("e.status = 'processing'", connection.statements[1])
+                # Claiming changes the lease/status, never an archived revision's identity.
+                self.assertNotIn("engine_version =", connection.statements[2])
+
+    def test_isolated_legacy_jobs_use_actual_english_filter_and_model_metadata(self):
+        import hashlib
+        import io
+        from PIL import Image
+        from ocr_core import PaddleEnglishProvider
+
+        output = io.BytesIO()
+        Image.new("RGB", (32, 32), "white").save(output, format="PNG")
+        raw = output.getvalue()
+        # Exercise the real document pipeline, including its native-text filter,
+        # without loading an inference model or using operational documents.
+        page = (1, None, "Claim No: SYNTHETIC-ENGLISH\nاسم العميل: بيانات سابقة", 600, 800)
+        for version in ENGINE_VERSIONS:
+            with self.subTest(version=version):
+                connection = MagicMock()
+                job = {"filename": "fixture.png", "mime": "image/png",
+                       "sha256": hashlib.sha256(raw).hexdigest(), "engine_version": version}
+                with patch("worker.sys.platform", "win32"), patch("ocr_core._image_pages", return_value=[page]):
+                    _run_ocr(raw, job, "paddleocr", connection)
+                outcome, result = connection.send.call_args.args[0]
+                self.assertEqual(outcome, "success")
+                self.assertEqual(result["pages"][0]["text"], "Claim No: SYNTHETIC-ENGLISH")
+                self.assertEqual(result["model_version"], PaddleEnglishProvider.version)
+                self.assertEqual(job["engine_version"], version)
 
     def test_private_storage_path_is_tenant_scoped(self):
         config = Config("", "https://example.invalid", "x" * 64, "development", "paddleocr")

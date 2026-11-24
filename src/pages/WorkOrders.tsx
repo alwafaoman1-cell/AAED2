@@ -68,7 +68,6 @@ import VehicleAvatar from "@/components/vehicles/VehicleAvatar";
 import WorkOrderInvoiceBadge from "@/components/workorders/WorkOrderInvoiceBadge";
 import { fetchWorkOrderInvoiceIndicators } from "@/lib/workOrderInvoiceIndicators";
 import { isUuid } from "@/lib/uuid";
-import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 import { resolveSelectedWorkOrderActions, resolveSelectedWorkOrderExport, resolveWorkOrderListAction } from "@/lib/workOrderListActions";
 import { fetchExpensesForWorkOrder, type ExpenseRecord } from "@/lib/expensesStore";
 import {
@@ -241,7 +240,7 @@ function insuranceReason(order: WorkOrder) {
 function buildWorkOrderHtml(order: WorkOrder, render: typeof import("@/lib/pdfGenerator")["getWorkOrderHtml"]) {
   return render({
     orderNumber: order.displayNumber || order.id, date: order.entryDate, customerName: order.customer,
-    workOrderType: resolveWorkOrderType(order), trackingToken: order.trackingToken,
+    workOrderType: resolveWorkOrderType(order),
     customerPhone: order.phone, vehicleType: order.vehicleType, model: order.model,
     year: order.year, plateNumber: order.plate, vin: order.vin, insurance: order.insurance,
     claimNumber: order.claimNumber, serviceType: order.serviceType, technician: order.technician,
@@ -653,11 +652,9 @@ export default function WorkOrders() {
 
   async function handlePreview(order: WorkOrder) {
     await withActionOrder(order, async (full) => {
-      const { buildTrackingQrDataUrl, getWorkOrderHtml } = await import("@/lib/pdfGenerator");
-      const portal = full.cloudId ? await ensureCustomerPortalToken(full.cloudId) : null;
-      const printableOrder = { ...full, trackingToken: portal?.token || full.trackingToken };
-      await buildTrackingQrDataUrl(printableOrder.trackingToken);
-      setPreviewHtml(buildWorkOrderHtml(printableOrder, getWorkOrderHtml));
+      // Printing stored work-order data must not create or require a customer portal.
+      const { getWorkOrderHtml } = await import("@/lib/pdfGenerator");
+      setPreviewHtml(buildWorkOrderHtml(full, getWorkOrderHtml));
       setPreviewTitle(`أمر عمل ${full.id}`);
       setShowPreview(true);
     });
@@ -669,22 +666,20 @@ export default function WorkOrders() {
       return;
     }
     const matchingOrders = await fetchAllMatchingOrders();
-    const { buildTrackingQrDataUrl, getWorkOrderHtml } = await import("@/lib/pdfGenerator");
-    const printableOrders = await Promise.all(matchingOrders.map(async (order) => {
-      const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
-      return { ...order, trackingToken: portal?.token || order.trackingToken };
-    }));
-    // Pre-build QR for every order in the batch
-    await Promise.all(printableOrders.map(o => buildTrackingQrDataUrl(o.trackingToken)));
+    if (matchingOrders.length === 0) {
+      toast.error(isArabic ? "لا توجد أوامر للطباعة" : "There are no work orders to print");
+      return;
+    }
+    const { getWorkOrderHtml } = await import("@/lib/pdfGenerator");
     // Print stack: each order on its own page
-    const combined = printableOrders.map(o => {
+    const combined = matchingOrders.map(o => {
       const html = buildWorkOrderHtml(o, getWorkOrderHtml);
       // Extract body content only
       const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
       return match ? match[1] : html;
     }).join('<div style="page-break-after:always"></div>');
     const wrapper = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>طباعة جماعية</title>${
-      buildWorkOrderHtml(printableOrders[0], getWorkOrderHtml).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
+      buildWorkOrderHtml(matchingOrders[0], getWorkOrderHtml).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
     }</head><body>${combined}</body></html>`;
     setPreviewHtml(wrapper);
     setPreviewTitle(`طباعة ${matchingOrders.length} أمر عمل`);
@@ -1591,19 +1586,14 @@ export default function WorkOrders() {
           onClick={() => void runListTask(async () => {
             const ords = await selectedActionOrders();
             if (ords.length === 0) return;
-            const { buildTrackingQrDataUrl, getWorkOrderHtml } = await import("@/lib/pdfGenerator");
-            const printableOrders = await Promise.all(ords.map(async (order) => {
-              const portal = order.cloudId ? await ensureCustomerPortalToken(order.cloudId) : null;
-              return { ...order, trackingToken: portal?.token || order.trackingToken };
-            }));
-            await Promise.all(printableOrders.map(o => buildTrackingQrDataUrl(o.trackingToken)));
-            const combined = printableOrders.map(o => {
+            const { getWorkOrderHtml } = await import("@/lib/pdfGenerator");
+            const combined = ords.map(o => {
               const html = buildWorkOrderHtml(o, getWorkOrderHtml);
               const m = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
               return m ? m[1] : html;
             }).join('<div style="page-break-after:always"></div>');
             const wrapper = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>طباعة جماعية</title>${
-              buildWorkOrderHtml(printableOrders[0], getWorkOrderHtml).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
+              buildWorkOrderHtml(ords[0], getWorkOrderHtml).match(/<style>[\s\S]*?<\/style>/)?.[0] || ''
             }</head><body>${combined}</body></html>`;
             setPreviewHtml(wrapper);
             setPreviewTitle(`طباعة ${ords.length} أمر عمل`);

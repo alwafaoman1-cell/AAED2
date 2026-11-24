@@ -8,6 +8,21 @@ const document = {
   entry: { id: "visit", entry_number: "ENT-2026-1", arrival_date: "2026-11-11", arrival_time: "08:00", received_by_name: "Receiving staff", vehicle_snapshot: { make: "Test car", vin: "VIN-ONLY-IN-STAFF-DOCUMENT", plate_number: "123", plate_letters: "AB", plate_country: "OM" }, delivered_by: { full_name: "Other person", phone: "PRIVATE-PHONE", id_number: "PRIVATE-ID" }, vehicle_entry_signatures: [{ signature_role: "delivered_by", signer_name: "Actual signer", signature_data_url: "data:image/png;base64,ORIGINALSIGNATURE", signed_at: "2026-11-12T09:01:02Z" }], custody_print_settings: { companyName: "اسم الشركة", companyNameEn: "Test company" } },
 } as unknown as IntakeReceiptDocument;
 describe("vehicle intake receipt evidence and verification", () => {
+  it.each(["ar", "en"] as const)("shows a saved unsigned exception without claiming a paper signature (%s)", async language => {
+    const saved = structuredClone(document);
+    saved.receipt.status = "used";
+    saved.delivery_confirmation = { handover_id: "handover", handover_number: "VH-TEST", recipient_name: "", delivered_at: "2026-11-23T09:00:00Z", confirmed_at: "2026-11-23T09:01:00Z", delivered_by_name: "Staff", signature_data_url: null, paper_signature_confirmed: false, workflow_requirement_override_id: "saved-audit-proof" };
+    const html = await buildIntakeReceiptHtml(saved, language);
+    const section = new DOMParser().parseFromString(html, "text/html").querySelector(".vir-delivery")!;
+    expect(section.textContent).toContain(language === "en" ? "Documented workflow exception" : "استثناء سير عمل موثق");
+    expect(section.textContent).toContain(language === "en" ? "No recipient signature was recorded" : "لم يُسجّل توقيع لمستلم المركبة");
+    expect(section.textContent).not.toContain(language === "en" ? "Paper signature confirmed" : "تم تأكيد التوقيع الورقي");
+    expect(section.querySelector("img")).toBeNull();
+    expect(html).toContain("ORIGINALSIGNATURE");
+    saved.delivery_confirmation.paper_signature_confirmed = true;
+    const paper = await buildIntakeReceiptHtml(saved, language);
+    expect(paper).toContain(language === "en" ? "Paper signature confirmed in the finalized handover" : "تم تأكيد التوقيع الورقي في المحضر النهائي");
+  });
   it("prints frozen odometer, running state, full new damage details and an arrival clock without fractions", async () => {
     const changed = structuredClone(document);
     const notes = "Review note without shortening. ".repeat(100) + "\nFinal review note.";

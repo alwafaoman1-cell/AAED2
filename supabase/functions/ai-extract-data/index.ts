@@ -2,6 +2,7 @@
 // Accepts an image (base64) + a preset schema and returns structured JSON
 // using vision + tool-calling. Supports multiple AI providers (Lovable / OpenAI / Gemini).
 // @ts-nocheck
+import { ENGLISH_ONLY_EXTRACTION_INSTRUCTION, englishOnlyExtractedValue } from "../_shared/englishExtraction.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,7 +44,7 @@ function sanitizeExtracted(schema: string, extracted: Record<string, unknown>, a
   const out: Record<string, string> = {};
   for (const key of allowedKeys) {
     const value = extracted[key];
-    out[key] = value === null || value === undefined ? "" : String(value).trim();
+    out[key] = englishOnlyExtractedValue(value);
   }
   if (schema === "insurance_claim") {
     const hasUsefulValue = allowedKeys.some((key) => out[key]);
@@ -170,7 +171,7 @@ async function logUsage(admin: any, payload: Record<string, unknown>) {
 const SCHEMAS: Record<string, { description: string; system: string; parameters: any }> = {
   vehicle_customer: {
     description: "Extract vehicle and customer/owner data from a vehicle registration card (مَلكية / استمارة), driver license, insurance certificate, or any vehicle document.",
-    system: "You are a data-extraction engine for an auto-workshop. Read the document image carefully (it may be Arabic, English, or both). Extract ONLY what you see — if a field is missing, return empty string. Plate numbers stay in original characters. Year is 4 digits. Phone uses local Oman/GCC digit format.",
+    system: "You are a data-extraction engine for an auto-workshop. Read English document text only. Extract ONLY what is printed in English or Western digits — if a field is missing, return empty string. Never transliterate Arabic plates or names. Year is 4 digits. Phone uses local Oman/GCC digit format.",
     parameters: {
       type: "object",
       properties: {
@@ -180,7 +181,7 @@ const SCHEMAS: Record<string, { description: string; system: string; parameters:
         make: { type: "string", description: "ماركة السيارة (مثل Toyota, Nissan)" },
         model: { type: "string", description: "موديل السيارة" },
         year: { type: "string", description: "سنة الصنع (4 أرقام)" },
-        color: { type: "string", description: "لون السيارة بالعربية" },
+        color: { type: "string", description: "Vehicle color as printed in English" },
         vin: { type: "string", description: "رقم الهيكل VIN (17 خانة)" },
         mileage: { type: "string", description: "قراءة العداد إن ظهرت" },
       },
@@ -190,7 +191,7 @@ const SCHEMAS: Record<string, { description: string; system: string; parameters:
   },
   insurance_claim: {
     description: "Extract insurance claim data from a claim document, repair estimate, accident report, police report, or insurance approval letter.",
-    system: "You are a data-extraction engine for an auto-workshop in Oman. The document may be Arabic or English. Extract claim fields, vehicle, owner, and damage description.",
+    system: "You are a data-extraction engine for an auto-workshop in Oman. Read English text only. Extract the printed claim fields, vehicle, owner, and damage description.",
     parameters: {
       type: "object",
       properties: {
@@ -216,7 +217,7 @@ const SCHEMAS: Record<string, { description: string; system: string; parameters:
     },
   },
   estimate_document: {
-    description: "Extract structured repair estimate / quotation data from an image or PDF. It may be Arabic, English, or bilingual.",
+    description: "Extract structured English repair estimate / quotation data from an image or PDF.",
     system: [
       "You are a strict data-extraction engine for an Oman automotive workshop.",
       "Extract only values visible in the document. Do not invent missing data.",
@@ -274,7 +275,7 @@ const SCHEMAS: Record<string, { description: string; system: string; parameters:
   },
   expense_receipt: {
     description: "Extract data from an expense receipt or purchase invoice (فاتورة مصروف/شراء).",
-    system: "You are a bookkeeping data-extraction engine. The receipt may be Arabic or English.",
+    system: "You are a bookkeeping data-extraction engine. Read English receipt text only.",
     parameters: {
       type: "object",
       properties: {
@@ -309,21 +310,21 @@ const SCHEMAS: Record<string, { description: string; system: string; parameters:
     },
   },
   delivery_receipt: {
-    description: "Extract vehicle delivery/handover info from a delivery receipt, customer satisfaction form, ID card (front or back), passport, driving licence, or any handover acknowledgment document — Arabic or English.",
+    description: "Extract English vehicle delivery/handover information from a delivery receipt, customer satisfaction form, ID card, passport, driving licence or handover acknowledgment.",
     system: [
       "You are a data-extraction engine for an auto-workshop in Oman.",
       "You will receive ONE OR MORE images (pages, or front/back of an ID card).",
-      "SCAN EVERY PAGE/IMAGE carefully. The receiver name and ID number can appear on any page, in Arabic OR English (or both).",
+      "SCAN EVERY PAGE/IMAGE carefully. Extract the receiver name and ID number only when printed in English or Western digits.",
       "Receiver name labels include but are not limited to: 'اسم المستلم', 'الاسم', 'اسم العميل', 'اسم المالك', 'اسم السائق', 'المُستلِم', 'Name', 'Full Name', 'Receiver', 'Customer Name', 'Owner Name', 'Holder'.",
       "ID number labels include: 'رقم الهوية', 'الرقم المدني', 'رقم البطاقة', 'رقم البطاقة الشخصية', 'رقم جواز السفر', 'رقم الرخصة', 'Civil No', 'Civil Number', 'ID No', 'ID Number', 'Passport No', 'Licence No', 'License No', 'National ID'.",
       "Omani Civil ID is typically 8 digits; GCC IDs can be 9-11 digits; passports are alphanumeric. Return digits only when it's purely numeric; otherwise keep the original characters.",
-      "Prefer the printed full name over a signature. If both Arabic and English names exist, return the Arabic one.",
+      "Prefer the printed English full name over a signature. Ignore Arabic names and never transliterate them.",
       "Return dates as YYYY-MM-DD. If a field truly does not appear anywhere, return empty string. Do not invent data.",
     ].join(" "),
     parameters: {
       type: "object",
       properties: {
-        receiver_name: { type: "string", description: "اسم المستلم الكامل (عربي مفضّل، أو إنجليزي إذا لم يتوفر العربي)" },
+        receiver_name: { type: "string", description: "Receiver's full name printed in English only" },
         receiver_id_number: { type: "string", description: "رقم هوية/بطاقة/جواز/رخصة المستلم" },
         delivered_at: { type: "string", description: "تاريخ التسليم YYYY-MM-DD" },
         delivery_notes: { type: "string", description: "ملاحظات/حالة المركبة عند التسليم" },
@@ -339,7 +340,7 @@ const SCHEMAS: Record<string, { description: string; system: string; parameters:
       "Extract only fault codes and problems explicitly supported by the report.",
       "Classify severity as low, medium, high, or critical.",
       "Do not provide repair instructions, procedures, parts recommendations, or troubleshooting steps.",
-      "The report can be Arabic or English. Keep fault codes exactly as printed.",
+      "Read the report's English content only. Keep fault codes exactly as printed.",
       "If a value is not visible, return an empty string. Never invent a code or diagnosis.",
     ].join(" "),
     parameters: {
@@ -470,7 +471,7 @@ Deno.serve(async (req) => {
       {
         type: "text",
         text: safePages.length > 1
-          ? `You are given ${safePages.length} page/image(s) from the same document. Scan ALL of them (Arabic and English). Call the function with the data you can see. Leave unknown fields as empty strings.`
+          ? `You are given ${safePages.length} page/image(s) from the same document. Scan their English content only. Call the function with the data you can see. Leave unknown fields as empty strings.`
           : `Read this document image and call the function with the data you can see. Leave unknown fields as empty strings.`,
       },
       ...safePages.map((p) => ({ type: "image_url", image_url: { url: toDataUrl(p) } })),
@@ -479,7 +480,7 @@ Deno.serve(async (req) => {
     const openAiBody = {
       model: provider.model,
       messages: [
-        { role: "system", content: preset.system },
+        { role: "system", content: `${preset.system}\n${ENGLISH_ONLY_EXTRACTION_INSTRUCTION}` },
         { role: "user", content: userContent },
       ],
       tools: [{
@@ -509,6 +510,7 @@ Deno.serve(async (req) => {
               role: "user",
               content: [
                 preset.system,
+                ENGLISH_ONLY_EXTRACTION_INSTRUCTION,
                 "Extract document text and fields only. Do not diagnose damage, do not recommend repairs, do not suggest parts or prices.",
                 "Return a single JSON object with keys from this list only:",
                 fieldNames.join(", "),
@@ -581,7 +583,7 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             model: provider.model,
             max_tokens: 1200,
-            system: preset.system,
+            system: `${preset.system}\n${ENGLISH_ONLY_EXTRACTION_INSTRUCTION}`,
             messages: [{
               role: "user",
               content: [

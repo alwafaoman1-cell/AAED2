@@ -5,6 +5,7 @@ import {useMutation} from '@tanstack/react-query';
 import {Loader2,ShieldCheck,XCircle,Wrench} from 'lucide-react';
 import {toast} from 'sonner';
 import {useAuth} from '@/contexts/AuthContext';
+import {useWorkflowRequirements} from '@/hooks/useWorkflowRequirements';
 import {useUpdateClaimStatus} from '@/hooks/useInsuranceClaims';
 import {SupervisorClaimApproval} from '@/components/supervisor/SupervisorClaimApproval';
 import {Button} from '@/components/ui/button';
@@ -24,6 +25,7 @@ export type VehicleVisitInlineActionHandle={openOrderAction:(action:'status'|'de
 export const VehicleVisitInlineActions=forwardRef<VehicleVisitInlineActionHandle,{entry:any;onChanged:()=>Promise<unknown>|void;hideDeliveryAction?:boolean}>(function VehicleVisitInlineActions({entry,onChanged,hideDeliveryAction=false},ref){
   const {t}=useTranslation();
   const {hasRole,profile,user}=useAuth();
+  const {requirementsEnabled}=useWorkflowRequirements();
   const [approvalOpen,setApprovalOpen]=useState(false),[cancelOpen,setCancelOpen]=useState(false);
   const [reason,setReason]=useState('');
   const [activeOrder,setActiveOrder]=useState<WorkOrder|null>(null);
@@ -56,7 +58,7 @@ export const VehicleVisitInlineActions=forwardRef<VehicleVisitInlineActionHandle
           }
         }else{
           if(!order?.id||!(action==='delivery'?hasRole('admin','manager','supervisor'):hasRole('admin','manager','supervisor','technician')))throw new Error(t('vehicleVisitWorkspace.readOnly'));
-          if(action==='delivery'&&!['completed','delivered'].includes(order.status))throw new Error(t('vehicleVisitWorkspace.deliveryConflict'));
+          if(requirementsEnabled&&action==='delivery'&&!['completed','delivered'].includes(order.status))throw new Error(t('vehicleVisitWorkspace.deliveryConflict'));
           const full=await resolveWorkOrderListAction(order.id,profile?.tenant_id||'');
           if(!full||full.cloudId!==order.id||full.vehicleId!==entry.vehicle_id)throw new Error(t('vehicleVisitWorkspace.failed'));
           setActiveOrder(full);setOrderAction(action);return;
@@ -79,9 +81,9 @@ export const VehicleVisitInlineActions=forwardRef<VehicleVisitInlineActionHandle
     <div className="flex flex-wrap gap-2">
       {!entry?._claimOnly&&!closed&&insurance&&!claim&&canPrepare&&<Button variant="outline" disabled={operation.isPending} onClick={()=>operation.mutate('claim')}><ShieldCheck className="me-2 h-4 w-4"/>{t('vehicleVisitWorkspace.createClaim')}</Button>}
       {claim?.status==='pending'&&manager&&<Button className="bg-success text-success-foreground hover:bg-success/90" aria-expanded={approvalOpen} disabled={operation.isPending} onClick={()=>{setApprovalOpen(!approvalOpen);setCancelOpen(false);}}><ShieldCheck className="me-2 h-4 w-4"/>{t('vehicleVisitWorkspace.approval')}</Button>}
-      {!entry?._claimOnly&&!closed&&!order&&canPrepare&&(!insurance||['approved','paid'].includes(claim?.status))&&<Button variant="outline" disabled={operation.isPending} onClick={()=>operation.mutate('order')}><Wrench className="me-2 h-4 w-4"/>{t('vehicleVisitWorkspace.createOrder')}</Button>}
+      {!entry?._claimOnly&&!closed&&!order&&canPrepare&&(!insurance||(!requirementsEnabled&&claim?.id)||['approved','paid'].includes(claim?.status))&&<Button variant="outline" disabled={operation.isPending} onClick={()=>operation.mutate('order')}><Wrench className="me-2 h-4 w-4"/>{t('vehicleVisitWorkspace.createOrder')}</Button>}
       {order&&!closed&&hasRole('admin','manager','supervisor','technician')&&order.status!=='delivered'&&<Button variant="outline" disabled={operation.isPending} onClick={()=>operation.mutate('status')}>{t('vehicleVisitWorkspace.repairStatus')}</Button>}
-      {!hideDeliveryAction&&order&&['completed','delivered'].includes(order.status)&&hasRole('admin','manager','supervisor')&&<Button variant="outline" disabled={operation.isPending} onClick={()=>operation.mutate('delivery')}>{t('vehicleVisitWorkspace.delivery')}</Button>}
+      {!hideDeliveryAction&&order&&(!requirementsEnabled||['completed','delivered'].includes(order.status))&&hasRole('admin','manager','supervisor')&&<Button variant="outline" disabled={operation.isPending} onClick={()=>operation.mutate('delivery')}>{t('vehicleVisitWorkspace.delivery')}</Button>}
       {claim&&['pending','approved'].includes(claim.status)&&manager&&<Button variant="outline" className="text-destructive hover:text-destructive" aria-expanded={cancelOpen} disabled={operation.isPending} onClick={()=>{setCancelOpen(!cancelOpen);setApprovalOpen(false);}}><XCircle className="me-2 h-4 w-4"/>{t('vehicleVisitWorkspace.cancelClaim')}</Button>}
       {operation.isPending&&<Loader2 role="status" aria-label={t('vehicleVisitWorkspace.loading')} className="h-5 w-5 animate-spin"/>}
     </div>

@@ -6,10 +6,12 @@ import { matchExtractedEntities } from "./matching";
 import { openDocumentPdf, extractNativePdfPage, hasPageSizedPdfImage, mergeNativeAndOcrPage, renderPdfPageForOcr } from "./nativePdf";
 import { createBrowserOcrProvider, imageDimensions, type OcrProvider } from "./ocr";
 import { normalizeCandidate, parseDocumentPages } from "./parsers";
+import { englishDocumentPages, parseEnglishDocumentPages } from "./englishOnly";
+import { englishOnlyValue } from "./languagePolicy";
 import { extractPurchaseLineItems } from "./lineItems";
 import { withDocumentDeadline } from "./timing";
 import { claimDocumentProcessing, enqueueDocumentProcessing, loadDocumentExtraction, markDocumentExtractionFailed, registerDocumentFile, scopeForDocument, persistDocumentExtraction } from "./persistence";
-import { DEFAULT_EXTRACTION_POLICY, DOCUMENT_ENGINE_VERSION, type DocumentExtractionResult, type DocumentPage, type DocumentType, type ExtractionIssue, type ExtractionPolicy, type ExtractionProgress } from "./types";
+import { DEFAULT_EXTRACTION_POLICY, DOCUMENT_ENGINE_VERSION, isEnglishExtractionVersion, type DocumentExtractionResult, type DocumentPage, type DocumentType, type ExtractionIssue, type ExtractionPolicy, type ExtractionProgress } from "./types";
 
 export interface DocumentEngineOptions {
   tenantId: string;
@@ -69,6 +71,7 @@ async function addOptionalAiFallback(
     for (const [rawKey, rawValue] of Object.entries(data)) {
       const key = aiKeyToEngineKey(rawKey);
       if (!AI_ALLOWED_FIELDS.has(key)) continue;
+      if (isEnglishExtractionVersion(result.engineVersion) && !englishOnlyValue(rawValue)) continue;
       if (!rawValue?.trim() || result.fields[key]?.confidence >= policy.mediumConfidence) continue;
       const normalized = normalizeCandidate(key, rawValue);
       result.fields[key] = {
@@ -87,6 +90,8 @@ export async function processDocumentLocally(
   file: File, mimeType: SupportedDocumentMime, sha256: string, options: DocumentEngineOptions,
 ): Promise<DocumentExtractionResult> {
   const policy = { ...DEFAULT_EXTRACTION_POLICY, ...options.policy };
+  const engineVersion = options.engineVersion || DOCUMENT_ENGINE_VERSION;
+  const englishOnly = isEnglishExtractionVersion(engineVersion);
   const started = performance.now();
   const pages: DocumentPage[] = [];
   const issues: ExtractionIssue[] = [];
@@ -106,7 +111,7 @@ export async function processDocumentLocally(
   options.signal?.addEventListener("abort", onAbort, { once: true });
   const getOcr = async () => {
     assertActive(options.signal);
-    ocrPromise ||= (options.ocrFactory || createBrowserOcrProvider)();
+    ocrPromise ||= (options.ocrFactory || (() => createBrowserOcrProvider(englishOnly)))();
     const worker = await ocrPromise;
     if (options.signal?.aborted) {
       await closeOcr();
@@ -174,21 +179,22 @@ export async function processDocumentLocally(
   assertActive(options.signal);
   options.onProgress?.({ stage: "parsing" });
   const parseStart = performance.now();
-  const parsed = parseDocumentPages(pages, options.expectedType, { vehicleMakes: options.vehicleMakes });
-  const purchaseLines = options.expectedType === "purchase_invoice" ? extractPurchaseLineItems(pages) : null;
+  const evidencePages = englishOnly ? englishDocumentPages(pages) : pages;
+  const parsed = (englishOnly ? parseEnglishDocumentPages : parseDocumentPages)(evidencePages, options.expectedType, { vehicleMakes: options.vehicleMakes });
+  const purchaseLines = options.expectedType === "purchase_invoice" ? extractPurchaseLineItems(evidencePages) : null;
   const parseMs = elapsed(parseStart);
-  const rawText = pages.map((page) => page.text).join("\n\f\n");
-  const method = pages.some((page) => page.method === "ocr") ? "ocr" : "native_pdf";
+  const rawText = evidencePages.map((page) => page.text).join("\n\f\n");
+  const method = evidencePages.some((page) => page.method === "ocr") ? "ocr" : "native_pdf";
   const result: DocumentExtractionResult = {
-    tenantId: options.tenantId, sha256, fileName: file.name, mimeType,
+    engineVersion, tenantId: options.tenantId, sha256, fileName: file.name, mimeType,
     documentType: parsed.type, documentTypeConfidence: parsed.typeConfidence,
-    language: parsed.language, method, rawText, pages, fields: { ...parsed.fields, ...purchaseLines?.fields },
+    language: parsed.language, method, rawText, pages: evidencePages, fields: { ...parsed.fields, ...purchaseLines?.fields },
     issues: [...issues, ...parsed.issues, ...(purchaseLines?.issues || [])], matches: [], matchingStatus: "skipped",
     overallConfidence: 0, needsReview: true, status: "needs_review", aiUsed: false,
     timings: { nativeMs, ocrMs, parseMs, matchMs: 0, totalMs: 0 },
     ocrEngine: method === "ocr" ? "tesseract.js" : "pdfjs-native",
-    ocrModelVersion: method === "ocr" ? "ara+eng" : "pdf-text-layer",
-    parserVersion: "rules-1.5", profileVersion: "default-1.0",
+    ocrModelVersion: method === "ocr" ? (englishOnly ? "eng" : "ara+eng") : "pdf-text-layer",
+    parserVersion: englishOnly ? "rules-1.6-en" : "rules-1.5", profileVersion: englishOnly ? "english-only-1.0" : "default-1.0",
   };
   addClaimCompletenessWarning(result, options.expectedType || result.documentType);
   options.onProgress?.({ stage: "matching" });
@@ -210,10 +216,11 @@ export async function processDocumentLocally(
   return result;
 }
 
-async function waitForExisting(tenantId: string, extractionId: string, signal?: AbortSignal): Promise<DocumentExtractionResult> {
+async function waitForExisting(tenantId: string, extractionId: string, signal?: AbortSignal, engineVersion?: string): Promise<DocumentExtractionResult> {
   for (let attempt = 0; attempt < 180; attempt++) {
     assertActive(signal);
     const result = await loadDocumentExtraction(tenantId, extractionId);
+    if (engineVersion && result.engineVersion && result.engineVersion !== engineVersion) throw new Error("DOCUMENT_ENGINE_VERSION_MISMATCH");
     if (["needs_review", "extracted", "verified"].includes(result.status)) return result;
     if (result.status === "failed") throw new Error("DOCUMENT_PREVIOUS_PROCESSING_FAILED_RETRY");
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -224,16 +231,18 @@ async function waitForExisting(tenantId: string, extractionId: string, signal?: 
 async function parseServerPages(result: DocumentExtractionResult, options: DocumentEngineOptions): Promise<DocumentExtractionResult> {
   if (result.status !== "extracted" || !result.pages.length) throw new Error("DOCUMENT_WORKER_RESULT_MISSING");
   options.onProgress?.({ stage: "parsing" });
-  const parsed = parseDocumentPages(result.pages, options.expectedType, { vehicleMakes: options.vehicleMakes });
-  const purchaseLines = options.expectedType === "purchase_invoice" ? extractPurchaseLineItems(result.pages) : null;
+  const englishOnly = isEnglishExtractionVersion(result.engineVersion || options.engineVersion || DOCUMENT_ENGINE_VERSION);
+  const evidencePages = englishOnly ? englishDocumentPages(result.pages) : result.pages;
+  const parsed = (englishOnly ? parseEnglishDocumentPages : parseDocumentPages)(evidencePages, options.expectedType, { vehicleMakes: options.vehicleMakes });
+  const purchaseLines = options.expectedType === "purchase_invoice" ? extractPurchaseLineItems(evidencePages) : null;
   result.documentType = parsed.type;
   result.documentTypeConfidence = parsed.typeConfidence;
   result.language = parsed.language;
   result.fields = { ...parsed.fields, ...purchaseLines?.fields };
   result.issues.push(...parsed.issues, ...(purchaseLines?.issues || []));
   addClaimCompletenessWarning(result, options.expectedType || result.documentType);
-  result.parserVersion = "rules-1.5";
-  result.profileVersion = "default-1.0";
+  result.parserVersion = englishOnly ? "rules-1.6-en" : "rules-1.5";
+  result.profileVersion = englishOnly ? "english-only-1.0" : "default-1.0";
   options.onProgress?.({ stage: "matching" });
   try {
     const matched = await (options.match || matchExtractedEntities)(options.tenantId, result.fields);
@@ -256,7 +265,7 @@ export async function extractAndPersistDocument(file: File, options: DocumentEng
   options.onProgress?.({ stage: "validating" });
   const mimeType = await validateDocumentFile(file, options.policy?.maxFileBytes);
   // The local WASM provider is a useful compatibility baseline, not an
-  // acceptable Arabic-claim or purchase-table engine. Never silently degrade
+  // acceptable claim or purchase-table engine. Never silently degrade
   // these reviewed workflows to its known lower-accuracy path.
   if ((options.requireWorker || ["insurance_claim", "insurance_approval", "lpo", "purchase_invoice"].includes(options.expectedType || "")) &&
       !isDocumentWorkerEnabled() && !options.ocrFactory) {
@@ -274,14 +283,14 @@ export async function extractAndPersistDocument(file: File, options: DocumentEng
     if (isDocumentWorkerEnabled() && !options.ocrFactory) {
       const queued = await enqueueDocumentProcessing(registered.id, engineVersion);
       options.onProgress?.({ stage: "ocr" });
-      const remote = await waitForExisting(options.tenantId, queued.extractionId, options.signal);
+      const remote = await waitForExisting(options.tenantId, queued.extractionId, options.signal, `${engineVersion}-worker`);
       const result = remote.status === "extracted" ? await parseServerPages(remote, options) : remote;
       options.onProgress?.({ stage: "done" });
       return result;
     }
-    const claimed = await claimDocumentProcessing(registered.id);
+    const claimed = await claimDocumentProcessing(registered.id, engineVersion);
     if (!claimed.acquired) {
-      const existing = await waitForExisting(options.tenantId, claimed.extractionId, options.signal);
+      const existing = await waitForExisting(options.tenantId, claimed.extractionId, options.signal, engineVersion);
       options.onProgress?.({ stage: "done" });
       return existing;
     }

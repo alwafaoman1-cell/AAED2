@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, type ElementType } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
 import { Printer, FileSignature, Trash2, Eraser, FileCheck2, Save, Loader2, CheckCircle2, LockKeyhole } from "lucide-react";
 import { ResponsiveDialog, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogFooter } from "@/components/ui/responsive-dialog";
 import { Button } from "@/components/ui/button";
@@ -50,9 +51,10 @@ interface Props {
 }
 
 export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order, deliveryDraft, onFinalized, presentation = "dialog", supervisor = false }: Props) {
+  const { requirementsEnabled } = useWorkflowRequirements();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [date, setDate] = useState(() => getDeliveredDateInputValue(deliveryDraft?.deliveredAt || deliveryDraft?.date));
   const [deliveryTime, setDeliveryTime] = useState(() => getDeliveredTimeInputValue(deliveryDraft?.deliveredAt || deliveryDraft?.date));
   const [recordId, setRecordId] = useState<string | null>(deliveryDraft?.recordId || null);
@@ -60,15 +62,16 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
   const [recordStatus, setRecordStatus] = useState(deliveryDraft?.status || "draft");
   const [custodyReceiptId, setCustodyReceiptId] = useState<string | null>(deliveryDraft?.custodyReceiptId || null);
   const [legacyReceiptReason, setLegacyReceiptReason] = useState(deliveryDraft?.legacyReceiptReason || "");
+  const [workflowRequirementOverrideId, setWorkflowRequirementOverrideId] = useState(deliveryDraft?.workflowRequirementOverrideId || null);
   const [cancellationReason, setCancellationReason] = useState(deliveryDraft?.cancellationReason || "");
   const [receiverType, setReceiverType] = useState<VehicleHandoverRecipientType>(deliveryDraft?.receiverType || "customer");
-  const [receiverName, setReceiverName] = useState(deliveryDraft?.receiverName || order.customer || "");
+  const [receiverName, setReceiverName] = useState(deliveryDraft?.receiverName || "");
   const [receiverPhone, setReceiverPhone] = useState(deliveryDraft?.receiverPhone || order.phone || "");
   const [receiverIdNumber, setReceiverIdNumber] = useState(deliveryDraft?.receiverIdNumber || "");
   const [receiverRelationship, setReceiverRelationship] = useState(deliveryDraft?.receiverRelationship || "");
   const [customerIdNumber, setCustomerIdNumber] = useState(deliveryDraft?.customerIdNumber || "");
   const [mileageOut, setMileageOut] = useState(deliveryDraft?.mileageOut || "");
-  const [vehicleCondition, setVehicleCondition] = useState(deliveryDraft?.vehicleCondition || "تمت المعاينة والحالة مطابقة");
+  const [vehicleCondition, setVehicleCondition] = useState(deliveryDraft?.vehicleCondition || "");
   const [workshopRepresentative, setWorkshopRepresentative] = useState(deliveryDraft?.workshopRepresentative || "");
   const [workSummary, setWorkSummary] = useState(deliveryDraft?.workSummary || "");
   const [partsReplaced, setPartsReplaced] = useState(deliveryDraft?.partsReplaced || "");
@@ -95,6 +98,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
   function applyDraft(draft?: VehicleDeliveryReceiptDraft | null) {
     setCustodyReceiptId(draft?.custodyReceiptId || null);
     setLegacyReceiptReason(draft?.legacyReceiptReason || "");
+    setWorkflowRequirementOverrideId(draft?.workflowRequirementOverrideId || null);
     setRecordId(draft?.recordId || null);
     setReceiptNumber(draft?.receiptNumber || null);
     setRecordStatus(draft?.status || "draft");
@@ -102,13 +106,13 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
     setDate(getDeliveredDateInputValue(draft?.deliveredAt || draft?.date));
     setDeliveryTime(getDeliveredTimeInputValue(draft?.deliveredAt || draft?.date));
     setReceiverType(draft?.receiverType || "customer");
-    setReceiverName(draft?.receiverName || order.customer || "");
+    setReceiverName(draft?.receiverName || "");
     setReceiverPhone(draft?.receiverPhone || order.phone || "");
     setReceiverIdNumber(draft?.receiverIdNumber || "");
     setReceiverRelationship(draft?.receiverRelationship || "");
     setCustomerIdNumber(draft?.customerIdNumber || "");
     setMileageOut(draft?.mileageOut || "");
-    setVehicleCondition(draft?.vehicleCondition || "تمت المعاينة والحالة مطابقة");
+    setVehicleCondition(draft?.vehicleCondition || "");
     setWorkshopRepresentative(draft?.workshopRepresentative || "");
     setWorkSummary(draft?.workSummary || "");
     setPartsReplaced(draft?.partsReplaced || "");
@@ -224,6 +228,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
 
   function buildHtml() {
     return getVehicleDeliveryReceiptHtml(buildDeliveryReceiptData(order, {
+      workflowRequirementOverrideId,
       date,
       recordId,
       receiptNumber,
@@ -255,6 +260,7 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
     return {
       custodyReceiptId,
       legacyReceiptReason,
+      workflowRequirementOverrideId,
       recordId,
       receiptNumber,
       status: recordStatus,
@@ -308,15 +314,15 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
 
   async function handleFinalize() {
     if(loadingDraft||draftLoadError)return;
-    if (!receiverName.trim()) {
+    if (requirementsEnabled && !receiverName.trim()) {
       toast.error("اسم المستلم مطلوب قبل اعتماد التسليم");
       return;
     }
-    if (signatureMethod === "electronic" && !signature) {
+    if (requirementsEnabled && signatureMethod === "electronic" && !signature) {
       toast.error(t("vehicleDelivery.electronicSignatureRequired"));
       return;
     }
-    if (signatureMethod === "paper" && (!paperSignatureConfirmed || !receiverIdNumber.trim() || !workshopRepresentative.trim())) {
+    if (requirementsEnabled && signatureMethod === "paper" && (!paperSignatureConfirmed || !receiverIdNumber.trim() || !workshopRepresentative.trim())) {
       toast.error(t("vehicleDelivery.paperConfirmationRequired"));
       return;
     }
@@ -395,7 +401,8 @@ export default function VehicleDeliveryReceiptDialog({ open, onOpenChange, order
           </HeaderComponent>
 
           <div className={cn("space-y-4 py-2 pr-1", standalone ? "px-5 py-5" : "max-h-[70vh] overflow-y-auto")}>
-            {!loadingDraft && !draftLoadError && <VehicleIntakeReceiptForOrder orderId={order.cloudId || order.id} orderNumber={order.displayNumber} receiptId={custodyReceiptId} legacyReason={legacyReceiptReason} readOnly={isReadOnly} onChange={(id, reason) => { setCustodyReceiptId(id); setLegacyReceiptReason(reason); }} />}
+            {(!requirementsEnabled || workflowRequirementOverrideId) && <p role="status" className="rounded border border-warning/40 p-3 text-sm">{i18n.language.startsWith("en") ? "Documented workflow exception. Unrecorded fields and signatures stay blank; a selected receipt must still be valid for this visit." : "استثناء سير عمل موثق. تبقى الحقول والتواقيع غير المسجلة فارغة؛ وأي وصل تختاره يجب أن يكون صالحًا لنفس الزيارة."}</p>}
+            {!loadingDraft && !draftLoadError && <VehicleIntakeReceiptForOrder orderId={order.cloudId || order.id} orderNumber={order.displayNumber} receiptId={custodyReceiptId} legacyReason={legacyReceiptReason} workflowRequirementOverrideId={workflowRequirementOverrideId} readOnly={isReadOnly} onChange={(id, reason) => { setCustodyReceiptId(id); setLegacyReceiptReason(reason); }} />}
             {loadingDraft && (
               <div className="flex items-center justify-center gap-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" /> تحميل بيانات الإقرار المحفوظة…

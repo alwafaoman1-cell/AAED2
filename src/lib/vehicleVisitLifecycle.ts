@@ -339,6 +339,7 @@ export function getVehicleVisitNextBlocker(
   entry: any,
   hasRole: (...roles: string[]) => boolean,
   hasFinalHandover: boolean,
+  requirementsEnabled = true,
 ): string | null {
   if (!next || !entry) return null;
   const claim = entry.claim || entry.converted_claim;
@@ -347,15 +348,15 @@ export function getVehicleVisitNextBlocker(
   return next === "approved" && !hasRole("admin", "manager", "insurance") ? "approvalPermissionRequired"
     : next === "in_progress" && !hasRole("admin", "manager", "supervisor", "technician") ? "workPermissionRequired"
     : (next === "ready" || next === "delivered") && !hasRole("admin", "manager", "supervisor") ? "completionPermissionRequired"
-    : next === "approved" && billingKind === "insurance" && !["approved", "paid"].includes(claim?.status) ? "claimApprovalRequired"
+    : requirementsEnabled && next === "approved" && billingKind === "insurance" && !["approved", "paid"].includes(claim?.status) ? "claimApprovalRequired"
     : next === "approved" && billingKind === "cash" && !order ? "cashWorkOrderRequired"
     : next === "in_progress" && !order ? "workOrderRequired"
-    : next === "in_progress" && billingKind === "insurance" && !["approved", "paid"].includes(claim?.status) ? "claimApprovalRequired"
-    : next === "in_progress" && (entry.vehicle_location !== "داخل الورشة"
+    : requirementsEnabled && next === "in_progress" && billingKind === "insurance" && !["approved", "paid"].includes(claim?.status) ? "claimApprovalRequired"
+    : requirementsEnabled && next === "in_progress" && (entry.vehicle_location !== "داخل الورشة"
       || order?.vehicle_presence_status === "with_customer" || claim?.vehicle_presence_status === "with_customer") ? "workshopPresenceRequired"
-    : next === "in_progress" && order && !["received", "inspection", "waiting_parts", "in_progress"].includes(order.status) ? "workOrderStatusInvalid"
-    : next === "ready" && order?.status !== "completed" ? "finishWorkFirst"
-    : next === "delivered" && order && !["completed", "delivered"].includes(order.status) ? "deliveryWorkOrderConflict"
+    : requirementsEnabled && next === "in_progress" && order && !["received", "inspection", "waiting_parts", "in_progress"].includes(order.status) ? "workOrderStatusInvalid"
+    : next === "ready" && (!order || (requirementsEnabled && order.status !== "completed")) ? "finishWorkFirst"
+    : requirementsEnabled && next === "delivered" && order && !["completed", "delivered"].includes(order.status) ? "deliveryWorkOrderConflict"
     : next === "delivered" && (!hasFinalHandover || order?.status !== "delivered" || !order?.vehicle_delivered_at) ? "signedHandoverRequired"
     : null;
 }

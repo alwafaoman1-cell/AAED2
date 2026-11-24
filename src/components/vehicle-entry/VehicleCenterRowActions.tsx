@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { ClipboardCheck, FileText, LogIn, MapPin, MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
 import Can from "@/components/Can";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -19,8 +20,9 @@ export function VehicleCenterRowActions({ row, tab, details, onOpen }: {
 }) {
   const { t, i18n } = useTranslation();
   const { hasRole } = useAuth();
+  const { requirementsEnabled } = useWorkflowRequirements();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const action = getVehicleCenterPrimaryAction(row, tab, hasRole);
+  const action = getVehicleCenterPrimaryAction(row, tab, hasRole, requirementsEnabled);
   const label = t(`vehicleCenterMobile.${action.label}`);
   const number = row.entry_number || row.claim?.claim_number || t("vehicleVisit.claimOnlyCard");
   const recordUrl = row._claimOnly ? `/insurance/${row.claim.id}` : `/vehicle-entry/${row.id}`;

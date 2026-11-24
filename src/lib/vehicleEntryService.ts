@@ -21,6 +21,7 @@ import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 import {pdfControlledLabel} from "@/lib/pdfDisplayLabels";
 import { intakeReceiptError } from "@/lib/vehicleIntakeReceiptErrors";
 import { resolveVehicleIntakePresentation } from "@/lib/vehicleIntakePresentation";
+import { readWorkflowRequirementPolicy } from "@/lib/workflowRequirements";
 
 type VehicleEntryMediaKind = "entry_photo" | "damage_photo" | "document";
 type VehicleEntrySignatureRole = "delivered_by" | "receiver" | "override";
@@ -633,9 +634,13 @@ export function customerPhoneEdit(form: VehicleEntryFormState): { previous: stri
 
 /** Identity, entry, marks and canonical declaration commit together; no partial fallback. */
 export async function saveVehicleEntry(form: VehicleEntryFormState, _userId?: string | null) {
-  if (needsRunningStatusBeforeIssue(form)) throw new Error(i18n.t("vehicleIntakeWizard.runningStatusRequired"));
   const tenantId = await getCurrentTenantId();
   if (!tenantId) throw new Error(i18n.t("vehicleIntakeWizard.VEHICLE_INTAKE_FORBIDDEN"));
+  if (needsRunningStatusBeforeIssue(form)) {
+    const policy = await readWorkflowRequirementPolicy(tenantId).catch(() => null);
+    if (policy?.requirements_enabled !== false) throw new Error(i18n.t("vehicleIntakeWizard.runningStatusRequired"));
+    if (await getCurrentTenantId() !== tenantId) throw new Error(i18n.t("vehicleIntakeWizard.VEHICLE_INTAKE_FORBIDDEN"));
+  }
   const phoneChange = customerPhoneEdit(form);
   if (form.technical_declaration) validateTechnicalDeclarationForm(form.technical_declaration.form);
   const phone = form.customer.phone.trim() ? toE164(form.customer.phone) : "";

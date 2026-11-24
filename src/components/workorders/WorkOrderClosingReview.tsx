@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
+import { readWorkflowRequirementPolicy } from "@/lib/workflowRequirements";
 import { AlertTriangle, FilePlus2, Lock, RefreshCw, Save, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -28,6 +31,9 @@ interface Props {
 }
 
 export default function WorkOrderClosingReview({ order, targetStatus, onCancel, onConfirm }: Props) {
+  const { i18n } = useTranslation();
+  const isEn = i18n.language.startsWith("en");
+  const { requirementsEnabled } = useWorkflowRequirements();
   const navigate = useNavigate();
   const role = getCurrentRole();
   const canApproveSkip = ["admin", "owner"].includes(role);
@@ -63,10 +69,16 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
       toast.error("لم تكتمل مزامنة الفواتير والدفعات بعد");
       return;
     }
+    const tenant = await getCurrentTenantId();
+    if (!tenant) { toast.error("tenant_not_found"); return; }
+    let enforce = true;
+    try { enforce = (await readWorkflowRequirementPolicy(tenant)).requirements_enabled; }
+    catch { toast.error(isEn ? "Could not confirm workflow requirements" : "تعذر تأكيد متطلبات سير العمل"); return; }
     if (!source) return;
-    if (source === "Manual Final Cost" && !manualReason.trim()) return;
-    if (!isInsurance && !hasInvoice && !skipInvoice) return;
-    if (!isInsurance && !hasInvoice && skipInvoice && (!canApproveSkip || !skipReason.trim())) return;
+    if (source === "Manual Final Cost" && ![manualSpare,manualLabour,manualOther].every(value => Number.isFinite(Number(value)) && Number(value) >= 0)) return;
+    if (enforce && source === "Manual Final Cost" && !manualReason.trim()) return;
+    if (enforce && !isInsurance && !hasInvoice && !skipInvoice) return;
+    if (enforce && !isInsurance && !hasInvoice && skipInvoice && (!canApproveSkip || !skipReason.trim())) return;
 
     const snapshot = {
       workOrderNumber: row.workOrderNumber,
@@ -110,6 +122,7 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
           invoiceSkipped: !isInsurance && !hasInvoice && skipInvoice,
           skipInvoiceReason: !isInsurance && skipInvoice ? skipReason.trim() : null,
           insuranceDeliveryWithoutInvoice: isInsurance && !hasInvoice,
+          workflowRequirementsBypassed: !enforce,
           insuranceFinancialStatus: isInsurance && !hasInvoice ? "Delivered - Waiting LPO / Insurance Invoice" : null,
           approvedByRole: role,
           snapshot,
@@ -165,15 +178,17 @@ export default function WorkOrderClosingReview({ order, targetStatus, onCancel, 
   const canConfirm =
     financialQuery.isSuccess &&
     !!source &&
-    (source !== "Manual Final Cost" || !!manualReason.trim()) &&
-    (isInsurance || hasInvoice || (skipInvoice && canApproveSkip && !!skipReason.trim()));
+    (!requirementsEnabled || source !== "Manual Final Cost" || !!manualReason.trim()) &&
+    (!requirementsEnabled || isInsurance || hasInvoice || (skipInvoice && canApproveSkip && !!skipReason.trim()));
 
   return (
     <>
     <Card className="space-y-4 border-primary/30 bg-primary/5 p-4">
       <div>
         <h3 className="text-base font-bold">Work Order Closing Review</h3>
-        <p className="text-xs text-muted-foreground">مراجعة مالية إلزامية قبل حفظ الحالة النهائية: {targetStatus}</p>
+        <p className="text-xs text-muted-foreground">{requirementsEnabled
+          ? (isEn ? "Financial review before saving final status: " : "مراجعة مالية إلزامية قبل حفظ الحالة النهائية: ")
+          : (isEn ? "Workflow requirements are disabled; actual financial records remain unchanged. Final status: " : "متطلبات سير العمل معطّلة؛ السجلات المالية الفعلية تبقى محفوظة. الحالة النهائية: ")}{targetStatus}</p>
       </div>
 
       <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">

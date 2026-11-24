@@ -31,7 +31,7 @@ export async function getReviewVisitIntakeSignatureState(entryId: string): Promi
   if (signature.error) throw signature.error;
   return { revision, signed: Boolean((signature.data as any)?.id) };
 }
-export async function deliverReviewVisit(input: { entryId: string; requestId: string; receiptId: string; recipient: string; signature: string; notes: string; occurredAt?: string }) {
+export async function deliverReviewVisit(input: { entryId: string; requestId: string; receiptId: string | null; recipient: string; signature: string; notes: string; occurredAt?: string }) {
   if (input.occurredAt !== undefined && (!Number.isFinite(Date.parse(input.occurredAt)) || Date.parse(input.occurredAt) > Date.now() + 300_000)) {
     throw new Error("REVIEW_RETURN_TIME_INVALID");
   }

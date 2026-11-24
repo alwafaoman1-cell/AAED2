@@ -21,6 +21,12 @@ function show() {
 }
 beforeEach(async () => { vi.clearAllMocks(); scanner.start.mockReset().mockResolvedValue(undefined); scanner.stop.mockResolvedValue(undefined); scanner.file.mockReset(); scanner.decoded = null; await i18n.changeLanguage("en"); api.permissions.mockResolvedValue({ Verify: true, Deliver: true, "Legacy exception": true }); api.context.mockResolvedValue({ required: true, receipts: [] }); });
 describe("receipt verification and legacy exception controls", () => {
+  it("labels an unsigned new delivery by its saved workflow exception rather than an invented legacy date", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><VehicleIntakeReceiptCheck entryId="new-visit" readOnly workflowRequirementOverrideId="saved-audit-proof" onChange={vi.fn()} /></QueryClientProvider>);
+    expect(screen.getByText(/Documented workflow exception/)).toHaveTextContent("No linked intake receipt was recorded");
+    expect(screen.queryByText(/predating this feature|Legacy visit exception/)).toBeNull();
+  });
   it("does not offer an exception for a new visit even with special permission", async () => {
     show(); await waitFor(() => expect(screen.getByRole("button", { name: "Verify receipt" })).toBeDisabled());
     expect(screen.queryByRole("textbox", { name: /Legacy visit exception/ })).toBeNull();

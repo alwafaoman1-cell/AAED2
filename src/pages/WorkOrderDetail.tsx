@@ -68,7 +68,6 @@ import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import NeededPartsManager from "@/components/workorders/NeededPartsManager";
 import { DeferredWorkOrderSection } from "@/components/workorders/DeferredWorkOrderSection";
 import SendStageNotificationButton from "@/components/workorders/SendStageNotificationButton";
-import { ensureCustomerPortalToken } from "@/lib/customerPortalTokens";
 import { isUuid } from "@/lib/uuid";
 // PortalNotesPending moved to /messages
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -593,40 +592,34 @@ export default function WorkOrderDetail() {
   }
 
   async function handlePrintWorkOrder() {
-    // Pre-build tracking QR into the cache before sync HTML render
     const generator = await import("@/lib/pdfGenerator").catch(() => {
       toast.error(label("تعذر تحميل أدوات الطباعة. أعد المحاولة.", "Could not load print tools. Please retry."));
       return null;
     });
     if (!generator) return;
-    const { buildTrackingQrDataUrl, getWorkOrderHtml } = generator;
+    const { getWorkOrderHtml } = generator;
 
-    // Fetch customer signature if available (from portal token)
-    let effectiveTrackingToken = order!.trackingToken;
+    // Read the existing signature without creating or requiring a customer portal.
     let customerSignatureDataUrl: string | undefined;
     let customerSignatureName: string | undefined;
     let customerSignatureDate: string | undefined;
     if (cloudJobOrderId) {
-      const ensuredToken = await ensureCustomerPortalToken(cloudJobOrderId);
       const { data: tok } = await supabase
         .from("customer_portal_tokens")
-        .select("token, signature_data_url, signer_name, signed_at")
+        .select("signature_data_url, signer_name, signed_at")
         .eq("job_order_id", cloudJobOrderId)
         .maybeSingle();
       const t: any = tok;
-      if (t?.token || ensuredToken?.token) effectiveTrackingToken = t?.token || ensuredToken?.token;
       if (t?.signature_data_url) {
         customerSignatureDataUrl = t.signature_data_url;
         customerSignatureName = t.signer_name || undefined;
         customerSignatureDate = t.signed_at ? new Date(t.signed_at).toLocaleString("en-GB") : undefined;
       }
     }
-    if (effectiveTrackingToken) await buildTrackingQrDataUrl(effectiveTrackingToken);
 
     const html = getWorkOrderHtml({
       orderNumber: order!.displayNumber || (UUID_RE.test(order!.id) ? `WO-${order!.id.slice(0, 8).toUpperCase()}` : order!.id),
       workOrderType: resolveWorkOrderType(order!),
-      trackingToken: effectiveTrackingToken,
       date: order!.entryDate,
       customerName: order!.customer,
       customerPhone: order!.phone,

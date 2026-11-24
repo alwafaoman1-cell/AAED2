@@ -12,7 +12,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 MAX_BYTES = 12 * 1024 * 1024
 MAX_PAGES = 8
@@ -24,6 +24,82 @@ SIGNATURES = {
     ".png": ("image/png", lambda b: b.startswith(b"\x89PNG\r\n\x1a\n")),
     ".webp": ("image/webp", lambda b: b.startswith(b"RIFF") and b[8:12] == b"WEBP"),
 }
+
+# A new extraction policy only. Legacy engines retain their original evidence.
+ARABIC_SCRIPT = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff]")
+ENGLISH_DOCUMENT_ANCHOR = re.compile(
+    r"(?:^|[^A-Za-z0-9/])(?:claim|insurance|policy|invoice|receipt|registration|plate|vin|chassis|owner|customer|supplier|"
+    r"tax|vat|vatin|lpo|repair|vehicle|amount|date|make|model|year|color|colour|phone|telephone|mobile|"
+    r"address|quantity|description|subtotal|total|expense|purchase|workshop|delivery|quotation|estimate|"
+    r"accident|loss|regn)(?=$|[^A-Za-z0-9/])", re.I)
+ENGLISH_WORD = re.compile(r"(?:^|[^A-Za-z0-9/])[A-Za-z][A-Za-z'-]{2,}(?=$|[^A-Za-z0-9/])")
+
+
+def _english_lines(text: str) -> list[str]:
+    lines = []
+    for raw in str(text or "").splitlines():
+        line = re.sub(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]", "", raw).strip()
+        if not line:
+            continue
+        if ARABIC_SCRIPT.search(line):
+            colon = re.search(r"[:\uff1a]", line)
+            # Never turn an Arabic value into a partial Latin name/value.
+            # Bilingual label aliases before the separator can be ignored.
+            if not ENGLISH_DOCUMENT_ANCHOR.search(line) or colon is None or \
+                    ARABIC_SCRIPT.search(line[colon.end():]):
+                continue
+            line = ARABIC_SCRIPT.sub(" ", line)
+            line = re.sub(r"\(\s*\)|\[\s*\]", " ", line)
+            line = re.sub(r"\s*/\s*(?=[:\uff1a])", "", line)
+            line = re.sub(r"[ \t]+", " ", line).strip()
+        if line:
+            lines.append(line)
+    return lines
+
+
+def sanitize_english_text(text: str, *, require_anchor: bool = False) -> str:
+    """Ignore Arabic, rather than translating it or converting its digits.
+
+    Arabic pages need actual English field/document labels. Pure English
+    continuation pages may instead supply three readable Latin word tokens.
+    A bare claim reference, VIN or number is not language evidence by itself.
+    """
+    original = str(text or "")
+    cleaned = "\n".join(_english_lines(original))
+    if ENGLISH_DOCUMENT_ANCHOR.search(cleaned) or \
+            (not require_anchor and not ARABIC_SCRIPT.search(original) and len(ENGLISH_WORD.findall(cleaned)) >= 3):
+        return cleaned
+    return ""
+
+
+def sanitize_english_segments(segments: list[dict[str, Any]], source_text: str | None = None, *,
+                              require_anchor: bool = False) -> list[dict[str, Any]]:
+    original = source_text if source_text is not None else "\n".join(str(item.get("text", "")) for item in segments)
+    text = sanitize_english_text(original, require_anchor=require_anchor)
+    if not text:
+        return []
+    normalized = re.sub(r"\s+", " ", text).strip()
+    retained = []
+    for item in segments:
+        cleaned = "\n".join(_english_lines(str(item.get("text", ""))))
+        # Do not resurrect fragments from an Arabic-value line discarded above.
+        if cleaned and re.sub(r"\s+", " ", cleaned).strip() in normalized:
+            retained.append({**item, "text": cleaned})
+    return retained
+
+
+def _english_result(text: str, segments: list[dict[str, Any]], confidence: float) -> tuple[str, list[dict[str, Any]], float]:
+    # The English model can render Arabic shapes as Latin noise. For OCR,
+    # several ASCII words are not sufficient evidence of an English form.
+    cleaned = sanitize_english_text(text, require_anchor=True)
+    retained = sanitize_english_segments(segments, text, require_anchor=True)
+    if segments:
+        cleaned = "\n".join(item["text"] for item in retained)
+    if not cleaned:
+        return "", [], 0.0
+    scores = [item.get("confidence", confidence) for item in retained]
+    score = sum(scores) / len(scores) if scores else confidence
+    return cleaned, retained, max(0.0, min(1.0, score))
 
 
 class InvalidDocument(ValueError):
@@ -162,6 +238,7 @@ def _probably_complete_ocr(text: str, segments: list[dict[str, Any]], confidence
 class TesseractProvider:
     name = "tesseract"
     version = "5"
+    languages = "ara+eng"
 
     def __init__(self):
         import pytesseract
@@ -171,7 +248,7 @@ class TesseractProvider:
         import pytesseract
         from pytesseract import Output
         from PIL import Image
-        data = pytesseract.image_to_data(Image.fromarray(image), lang="ara+eng", config="--psm 3", output_type=Output.DICT)
+        data = pytesseract.image_to_data(Image.fromarray(image), lang=self.languages, config="--psm 3", output_type=Output.DICT)
         lines: dict[tuple[int, int, int], list[tuple[str, float, list[float]]]] = {}
         for index, raw in enumerate(data["text"]):
             text = raw.strip()
@@ -557,21 +634,83 @@ class PaddleProvider:
         return self._result(segments)
 
 
-def process_document(raw: bytes, filename: str, declared_mime: str, provider: Any,
-                     expected_sha256: str | None = None) -> dict[str, Any]:
+class PaddleEnglishProvider(PaddleProvider):
+    """English inference only; no Arabic model, fallback or Arabic row pass."""
+    version = "PP-OCRv5-en-only-1.0.7"
+    english_only = True
+
+    def warm_arabic_model(self):
+        raise RuntimeError("DOCUMENT_ENGLISH_ONLY")
+
+    def _recognize_arabic(self, *_args, **_kwargs):
+        raise RuntimeError("DOCUMENT_ENGLISH_ONLY")
+
+    def recognize(self, image: Any) -> tuple[str, list[dict[str, Any]], float]:
+        segments = self._segments(self._english_pipeline.predict(image))
+        text, segments, confidence = _english_result(*self._result(segments))
+        if not self.complete_document(segments, confidence):
+            segments = self._recover_english_rows(image, segments)
+            text, segments, confidence = _english_result(*self._result(segments))
+        return text, segments, confidence
+
+
+class TesseractEnglishProvider(TesseractProvider):
+    version = "5-eng-only-1.0.7"
+    languages = "eng"
+    english_only = True
+
+    def recognize(self, image: Any) -> tuple[str, list[dict[str, Any]], float]:
+        return _english_result(*super().recognize(image))
+
+
+def process_document(raw: bytes, filename: str, declared_mime: str, provider: Any = None,
+                     expected_sha256: str | None = None, *,
+                     provider_factory: Callable[[], Any] | None = None) -> dict[str, Any]:
+    """Read native PDF text before constructing an optional OCR provider.
+
+    Existing callers may continue supplying an initialized provider. A factory
+    is called at most once, only after validation and at the first raster page.
+    Supplying a class (or callable with ``name``/``version`` attributes) retains
+    configured engine metadata even when every page uses its native text layer.
+
+    ``duration_ms`` retains the processing-only timing of the existing API,
+    excluding validation and newly measured provider initialization. The extra
+    ``provider_init_ms`` records that initialization separately, while
+    ``total_duration_ms`` includes validation, initialization and processing.
+    An already initialized provider's earlier startup cannot be measured here.
+    """
+    total_started = time.monotonic()
     validation = validate_document(raw, filename, declared_mime, expected_sha256)
+    if provider is not None and provider_factory is not None:
+        raise ValueError("DOCUMENT_OCR_PROVIDER_AMBIGUOUS")
     started = time.monotonic()
+    provider_init_seconds = 0.0
+    provider_metadata = provider if provider is not None else provider_factory
+    english_only = getattr(provider_metadata, "english_only", False) is True
     output = []
     issues = []
     for number, image, native_text, width, height in _image_pages(raw, validation.mime):
+        if english_only:
+            native_text = sanitize_english_text(native_text)
         if image is None:
             output.append({"number": number, "text": native_text[:200_000], "method": "native_pdf",
-                           "confidence": 0.99, "width": width, "height": height, "segments": []})
+                           "confidence": 0.0 if english_only and not native_text.strip() else 0.99,
+                           "width": width, "height": height, "segments": []})
             continue
+        if provider is None:
+            if provider_factory is None:
+                raise ValueError("DOCUMENT_OCR_PROVIDER_REQUIRED")
+            initialization_started = time.monotonic()
+            provider = provider_factory()
+            provider_init_seconds = time.monotonic() - initialization_started
+            if provider is None:
+                raise ValueError("DOCUMENT_OCR_PROVIDER_REQUIRED")
         best = ("", [], 0.0, "original")
         best_structured_complete = False
         for name, variant in _variants(image):
             text, segments, confidence = provider.recognize(variant)
+            if english_only:
+                text, segments, confidence = _english_result(text, segments, confidence)
             complete_document = getattr(provider, "complete_document", None)
             structured_complete = bool(complete_document(segments, confidence)) if complete_document else False
             if (structured_complete and not best_structured_complete) or \
@@ -591,6 +730,14 @@ def process_document(raw: bytes, filename: str, declared_mime: str, provider: An
         output.append({"number": number, "text": merged[:200_000], "method": method,
                        "confidence": round(best[2] if method == "ocr" else 0.95, 3), "width": width, "height": height,
                        "segments": best[1][:1000], "variant": best[3]})
-    return {"engine": provider.name, "model_version": provider.version, "sha256": validation.sha256,
+    if english_only and not any(page["text"].strip() for page in output):
+        issues.append({"code": "ENGLISH_TEXT_NOT_FOUND", "severity": "warning",
+                       "message": "No reliable English document text was found; enter the data manually."})
+    finished = time.monotonic()
+    metadata = provider if provider is not None else provider_metadata
+    return {"engine": getattr(metadata, "name", "pymupdf"),
+            "model_version": getattr(metadata, "version", "native-text"), "sha256": validation.sha256,
             "pages": output, "issues": issues,
-            "duration_ms": round((time.monotonic() - started) * 1000), "ai_used": False}
+            "duration_ms": round((finished - started - provider_init_seconds) * 1000),
+            "provider_init_ms": round(provider_init_seconds * 1000),
+            "total_duration_ms": round((finished - total_started) * 1000), "ai_used": False}

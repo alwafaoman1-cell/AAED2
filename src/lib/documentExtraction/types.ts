@@ -80,6 +80,8 @@ export interface ProcessingTimings {
 }
 
 export interface DocumentExtractionResult {
+  /** Immutable processing-policy identity, separate from the UI language. */
+  engineVersion?: string;
   extractionId?: string;
   fileId?: string;
   tenantId: string;
@@ -138,7 +140,12 @@ export const DEFAULT_EXTRACTION_POLICY: Readonly<ExtractionPolicy> = Object.free
 
 // A parser revision must get a new immutable extraction for the same file.
 // Previously reviewed OCR evidence is never rewritten in place.
-export const DOCUMENT_ENGINE_VERSION = "1.0.5";
-// Only the vehicle-entry auto-detection flow must re-read previously cached
-// gate passes. Other extraction workflows keep their established queue version.
-export const VEHICLE_ENTRY_AUTO_ENGINE_VERSION = "1.0.6";
+export const ENGLISH_DOCUMENT_ENGINE_VERSION = "1.0.7-en";
+export const DOCUMENT_ENGINE_VERSION = ENGLISH_DOCUMENT_ENGINE_VERSION;
+// All new extraction flows share the English-only policy. Historical rows keep
+// their original version and are never rewritten when this default changes.
+export const VEHICLE_ENTRY_AUTO_ENGINE_VERSION = ENGLISH_DOCUMENT_ENGINE_VERSION;
+
+export function isEnglishExtractionVersion(version?: string): boolean {
+  return version === ENGLISH_DOCUMENT_ENGINE_VERSION || version === `${ENGLISH_DOCUMENT_ENGINE_VERSION}-worker`;
+}

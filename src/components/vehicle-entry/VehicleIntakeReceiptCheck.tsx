@@ -7,8 +7,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { getIntakeReceiptContext, getIntakeReceiptPermissions, verifyIntakeReceipt, type VerifiedIntakeReceipt } from "@/lib/vehicleIntakeReceipt";
 
-export default function VehicleIntakeReceiptCheck({ entryId, receiptId, legacyReason, onChange, readOnly = false, initialReference = "" }: {
+export default function VehicleIntakeReceiptCheck({ entryId, receiptId, legacyReason, workflowRequirementOverrideId, onChange, readOnly = false, initialReference = "" }: {
   entryId: string; receiptId?: string | null; legacyReason?: string | null; readOnly?: boolean; initialReference?: string;
+  workflowRequirementOverrideId?: string | null;
   onChange: (receiptId: string | null, legacyReason: string) => void;
 }) {
   const { i18n } = useTranslation(); const en = i18n.language.startsWith("en"); const text = (ar: string, english: string) => en ? english : ar;
@@ -48,7 +49,12 @@ export default function VehicleIntakeReceiptCheck({ entryId, receiptId, legacyRe
     try { const result = await verifyIntakeReceipt(entryId, reference); if (generation === verificationGeneration.current) { setVerified(result); onChange(result.id, ""); } }
     catch (e) { if (generation === verificationGeneration.current) setError((e as Error).message); } finally { setBusy(false); }
   }
-  if (readOnly) return <div className="rounded border p-3 text-sm">{legacyReason ? <>{text("استثناء زيارة قديمة:", "Legacy visit exception:")} {legacyReason}</> : <>{text("وصل الاستلام المرتبط:", "Linked intake receipt:")} {receiptId || text("محضر سابق لتفعيل الميزة", "Handover predating this feature")}</>}</div>;
+  if (readOnly) return <div className="rounded border p-3 text-sm">{workflowRequirementOverrideId
+    ? <>{text("استثناء سير عمل موثق", "Documented workflow exception")} — {receiptId
+      ? <>{text("وصل الاستلام المرتبط:", "Linked intake receipt:")} {receiptId}</>
+      : text("لم يُسجّل وصل استلام مرتبط", "No linked intake receipt was recorded")}</>
+    : legacyReason ? <>{text("استثناء زيارة قديمة:", "Legacy visit exception:")} {legacyReason}</>
+      : <>{text("وصل الاستلام المرتبط:", "Linked intake receipt:")} {receiptId || text("لم يُسجّل وصل استلام مرتبط", "No linked intake receipt was recorded")}</>}</div>;
   return <section className="space-y-2 rounded-lg border p-3" dir={en ? "ltr" : "rtl"}>
     <h3 className="font-semibold">{text("التحقق من وصل الاستلام", "Verify intake receipt")}</h3>
     <Label htmlFor={`receipt-reference-${id}`}>{text("رقم الوصل أو رمز QR", "Receipt number or QR link")}</Label>

@@ -1,10 +1,13 @@
 import hashlib
 import io
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
 
-from ocr_core import InvalidDocument, PaddleProvider, _probably_complete_ocr, process_document, validate_document
+from ocr_core import (ARABIC_SCRIPT, InvalidDocument, PaddleEnglishProvider, PaddleProvider,
+                      TesseractEnglishProvider, _probably_complete_ocr, process_document,
+                      sanitize_english_segments, sanitize_english_text, validate_document)
 
 
 class FakePipeline:
@@ -225,6 +228,334 @@ class FileSafetyTests(unittest.TestCase):
         result = process_document(self.png, "scan.png", "image/png", provider)
         self.assertEqual(provider.calls, 2)
         self.assertIn("Plate No:", result["pages"][0]["text"])
+
+
+class EnglishOnlyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        target = io.BytesIO()
+        Image.new("RGB", (50, 50), "white").save(target, format="PNG")
+        cls.png = target.getvalue()
+
+    def test_english_filter_keeps_bilingual_label_but_never_partial_arabic_value(self):
+        result = sanitize_english_text(
+            "Insurance Claim\nClaim No / رقم المطالبة: C/004/01/26/9999/00001\n"
+            "Owner Name: أحمد ALI\nPlate No: ٤٧٧٨٢ B\nVIN: 1HGCM82633A004352")
+        self.assertIn("Claim No: C/004/01/26/9999/00001", result)
+        self.assertIn("VIN: 1HGCM82633A004352", result)
+        self.assertNotIn("Owner Name", result)
+        self.assertNotIn("ALI", result)
+        self.assertNotIn("Plate No", result)
+        self.assertFalse(ARABIC_SCRIPT.search(result))
+
+    def test_english_continuations_are_kept_but_unlabeled_arabic_reference_is_not(self):
+        self.assertEqual(sanitize_english_text("Oil Filter Brake Pads"), "Oil Filter Brake Pads")
+        self.assertEqual(sanitize_english_text("C/004/01/26/9999/00001\n1HGCM82633A004352"), "")
+        self.assertEqual(sanitize_english_text(
+            "مطالبة تأمين\nرقم المطالبة\nC/004/01/26/9999/00001\nالشاصي\n1HGCM82633A004352"), "")
+
+    def test_structured_reference_chunks_are_not_words_or_english_field_labels(self):
+        self.assertEqual(sanitize_english_text("C/ABC/DEF/GHI/2026/12345"), "")
+        self.assertEqual(sanitize_english_text("C/VIN/ABC/2026/12345"), "")
+        self.assertEqual(sanitize_english_text("مطالبة تأمين\nC/VIN/ABC/2026/12345"), "")
+        self.assertEqual(sanitize_english_text("Claim No: C/ABC/DEF/GHI/2026/12345"),
+                         "Claim No: C/ABC/DEF/GHI/2026/12345")
+        self.assertEqual(sanitize_english_text("Oil Filter Brake Pads"), "Oil Filter Brake Pads")
+
+    def test_rejected_arabic_value_cannot_be_resurrected_from_split_segments(self):
+        source = "Insurance Claim\nOwner Name: أحمد ALI\nVIN: 1HGCM82633A004352"
+        segments = [{"text": text, "box": {"x": 10, "y": index * 40, "width": 100, "height": 30}}
+                    for index, text in enumerate(("Insurance Claim", "Owner Name:", "أحمد", "ALI", "VIN: 1HGCM82633A004352"))]
+        result = sanitize_english_segments(segments, source)
+        self.assertEqual([item["text"] for item in result], ["Insurance Claim", "VIN: 1HGCM82633A004352"])
+        self.assertEqual(result[-1]["box"], segments[-1]["box"])
+
+    def test_incomplete_english_reading_never_initializes_or_calls_arabic(self):
+        provider = PaddleEnglishProvider.__new__(PaddleEnglishProvider)
+        provider._english_pipeline = SequencePipeline(FakePipeline(
+            ["Claim No: C/004/01/26/9999/00001", "VIN: 1HGCM82633A004352"], [.95, .96], [100, 200]))
+        with patch.object(provider, "warm_arabic_model", side_effect=AssertionError("Arabic model forbidden")) as warm, \
+                patch.object(provider, "_recognize_arabic", side_effect=AssertionError("Arabic fallback forbidden")) as arabic:
+            text, segments, confidence = provider.recognize(None)
+        self.assertIn("C/004/01/26/9999/00001", text)
+        self.assertEqual(len(segments), 2)
+        self.assertGreater(confidence, .9)
+        self.assertEqual(provider._english_pipeline.calls, 1)
+        warm.assert_not_called(); arabic.assert_not_called()
+
+    def test_english_missing_date_still_uses_guarded_english_row_recovery_only(self):
+        import numpy as np
+        provider = PaddleEnglishProvider.__new__(PaddleEnglishProvider)
+        provider._english_pipeline = SequencePipeline(
+            FakePipeline(["Claim No: C/004/01/26/9999/00001", "Date of Loss", "Vehicle No: A A/39566"],
+                         [.93] * 3, [100, 150, 200]),
+            FakePipeline(["Date of Loss: 01/10/2026"], [.95], [10]))
+        with patch.object(provider, "warm_arabic_model", side_effect=AssertionError("Arabic forbidden")):
+            text, _, _ = provider.recognize(np.zeros((500, 1000, 3), dtype=np.uint8))
+        self.assertIn("Date of Loss: 01/10/2026", text)
+        self.assertEqual(provider._english_pipeline.calls, 2)
+
+    def test_arabic_only_ocr_with_unlabeled_latin_ids_returns_no_data(self):
+        provider = PaddleEnglishProvider.__new__(PaddleEnglishProvider)
+        provider._english_pipeline = SequencePipeline(FakePipeline(
+            ["مطالبة تأمين", "رقم المطالبة", "C/004/01/26/9999/00001", "الشاصي", "1HGCM82633A004352"],
+            [.9] * 5, [10, 50, 90, 130, 170]))
+        self.assertEqual(provider.recognize(None), ("", [], 0.0))
+        self.assertEqual(provider._english_pipeline.calls, 1)
+
+    def test_ascii_model_noise_with_bare_ids_is_not_english_ocr_evidence(self):
+        provider = PaddleEnglishProvider.__new__(PaddleEnglishProvider)
+        provider._english_pipeline = SequencePipeline(FakePipeline(
+            ["Unlabeled Latin Noise", "C/004/01/26/9999/00001", "1HGCM82633A004352"],
+            [.95] * 3, [10, 50, 90]))
+        self.assertEqual(provider.recognize(None), ("", [], 0.0))
+        # Native continuation text may still use its actual text-layer words.
+        self.assertEqual(sanitize_english_text("Oil Filter Brake Pads"), "Oil Filter Brake Pads")
+        self.assertEqual(sanitize_english_text("Oil Filter Brake Pads", require_anchor=True), "")
+
+    def test_document_processing_also_rejects_unanchored_ascii_ocr_output(self):
+        class EnglishStub:
+            name = "english-test"
+            version = "en-only"
+            english_only = True
+
+            def recognize(self, _image):
+                return "Unlabeled Latin Noise\nC/004/01/26/9999/00001\n1HGCM82633A004352", [], .98
+
+            def should_stop_after_variant(self, *_args):
+                return True
+
+        with patch("ocr_core._variants", return_value=[("original", object())]):
+            result = process_document(self.png, "claim.png", "image/png", provider_factory=EnglishStub)
+        self.assertEqual(result["pages"][0]["text"], "")
+        self.assertEqual(result["pages"][0]["segments"], [])
+        self.assertIn("ENGLISH_TEXT_NOT_FOUND", [item["code"] for item in result["issues"]])
+
+    def test_tesseract_english_provider_never_requests_arabic_language_data(self):
+        import sys
+        import types
+        import numpy as np
+        from unittest.mock import MagicMock
+        fake = types.ModuleType("pytesseract")
+        fake.Output = types.SimpleNamespace(DICT="dict")
+        fake.image_to_data = MagicMock(return_value={
+            "text": ["VIN:", "1HGCM82633A004352"], "conf": ["95", "95"],
+            "block_num": [1, 1], "par_num": [1, 1], "line_num": [1, 1],
+            "left": [1, 30], "top": [1, 1], "width": [25, 150], "height": [15, 15]})
+        with patch.dict(sys.modules, {"pytesseract": fake}):
+            provider = TesseractEnglishProvider.__new__(TesseractEnglishProvider)
+            text, _, _ = provider.recognize(np.zeros((40, 200, 3), dtype=np.uint8))
+        self.assertIn("1HGCM82633A004352", text)
+        self.assertEqual(fake.image_to_data.call_args.kwargs["lang"], "eng")
+
+    def test_native_arabic_text_is_ignored_without_constructing_ocr(self):
+        class ForbiddenEnglishFactory:
+            name = "english-test"
+            version = "en-only"
+            english_only = True
+
+            def __init__(self):
+                raise AssertionError("Native unsupported text must not load OCR")
+
+        native = "مطالبة تأمين\nرقم المطالبة\nC/004/01/26/9999/00001\nالشاصي\n1HGCM82633A004352"
+        with patch("ocr_core._image_pages", return_value=[(1, None, native, 600, 800)]):
+            result = process_document(self.png, "claim.png", "image/png", provider_factory=ForbiddenEnglishFactory)
+        self.assertEqual(result["pages"][0]["text"], "")
+        self.assertEqual(result["pages"][0]["confidence"], 0)
+        self.assertEqual(result["provider_init_ms"], 0)
+        self.assertIn("ENGLISH_TEXT_NOT_FOUND", [item["code"] for item in result["issues"]])
+
+    def test_english_policy_filters_native_and_ocr_evidence_without_changing_source_boxes(self):
+        class EnglishStub:
+            name = "english-test"
+            version = "en-only"
+            english_only = True
+
+            def recognize(self, _image):
+                lines = ["Insurance Claim", "Owner Name: أحمد ALI", "VIN: 1HGCM82633A004352"]
+                return "\n".join(lines), [{"text": line, "confidence": .9,
+                    "box": {"x": 20, "y": n * 40, "width": 400, "height": 30}}
+                    for n, line in enumerate(lines)], .9
+
+            def should_stop_after_variant(self, *_args):
+                return True
+
+        with patch("ocr_core._image_pages", return_value=[(1, object(), "Insurance Claim\nملاحظات عربية", 600, 800)]), \
+                patch("ocr_core._variants", return_value=[("original", object())]):
+            result = process_document(self.png, "claim.png", "image/png", provider_factory=EnglishStub)
+        page = result["pages"][0]
+        self.assertFalse(ARABIC_SCRIPT.search(page["text"]))
+        self.assertNotIn("ALI", page["text"])
+        self.assertEqual(page["segments"][-1]["box"], {"x": 20, "y": 80, "width": 400, "height": 30})
+
+
+class LazyProviderTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        target = io.BytesIO()
+        Image.new("RGB", (40, 40), "white").save(target, format="PNG")
+        cls.png = target.getvalue()
+
+    def test_native_pdf_never_constructs_factory_and_retains_configured_metadata(self):
+        import pymupdf
+
+        class MustNotInitialize:
+            name = "configured-test-engine"
+            version = "configured-test-model"
+
+            def __init__(self):
+                raise AssertionError("Native text must not initialize the OCR model")
+
+        with pymupdf.open() as pdf:
+            page = pdf.new_page()
+            page.insert_text((40, 70), "Complete native claim text with more than forty-five readable characters")
+            page.insert_image(pymupdf.Rect(35, 100, 75, 140), stream=self.png)
+            result = process_document(pdf.tobytes(), "native.pdf", "application/pdf",
+                                      provider_factory=MustNotInitialize)
+        self.assertEqual(result["engine"], MustNotInitialize.name)
+        self.assertEqual(result["model_version"], MustNotInitialize.version)
+        self.assertEqual(result["pages"][0]["method"], "native_pdf")
+        self.assertIn("Complete native claim", result["pages"][0]["text"])
+        self.assertEqual(result["provider_init_ms"], 0)
+        self.assertFalse(result["ai_used"])
+
+    def test_mixed_pdf_constructs_once_for_the_first_of_multiple_scanned_pages(self):
+        import pymupdf
+        constructions = []
+
+        class ScanProvider:
+            name = "synthetic-test"
+            version = "1"
+
+            def __init__(self):
+                constructions.append(self)
+                self.calls = 0
+
+            def recognize(self, _image):
+                self.calls += 1
+                return f"SCANNED-PAGE-{self.calls}", [], .9
+
+            def should_stop_after_variant(self, *_args):
+                return True
+
+        with pymupdf.open() as pdf:
+            native = pdf.new_page()
+            native.insert_text((40, 70), "Complete selectable native text before the actual scanned claim pages")
+            for _ in range(2):
+                page = pdf.new_page()
+                page.insert_image(page.rect, stream=self.png)
+            result = process_document(pdf.tobytes(), "mixed.pdf", "application/pdf",
+                                      provider_factory=ScanProvider)
+        self.assertEqual(len(constructions), 1)
+        self.assertEqual(constructions[0].calls, 2)
+        self.assertEqual([page["method"] for page in result["pages"]], ["native_pdf", "ocr", "ocr"])
+        self.assertEqual([page["text"] for page in result["pages"]][1:], ["SCANNED-PAGE-1", "SCANNED-PAGE-2"])
+
+    def test_invalid_or_mismatched_documents_fail_before_constructing_ocr(self):
+        constructions = []
+
+        def forbidden_factory():
+            constructions.append(True)
+            raise AssertionError("Invalid bytes must not initialize OCR")
+
+        cases = (
+            (self.png, "scan.png", "image/png", "0" * 64, "DOCUMENT_HASH_MISMATCH"),
+            (b"%PDF-broken", "scan.pdf", "application/pdf", None, "DOCUMENT_PDF_CORRUPT"),
+            (b"\x89PNG\r\n\x1a\nbroken", "scan.png", "image/png", None, "DOCUMENT_IMAGE_CORRUPT"),
+            (self.png, "scan.pdf", "application/pdf", None, "DOCUMENT_SIGNATURE_MISMATCH"),
+        )
+        for raw, filename, mime, digest, code in cases:
+            with self.subTest(code=code), self.assertRaisesRegex(InvalidDocument, code):
+                process_document(raw, filename, mime, expected_sha256=digest,
+                                 provider_factory=forbidden_factory)
+        self.assertEqual(constructions, [])
+
+    def test_lazy_and_existing_provider_calls_keep_the_same_complete_extraction(self):
+        class UncertainProvider:
+            name = "synthetic-test"
+            version = "same-model"
+
+            def recognize(self, _image):
+                return "Claim No: C/004/01/26/2510/00545\nPlate No: A A/39566", [
+                    {"text": "Claim No: C/004/01/26/2510/00545", "confidence": .83,
+                     "box": {"x": 1, "y": 2, "width": 100, "height": 12}},
+                ], .83
+
+        eager = process_document(self.png, "claim.png", "image/png", UncertainProvider())
+        lazy = process_document(self.png, "claim.png", "image/png", provider_factory=UncertainProvider)
+        timing_keys = {"duration_ms", "provider_init_ms", "total_duration_ms"}
+        self.assertEqual({key: value for key, value in eager.items() if key not in timing_keys},
+                         {key: value for key, value in lazy.items() if key not in timing_keys})
+
+    def test_provider_startup_is_separate_from_processing_and_inclusive_wall_time(self):
+        clock = [10.0]
+        validated = validate_document(self.png, "scan.png", "image/png")
+
+        class Provider:
+            name = "synthetic-test"
+            version = "1"
+
+            def recognize(self, _image):
+                clock[0] += 5.0
+                return "Actual recognized text", [], .9
+
+        def validate(*_args):
+            clock[0] += 1.0
+            return validated
+
+        def image_pages(*_args):
+            clock[0] += 2.0
+            yield 1, object(), "", 40, 40
+
+        def factory():
+            clock[0] += 3.0
+            return Provider()
+
+        with patch("ocr_core.time.monotonic", side_effect=lambda: clock[0]), \
+                patch("ocr_core.validate_document", side_effect=validate), \
+                patch("ocr_core._image_pages", side_effect=image_pages), \
+                patch("ocr_core._variants", return_value=[("original", object())]):
+            result = process_document(self.png, "scan.png", "image/png", provider_factory=factory)
+        self.assertEqual(result["provider_init_ms"], 3000)
+        self.assertEqual(result["duration_ms"], 7000)  # rendering + recognition, as before
+        self.assertEqual(result["total_duration_ms"], 11000)  # validation + init + processing
+
+    def test_a_warm_factory_does_not_report_model_startup_again(self):
+        clock = [0.0]
+        validated = validate_document(self.png, "scan.png", "image/png")
+
+        class Provider:
+            name = "synthetic-test"
+            version = "1"
+
+            def recognize(self, _image):
+                clock[0] += 1.0
+                return "Actual recognized text", [], .9
+
+        class SessionFactory:
+            name = Provider.name
+            version = Provider.version
+
+            def __init__(self):
+                self.cached = None
+
+            def __call__(self):
+                if self.cached is None:
+                    clock[0] += 2.0
+                    self.cached = Provider()
+                return self.cached
+
+        factory = SessionFactory()
+        with patch("ocr_core.time.monotonic", side_effect=lambda: clock[0]), \
+                patch("ocr_core.validate_document", return_value=validated), \
+                patch("ocr_core._image_pages", side_effect=lambda *_args: [(1, object(), "", 40, 40)]), \
+                patch("ocr_core._variants", return_value=[("original", object())]):
+            first = process_document(self.png, "scan.png", "image/png", provider_factory=factory)
+            second = process_document(self.png, "scan.png", "image/png", provider_factory=factory)
+        self.assertEqual(first["provider_init_ms"], 2000)
+        self.assertEqual(second["provider_init_ms"], 0)
+        self.assertEqual(first["duration_ms"], second["duration_ms"])
+        self.assertEqual(second["total_duration_ms"], second["duration_ms"])
 
 
 class ClaimOcrRecoveryTests(unittest.TestCase):

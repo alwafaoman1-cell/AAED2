@@ -57,11 +57,11 @@ export async function registerDocumentFile(input: {
   throw inserted.error || new Error("DOCUMENT_FILE_REGISTER_FAILED");
 }
 
-export async function claimDocumentProcessing(fileId: string): Promise<{
+export async function claimDocumentProcessing(fileId: string, engineVersion = DOCUMENT_ENGINE_VERSION): Promise<{
   extractionId: string; acquired: boolean; status: ProcessingStatus; lease: string;
 }> {
   const { data, error } = await supabase.rpc("document_claim_processing", {
-    p_file_id: fileId, p_engine_version: DOCUMENT_ENGINE_VERSION,
+    p_file_id: fileId, p_engine_version: engineVersion,
   });
   if (error) throw error;
   const claim = data?.[0];
@@ -108,6 +108,7 @@ export async function loadDocumentExtraction(tenantId: string, extractionId: str
     segments: page.segments as unknown as DocumentPage["segments"],
   }));
   return {
+    engineVersion: row.engine_version,
     extractionId: row.id, fileId: row.file_id, tenantId, sha256: fileRow.sha256,
     fileName: fileRow.original_file_name, mimeType: fileRow.mime_type,
     documentType: row.document_type as DocumentType,

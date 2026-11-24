@@ -19,6 +19,7 @@ export type VehicleHandoverStatus = "draft" | "finalized" | "cancelled";
 export type VehicleHandoverSignatureMethod = "electronic" | "paper";
 
 export interface VehicleDeliveryReceiptDraft {
+  workflowRequirementOverrideId?: string | null;
   custodyReceiptId?: string | null;
   legacyReceiptReason?: string | null;
   recordId?: string | null;
@@ -85,6 +86,7 @@ function isMissingHandoverTable(error: unknown): boolean {
 function rowToDraft(row: any): VehicleDeliveryReceiptDraft {
   const snapshot = row.snapshot_json && typeof row.snapshot_json === "object" ? row.snapshot_json : {};
   return {
+    workflowRequirementOverrideId: snapshot.workflowRequirementOverrideId || null,
     custodyReceiptId: snapshot.custodyReceiptId || null,
     legacyReceiptReason: snapshot.legacyReceiptReason || null,
     recordId: row.id,
@@ -373,7 +375,8 @@ export function buildDeliveryReceiptData(order: WorkOrder, draft: VehicleDeliver
     customerPhone: order.phone || undefined,
     customerIdNumber: draft.customerIdNumber || undefined,
     recipientType: draft.receiverType || "customer",
-    receiverName: draft.receiverName || undefined,
+    receiverName: draft.receiverName === undefined ? undefined : draft.receiverName ?? "",
+    workflowRequirementOverrideId: draft.workflowRequirementOverrideId || undefined,
     receiverPhone: draft.receiverPhone || undefined,
     receiverIdNumber: draft.receiverIdNumber || undefined,
     receiverRelationship: draft.receiverRelationship || undefined,

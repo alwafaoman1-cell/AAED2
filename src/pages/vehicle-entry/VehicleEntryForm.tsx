@@ -11,6 +11,7 @@ import {VehicleEntryIdentityStep} from "@/components/vehicle-entry/VehicleEntryI
 import {VehicleEntryConditionStep} from "@/components/vehicle-entry/VehicleEntryConditionStep";
 import {VehicleEntryReviewStep} from "@/components/vehicle-entry/VehicleEntryReviewStep";
 import {VehicleEntryExtraction} from "@/components/vehicle-entry/VehicleEntryExtraction";
+import WorkflowRequirementsBanner from "@/components/WorkflowRequirementsBanner";
 import "@/lib/i18n/vehicleIntakeWizard";
 import "@/lib/i18n/vehicleVisitWorkspace";
 
@@ -30,6 +31,7 @@ export default function VehicleEntryForm({workspace,onBusyChange,sourceClaimId,o
   if(isEdit && detail.isLoading) return <p role="status" className="p-8 text-center">{t("vehicleIntakeWizard.loading")}</p>;
   if(isEdit && (detail.error || !detail.data)) return <p role="alert" className="p-8 text-destructive">{t("vehicleIntakeWizard.saveFailed")}: {detail.error?.message}</p>;
   return <div className="space-y-5 pb-12" dir={i18n.language.startsWith("ar")?"rtl":"ltr"}>
+    <WorkflowRequirementsBanner {...editor.workflowRequirements} />
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0"><h1 className="text-xl font-bold sm:text-2xl">{t(isEdit?"vehicleIntakeWizard.editTitle":"vehicleIntakeWizard.title")}</h1>
         {form.entry_number && <p className="font-mono font-semibold" dir="ltr">{form.entry_number}</p>}

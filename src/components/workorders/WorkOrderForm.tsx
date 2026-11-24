@@ -31,6 +31,8 @@ import { uploadStagePhoto } from "@/lib/workOrderPhotosStorage";
 import AiExtractButton from "@/components/ai/AiExtractButton";
 import AiWriteButton from "@/components/ai/AiWriteButton";
 import { useDraftPersistence } from "@/lib/drafts/useDraftPersistence";
+import WorkflowRequirementsBanner from "@/components/WorkflowRequirementsBanner";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
 
 function normalizeWorkOrderNumberInput(value: string) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -38,6 +40,12 @@ function normalizeWorkOrderNumberInput(value: string) {
 
 function workOrderChannelSaveError(error: unknown, isEnglish: boolean): string {
   const message = String((error as { message?: string })?.message || "");
+  if (message.includes("VEHICLE_VISIT_CLAIM_APPROVAL_REQUIRED")) {
+    return isEnglish ? "Approve the linked claim first, or ask the administrator to authorize a documented workflow exception." : "اعتمد المطالبة المرتبطة أولًا، أو اطلب من المدير العام السماح باستثناء موثّق من شروط سير العمل.";
+  }
+  if (message.includes("WORKFLOW_CLAIM_CLOSED")) {
+    return isEnglish ? "The linked claim is closed. Review its status before creating a new work order." : "المطالبة المرتبطة مغلقة. راجع حالتها قبل إنشاء أمر عمل جديد.";
+  }
   if (message.includes("WORK_ORDER_CHANNEL_CHANGE_HAS_CASH_INVOICE")) {
     return isEnglish
       ? "This work order has a cash invoice. Resolve the invoice before moving it to insurance. Nothing was changed."
@@ -136,6 +144,7 @@ function visitPrefillFields(prefillVisit: unknown): Partial<WorkOrder> {
 
 export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustomer, prefillPhone, prefillPlate, prefillVehicle, prefillVisit, linkedExpenseVouchers }: Props) {
   const { i18n } = useTranslation();
+  const workflowRequirements = useWorkflowRequirements();
   const queryClient = useQueryClient();
   const isEdit = !!initial;
   const prefillVehicleKey = vehiclePrefillFields(prefillVehicle);
@@ -698,6 +707,7 @@ export default function WorkOrderForm({ onClose, onSaved, initial, prefillCustom
 
   return (
     <div className="space-y-4 py-2">
+      <WorkflowRequirementsBanner {...workflowRequirements} />
       {isEdit && (
         <div className="rounded-xl border border-primary/25 bg-primary/5 p-3">
           <label className="text-xs font-semibold text-foreground">رقم أمر العمل</label>

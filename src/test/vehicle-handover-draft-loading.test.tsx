@@ -8,6 +8,7 @@ import type {WorkOrder} from '@/lib/workOrdersStore';
 import i18n from '@/i18n';
 
 const mocks=vi.hoisted(()=>({load:vi.fn(),history:vi.fn(),save:vi.fn(),finalize:vi.fn()}));
+vi.mock('@/hooks/useWorkflowRequirements',()=>({useWorkflowRequirements:()=>({requirementsEnabled:true})}));
 vi.mock('@/lib/vehicleDeliveryReceipt',()=>({loadVehicleDeliveryReceiptDraft:mocks.load,listVehicleHandoverHistory:mocks.history,saveVehicleDeliveryReceiptDraft:mocks.save,finalizeVehicleDeliveryReceipt:mocks.finalize,
   buildDeliveryReceiptData:vi.fn(),DEFAULT_HANDOVER_DECLARATION_AR:'إقرار تجريبي',DEFAULT_HANDOVER_DECLARATION_EN:'Test declaration',getDefaultDeliveryWarrantyNotes:()=>'',getDeliveredDateInputValue:()=>'2026-11-07',getDeliveredTimeInputValue:()=>'12:30:00',combineDeliveryDateTime:(date:string,time:string)=>`${date}T${time}+04:00`}));
 vi.mock('@/lib/workOrderInvoiceSync',()=>({isInsuranceWorkOrder:()=>true,syncWorkOrderInvoiceFromExpenses:vi.fn()}));

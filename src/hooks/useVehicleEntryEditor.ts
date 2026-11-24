@@ -16,6 +16,7 @@ import "@/lib/i18n/vehicleIntakeWizard";
 import { newVehicleVisitLocation } from "@/lib/vehicleVisitIntake";
 import {markDirty,markClean} from "@/lib/unsavedWork";
 import {loadSupervisorIntakeSource} from "@/lib/supervisorIntakeSource";
+import {useWorkflowRequirements} from "@/hooks/useWorkflowRequirements";
 export const ENTRY_PHOTO_SLOTS= [
   { key: "front_view", ar: "الواجهة الأمامية", en: "Front View" },
   { key: "rear_view", ar: "الواجهة الخلفية", en: "Rear View" },
@@ -52,6 +53,8 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor";sourc
   const entryBasePath = options?.workspace === "supervisor" ? "/supervisor/entry" : "/vehicle-entry";
   const qc = useQueryClient();
   const { user, profile } = useAuth();
+  const workflowRequirements = useWorkflowRequirements();
+  const requirementsEnabled = workflowRequirements.requirementsEnabled;
   const isEdit = !!id;
   const [form, setForm] = useState<VehicleEntryFormState>(() => {
     const initial = defaultVehicleEntryForm();
@@ -203,8 +206,8 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor";sourc
   const patchContents = (next: Partial<VehicleEntryFormState["contents"]>) => setForm((prev) => ({ ...prev, contents: { ...prev.contents, ...next } }));
 
   const canSave = useMemo(() => {
-    return Boolean(profile?.tenant_id) && draftScope===editorScope && (!needsSource || (hydratedSourceKey===sourceKey && !source.error && !source.data?.existingEntryId)) && !!channel && !!purpose && !!form.arrival_date && !!form.arrival_time && !!form.delivered_by.full_name.trim() && (!!form.customer_id || !!form.customer.customer_code || isValidE164(toE164(form.customer.phone))) && (!!form.vehicle_id || (!!form.vehicle.plate_number.trim() && !!form.vehicle.make.trim()));
-  }, [form,channel,purpose,needsSource,hydratedSourceKey,sourceKey,source.error,source.data,draftScope,editorScope,profile?.tenant_id]);
+    return Boolean(profile?.tenant_id) && draftScope===editorScope && (!needsSource || (hydratedSourceKey===sourceKey && !source.error && !source.data?.existingEntryId)) && !!channel && !!purpose && !!form.arrival_date && !!form.arrival_time && (!requirementsEnabled || !!form.delivered_by.full_name.trim()) && (!!form.customer_id || !!form.customer.customer_code || isValidE164(toE164(form.customer.phone))) && (!!form.vehicle_id || (!!form.vehicle.plate_number.trim() && !!form.vehicle.make.trim()));
+  }, [form,channel,purpose,needsSource,hydratedSourceKey,sourceKey,source.error,source.data,draftScope,editorScope,profile?.tenant_id,requirementsEnabled]);
 
   function chooseDeliveredBy(type: VehicleEntryFormState["delivered_by"]["delivery_type"]) {
     if (type === "owner") {
@@ -294,7 +297,7 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor";sourc
   }
   async function handleSave(status = form.status) {
     if(savingRef.current) return;
-    if (needsRunningStatusBeforeIssue(form, status)) { toast.error(t("vehicleIntakeWizard.runningStatusRequired")); return; }
+    if (requirementsEnabled && needsRunningStatusBeforeIssue(form, status)) { toast.error(t("vehicleIntakeWizard.runningStatusRequired")); return; }
     if (!canSave) {
       toast.error(t("vehicleIntakeWizard.required"));
       return;
@@ -544,7 +547,7 @@ export function useVehicleEntryEditor(options?: { workspace?: "supervisor";sourc
   }
 
 
-return {channel,purpose,step,setStep,setChannel,setPurpose,goNext,technicalForm,setTechnicalForm,visit,form,patch,patchCustomer,patchVehicle,patchInsurance,patchDeliveredBy,patchCondition,patchContents,chooseDeliveredBy,deliveryDataSource,setDeliveryDataSource,customerSearch,setCustomerSearch,vehicleSearch,setVehicleSearch,customerResults,vehicleResults,selectCustomer,selectVehicle,insuranceEmployees,vehicleMakes,detail,pendingPhotos,photoInputRef,documentInputRef,stageEntryPhoto,activePhotoCategory,setActivePhotoCategory,removePendingPhoto,uploading,handleUpload,handleSignature,supplementalEntryMedia,addDamageAt,addDamageMark,updateDamageMark,removeDamageMark,setPendingDocumentFileId,saving,handleSave,canSave,isEdit,navigate,user,profile,setForm,centerPath,entryBasePath,source,needsSource,sourceReady:!needsSource || hydratedSourceKey===sourceKey,hasDraftChanges:JSON.stringify(form)!==savedFormBaseline.current || pendingPhotos.length>0 || Boolean(pendingDocumentFileId)};
+return {channel,purpose,step,setStep,setChannel,setPurpose,goNext,technicalForm,setTechnicalForm,visit,form,patch,patchCustomer,patchVehicle,patchInsurance,patchDeliveredBy,patchCondition,patchContents,chooseDeliveredBy,deliveryDataSource,setDeliveryDataSource,customerSearch,setCustomerSearch,vehicleSearch,setVehicleSearch,customerResults,vehicleResults,selectCustomer,selectVehicle,insuranceEmployees,vehicleMakes,detail,pendingPhotos,photoInputRef,documentInputRef,stageEntryPhoto,activePhotoCategory,setActivePhotoCategory,removePendingPhoto,uploading,handleUpload,handleSignature,supplementalEntryMedia,addDamageAt,addDamageMark,updateDamageMark,removeDamageMark,setPendingDocumentFileId,saving,handleSave,canSave,isEdit,navigate,user,profile,setForm,centerPath,entryBasePath,source,needsSource,requirementsEnabled,workflowRequirements,sourceReady:!needsSource || hydratedSourceKey===sourceKey,hasDraftChanges:JSON.stringify(form)!==savedFormBaseline.current || pendingPhotos.length>0 || Boolean(pendingDocumentFileId)};
 }
 export type VehicleEntryEditor=ReturnType<typeof useVehicleEntryEditor>;
 

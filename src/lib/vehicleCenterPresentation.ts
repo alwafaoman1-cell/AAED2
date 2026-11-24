@@ -11,7 +11,7 @@ const nextStage: Partial<Record<VisitStage, "approved" | "in_progress" | "ready"
 
 /** A list affordance, never permission to write. The existing detail controller
  * re-reads the visit and checks its source guards before opening a confirmation. */
-export function getVehicleCenterPrimaryAction(row: any, tab: VehicleCenterTab, hasRole: (...roles: string[]) => boolean): {
+export function getVehicleCenterPrimaryAction(row: any, tab: VehicleCenterTab, hasRole: (...roles: string[]) => boolean, requirementsEnabled = true): {
   label: string; request?: VehicleCenterActionRequest;
 } {
   const stage: VisitStage = row._visitStage;
@@ -22,7 +22,7 @@ export function getVehicleCenterPrimaryAction(row: any, tab: VehicleCenterTab, h
   if (isVehicleReviewVisit(row)) return { label: "reviewRepair" };
   const next = nextStage[stage];
   if (!next) return { label: "viewRecord" };
-  const blocker = getVehicleVisitNextBlocker(next, row, hasRole, Boolean(row._hasFinalHandover));
+  const blocker = getVehicleVisitNextBlocker(next, row, hasRole, Boolean(row._hasFinalHandover), requirementsEnabled);
   if (["approvalPermissionRequired", "workPermissionRequired", "completionPermissionRequired"].includes(blocker || "")) return { label: "viewRecord" };
   const claim = row.claim || row.converted_claim;
   if (blocker === "claimApprovalRequired" && claim?.status === "pending" && hasRole("admin", "manager")) {

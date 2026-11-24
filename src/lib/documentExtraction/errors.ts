@@ -11,6 +11,7 @@ const MESSAGES: Record<string, [string, string]> = {
   DOCUMENT_IMAGE_UNREADABLE: ["تعذرت قراءة الصورة؛ جرّب ملفًا أوضح.", "Could not read the image; try a clearer file."],
   DOCUMENT_HASH_UNAVAILABLE: ["المتصفح لا يدعم التحقق الآمن من الملف.", "This browser cannot securely verify the file."],
   DOCUMENT_TENANT_MISMATCH: ["لا يمكن ربط المستند بالورشة الحالية؛ أعد تسجيل الدخول.", "Document and workshop do not match; sign in again."],
+  DOCUMENT_ENGINE_VERSION_MISMATCH: ["وصل إصدار معالجة مختلف للمستند؛ أعد تحميل الصفحة وحاول مجددًا.", "A different document processing version was returned. Reload the page and retry."],
   DOCUMENT_PROCESSING_IN_PROGRESS_RETRY_LATER: ["المستند قيد المعالجة في جلسة أخرى؛ حاول لاحقًا.", "The document is being processed in another session; retry later."],
   DOCUMENT_PREVIOUS_PROCESSING_FAILED_RETRY: ["فشلت معالجة سابقة للمستند؛ أعد المحاولة.", "A previous extraction failed; retry the document."],
   DOCUMENT_PROCESSING_TIMEOUT: ["انتهت مهلة قراءة المستند؛ احتُفظ بالملف إن اكتمل رفعه. أعد المحاولة لاحقًا.", "Document processing timed out. If upload completed, the file was retained; retry later."],
@@ -29,6 +30,7 @@ export function documentErrorMessage(error: unknown, english: boolean): string {
 }
 
 const ARABIC_ISSUES: Record<string, string> = {
+  ENGLISH_ONLY_NO_RELIABLE_FIELDS: "لم تُستخرج حقول إنجليزية موثوقة. تم تجاهل المحتوى العربي؛ أرفق مستندًا بالإنجليزية أو أدخل البيانات يدويًا.",
   DOCUMENT_TYPE_MISMATCH: "نوع المستند يختلف عن المتوقع لهذا النموذج؛ راجعه قبل تطبيق أي حقل.",
   NO_FIELDS_RECOGNIZED: "لم تُستخرج حقول موثوقة؛ راجع الملف يدويًا.",
   VAT_TOTAL_MISMATCH: "الإجمالي لا يساوي المبلغ قبل الضريبة مع الضريبة والخصم؛ راجع الأرقام دون تعديل تلقائي.",

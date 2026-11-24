@@ -73,6 +73,8 @@ export interface InsuranceClaim {
   /** Server projection from the linked vehicle visit; never a persisted claim field. */
   list_vehicle_location?: string | null;
   temporary_inspection_release_id?: string | null;
+  /** Creation provenance only; it never authorizes an operational exception. */
+  workflow_requirement_revision?: number | null;
   // joined
   customer?: { name: string; phone: string | null; customer_code?: string | null };
   vehicle?: {
@@ -95,6 +97,7 @@ export type ClaimInsert = {
   customer_id: string;
   vehicle_id: string | null;
   claim_number: string;
+  workflow_requirement_revision?: number | null;
   insurance_company: string;
   insurance_company_id?: string | null;
   insurance_employee_id?: string | null;

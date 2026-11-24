@@ -1978,6 +1978,7 @@ export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): strin
 
 // ===== VEHICLE DELIVERY RECEIPT (إقرار استلام سيارة من الورشة) =====
 export interface VehicleDeliveryReceiptData {
+  workflowRequirementOverrideId?: string;
   receiptNumber: string;
   date: string;
   workOrderNumber?: string;
@@ -2047,6 +2048,7 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
       ${data.workOrderNumber ? `<br/>أمر العمل المرجعي: <strong>${escapeHtml(data.workOrderNumber)}</strong>` : ''}
     </div>
 
+    ${data.workflowRequirementOverrideId ? `<div class="notes-box" style="border-color:#b7791f;background:#fffbeb;">${lbl('استثناء سير عمل موثق؛ الحقول والتواقيع غير المسجلة بقيت فارغة.', 'Documented workflow exception; unrecorded fields and signatures remain blank.')}</div>` : ''}
     ${sectionTitle('بيانات المركبة', 'Vehicle Information')}
     <div class="info-grid">
       <div class="info-row">${lbl('نوع المركبة:', 'Vehicle')}<span class="value">${escapeHtml(data.vehicleType)} ${escapeHtml(data.model || '')}</span></div>
@@ -2063,7 +2065,7 @@ export function getVehicleDeliveryReceiptHtml(data: VehicleDeliveryReceiptData):
       <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${escapeHtml(data.customerName)}</span></div>
       <div class="info-row">${lbl('هاتف العميل:', 'Phone')}<span class="value">${escapeHtml(data.customerPhone || '-')}</span></div>
       <div class="info-row">${lbl('صفة المستلم:', 'Recipient Type')}<span class="value">${escapeHtml(recipientType)}</span></div>
-      <div class="info-row">${lbl('اسم المستلم:', 'Receiver')}<span class="value">${escapeHtml(data.receiverName || data.customerName)}</span></div>
+      <div class="info-row">${lbl('اسم المستلم:', 'Receiver')}<span class="value">${escapeHtml((data.receiverName ?? data.customerName) || '—')}</span></div>
       <div class="info-row">${lbl('هاتف المستلم:', 'Receiver Phone')}<span class="value">${escapeHtml(data.receiverPhone || data.customerPhone || '-')}</span></div>
       <div class="info-row">${lbl('رقم هوية المستلم:', 'Receiver ID')}<span class="value">${escapeHtml(data.receiverIdNumber || '-')}</span></div>
       <div class="info-row">${lbl('العلاقة/الصفة:', 'Relationship')}<span class="value">${escapeHtml(data.receiverRelationship || '-')}</span></div>

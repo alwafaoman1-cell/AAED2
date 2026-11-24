@@ -38,6 +38,9 @@ import { toE164 } from "@/lib/phoneUtils";
 import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { parseMoneyInput } from "@/lib/formatters/numberFormat";
 import { markClean, markDirty } from "@/lib/unsavedWork";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
+import { readWorkflowRequirementPolicy } from "@/lib/workflowRequirements";
+import WorkflowRequirementsBanner from "@/components/WorkflowRequirementsBanner";
 
 // إنشاء/ربط المركبة يتم مركزياً داخل useCreateClaim
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ أنواع داخلية â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -113,7 +116,8 @@ async function resolveTenantForClaim(): Promise<string> {
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ المكون الرئيسي â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function NewInsuranceClaim() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { requirementsEnabled, policy: workflowPolicy } = useWorkflowRequirements();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [params] = useSearchParams();
@@ -271,18 +275,20 @@ export default function NewInsuranceClaim() {
   const finalWithVat = finalEstimate + vatAmount;
 
   // â”€â”€ تحقق من كل خطوة â”€â”€
-  const stepValid = (s: Step): boolean => {
+  const stepValid = (s: Step, enforce = requirementsEnabled): boolean => {
     switch (s) {
       case 0: return !!draft.company.trim() && !!draft.claimNumber.trim();
       // يكفي إدخال بيانات السيارة الأساسية يدوياً (ستُنشأ المركبة تلقائياً عند الحفظ)
       case 1: return !!(
         draft.vehicleMake.trim() &&
-        draft.vehicleModel.trim() &&
+        (!enforce || draft.vehicleModel.trim()) &&
         draft.vehiclePlate.trim() &&
         (draft.customerId || draft.ownerName.trim())
       );
-      case 2: return !!draft.incidentDate;
-      case 3: return draft.estimationType === "upl" ? draft.uplItems.length > 0 && uplTotal > 0 : parseMoneyInput(draft.estimatedCost) > 0;
+      case 2: return !enforce || !!draft.incidentDate;
+      case 3: return enforce
+        ? (draft.estimationType === "upl" ? draft.uplItems.length > 0 && uplTotal > 0 : parseMoneyInput(draft.estimatedCost) > 0)
+        : Number.isFinite(finalEstimate) && finalEstimate >= 0 && draft.uplItems.every(item => Number(item.quantity) >= 0 && Number(item.unit_price) >= 0);
       case 4: return true;
       default: return false;
     }
@@ -292,7 +298,8 @@ export default function NewInsuranceClaim() {
   const allValid = stepValid(0) && stepValid(1) && stepValid(2) && stepValid(3);
 
   // رسالة توضيحية تشرح سبب عدم اكتمال خطوة معينة
-  const stepMissingMsg = (s: Step): string | null => {
+  const stepMissingMsg = (s: Step, enforce = requirementsEnabled): string | null => {
+    if (!enforce && (s === 2 || s === 3) && stepValid(s, enforce)) return null;
     switch (s) {
       case 0: {
         const miss: string[] = [];
@@ -303,7 +310,7 @@ export default function NewInsuranceClaim() {
       case 1: {
         const miss: string[] = [];
         if (!draft.vehicleMake.trim()) miss.push("الماركة");
-        if (!draft.vehicleModel.trim()) miss.push("الموديل");
+        if (enforce && !draft.vehicleModel.trim()) miss.push("الموديل");
         if (!draft.vehiclePlate.trim()) miss.push("رقم اللوحة");
         if (!draft.customerId && !draft.ownerName.trim()) miss.push("اسم المالك أو اختيار عميل موجود");
         return miss.length ? `أكمل بيانات السيارة والمالك: ${miss.join("، ")}` : null;
@@ -353,6 +360,14 @@ export default function NewInsuranceClaim() {
     }
     setSubmitting(true);
     try {
+      let requirementRevision = workflowPolicy?.revision ?? 0;
+      if (!requirementsEnabled) {
+        const policy = await readWorkflowRequirementPolicy(await resolveTenantForClaim());
+        requirementRevision = policy.revision;
+        if ([0, 1, 2, 3].some(s => !stepValid(s as Step, policy.requirements_enabled))) {
+          throw new Error(i18n.language.startsWith("ar") ? "تغيّرت شروط سير العمل. راجع البيانات المطلوبة وأعد المحاولة." : "Workflow requirements changed. Review the required data and retry.");
+        }
+      }
       const tenantId = await resolveTenantForClaim();
       if (!tenantId) throw new Error("لا يمكن تحديد المستأجر");
 
@@ -510,6 +525,7 @@ export default function NewInsuranceClaim() {
         customer_id: customerId!,
         vehicle_id: vehicleId,
         claim_number: draft.claimNumber.trim(),
+        workflow_requirement_revision: requirementRevision,
         insurance_company: draft.company.trim(),
         insurance_company_id: companyId && isUuid(companyId) ? companyId : null,
         insurance_employee_id: draft.insuranceEmployeeId && isUuid(draft.insuranceEmployeeId) ? draft.insuranceEmployeeId : null,
@@ -567,6 +583,10 @@ export default function NewInsuranceClaim() {
         navigate("/insurance/list");
       }
     } catch (e: any) {
+      if (String(e?.message || "").includes("WORKFLOW_CLAIM_FORM_DETAILS_REQUIRED")) {
+        toast.error(i18n.language.startsWith("ar") ? "أُعيد تفعيل الشروط أثناء الحفظ. أكمل الموديل وتاريخ التقدير والمبلغ ثم أعد المحاولة." : "Requirements were restored while saving. Complete the model, estimate date and amount, then retry.");
+        return;
+      }
       if (e?.message === "claim_number_exists" && e?.existingClaimId) {
         const shouldOpen = window.confirm(
           e?.existingClaimInactive
@@ -591,6 +611,7 @@ export default function NewInsuranceClaim() {
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ العرض â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <div className="space-y-4 md:space-y-6">
+      <WorkflowRequirementsBanner requirementsEnabled={requirementsEnabled} policy={workflowPolicy} />
       {/* العنوان */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>

@@ -20,15 +20,16 @@ describe("project-bound OCR rollout", () => {
   });
 
   it("keeps the parser revision scoped to an immutable version across queue and RLS", () => {
-    const sql = readFileSync(new URL("../../supabase/migrations/20261021075356_document_vehicle_entry_gate_pass_detection.sql", import.meta.url), "utf8");
-    expect(DOCUMENT_ENGINE_VERSION).toBe("1.0.5");
-    expect(VEHICLE_ENTRY_AUTO_ENGINE_VERSION).toBe("1.0.6");
+    const sql = readFileSync(new URL("../../supabase/migrations/20261124102637_document_english_only_extraction_policy.sql", import.meta.url), "utf8");
+    expect(DOCUMENT_ENGINE_VERSION).toBe("1.0.7-en");
+    expect(VEHICLE_ENTRY_AUTO_ENGINE_VERSION).toBe("1.0.7-en");
     expect(sql).toContain("document_worker_file_read");
     expect(sql).toContain("document_worker_extraction_update");
     expect(sql).toContain("document_worker_page_insert");
     expect(sql).toContain("document_worker_write_guard()");
     expect(sql).toContain("document_enqueue_processing(p_file_id uuid, p_engine_version text)");
-    expect(sql.match(/'1\.0\.6-worker'/g)?.length).toBeGreaterThanOrEqual(7);
+    expect(sql.match(/'1\.0\.7-en-worker'/g)?.length).toBeGreaterThanOrEqual(7);
+    expect(sql).toContain("'1.0.6-worker'");
     expect(sql).toContain("'1.0.5-worker'");
     expect(sql).toContain("'1.0.4-worker'");
     expect(sql).toContain("'1.0.3-worker'");
@@ -39,8 +40,8 @@ describe("project-bound OCR rollout", () => {
     const dockerfile = readFileSync(new URL("../../services/document-ocr/Dockerfile", import.meta.url), "utf8");
     expect(dockerfile).toMatch(/\blibgl1\b/);
     expect(dockerfile).toContain("USER worker");
-    expect(dockerfile).toContain("PaddleProvider()");
-    expect(dockerfile).toContain("warm_arabic_model");
+    expect(dockerfile).toContain("PaddleEnglishProvider()");
+    expect(dockerfile).not.toContain("warm_arabic_model");
   });
 
   it("keeps both switches off and rejects mismatched projects", () => {

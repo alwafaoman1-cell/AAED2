@@ -11,6 +11,9 @@ import { isClosingStatus } from "@/components/workorders/workOrderClosingStatus"
 import { buildCustomerPortalUrl } from "@/lib/customerPortalTokens";
 import { useWorkOrderPortalToken } from "@/hooks/useWorkOrderPortalToken";
 import { useTranslation } from "react-i18next";
+import { useWorkflowRequirements } from "@/hooks/useWorkflowRequirements";
+import { readWorkflowRequirementPolicy } from "@/lib/workflowRequirements";
+import { getCurrentTenantId } from "@/lib/cloud/createCloudStore";
 import { uploadStagePhoto } from "@/lib/workOrderPhotosStorage";
 
 interface Props {
@@ -106,6 +109,7 @@ function defaultMessage(status: string, customer: string, orderNo: string): stri
 }
 
 export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloudJobOrderId, onUpdated, onRequestHandover }: Props) {
+  const { requirementsEnabled } = useWorkflowRequirements();
   const [selected, setSelected] = useState<string>(order?.status || "");
   const [message, setMessage] = useState("");
   const [pendingPhotos, setPendingPhotos] = useState<StagePhoto[]>([]);
@@ -147,7 +151,7 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
   const currentIdx = WORK_ORDER_STATUSES.indexOf(normalizedOrderStatus);
   const statusChanged = selected && selected !== normalizedOrderStatus;
   const hasPhotos = pendingPhotos.length > 0;
-  const requiresClosingReview = !!statusChanged && isClosingStatus(selected);
+  const requiresClosingReview = requirementsEnabled && !!statusChanged && isClosingStatus(selected);
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -195,7 +199,10 @@ export default function WorkOrderStatusDialog({ order, open, onOpenChange, cloud
     }
     const patch: Partial<WorkOrder> = {};
     if (statusChanged) patch.status = normalizeWorkOrderStatus(selected);
-    if (requiresClosingReview) {
+    const tenantId = await getCurrentTenantId();
+    if (!tenantId) throw new Error("TENANT_NOT_FOUND");
+    const policy = await readWorkflowRequirementPolicy(tenantId);
+    if (policy.requirements_enabled && statusChanged && isClosingStatus(selected)) {
       if (!closingReview) {
         toast.error("يجب اعتماد Work Order Closing Review قبل حفظ الحالة النهائية.");
         return false;

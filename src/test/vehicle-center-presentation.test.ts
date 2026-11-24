@@ -36,4 +36,11 @@ describe("vehicle center presentation (read-only affordances)", () => {
     expect(action(row("ready"), "in_workshop", role("technician")).request).toBeUndefined();
     expect(action(row("approved", { _reviewReason: "custody_conflict" }), "in_workshop", manager).request).toBeUndefined();
   });
+  it("offers audited progression for a pending claim in exception mode without changing its actual status", () => {
+    const pending = row("arrived", { claim: { status: "pending" } });
+    expect(action(pending, "in_workshop", manager, false)).toEqual({ label: "approveVisit", request: { intent: "next", expectedStage: "arrived" } });
+    expect(pending.claim?.status).toBe("pending");
+    expect(action(pending, "in_workshop", role("technician"), false).request).toBeUndefined();
+    expect(action(row("delivered"), "delivered", manager, false).request).toBeUndefined();
+  });
 });

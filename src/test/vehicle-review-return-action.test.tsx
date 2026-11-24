@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({ rpc: vi.fn(), single: vi.fn(), navigate: vi.fn
 vi.mock("react-router-dom", () => ({ useNavigate: () => mocks.navigate }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", dir: () => "ltr" } }) }));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ hasRole: () => true }) }));
+vi.mock("@/hooks/useWorkflowRequirements", () => ({ useWorkflowRequirements: () => ({ requirementsEnabled: true }) }));
 vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error } }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: mocks.rpc, from: () => ({ select: () => ({ eq: () => ({ single: mocks.single }) }) }) } }));
 import { VehicleReviewReturnAction } from "@/components/vehicle-entry/VehicleReviewReturnAction";

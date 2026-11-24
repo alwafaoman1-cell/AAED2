@@ -1,5 +1,6 @@
 import type { DocumentPage, SourceSegment } from "./types";
 import type Tesseract from "tesseract.js";
+import { englishDocumentPages } from "./languagePolicy";
 
 export interface OcrInput {
   blob: Blob;
@@ -60,10 +61,10 @@ function referenceWordSegments(blocks: Tesseract.Page["blocks"]): SourceSegment[
 }
 
 /** One WASM worker per document. Models download only; document bytes stay in the browser. */
-export async function createBrowserOcrProvider(): Promise<OcrProvider> {
+export async function createBrowserOcrProvider(englishOnly = false): Promise<OcrProvider> {
   const { createWorker } = await import("tesseract.js");
   let reportProgress: ((percent: number) => void) | undefined;
-  const worker = await createWorker("ara+eng", 1, {
+  const worker = await createWorker(englishOnly ? "eng" : "ara+eng", 1, {
     logger: (message) => {
       if (message.status === "recognizing text" && typeof message.progress === "number") {
         reportProgress?.(Math.round(message.progress * 100));
@@ -80,7 +81,7 @@ export async function createBrowserOcrProvider(): Promise<OcrProvider> {
         // The mixed-script model often retains the Arabic label but drops the
         // Latin C/... value. Re-read only when a real label is present, and
         // accept a complete high-confidence reference on that physical row.
-        if (segments.some((segment) => segment.text.includes("رقم المطالبة")) && !CLAIM_REFERENCE.test(text)) {
+        if (!englishOnly && segments.some((segment) => segment.text.includes("رقم المطالبة")) && !CLAIM_REFERENCE.test(text)) {
           try {
             await worker.reinitialize("eng");
             const secondary = await worker.recognize(input.blob, {}, { blocks: true });
@@ -89,7 +90,7 @@ export async function createBrowserOcrProvider(): Promise<OcrProvider> {
           } catch { /* The primary Arabic result remains available for review. */ }
           finally { await worker.reinitialize("ara+eng"); }
         }
-        return {
+        const page: DocumentPage = {
           number: input.page,
           text,
           method: "ocr",
@@ -98,6 +99,7 @@ export async function createBrowserOcrProvider(): Promise<OcrProvider> {
           height: input.height,
           segments,
         };
+        return englishOnly ? englishDocumentPages([page])[0] : page;
       } finally {
         reportProgress = undefined;
       }

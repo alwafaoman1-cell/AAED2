@@ -2,6 +2,7 @@
 // extracted by the `ai-extract-data` Edge Function.
 // PDFs are rendered to JPEG pages client-side using pdfjs-dist.
 import { supabase } from "@/integrations/supabase/client";
+import { englishOnlyValue } from "@/lib/documentExtraction/languagePolicy";
 import * as pdfjsLib from "pdfjs-dist";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - worker is loaded as URL by Vite.
@@ -49,14 +50,14 @@ function validateExtractedData(schema: ExtractSchema, data: unknown): Record<str
   const raw = data as Record<string, unknown>;
   if (schema !== "insurance_claim") {
     return Object.fromEntries(
-      Object.entries(raw).map(([key, value]) => [key, value == null ? "" : String(value)])
+      Object.entries(raw).map(([key, value]) => [key, englishOnlyValue(value)])
     );
   }
 
   const out: Record<string, string> = {};
   for (const key of INSURANCE_CLAIM_FIELDS) {
     const value = raw[key];
-    out[key] = value == null ? "" : String(value).trim();
+    out[key] = englishOnlyValue(value);
   }
 
   if (!INSURANCE_CLAIM_FIELDS.some((key) => out[key])) {
