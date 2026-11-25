@@ -109,6 +109,25 @@ beforeEach(() => {
 afterEach(() => { cleanup(); for (const client of clients.splice(0)) client.clear(); vi.restoreAllMocks(); });
 
 describe("vehicle customer WhatsApp center", () => {
+  it("blocks preview on a context permission error and recovers after refreshing without sending", async () => {
+    api.load.mockRejectedValueOnce({ code: "42501", message: "permission denied for table vehicle_entry_custody_receipts" });
+    renderCenter();
+    expect(await screen.findByRole("alert")).toHaveTextContent("The current customer or visit could not be verified.");
+    expect(screen.getByRole("button", { name: "Prepare preview" })).toBeDisabled();
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.send).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
+    await loaded();
+    expect(api.load).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    const body = await preparePreview();
+    expect(body).toHaveValue(makeDraft(context).body);
+    expect(screen.getByRole("button", { name: "Send WhatsApp message" })).toBeDisabled();
+    await review();
+    expect(screen.getByRole("button", { name: "Send WhatsApp message" })).toBeEnabled();
+    expect(api.send).not.toHaveBeenCalled(); expect(api.clipboard).not.toHaveBeenCalled();
+  });
+
   it("does not read, prepare or send while closed or when the role is not allowed", async () => {
     const view = renderCenter({ open: false });
     expect(screen.queryByRole("dialog")).toBeNull();

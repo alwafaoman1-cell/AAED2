@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn(), tenant: vi.fn(), visit: vi.fn(), portal: vi.fn(), ensure: vi.fn(), release: vi.fn(), review: vi.fn(), send: vi.fn(), queries: [] as Array<{ table: string; calls: Array<[string, ...unknown[]]> }> }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn(), tenant: vi.fn(), visit: vi.fn(), custody: vi.fn(), portal: vi.fn(), ensure: vi.fn(), release: vi.fn(), review: vi.fn(), send: vi.fn(), queries: [] as Array<{ table: string; calls: Array<[string, ...unknown[]]> }> }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { from: mocks.from, auth: { getUser: mocks.getUser } } }));
 vi.mock("@/lib/cloud/createCloudStore", () => ({ getCurrentTenantId: mocks.tenant }));
 vi.mock("@/lib/vehicleVisitLifecycle", () => ({ getVehicleVisitDetail: mocks.visit }));
 vi.mock("@/lib/vehicleEntryService", () => ({ getVehicleEntryPresence: (entry: any) => entry.vehicle_location === "داخل الورشة" ? "in_workshop" : entry.vehicle_location === "مع العميل" ? "with_customer" : "needs_review" }));
 vi.mock("@/lib/vehicleReviewVisit", () => ({ isVehicleReviewVisit: (entry: any) => Boolean(entry.vehicle_condition?.review_return?.source_handover_id), getReviewVisitContext: mocks.review }));
 vi.mock("@/lib/vehicleInspectionRelease", () => ({ getInspectionReleaseById: mocks.release, inspectionReleaseMissingFields: (form: any) => form.complete === false ? ["pending_action"] : [] }));
+vi.mock("@/lib/vehicleIntakeReceipt", () => ({ getIntakeReceiptContext: mocks.custody }));
 vi.mock("@/lib/unifiedVehiclePortal", () => ({ getVehicleCustomerPortalContext: mocks.portal, ensureVehicleCustomerPortal: mocks.ensure, buildUnifiedVehiclePortalUrl: (token: string) => `https://example.invalid/customer/vehicle/${token}` }));
 vi.mock("@/lib/systemPreferences", () => ({ readSystemPreferences: async () => ({ defaultCountryCode: "968" }) }));
 vi.mock("@/lib/messaging/messagingService", () => ({ sendUnifiedMessage: mocks.send }));
@@ -15,13 +16,17 @@ import { CUSTOMER_MESSAGE_KINDS, listVehicleCustomerMessageLogs, loadVehicleCust
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const tenant = id(1), entryId = id(2), customerId = id(3), vehicleId = id(4), claimId = id(5), orderId = id(6), actorId = id(7);
 let entry: any, customer: any, claim: any, order: any, profile: any, visit: any, portal: any;
-let signatures: any[], frozen: any, receipts: any[], orderToken: any, legacy: any[], logs: any[];
+let signatures: any[], receipts: any[], orderToken: any, legacy: any[], logs: any[];
 function query(table: string) {
+  // Actual Production grants deny these SELECTs even for staff. Test doubles
+  // must not fabricate access that only the canonical metadata RPC provides.
+  if (["vehicle_entry_signed_revisions", "vehicle_entry_custody_receipts"].includes(table)) {
+    throw Object.assign(new Error("permission denied for protected custody table"), { code: "42501" });
+  }
   const captured = { table, calls: [] as Array<[string, ...unknown[]]> }; mocks.queries.push(captured);
   const q: any = { then: (resolve: (value: unknown) => unknown) => {
     const data = table === "profiles" ? profile : table === "customers" ? customer : table === "insurance_claims" ? claim
-      : table === "job_orders" ? order : table === "vehicle_entry_signatures" ? signatures : table === "vehicle_entry_signed_revisions" ? frozen
-        : table === "vehicle_entry_custody_receipts" ? receipts : table === "customer_portal_tokens" ? orderToken
+      : table === "job_orders" ? order : table === "vehicle_entry_signatures" ? signatures : table === "customer_portal_tokens" ? orderToken
           : table === "customer_notifications" ? legacy : table === "message_logs" ? logs : null;
     return Promise.resolve(resolve({ data, error: null }));
   } };
@@ -42,15 +47,16 @@ beforeEach(() => {
   visit = { entry, stage: "in_progress", operationalStage: "in_progress", reviewReason: null, hasFinalHandover: false,
     workflow: { stage: "in_progress", revision: 5, changed_at: "2026-11-17T08:00:00Z" }, releases: [], handovers: [] };
   portal = { token: "canonical-protected-token", enabled: true, expires_at: null, pending_handover_id: null };
-  signatures = []; frozen = null; receipts = []; orderToken = null; legacy = []; logs = [];
+  signatures = []; receipts = []; orderToken = null; legacy = []; logs = [];
   mocks.from.mockImplementation(query);
   mocks.getUser.mockResolvedValue({ data: { user: { id: actorId } }, error: null }); mocks.tenant.mockResolvedValue(tenant);
   mocks.visit.mockImplementation(async () => clone(visit)); mocks.portal.mockImplementation(async () => clone(portal));
+  mocks.custody.mockReset().mockImplementation(async () => ({ entry_id: entry.id, revision: entry.intake_revision, required: entry.custody_receipt_required !== false, receipts: clone(receipts) }));
   mocks.ensure.mockImplementation(async () => { portal = { token: "prepared-on-explicit-request", enabled: true, expires_at: null }; return clone(portal); });
   mocks.send.mockResolvedValue({ ok: true, status: "queued", logId: id(90) }); mocks.review.mockResolvedValue(null);
 });
 async function context() { return loadVehicleCustomerMessageContext(entryId, tenant); }
-function signed() { signatures = [{ id: id(20), intake_revision: 4 }]; frozen = { id: id(21), signature_id: id(20), revision: 4 }; receipts = [{ id: id(22), signature_id: id(20), revision_id: id(21), status: "issued" }]; }
+function signed() { signatures = [{ id: id(20), intake_revision: entry.intake_revision }]; receipts = [{ id: id(22), receipt_number: "VIR-TEST-1", revision: entry.intake_revision, status: "issued", issued_at: "2026-11-17T07:00:00Z", signer_name: "Saved intake signer" }]; }
 function delivered() { visit.stage = "delivered"; visit.workflow.stage = "delivered"; entry.vehicle_location = "مع العميل"; order.status = "delivered"; visit.hasFinalHandover = true; visit.handovers = [{ id: id(30), work_order_id: orderId, status: "finalized", finalized_at: "2026-11-17T10:00:00Z" }]; }
 
 describe("customer vehicle message center: canonical context and bounded reads", () => {
@@ -60,7 +66,58 @@ describe("customer vehicle message center: canonical context and bounded reads",
     expect(mocks.ensure).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled(); expect(mocks.release).not.toHaveBeenCalled();
     expect(mocks.queries.flatMap(row => row.calls).some(([method]) => ["insert", "update", "delete", "upsert"].includes(method))).toBe(false);
     expect(mocks.queries.find(row => row.table === "vehicle_entry_signatures")?.calls).toContainEqual(["select", "id,intake_revision,created_at"]);
-    expect(mocks.queries.find(row => row.table === "vehicle_entry_custody_receipts")?.calls).toContainEqual(["order", "issued_at", { ascending: false }]);
+    expect(mocks.custody).toHaveBeenCalledExactlyOnceWith(entryId);
+    expect(mocks.from.mock.calls.some(([table]) => ["vehicle_entry_signed_revisions", "vehicle_entry_custody_receipts"].includes(table))).toBe(false);
+  });
+  it.each(["issued", "used"])("loads a signed visit from authorized %s receipt metadata while private SELECTs remain forbidden", async status => {
+    signed(); receipts[0].status = status;
+    const current = await context();
+    expect(current).toMatchObject({ intakeSigned: true, intakeDocumentAvailable: true, intakeRevision: 4, signatureId: id(20), receiptId: id(22) });
+    expect(mocks.custody).toHaveBeenCalledExactlyOnceWith(entryId);
+    // The actual RPC exposes joined metadata, never signature_id/revision_id
+    // or a frozen document. A successful read must work with that exact DTO.
+    expect(receipts[0]).not.toHaveProperty("signature_id"); expect(receipts[0]).not.toHaveProperty("revision_id");
+    expect(mocks.from.mock.calls.some(([table]) => ["vehicle_entry_signed_revisions", "vehicle_entry_custody_receipts"].includes(table))).toBe(false);
+    expect(mocks.ensure).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.release).not.toHaveBeenCalled();
+  });
+  it.each(["42501", "P0001", "PGRST202"])("keeps a real custody metadata RPC failure closed (%s) without creating a link or sending", async code => {
+    const failure = Object.assign(new Error(code === "P0001" ? "CUSTODY_FORBIDDEN" : "custody metadata unavailable"), { code });
+    mocks.custody.mockRejectedValue(failure);
+    await expect(context()).rejects.toBe(failure);
+    await expect(prepareVehicleCustomerMessage(entryId, "portal", "en", tenant)).rejects.toBe(failure);
+    expect(mocks.ensure).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.queries.flatMap(row => row.calls).some(([method]) => ["insert", "update", "delete", "upsert"].includes(method))).toBe(false);
+  });
+  it.each([
+    ["wrong entry", (value: any) => { value.entry_id = id(99); }],
+    ["missing receipts", (value: any) => { delete value.receipts; }],
+    ["invalid receipt id", (value: any) => { value.receipts[0].id = "not-a-uuid"; }],
+    ["invalid receipt revision", (value: any) => { value.receipts[0].revision = 0; }],
+    ["unknown receipt status", (value: any) => { value.receipts[0].status = "unexpected"; }],
+    ["duplicate receipt ids", (value: any) => { value.receipts.push({ ...value.receipts[0] }); }],
+  ])("rejects contradictory custody metadata: %s", async (_name, change) => {
+    signed(); const metadata = { entry_id: entryId, revision: 4, required: true, receipts: clone(receipts) };
+    change(metadata); mocks.custody.mockResolvedValueOnce(metadata);
+    await expect(context()).rejects.toMatchObject({ code: "CUSTOMER_MESSAGE_CONFLICT" });
+    expect(mocks.ensure).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it.each(["revision", "required"])("rejects a changed custody %s snapshot", async field => {
+    entry.custody_receipt_required = true;
+    mocks.custody.mockResolvedValueOnce({ entry_id: entryId, revision: field === "revision" ? 5 : 4, required: field !== "required", receipts: [] });
+    await expect(context()).rejects.toMatchObject({ code: "CUSTOMER_MESSAGE_STALE" });
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it("does not accept a current receipt backed only by a signature from an older revision", async () => {
+    signed(); signatures[0].intake_revision = 3;
+    await expect(context()).rejects.toMatchObject({ code: "CUSTOMER_MESSAGE_STALE" });
+    expect(mocks.send).not.toHaveBeenCalled(); expect(mocks.ensure).not.toHaveBeenCalled();
+  });
+  it("rejects two current signatures or two active receipts instead of guessing", async () => {
+    signed(); signatures.push({ id: id(23), intake_revision: 4 });
+    await expect(context()).rejects.toMatchObject({ code: "CUSTOMER_MESSAGE_CONFLICT" });
+    signatures.pop(); receipts.push({ ...receipts[0], id: id(24), receipt_number: "VIR-TEST-2", status: "used" });
+    await expect(context()).rejects.toMatchObject({ code: "CUSTOMER_MESSAGE_CONFLICT" });
   });
   it("never substitutes historical owner/snapshot contact for a deleted canonical visit customer", async () => {
     customer = null; await expect(context()).rejects.toMatchObject({ code: "CUSTOMER_MESSAGE_CUSTOMER_UNAVAILABLE" }); expect(mocks.ensure).not.toHaveBeenCalled();
@@ -103,13 +160,19 @@ describe("customer message case eligibility and protected portal", () => {
     expect(vehicleCustomerMessageAvailability(unsigned, "intake_documents").reason).toBe("DOCUMENT_REQUIRED");
     signed(); const current = await context(); expect(vehicleCustomerMessageAvailability(current, "intake_signature").reason).toBe("ALREADY_SIGNED");
     expect(vehicleCustomerMessageAvailability(current, "intake_documents").available).toBe(true);
-    receipts[0].signature_id = id(99); expect((await context()).intakeDocumentAvailable).toBe(false);
+    receipts[0].revision = 3; expect((await context()).intakeDocumentAvailable).toBe(false);
   });
   it("does not copy legacy ink into new revision or promise missing frozen documents", async () => {
     entry.intake_revision = 1; entry.custody_receipt_required = false; signatures = [{ id: id(20), intake_revision: null }];
     const current = await context(); expect(current.intakeSigned).toBe(true); expect(current.intakeDocumentAvailable).toBe(false);
     expect(vehicleCustomerMessageAvailability(current, "intake_signature").reason).toBe("ALREADY_SIGNED");
     entry.intake_revision = 2; expect((await context()).intakeSigned).toBe(false);
+  });
+  it.each(["draft", "cancelled", "replaced"])("retains a %s receipt as history without treating it as a current document", async status => {
+    signed(); receipts[0].status = status;
+    const current = await context();
+    expect(current.intakeSigned).toBe(true); expect(current.intakeDocumentAvailable).toBe(false); expect(current.receiptId).toBeNull();
+    expect(vehicleCustomerMessageAvailability(current, "intake_documents").reason).toBe("DOCUMENT_REQUIRED");
   });
   it("blocks drafts, cancelled visits and approval based only on a historical timestamp", async () => {
     entry.status = "Draft"; expect(vehicleCustomerMessageAvailability(await context(), "portal").reason).toBe("DRAFT");

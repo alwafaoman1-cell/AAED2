@@ -5,6 +5,7 @@ import { getVehicleEntryPresence } from "@/lib/vehicleEntryService";
 import { hasConfirmedVehicleEntryWorkOrderLink } from "@/lib/vehicleEntryWorkOrderLink";
 import { getReviewVisitContext, isVehicleReviewVisit } from "@/lib/vehicleReviewVisit";
 import { getInspectionReleaseById, inspectionReleaseMissingFields } from "@/lib/vehicleInspectionRelease";
+import { getIntakeReceiptContext } from "@/lib/vehicleIntakeReceipt";
 import { buildCustomerPortalInvitation } from "@/lib/customerPortalInvitation";
 import { buildUnifiedVehiclePortalUrl, ensureVehicleCustomerPortal, getVehicleCustomerPortalContext, type StaffVehiclePortalContext } from "@/lib/unifiedVehiclePortal";
 import { normalizePhone } from "@/lib/phoneUtils";
@@ -112,21 +113,32 @@ export async function loadVehicleCustomerMessageContext(entryId: string, expecte
   if (presence !== "in_workshop" && presence !== "with_customer") fail("CONFLICT");
   const revision = entry.intake_revision;
   if (!Number.isSafeInteger(revision) || revision < 1) fail("CONFLICT");
-  const [signatures, frozen, receipts, portal, orderToken] = await Promise.all([
+  const [signatures, receiptContext, portal, orderToken] = await Promise.all([
     supabase.from("vehicle_entry_signatures" as any).select("id,intake_revision,created_at").eq("tenant_id", actor.tenantId).eq("vehicle_entry_id", entryId).eq("signature_role", "delivered_by").order("created_at", { ascending: false }).limit(100),
-    supabase.from("vehicle_entry_signed_revisions" as any).select("id,signature_id,revision").eq("tenant_id", actor.tenantId).eq("vehicle_entry_id", entryId).eq("revision", revision).maybeSingle(),
-    supabase.from("vehicle_entry_custody_receipts" as any).select("id,signature_id,revision_id,status").eq("tenant_id", actor.tenantId).eq("vehicle_entry_id", entryId).eq("vehicle_id", entry.vehicle_id).order("issued_at", { ascending: false }).limit(100),
+    getIntakeReceiptContext(entryId),
     getVehicleCustomerPortalContext(entryId),
     workOrderId ? supabase.from("customer_portal_tokens" as any).select("id,signed_at,revoked_at").eq("tenant_id", actor.tenantId).eq("job_order_id", workOrderId).maybeSingle() : Promise.resolve({ data: null, error: null }),
   ]);
-  for (const result of [signatures, frozen, receipts, orderToken]) if (result.error) throw result.error;
+  for (const result of [signatures, orderToken]) if (result.error) throw result.error;
+  // These custody tables deliberately have no browser SELECT grant. Their
+  // stable context RPC authorizes the tenant/entry and joins the unique frozen
+  // revision to its signature without opening a document or logging a view.
+  if (!receiptContext || receiptContext.entry_id !== entryId || !Number.isSafeInteger(receiptContext.revision)
+    || typeof receiptContext.required !== "boolean" || !Array.isArray(receiptContext.receipts)) fail("CONFLICT");
+  if (receiptContext.revision !== revision
+    || typeof entry.custody_receipt_required === "boolean" && receiptContext.required !== entry.custody_receipt_required) fail("STALE");
+  if (receiptContext.receipts.some(row => !row || !isUuid(row.id) || !Number.isSafeInteger(row.revision) || row.revision < 1
+    || !["draft", "issued", "used", "cancelled", "replaced"].includes(row.status))
+    || new Set(receiptContext.receipts.map(row => row.id)).size !== receiptContext.receipts.length) fail("CONFLICT");
   const current = ((signatures.data || []) as Row[]).filter(row => row.intake_revision === revision);
-  if (current.length > 1) fail("CONFLICT");
+  if (current.length > 1 || current.some(row => !isUuid(row.id))) fail("CONFLICT");
   const legacy = entry.custody_receipt_required === false && revision === 1 ? ((signatures.data || []) as Row[]).find(row => row.intake_revision == null) : null;
+  if (legacy && !isUuid(legacy.id)) fail("CONFLICT");
   const signature = current[0] || legacy || null;
-  const frozenRow = frozen.data as Row | null;
-  const receipt = frozenRow && current[0] && frozenRow.signature_id === current[0].id
-    ? ((receipts.data || []) as Row[]).find(row => row.revision_id === frozenRow.id && row.signature_id === current[0].id && ["issued", "used"].includes(row.status)) : null;
+  const currentReceipts = receiptContext.receipts.filter(row => row.revision === revision && ["issued", "used"].includes(row.status));
+  if (currentReceipts.length > 1) fail("CONFLICT");
+  if (currentReceipts.length && !current[0]) fail("STALE");
+  const receipt = current[0] ? currentReceipts[0] || null : null;
   const pendingReleases = (visit.releases || []).filter(row => ["draft", "awaiting_signature"].includes(row.status) && !row.returned_at);
   const signedReleases = (visit.releases || []).filter(row => row.status === "signed" && row.released_at && !row.returned_at);
   if (pendingReleases.length > 1 || signedReleases.length > 1) fail("CONFLICT");
