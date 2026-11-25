@@ -103,6 +103,11 @@ const PDF_EXPORT_CSS = `
     break-inside:avoid!important;
     page-break-inside:avoid!important;
   }
+  /* The canonical intake form already reserves its compact footer spacing.
+     The generic 7mm gap can push that footer alone onto an extra A4 page. */
+  html.pdf-export .page[data-pdf-fixed-form="vehicle-entry"] .footer{
+    margin-top:1.2mm!important;
+  }
   html.pdf-export .pdf-signature-stamp,
   html.pdf-export .signatures,
   html.pdf-export .signature-area,

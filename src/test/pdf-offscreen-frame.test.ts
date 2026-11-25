@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ capture: vi.fn(), addImage: vi.fn(), output: vi.fn() }));
+const mocks = vi.hoisted(() => ({ capture: vi.fn(), addImage: vi.fn(), output: vi.fn(), paginate: vi.fn() }));
 vi.mock("html2canvas", () => ({ default: mocks.capture }));
 vi.mock("jspdf", () => ({ default: class {
   internal = { pageSize: { getWidth: () => 210, getHeight: () => 297 } };
@@ -11,7 +11,7 @@ vi.mock("jspdf", () => ({ default: class {
   output = mocks.output;
 } }));
 vi.mock("@/lib/pdfLayoutSettings", () => ({ buildHtmlWithPageMarginStyle: (s: string) => s, injectPageMarginStyle: vi.fn() }));
-vi.mock("@/lib/pdfDocumentRenderer", () => ({ preparePagedPdfDocument: vi.fn(), waitForPdfAssets: vi.fn(async () => {}) }));
+vi.mock("@/lib/pdfDocumentRenderer", () => ({ preparePagedPdfDocument: mocks.paginate, waitForPdfAssets: vi.fn(async () => {}) }));
 import { generatePdfFromHtml } from "@/lib/htmlToPdf";
 
 const pausedFrameRaf = vi.fn(() => 7);
@@ -49,6 +49,7 @@ function mockCssConnectedFonts(ready: Promise<void>, nativeReplacement = true) {
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks();
+  mocks.paginate.mockReset();
   autoLoadFrames = true;
   const append = document.body.appendChild.bind(document.body);
   vi.spyOn(document.body, "appendChild").mockImplementation((node) => {
@@ -71,6 +72,34 @@ beforeEach(() => {
 afterEach(() => { document.body.replaceChildren(); restoreFonts(); restoreFonts = () => {}; vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("offscreen PDF rendering", () => {
+  it.each([
+    ['data-pdf-fixed-form="vehicle-entry"', "1.2mm"],
+    ["", "7mm"],
+    ['data-pdf-fixed-form="another-form"', "7mm"],
+  ])("preserves the intake footer gap only for its existing fixed-form marker (%s)", async (marker, expectedGap) => {
+    let inspected = false;
+    mocks.paginate.mockImplementationOnce((doc: Document) => {
+      const page = doc.querySelector<HTMLElement>(".page")!;
+      const footer = doc.querySelector<HTMLElement>(".footer")!;
+      const signature = doc.querySelector<HTMLImageElement>(".saved-signature")!;
+      // Inspect the real export CSS cascade before pagination/rasterization,
+      // rather than asserting source text or pretending jsdom measures A4.
+      expect(doc.defaultView!.getComputedStyle(footer).marginTop).toBe(expectedGap);
+      expect(doc.defaultView!.getComputedStyle(page).overflow).toBe("visible");
+      expect(signature.getAttribute("src")).toBe("data:image/png;base64,c2lnbmVk");
+      expect(footer.textContent).toBe("Saved intake footer");
+      inspected = true;
+    });
+    const pending = generatePdfFromHtml({ htmlContent: `<html><head><style>.footer{margin-top:1.2mm}</style></head><body><main class="page" ${marker}><section>Saved entry data</section><img class="saved-signature" src="data:image/png;base64,c2lnbmVk"><footer class="footer">Saved intake footer</footer></main></body></html>`, fileName: "entry-footer", download: false });
+    await vi.advanceTimersByTimeAsync(100);
+    await pending;
+    expect(inspected).toBe(true);
+    expect(mocks.paginate).toHaveBeenCalledOnce();
+    expect(mocks.paginate.mock.calls[0][0].nodeType).toBe(9);
+    expect(mocks.paginate.mock.calls[0][1]).toBe("portrait");
+    expect(mocks.capture).toHaveBeenCalledOnce();
+  });
+
   it("waits for the written document's load instead of trusting an already-complete blank frame", async () => {
     autoLoadFrames = false;
     const pending = generatePdfFromHtml({ htmlContent: '<html><body><main class="page">Estimate</main></body></html>', fileName: "Estimate-Load", download: false });
