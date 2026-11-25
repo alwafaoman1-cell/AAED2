@@ -72,6 +72,41 @@ beforeEach(() => {
 afterEach(() => { document.body.replaceChildren(); restoreFonts(); restoreFonts = () => {}; vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("offscreen PDF rendering", () => {
+  it.each([
+    ['data-pdf-fixed-form="vehicle-entry"', 1144],
+    ["", 1135],
+    ['data-pdf-fixed-form="another-form"', 1135],
+  ])("captures fractional footer paint plus 8px only on the fixed intake sheet (%s)", async (marker, expectedHeight) => {
+    let sourcePage: HTMLElement;
+    mocks.paginate.mockImplementationOnce((doc: Document) => {
+      sourcePage = doc.querySelector<HTMLElement>(".page")!;
+      sourcePage.style.height = "1123px";
+      const height = () => Number.parseFloat(sourcePage.style.height) || 1123;
+      Object.defineProperties(sourcePage, {
+        clientHeight: { configurable: true, get: height }, offsetHeight: { configurable: true, get: height },
+        scrollHeight: { configurable: true, get: () => Math.max(1135, height()) },
+        clientWidth: { configurable: true, value: 794 }, offsetWidth: { configurable: true, value: 794 }, scrollWidth: { configurable: true, value: 794 },
+      });
+      sourcePage.getBoundingClientRect = () => ({ top: 100.25, bottom: 100.25 + height(), height: height(), left: 0, right: 794, width: 794 } as DOMRect);
+      const footer = sourcePage.querySelector<HTMLElement>(".footer")!;
+      // Measured in the actual form: footer ends below integer scrollHeight.
+      footer.getBoundingClientRect = () => ({ top: 1226, bottom: 1235.594, height: 9.594, left: 0, right: 794, width: 794 } as DOMRect);
+    });
+    const capture = vi.fn((surface: HTMLElement, options: { windowHeight: number }) => {
+      expect(sourcePage.style.height).toBe(`${expectedHeight}px`);
+      expect(sourcePage.style.minHeight).toBe(`${expectedHeight}px`);
+      expect(surface.style.height).toBe(`${expectedHeight}px`);
+      expect(options.windowHeight).toBe(expectedHeight);
+      if (marker.includes("vehicle-entry")) expect(options.windowHeight - 1135.344).toBeGreaterThanOrEqual(8);
+      const canvas = document.createElement("canvas"); canvas.width = 2; canvas.height = 2; return Promise.resolve(canvas);
+    });
+    mocks.capture.mockImplementationOnce(capture);
+    const pending = generatePdfFromHtml({ htmlContent: `<html><body><main class="page" ${marker}><footer class="footer">Saved footer glyphs</footer></main></body></html>`, fileName: "paint-bounds", download: false });
+    await vi.advanceTimersByTimeAsync(100); await pending;
+    expect(capture).toHaveBeenCalledOnce();
+    expect(sourcePage.style.height).toBe("1123px");
+    expect(sourcePage.style.minHeight).toBe("");
+  });
   it("embeds the entire near-fit vehicle intake canvas once, centered and bounded, before any trimming or slicing", async () => {
     const canvas = document.createElement("canvas"); canvas.width = 1961; canvas.height = 2803;
     const fullImage = vi.spyOn(canvas, "toDataURL").mockReturnValue("data:image/jpeg;base64,FULL_SAVED_FORM_AND_FOOTER");

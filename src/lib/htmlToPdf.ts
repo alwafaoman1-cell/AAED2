@@ -234,6 +234,20 @@ export function fixedVehicleEntryCanvasPlacement(canvasWidth: number, canvasHeig
   return { x: (pageWidthMm - width) / 2, y: 0, width, height: pageHeightMm };
 }
 
+/** Integer scroll dimensions can stop above a fractional footer's painted edge.
+ * Reserve a small paint allowance before copying the fixed intake sheet; fitting
+ * an already clipped bitmap cannot recover its missing glyphs. */
+export function fixedVehicleEntryPaintCaptureHeight(page: HTMLElement, measuredHeight: number): number {
+  if (!page.matches('[data-pdf-fixed-form="vehicle-entry"]') || measuredHeight <= 0) return measuredHeight;
+  const pageRect = page.getBoundingClientRect();
+  let paintBottom = Math.max(measuredHeight, pageRect.height);
+  for (const child of Array.from(page.querySelectorAll("*"))) {
+    const bottom = child.getBoundingClientRect().bottom - pageRect.top;
+    if (Number.isFinite(bottom)) paintBottom = Math.max(paintBottom, bottom);
+  }
+  return Math.ceil(paintBottom) + 8;
+}
+
 const fmtTimestamp = (d = new Date()) => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -331,13 +345,14 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
       const originalMaxHeight = el.style.maxHeight;
       siblings.forEach(([p]) => { p.style.display = "none"; });
       const overflowHeight = Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight);
-      if (overflowHeight > el.clientHeight + 2) {
+      const paintCaptureHeight = pageEls.length === 1 ? fixedVehicleEntryPaintCaptureHeight(el, overflowHeight) : overflowHeight;
+      if (paintCaptureHeight > el.clientHeight + 2) {
         // A4 `.page` containers are intentionally fixed for print preview. If
         // content overflows that box, html2canvas captures only the border box
         // and clips the next page before jsPDF can slice it. Expand the page
         // only during rasterization, then restore the preview sizing.
-        el.style.height = `${overflowHeight}px`;
-        el.style.minHeight = `${overflowHeight}px`;
+        el.style.height = `${paintCaptureHeight}px`;
+        el.style.minHeight = `${paintCaptureHeight}px`;
         el.style.maxHeight = "none";
       }
       await yieldToBrowser();
