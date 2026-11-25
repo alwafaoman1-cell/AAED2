@@ -22,6 +22,7 @@ import {pdfControlledLabel} from "@/lib/pdfDisplayLabels";
 import { intakeReceiptError } from "@/lib/vehicleIntakeReceiptErrors";
 import { resolveVehicleIntakePresentation } from "@/lib/vehicleIntakePresentation";
 import { readWorkflowRequirementPolicy } from "@/lib/workflowRequirements";
+import { isUuid } from "@/lib/uuid";
 
 type VehicleEntryMediaKind = "entry_photo" | "damage_photo" | "document";
 type VehicleEntrySignatureRole = "delivered_by" | "receiver" | "override";
@@ -1058,6 +1059,23 @@ export async function convertVehicleEntryToClaim(entryId: string, userId?: strin
   }
   const vehicle = entry.vehicle || entry.vehicle_snapshot || {};
   const customer = entry.customer || entry.customer_snapshot || {};
+  // Inherit the persisted intake selection, never an unsaved contact or the
+  // insurer's general email. Keep the historic contact ID even if it was later
+  // deactivated; sending independently requires a currently active recipient.
+  const selectedEmployeeId = cleanText(insurance.employee_id);
+  let insuranceEmployeeId: string | null = null;
+  if (selectedEmployeeId) {
+    if (!isUuid(selectedEmployeeId) || !entry.insurance_company_id) throw new Error("claim_email_engineer_mismatch");
+    const selected = await supabase.from("insurance_company_employees" as any)
+      .select("id,tenant_id,insurance_company_id")
+      .eq("tenant_id", tenantId).eq("id", selectedEmployeeId).eq("insurance_company_id", entry.insurance_company_id).maybeSingle();
+    if (selected.error) throw selected.error;
+    const employee = selected.data as any;
+    if (!employee || employee.id !== selectedEmployeeId || employee.tenant_id !== tenantId || employee.insurance_company_id !== entry.insurance_company_id) {
+      throw new Error("claim_email_engineer_mismatch");
+    }
+    insuranceEmployeeId = selectedEmployeeId;
+  }
   const payload = {
     tenant_id: tenantId,
     claim_number: claimNumber,
@@ -1066,6 +1084,7 @@ export async function convertVehicleEntryToClaim(entryId: string, userId?: strin
     vehicle_entry_id: entryId,
     insurance_company: insurance.company_name || "Insurance",
     insurance_company_id: entry.insurance_company_id || null,
+    insurance_employee_id: insuranceEmployeeId,
     policy_number: insurance.policy_number || null,
     incident_description: insurance.notes || entry.vehicle_condition?.incident_description || null,
     workshop_arrival_date: entry.arrival_date,

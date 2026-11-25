@@ -8,8 +8,21 @@ import { openSanitizedPdfWindow } from "./safePdfWindow";
 import { buildPublicUrl } from "./publicAccessSettingsStore";
 import { getTemplateSettings, STAMP_SIZE_PX, type PdfTemplateSettings } from "./pdfTemplateSettings";
 import { escapeHtml, safePdfImageSrc } from "./safeHtml";
+import { pdfControlledLabel } from "./pdfDisplayLabels";
 // Compatibility API: all callers share the lightweight module's one cache.
 export * from "./pdfTemplateSettings";
+
+export type PdfDocumentLanguage = "ar" | "en";
+/** Localize generated labels only; never translate stored names, notes or items. */
+export const pdfLanguageLabel = (legacy: string, english: string, language?: PdfDocumentLanguage) =>
+  language === "en" ? english : legacy;
+export const pdfLanguageStyles = (language?: PdfDocumentLanguage) => language === "en" ? `
+  html[lang="en"] body{direction:ltr;text-align:left}
+  html[lang="en"] .section-title{border-right:0;border-left:3px solid currentColor;padding-right:0;padding-left:9px}
+  html[lang="en"] thead th{text-align:left}
+  html[lang="en"] .signature-area .sig,html[lang="en"] .brand-center,html[lang="en"] .claim-right,
+  html[lang="en"] .bill-cell.bill-to,html[lang="en"] .items .desc{direction:ltr}
+` : "";
 
 /** رابط تتبع عام آمن. المفتاح يجب أن يكون tracking_token وليس رقم الأمر أو UUID الداخلي. */
 export function getTrackingUrl(trackingToken?: string): string {
@@ -123,8 +136,8 @@ interface InspectionData {
 
 
 // Bilingual label helper
-const bi = (ar: string, en: string) =>
-  `<span class="bi"><span class="ar">${ar}</span><span class="en">${en}</span></span>`;
+const bi = (ar: string, en: string, language?: PdfDocumentLanguage) =>
+  language === "en" ? `<span class="bi">${en}</span>` : `<span class="bi"><span class="ar">${ar}</span><span class="en">${en}</span></span>`;
 
 function getBaseStyles(s: PdfTemplateSettings) {
   s = { ...s, primaryColor: safePdfColor(s.primaryColor) };
@@ -214,10 +227,10 @@ function safePdfColor(value: string): string {
   return /^#[\da-f]{6}$/i.test(value) ? value : "#d4a537";
 }
 
-function wrapHtml(title: string, styles: string, body: string): string {
+function wrapHtml(title: string, styles: string, body: string, language?: PdfDocumentLanguage): string {
   // ضمان عدم ظهور أرقام عربية هندية في أي مكان من المستند بعد التوليد
   const enforced = toEnglishDigits(body);
-  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>${escapeHtml(toEnglishDigits(title))}</title><style>${styles}</style></head><body>${enforced}</body></html>`;
+  return `<!DOCTYPE html><html lang="${language === "en" ? "en" : "ar"}" dir="${language === "en" ? "ltr" : "rtl"}"><head><meta charset="UTF-8"/><title>${escapeHtml(toEnglishDigits(title))}</title><style>${styles}${pdfLanguageStyles(language)}</style></head><body>${enforced}</body></html>`;
 }
 
 // Currency formatter — English digits, OMR-style with configurable decimals + symbol
@@ -236,7 +249,7 @@ export function formatMoney(n: number, opts?: { withSymbol?: boolean }): string 
   return opts?.withSymbol === false ? v : `${v} ${s.currencySymbol || "ر.ع"}`;
 }
 
-function headerHtml(s: PdfTemplateSettings, docLabelAr: string, docLabelEn: string, docNumber: string, docDate: string, badgeStyle = "") {
+function headerHtml(s: PdfTemplateSettings, docLabelAr: string, docLabelEn: string, docNumber: string, docDate: string, badgeStyle = "", language?: PdfDocumentLanguage) {
   const logoBlock = s.logoUrl
     ? `<img src="${safePdfImageSrc(s.logoUrl)}" alt="logo" style="max-height:62px;max-width:140px;object-fit:contain;margin-bottom:8px;display:block;" />`
     : '';
@@ -244,17 +257,17 @@ function headerHtml(s: PdfTemplateSettings, docLabelAr: string, docLabelEn: stri
     <div class="header">
       <div class="company-info">
         ${logoBlock}
-        <h1>${escapeHtml(s.companyName)}</h1>
-        <div class="en-name">${escapeHtml(s.companyNameEn)}</div>
+        <h1>${escapeHtml(language === "en" ? s.companyNameEn : s.companyName)}</h1>
+        ${language === "en" ? "" : `<div class="en-name">${escapeHtml(s.companyNameEn)}</div>`}
         <div class="details">
-          السجل التجاري / CR: ${escapeHtml(s.commercialReg)}<br/>
-          الرقم الضريبي / VAT: ${escapeHtml(s.vatNumber)}<br/>
+          ${pdfLanguageLabel("السجل التجاري / CR:", "CR:", language)} ${escapeHtml(s.commercialReg)}<br/>
+          ${pdfLanguageLabel("الرقم الضريبي / VAT:", "VAT:", language)} ${escapeHtml(s.vatNumber)}<br/>
           ${escapeHtml(s.phone)} • ${escapeHtml(s.email)}<br/>
-          ${escapeHtml(s.address)}${s.addressEn ? `<span class="en-line">${escapeHtml(s.addressEn)}</span>` : ''}
+          ${language === "en" ? escapeHtml(s.addressEn || "") : `${escapeHtml(s.address)}${s.addressEn ? `<span class="en-line">${escapeHtml(s.addressEn)}</span>` : ''}`}
         </div>
       </div>
       <div class="doc-badge" ${badgeStyle ? `style="${badgeStyle}"` : ''}>
-        <div class="label-ar">${escapeHtml(docLabelAr)}</div>
+        ${language === "en" ? "" : `<div class="label-ar">${escapeHtml(docLabelAr)}</div>`}
         <div class="label-en">${escapeHtml(docLabelEn)}</div>
         <div class="number">${escapeHtml(docNumber)}</div>
         <div class="date">${escapeHtml(docDate)}</div>
@@ -262,7 +275,8 @@ function headerHtml(s: PdfTemplateSettings, docLabelAr: string, docLabelEn: stri
     </div>`;
 }
 
-function footerHtml(s: PdfTemplateSettings) {
+function footerHtml(s: PdfTemplateSettings, language?: PdfDocumentLanguage) {
+  if (language === "en") return `<div class="footer">${escapeHtml(s.companyNameEn)} • All Rights Reserved © ${new Date().getFullYear()}</div>`;
   if (s.footerText) {
     return `<div class="footer">${escapeHtml(s.footerText)}</div>`;
   }
@@ -312,7 +326,8 @@ export function pdfSignatureStampSectionHtml(options: {
  */
 export function stampSignatureHtml(
   s: PdfTemplateSettings,
-  docType: "invoice" | "quote" | "voucher" | "report" | "workOrder" | "inspection"
+  docType: "invoice" | "quote" | "voucher" | "report" | "workOrder" | "inspection",
+  language?: PdfDocumentLanguage
 ): string {
   if (!s.stampEnabled) return "";
   const enabledMap: Record<typeof docType, boolean> = {
@@ -333,16 +348,18 @@ export function stampSignatureHtml(
       companyName: s.companyName,
       companyNameEn: s.companyNameEn,
       commercialReg: s.commercialReg,
+      signatureTitle: language === "en" ? "SIGNATURE" : undefined,
+      stampTitle: language === "en" ? "COMPANY STAMP" : undefined,
     });
   }
   if (!s.stampUrl && !s.signatureUrl) return "";
 
   const size = STAMP_SIZE_PX[s.stampSize] || 150;
   const stampImg = s.stampUrl
-    ? `<img src="${safePdfImageSrc(s.stampUrl)}" alt="ختم" style="max-width:${size}px;max-height:${size}px;object-fit:contain;display:block;" />`
+    ? `<img src="${safePdfImageSrc(s.stampUrl)}" alt="${language === "en" ? "Company stamp" : "ختم"}" style="max-width:${size}px;max-height:${size}px;object-fit:contain;display:block;" />`
     : "";
   const sigImg = s.signatureUrl
-    ? `<img src="${safePdfImageSrc(s.signatureUrl)}" alt="توقيع" style="max-width:${size}px;max-height:${Math.round(size * 0.55)}px;object-fit:contain;display:block;" />`
+    ? `<img src="${safePdfImageSrc(s.signatureUrl)}" alt="${language === "en" ? "Signature" : "توقيع"}" style="max-width:${size}px;max-height:${Math.round(size * 0.55)}px;object-fit:contain;display:block;" />`
     : "";
   const respName = s.responsibleName
     ? `<div style="font-size:10px;color:#555;font-weight:600;margin-top:4px;text-align:center;">${escapeHtml(s.responsibleName)}</div>`
@@ -351,7 +368,7 @@ export function stampSignatureHtml(
   // Watermark behind content
   if (s.stampPosition === "watermark-center" && s.stampUrl) {
     return `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-12deg);opacity:0.12;pointer-events:none;z-index:0;">
-      <img src="${safePdfImageSrc(s.stampUrl)}" alt="ختم" style="max-width:${size * 1.6}px;max-height:${size * 1.6}px;object-fit:contain;" />
+      <img src="${safePdfImageSrc(s.stampUrl)}" alt="${language === "en" ? "Company stamp" : "ختم"}" style="max-width:${size * 1.6}px;max-height:${size * 1.6}px;object-fit:contain;" />
     </div>`;
   }
 
@@ -372,14 +389,14 @@ export function stampSignatureHtml(
 }
 
 // Bilingual label cell
-const lbl = (ar: string, en: string) =>
-  `<span class="label">${ar}<span class="en">${en}</span></span>`;
+const lbl = (ar: string, en: string, language?: PdfDocumentLanguage) =>
+  language === "en" ? `<span class="label">${en}</span>` : `<span class="label">${ar}<span class="en">${en}</span></span>`;
 
-const sectionTitle = (ar: string, en: string) =>
-  `<div class="section-title">${ar}<span class="en">${en}</span></div>`;
+const sectionTitle = (ar: string, en: string, language?: PdfDocumentLanguage) =>
+  language === "en" ? `<div class="section-title">${en}</div>` : `<div class="section-title">${ar}<span class="en">${en}</span></div>`;
 
-const th = (ar: string, en: string, extraStyle = "") =>
-  `<th${extraStyle ? ` style="${extraStyle}"` : ''}>${ar}<span class="en">${en}</span></th>`;
+const th = (ar: string, en: string, extraStyle = "", language?: PdfDocumentLanguage) =>
+  `<th${extraStyle ? ` style="${extraStyle}"` : ''}>${language === "en" ? en : `${ar}<span class="en">${en}</span>`}</th>`;
 
 // ===== INVOICE =====
 export function getInvoiceHtml(data: InvoiceData): string {
@@ -467,7 +484,7 @@ export function generateInvoicePdf(data: InvoiceData) {
 // ===== WORK ORDER =====
 const escapeWorkOrderText = escapeHtml;
 
-function workOrderHeaderHtml(s: PdfTemplateSettings, data: WorkOrderData, isInsurance: boolean): string {
+function workOrderHeaderHtml(s: PdfTemplateSettings, data: WorkOrderData, isInsurance: boolean, language?: PdfDocumentLanguage): string {
   const logo = s.logoUrl
     ? `<img class="wo-logo" src="${safePdfImageSrc(s.logoUrl)}" alt="Company logo" />`
     : "";
@@ -475,29 +492,30 @@ function workOrderHeaderHtml(s: PdfTemplateSettings, data: WorkOrderData, isInsu
     <section class="wo-company">
       ${logo}
       <div class="wo-company-copy">
-        <h1>${escapeWorkOrderText(s.companyName)}</h1>
-        <div class="wo-company-en" dir="ltr">${escapeWorkOrderText(s.companyNameEn)}</div>
+        <h1>${escapeWorkOrderText(language === "en" ? s.companyNameEn : s.companyName)}</h1>
+        ${language === "en" ? "" : `<div class="wo-company-en" dir="ltr">${escapeWorkOrderText(s.companyNameEn)}</div>`}
         <div class="wo-company-meta">
           <span>CR: ${escapeWorkOrderText(s.commercialReg)}</span>
           <span>VAT: ${escapeWorkOrderText(s.vatNumber)}</span>
           <span dir="ltr">${escapeWorkOrderText(s.phone)}</span>
           <span dir="ltr">${escapeWorkOrderText(s.email)}</span>
-          <span>${escapeWorkOrderText(s.address)}</span>
-          ${s.addressEn ? `<span dir="ltr">${escapeWorkOrderText(s.addressEn)}</span>` : ""}
+          ${language === "en" ? `<span>${escapeWorkOrderText(s.addressEn || "")}</span>` : `<span>${escapeWorkOrderText(s.address)}</span>`}
+          ${language !== "en" && s.addressEn ? `<span dir="ltr">${escapeWorkOrderText(s.addressEn)}</span>` : ""}
         </div>
       </div>
     </section>
     <section class="wo-number-card">
-      <div class="wo-document-title">أمر عمل <span>/ WORK ORDER</span></div>
+      <div class="wo-document-title">${language === "en" ? "WORK ORDER" : "أمر عمل <span>/ WORK ORDER</span>"}</div>
       <strong dir="ltr">${escapeWorkOrderText(data.orderNumber)}</strong>
-      <div class="wo-type">${isInsurance ? "تأمين / INSURANCE" : "عميل كاش / CASH CUSTOMER"}</div>
+      <div class="wo-type">${isInsurance ? pdfLanguageLabel("تأمين / INSURANCE", "INSURANCE", language) : pdfLanguageLabel("عميل كاش / CASH CUSTOMER", "CASH CUSTOMER", language)}</div>
       <time dir="ltr">${escapeWorkOrderText(data.date)}</time>
     </section>
   </header>`;
 }
 
-export function getWorkOrderHtml(data: WorkOrderData): string {
+export function getWorkOrderHtml(data: WorkOrderData, language?: PdfDocumentLanguage): string {
   const s = getTemplateSettings();
+  const text = (legacy: string, english: string) => pdfLanguageLabel(legacy, english, language);
   const isInsurance = data.workOrderType === "insurance";
   const value = (input: unknown, fallback = "—") => {
     const text = String(input ?? "").trim();
@@ -516,16 +534,16 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
     : `<tr><td class="wo-index">1</td><td>${value(fallbackWork)}</td><td>${value(diagnosis)}</td></tr>`;
   const partsRows = parts.length
     ? parts.map((part, index) => `<tr><td class="wo-index">${index + 1}</td><td>${value(part.name)}</td><td class="wo-center">${Math.max(1, Number(part.quantity) || 1)}</td><td>${value(part.notes)}</td></tr>`).join("")
-    : `<tr><td colspan="4" class="wo-empty">لا توجد قطع غيار مطلوبة مسجلة / No required parts recorded</td></tr>`;
+    : `<tr><td colspan="4" class="wo-empty">${text("لا توجد قطع غيار مطلوبة مسجلة / No required parts recorded", "No required parts recorded")}</td></tr>`;
 
   const financialSection = isInsurance ? "" : `
-    ${sectionTitle("الاتفاق المالي", "Financial Agreement")}
+    ${sectionTitle("الاتفاق المالي", "Financial Agreement", language)}
     <div class="wo-financial-grid">
-      <div><span>أجرة العمل المتفق عليها<br/><small>Agreed labor charge</small></span><strong>${omr(laborCharge)}</strong></div>
-      <div><span>دفعة مستلمة<br/><small>Advance received</small></span><strong>${omr(deposit)}</strong></div>
-      <div><span>المتبقي من أجرة العمل<br/><small>Labor balance</small></span><strong>${omr(laborBalance)}</strong></div>
+      <div><span>${text("أجرة العمل المتفق عليها<br/><small>Agreed labor charge</small>", "Agreed labor charge")}</span><strong>${omr(laborCharge)}</strong></div>
+      <div><span>${text("دفعة مستلمة<br/><small>Advance received</small>", "Advance received")}</span><strong>${omr(deposit)}</strong></div>
+      <div><span>${text("المتبقي من أجرة العمل<br/><small>Labor balance</small>", "Labor balance")}</span><strong>${omr(laborBalance)}</strong></div>
     </div>
-    <p class="wo-agreement-note">أجرة العمل/الخدمة تُحتسب وفق الاتفاق، أما قطع الغيار فيتحمل العميل تكلفتها الفعلية وتُدفع مقدمًا أو عند انتهاء الخدمة حسب الاتفاق. هذا المستند أمر عمل وليس فاتورة ضريبية نهائية.<br/><span dir="ltr">Labor/service charges are governed by the agreement. Spare parts are paid by the customer in advance or upon completion, as agreed. This work order is not a final tax invoice.</span></p>`;
+    <p class="wo-agreement-note">${language === "en" ? "" : "أجرة العمل/الخدمة تُحتسب وفق الاتفاق، أما قطع الغيار فيتحمل العميل تكلفتها الفعلية وتُدفع مقدمًا أو عند انتهاء الخدمة حسب الاتفاق. هذا المستند أمر عمل وليس فاتورة ضريبية نهائية.<br/>"}<span dir="ltr">Labor/service charges are governed by the agreement. Spare parts are paid by the customer in advance or upon completion, as agreed. This work order is not a final tax invoice.</span></p>`;
 
   const signature = data.customerSignatureDataUrl
     ? `<img src="${escapeWorkOrderText(data.customerSignatureDataUrl)}" alt="Customer signature" />`
@@ -537,53 +555,53 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
   const body = `<main class="wo-document">
     <section class="page wo-main-page">
       ${s.showWatermark ? `<div class="watermark">${escapeWorkOrderText(s.companyNameEn)}</div>` : ""}
-      ${workOrderHeaderHtml(s, data, isInsurance)}
+      ${workOrderHeaderHtml(s, data, isInsurance, language)}
 
       <div class="wo-summary-grid">
-        <section><h2>بيانات العميل <span>/ CUSTOMER</span></h2><dl>
-          <div><dt>الاسم / Name</dt><dd>${value(data.customerName)}</dd></div>
-          <div><dt>الهاتف / Phone</dt><dd dir="ltr">${value(data.customerPhone)}</dd></div>
+        <section><h2>${text("بيانات العميل <span>/ CUSTOMER</span>", "CUSTOMER")}</h2><dl>
+          <div><dt>${text("الاسم / Name", "Name")}</dt><dd>${value(data.customerName)}</dd></div>
+          <div><dt>${text("الهاتف / Phone", "Phone")}</dt><dd dir="ltr">${value(data.customerPhone)}</dd></div>
         </dl></section>
-        <section><h2>بيانات المركبة <span>/ VEHICLE</span></h2><dl>
-          <div><dt>الماركة والموديل / Make &amp; Model</dt><dd>${value([data.vehicleType, data.model, data.year].filter(Boolean).join(" "))}</dd></div>
-          <div><dt>رقم اللوحة / Plate No.</dt><dd class="wo-emphasis" dir="ltr">${value(data.plateNumber)}</dd></div>
-          <div><dt>رقم الهيكل / VIN</dt><dd class="wo-emphasis" dir="ltr">${value(data.vin)}</dd></div>
-          ${data.color ? `<div><dt>اللون / Color</dt><dd>${value(data.color)}</dd></div>` : ""}
-          ${data.mileage ? `<div><dt>العداد / Mileage</dt><dd dir="ltr">${value(data.mileage)} km</dd></div>` : ""}
+        <section><h2>${text("بيانات المركبة <span>/ VEHICLE</span>", "VEHICLE")}</h2><dl>
+          <div><dt>${text("الماركة والموديل / Make &amp; Model", "Make &amp; Model")}</dt><dd>${value([data.vehicleType, data.model, data.year].filter(Boolean).join(" "))}</dd></div>
+          <div><dt>${text("رقم اللوحة / Plate No.", "Plate No.")}</dt><dd class="wo-emphasis" dir="ltr">${value(data.plateNumber)}</dd></div>
+          <div><dt>${text("رقم الهيكل / VIN", "VIN")}</dt><dd class="wo-emphasis" dir="ltr">${value(data.vin)}</dd></div>
+          ${data.color ? `<div><dt>${text("اللون / Color", "Color")}</dt><dd>${value(data.color)}</dd></div>` : ""}
+          ${data.mileage ? `<div><dt>${text("العداد / Mileage", "Mileage")}</dt><dd dir="ltr">${value(data.mileage)} km</dd></div>` : ""}
         </dl></section>
       </div>
 
       <div class="wo-order-meta">
-        <div><span>نوع الخدمة / Service</span><strong>${value(data.serviceType)}</strong></div>
-        <div><span>الفني المسؤول / Technician</span><strong>${value(data.technician)}</strong></div>
-        <div><span>الحالة / Status</span><strong>${value(data.status)}</strong></div>
-        ${isInsurance ? `<div><span>شركة التأمين / Insurance</span><strong>${value(data.insurance)}</strong></div><div><span>رقم المطالبة / Claim No.</span><strong dir="ltr">${value(data.claimNumber)}</strong></div>` : ""}
+        <div><span>${text("نوع الخدمة / Service", "Service")}</span><strong>${value(data.serviceType)}</strong></div>
+        <div><span>${text("الفني المسؤول / Technician", "Technician")}</span><strong>${value(data.technician)}</strong></div>
+        <div><span>${text("الحالة / Status", "Status")}</span><strong>${value(language === "en" ? pdfControlledLabel(data.status, "workOrderStatus", "en") : data.status)}</strong></div>
+        ${isInsurance ? `<div><span>${text("شركة التأمين / Insurance", "Insurance")}</span><strong>${value(data.insurance)}</strong></div><div><span>${text("رقم المطالبة / Claim No.", "Claim No.")}</span><strong dir="ltr">${value(data.claimNumber)}</strong></div>` : ""}
       </div>
 
-      ${sectionTitle("الأعمال المطلوبة والمعتمدة", "Authorized Work")}
-      <table class="wo-table"><thead><tr><th>#</th><th>العمل / Work Item</th><th>ملاحظات / Notes</th></tr></thead><tbody>${workRows}</tbody></table>
-      ${diagnosis && workItems.length ? `<div class="wo-diagnosis"><strong>التشخيص والملاحظات / Diagnosis &amp; Notes</strong><p>${value(diagnosis)}</p></div>` : ""}
+      ${sectionTitle("الأعمال المطلوبة والمعتمدة", "Authorized Work", language)}
+      <table class="wo-table"><thead><tr><th>#</th><th>${text("العمل / Work Item", "Work Item")}</th><th>${text("ملاحظات / Notes", "Notes")}</th></tr></thead><tbody>${workRows}</tbody></table>
+      ${diagnosis && workItems.length ? `<div class="wo-diagnosis"><strong>${text("التشخيص والملاحظات / Diagnosis &amp; Notes", "Diagnosis &amp; Notes")}</strong><p>${value(diagnosis)}</p></div>` : ""}
 
-      ${sectionTitle("قطع الغيار المطلوبة", "Required Spare Parts")}
-      <table class="wo-table"><thead><tr><th>#</th><th>اسم القطعة / Part</th><th>الكمية / Qty</th><th>ملاحظات / Notes</th></tr></thead><tbody>${partsRows}</tbody></table>
+      ${sectionTitle("قطع الغيار المطلوبة", "Required Spare Parts", language)}
+      <table class="wo-table"><thead><tr><th>#</th><th>${text("اسم القطعة / Part", "Part")}</th><th>${text("الكمية / Qty", "Qty")}</th><th>${text("ملاحظات / Notes", "Notes")}</th></tr></thead><tbody>${partsRows}</tbody></table>
       ${financialSection}
 
-      ${sectionTitle("التفويض والشروط", "Authorization & Terms")}
+      ${sectionTitle("التفويض والشروط", "Authorization & Terms", language)}
       <ol class="wo-terms">
-        <li>أفوض الشركة بتنفيذ أعمال الإصلاح المبينة أعلاه وفق المعتمد والاتفاق. <span dir="ltr">I authorize the company to perform the repair work listed above as approved and agreed.</span></li>
-        <li>لا تتحمل الشركة مسؤولية أي عطل أو ضرر يحدث خارج إرادتها أو بسبب عيب سابق أو خفي. <span dir="ltr">The company is not liable for faults or damage beyond its control or arising from pre-existing or hidden defects.</span></li>
-        <li>الورشة غير مسؤولة عن الأغراض الثمينة أو غير الثمينة المتروكة داخل المركبة. <span dir="ltr">The workshop is not responsible for valuable or non-valuable belongings left in the vehicle.</span></li>
-        <li>تُحتسب أرضية بحد أقصى 5 ريالات عمانية عن كل يوم تأخير بعد إخطار العميل بجاهزية المركبة للاستلام، وذلك وفق الأنظمة المعمول بها. <span dir="ltr">Storage may be charged up to OMR 5 per delayed day after the customer is notified that the vehicle is ready, subject to applicable regulations.</span></li>
-        <li>أي أعمال أو أضرار خفية إضافية تتطلب موافقة جديدة، وقد يتغير موعد التسليم بسبب القطع أو الموافقات أو ظروف خارجة عن السيطرة. <span dir="ltr">Additional hidden work requires further approval, and delivery may change due to parts, approvals, or circumstances beyond control.</span></li>
-        ${isInsurance ? `<li>يخضع الإصلاح لموافقة شركة التأمين وحدود التغطية، ولا يتضمن أمر عمل التأمين أي أسعار أو أجور أو مبالغ. <span dir="ltr">Repairs remain subject to insurer approval and coverage limits; this insurance work order displays no prices, labor charges, or amounts.</span></li>` : ""}
+        <li>${language === "en" ? "" : "أفوض الشركة بتنفيذ أعمال الإصلاح المبينة أعلاه وفق المعتمد والاتفاق. "}<span dir="ltr">I authorize the company to perform the repair work listed above as approved and agreed.</span></li>
+        <li>${language === "en" ? "" : "لا تتحمل الشركة مسؤولية أي عطل أو ضرر يحدث خارج إرادتها أو بسبب عيب سابق أو خفي. "}<span dir="ltr">The company is not liable for faults or damage beyond its control or arising from pre-existing or hidden defects.</span></li>
+        <li>${language === "en" ? "" : "الورشة غير مسؤولة عن الأغراض الثمينة أو غير الثمينة المتروكة داخل المركبة. "}<span dir="ltr">The workshop is not responsible for valuable or non-valuable belongings left in the vehicle.</span></li>
+        <li>${language === "en" ? "" : "تُحتسب أرضية بحد أقصى 5 ريالات عمانية عن كل يوم تأخير بعد إخطار العميل بجاهزية المركبة للاستلام، وذلك وفق الأنظمة المعمول بها. "}<span dir="ltr">Storage may be charged up to OMR 5 per delayed day after the customer is notified that the vehicle is ready, subject to applicable regulations.</span></li>
+        <li>${language === "en" ? "" : "أي أعمال أو أضرار خفية إضافية تتطلب موافقة جديدة، وقد يتغير موعد التسليم بسبب القطع أو الموافقات أو ظروف خارجة عن السيطرة. "}<span dir="ltr">Additional hidden work requires further approval, and delivery may change due to parts, approvals, or circumstances beyond control.</span></li>
+        ${isInsurance ? `<li>${language === "en" ? "" : "يخضع الإصلاح لموافقة شركة التأمين وحدود التغطية، ولا يتضمن أمر عمل التأمين أي أسعار أو أجور أو مبالغ. "}<span dir="ltr">Repairs remain subject to insurer approval and coverage limits; this insurance work order displays no prices, labor charges, or amounts.</span></li>` : ""}
       </ol>
 
       <div class="wo-approval-grid">
-        <section>${signature}<div class="wo-sign-line"></div><strong>توقيع العميل / Customer Signature</strong>${data.customerSignatureName ? `<small>${value(data.customerSignatureName)}</small>` : ""}${data.customerSignatureDate ? `<small dir="ltr">${value(data.customerSignatureDate)}</small>` : ""}</section>
-        <section><div class="wo-sign-space"></div><div class="wo-sign-line"></div><strong>اعتماد مدير الورشة / Workshop Manager Approval</strong></section>
-        <section>${stamp}<strong>ختم الشركة / Company Stamp</strong></section>
+        <section>${signature}<div class="wo-sign-line"></div><strong>${text("توقيع العميل / Customer Signature", "Customer Signature")}</strong>${data.customerSignatureName ? `<small>${value(data.customerSignatureName)}</small>` : ""}${data.customerSignatureDate ? `<small dir="ltr">${value(data.customerSignatureDate)}</small>` : ""}</section>
+        <section><div class="wo-sign-space"></div><div class="wo-sign-line"></div><strong>${text("اعتماد مدير الورشة / Workshop Manager Approval", "Workshop Manager Approval")}</strong></section>
+        <section>${stamp}<strong>${text("ختم الشركة / Company Stamp", "Company Stamp")}</strong></section>
       </div>
-      ${footerHtml(s)}
+      ${footerHtml(s, language)}
     </section>
   </main>`;
 
@@ -604,7 +622,7 @@ export function getWorkOrderHtml(data: WorkOrderData): string {
     @page{size:A4;margin:0}
     @media print{.wo-main-page{min-height:297mm;padding:7mm 9mm 10mm;zoom:.96;width:104.1667%}.wo-header{grid-template-columns:minmax(0,1fr) 58mm;margin-bottom:3.5mm;padding-bottom:3.5mm}.wo-document .section-title{margin:2.2mm 0 1.2mm;font-size:10.5px}.wo-document .section-title .en{font-size:8px}.wo-main-page>.footer{position:absolute!important;bottom:2.5mm;right:9mm;left:9mm;margin:0!important}}
   `;
-  return wrapHtml(`Work Order ${data.orderNumber}`, styles, body);
+  return wrapHtml(`Work Order ${data.orderNumber}`, styles, body, language);
 }
 
 export async function generateWorkOrderPdf(data: WorkOrderData) {
@@ -663,8 +681,10 @@ export function generateInspectionPdf(data: InspectionData) {
 }
 
 // ===== QUOTE =====
-export function getQuoteHtml(data: InvoiceData & { quoteNumber: string }): string {
-  const custom = tryCustomTemplate("quote", { ...data, ...getTemplateSettings() }, `Quote ${data.quoteNumber}`);
+export function getQuoteHtml(data: InvoiceData & { quoteNumber: string }, language?: PdfDocumentLanguage): string {
+  // Existing custom schemas have no language contract; explicit English fallback
+  // uses this canonical renderer. Default/Arabic callers keep their custom template.
+  const custom = language === "en" ? null : tryCustomTemplate("quote", { ...data, ...getTemplateSettings() }, `Quote ${data.quoteNumber}`);
   if (custom) return custom;
   const s = getTemplateSettings();
   const itemsHtml = data.items.map((item, i) => `
@@ -678,47 +698,47 @@ export function getQuoteHtml(data: InvoiceData & { quoteNumber: string }): strin
 
   const body = `<div class="page">
     ${s.showWatermark ? `<div class="watermark">${escapeHtml(s.companyNameEn)}</div>` : ''}
-    ${headerHtml(s, 'عرض سعر', 'PRICE QUOTATION', data.quoteNumber, data.date, 'background:linear-gradient(135deg,#2d6a4f,#1b4332);')}
+    ${headerHtml(s, 'عرض سعر', 'PRICE QUOTATION', data.quoteNumber, data.date, 'background:linear-gradient(135deg,#2d6a4f,#1b4332);', language)}
 
-    ${sectionTitle('معلومات العميل', 'Customer Information')}
+    ${sectionTitle('معلومات العميل', 'Customer Information', language)}
     <div class="info-grid">
-      <div class="info-row">${lbl('اسم العميل:', 'Customer Name')}<span class="value">${escapeHtml(data.customerName)}</span></div>
-      <div class="info-row">${lbl('السيارة:', 'Vehicle')}<span class="value">${escapeHtml(data.vehicleInfo)}</span></div>
-      <div class="info-row">${lbl('رقم اللوحة:', 'Plate Number')}<span class="value">${escapeHtml(data.plateNumber)}</span></div>
+      <div class="info-row">${lbl('اسم العميل:', 'Customer Name', language)}<span class="value">${escapeHtml(data.customerName)}</span></div>
+      <div class="info-row">${lbl('السيارة:', 'Vehicle', language)}<span class="value">${escapeHtml(data.vehicleInfo)}</span></div>
+      <div class="info-row">${lbl('رقم اللوحة:', 'Plate Number', language)}<span class="value">${escapeHtml(data.plateNumber)}</span></div>
     </div>
 
-    ${sectionTitle('تفاصيل العرض', 'Quotation Details')}
+    ${sectionTitle('تفاصيل العرض', 'Quotation Details', language)}
     <table><thead><tr>
-      ${th('#', 'No.', 'width:40px;text-align:center;')}
-      ${th('الوصف', 'Description')}
-      ${th('الكمية', 'Qty', 'width:60px;text-align:center;')}
-      ${th('السعر', 'Unit Price', 'width:130px;text-align:center;')}
-      ${th('المجموع', 'Total', 'width:140px;text-align:center;')}
+      ${th('#', 'No.', 'width:40px;text-align:center;', language)}
+      ${th('الوصف', 'Description', '', language)}
+      ${th('الكمية', 'Qty', 'width:60px;text-align:center;', language)}
+      ${th('السعر', 'Unit Price', 'width:130px;text-align:center;', language)}
+      ${th('المجموع', 'Total', 'width:140px;text-align:center;', language)}
     </tr></thead><tbody>${itemsHtml}</tbody></table>
 
     <div class="totals-box">
-      <div class="totals-row"><span>${bi('المجموع الفرعي', 'Subtotal')}</span><span class="amount">${omr(data.subtotal)}</span></div>
-      <div class="totals-row"><span>${bi(`ضريبة القيمة المضافة (${escapeHtml(s.vatRate)}%)`, `VAT (${escapeHtml(s.vatRate)}%)`)}</span><span class="amount">${omr(data.vat)}</span></div>
-      <div class="totals-row total"><span>${bi('الإجمالي', 'Grand Total')}</span><span class="amount">${omr(data.total)}</span></div>
+      <div class="totals-row"><span>${bi('المجموع الفرعي', 'Subtotal', language)}</span><span class="amount">${omr(data.subtotal)}</span></div>
+      <div class="totals-row"><span>${bi(`ضريبة القيمة المضافة (${escapeHtml(s.vatRate)}%)`, `VAT (${escapeHtml(s.vatRate)}%)`, language)}</span><span class="amount">${omr(data.vat)}</span></div>
+      <div class="totals-row total"><span>${bi('الإجمالي', 'Grand Total', language)}</span><span class="amount">${omr(data.total)}</span></div>
     </div>
 
     <div class="notes-box">
       <span class="label-en">Quote Terms &amp; Conditions</span>
-      <strong>شروط العرض:</strong><br/>
-      • هذا العرض ساري المفعول لمدة 15 يوماً من تاريخ الإصدار. <span style="color:#999;font-family:'Inter',sans-serif;">/ This quote is valid for 15 days from the issue date.</span><br/>
-      • الأسعار شاملة ضريبة القيمة المضافة. <span style="color:#999;font-family:'Inter',sans-serif;">/ Prices are inclusive of VAT.</span><br/>
-      • يتم البدء بالعمل بعد اعتماد العرض من قبل العميل. <span style="color:#999;font-family:'Inter',sans-serif;">/ Work commences upon customer approval.</span>
+      ${language === "en" ? "" : "<strong>شروط العرض:</strong><br/>"}
+      • ${language === "en" ? "" : "هذا العرض ساري المفعول لمدة 15 يوماً من تاريخ الإصدار. "}<span style="color:#999;font-family:'Inter',sans-serif;">${language === "en" ? "" : "/ "}This quote is valid for 15 days from the issue date.</span><br/>
+      • ${language === "en" ? "" : "الأسعار شاملة ضريبة القيمة المضافة. "}<span style="color:#999;font-family:'Inter',sans-serif;">${language === "en" ? "" : "/ "}Prices are inclusive of VAT.</span><br/>
+      • ${language === "en" ? "" : "يتم البدء بالعمل بعد اعتماد العرض من قبل العميل. "}<span style="color:#999;font-family:'Inter',sans-serif;">${language === "en" ? "" : "/ "}Work commences upon customer approval.</span>
     </div>
 
     <div style="margin-top:40px;display:flex;justify-content:space-between;">
-      <div style="text-align:center;width:200px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">توقيع العميل<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Customer Signature</span></div></div>
-      <div style="text-align:center;width:200px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">المدير المسؤول<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Authorized Manager</span></div></div>
+      <div style="text-align:center;width:200px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">${language === "en" ? "" : "توقيع العميل"}<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Customer Signature</span></div></div>
+      <div style="text-align:center;width:200px;"><div style="border-top:1px solid #ccc;padding-top:6px;font-size:10.5px;color:#888;">${language === "en" ? "" : "المدير المسؤول"}<span style="display:block;font-size:9px;color:#bbb;font-family:'Inter',sans-serif;">Authorized Manager</span></div></div>
     </div>
 
-    ${stampSignatureHtml(s, "quote")}
-    ${footerHtml(s)}
+    ${stampSignatureHtml(s, "quote", language)}
+    ${footerHtml(s, language)}
   </div>`;
-  return wrapHtml(`Quote ${data.quoteNumber}`, getBaseStyles(s), body);
+  return wrapHtml(`Quote ${data.quoteNumber}`, getBaseStyles(s), body, language);
 }
 
 export function generateQuotePdf(data: InvoiceData & { quoteNumber: string }) {
@@ -1620,8 +1640,10 @@ function renderInsuranceTaxInvoiceReferenceClean(data: InsuranceTaxInvoiceData):
   return wrapHtml(`Tax Invoice ${data.invoiceNumber}`, styles, body);
 }
 
-function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData): string {
+function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData, language?: PdfDocumentLanguage): string {
   const s = getTemplateSettings();
+  const arabicLabel = (label: string) => language === "en" ? "" : `<div class="label-ar">${label}</div>`;
+  const caption = (label: string) => language === "en" ? "" : `${label}<br/>`;
   const isCustomerInvoice = data.recipientKind === "customer";
   const subtotal = Number(data.subtotal || 0);
   const vatAmount = Number(data.taxTotal ?? Math.max(0, Number(data.total || 0) - subtotal));
@@ -1655,8 +1677,8 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
   const items = Array.isArray(data.items) ? data.items.filter((item) => String(item.description || "").trim()) : [];
   const itemRows = (items.length ? items : [{
     description: isCustomerInvoice
-      ? `خدمات صيانة وإصلاح<br/><strong>${invoiceRefEscape(data.invoiceNumber)}</strong>`
-      : `خدمة إصلاح شامل وفق رقم المطالبة<br/><strong>${invoiceRefEscape(data.claimNumber)}</strong>`,
+      ? `${pdfLanguageLabel("خدمات صيانة وإصلاح", "Maintenance and repair services", language)}<br/><strong>${invoiceRefEscape(data.invoiceNumber)}</strong>`
+      : `${pdfLanguageLabel("خدمة إصلاح شامل وفق رقم المطالبة", "Comprehensive repair under claim", language)}<br/><strong>${invoiceRefEscape(data.claimNumber)}</strong>`,
     quantity: 1,
     unitPrice: subtotal,
   }]).map((item: any, index: number) => {
@@ -1712,48 +1734,48 @@ function renderInsuranceTaxInvoiceAlwafaReference(data: InsuranceTaxInvoiceData)
     s.phone ? `<span class="ltr">${invoiceRefEscape(s.phone)}</span>` : "",
     s.email ? `<span class="ltr">${invoiceRefEscape(s.email)}</span>` : "",
     (s as any).website ? `<span class="ltr">${invoiceRefEscape((s as any).website)}</span>` : "",
-    s.address ? `<span>${invoiceRefEscape(s.address)}</span>` : "",
+    (language === "en" ? s.addressEn : s.address) ? `<span>${invoiceRefEscape(language === "en" ? s.addressEn : s.address)}</span>` : "",
   ].filter(Boolean).join("");
   const body = `<div class="page">
     <header class="top">
-      <div><div class="invoice-card"><div class="ar">فاتورة ضريبية</div><div class="en">TAX INVOICE</div><div class="no">${invoiceRefEscape(data.invoiceNumber)}</div></div><div class="invoice-date">${invoiceRefEscape(data.issueDate)}</div></div>
-      <div class="brand-center"><div class="logo-box">${logoHtml}</div><div class="brand-name-ar">${invoiceRefEscape(companyNameAr)}</div><div class="brand-name-en">${invoiceRefEnglishWordSpans(companyNameEn)}</div></div>
+      <div><div class="invoice-card">${language === "en" ? "" : '<div class="ar">فاتورة ضريبية</div>'}<div class="en">TAX INVOICE</div><div class="no">${invoiceRefEscape(data.invoiceNumber)}</div></div><div class="invoice-date">${invoiceRefEscape(data.issueDate)}</div></div>
+      <div class="brand-center"><div class="logo-box">${logoHtml}</div>${language === "en" ? "" : `<div class="brand-name-ar">${invoiceRefEscape(companyNameAr)}</div>`}<div class="brand-name-en">${invoiceRefEnglishWordSpans(companyNameEn)}</div></div>
       <div class="company"><div class="meta">${companyMetaHtml}</div></div>
     </header>
     <section class="card claim-card">
-      <div class="claim-left"><div class="label-ar">${isCustomerInvoice ? "مرجع الفاتورة" : "رقم المطالبة"}</div><div class="label-en">${isCustomerInvoice ? "INVOICE REFERENCE" : "CLAIM"}</div><div class="big mono">${invoiceRefEscape(recipientReference)}</div>${!isCustomerInvoice && data.lpoNumber ? `<div class="lpo-under-claim">LPO - ${invoiceRefEscape(data.lpoNumber)}</div>` : ""}</div>
+      <div class="claim-left">${arabicLabel(isCustomerInvoice ? "مرجع الفاتورة" : "رقم المطالبة")}<div class="label-en">${isCustomerInvoice ? "INVOICE REFERENCE" : "CLAIM"}</div><div class="big mono">${invoiceRefEscape(recipientReference)}</div>${!isCustomerInvoice && data.lpoNumber ? `<div class="lpo-under-claim">LPO - ${invoiceRefEscape(data.lpoNumber)}</div>` : ""}</div>
       <div class="claim-mid"><div class="insurance-logo">${insuranceLogoHtml}</div></div>
-      <div class="claim-right"><div class="label-ar">${isCustomerInvoice ? "العميل" : "شركة التأمين"}</div><div class="label-en">${isCustomerInvoice ? "CUSTOMER" : "INSURANCE PROVIDER"}</div><div class="big">${invoiceRefEscape(recipientName || "—")}</div></div>
+      <div class="claim-right">${arabicLabel(isCustomerInvoice ? "العميل" : "شركة التأمين")}<div class="label-en">${isCustomerInvoice ? "CUSTOMER" : "INSURANCE PROVIDER"}</div><div class="big">${invoiceRefEscape(recipientName || "—")}</div></div>
     </section>
     <section class="card vehicle-card">
-      <div class="vehicle-cell"><div class="label-ar">اللون</div><div class="label-en">COLOR</div><div class="value">${invoiceRefEscape(custom.color || "—")}</div></div>
-      <div class="vehicle-cell"><div class="label-ar">المركبة</div><div class="label-en">VEHICLE</div><div class="value">${invoiceRefEscape([vehicleName, vehicleYear].filter(Boolean).join(" - "))}</div></div>
-      <div class="vehicle-cell"><div class="label-ar">رقم اللوحة</div><div class="label-en">PLATE NO.</div><div class="value mono">${invoiceRefEscape(plateRaw)}</div></div>
-      <div class="vehicle-cell"><div class="label-ar">رقم الهيكل</div><div class="label-en">VIN</div><div class="dash mono">${invoiceRefEscape(custom.vin || "---")}</div></div>
+      <div class="vehicle-cell">${arabicLabel("اللون")}<div class="label-en">COLOR</div><div class="value">${invoiceRefEscape(custom.color || "—")}</div></div>
+      <div class="vehicle-cell">${arabicLabel("المركبة")}<div class="label-en">VEHICLE</div><div class="value">${invoiceRefEscape([vehicleName, vehicleYear].filter(Boolean).join(" - "))}</div></div>
+      <div class="vehicle-cell">${arabicLabel("رقم اللوحة")}<div class="label-en">PLATE NO.</div><div class="value mono">${invoiceRefEscape(plateRaw)}</div></div>
+      <div class="vehicle-cell">${arabicLabel("رقم الهيكل")}<div class="label-en">VIN</div><div class="dash mono">${invoiceRefEscape(custom.vin || "---")}</div></div>
     </section>
     <section class="card bill-card">
-      <div class="bill-cell"><div class="label-ar">تاريخ الاستحقاق</div><div class="label-en">DUE DATE</div><div class="value mono">${invoiceRefEscape(dueDate)}</div></div>
-      <div class="bill-cell"><div class="label-ar">السجل التجاري</div><div class="label-en">COMMERCIAL REG</div><div class="value mono">${invoiceRefEscape(recipientCommercialRegistration)}</div></div>
-      <div class="bill-cell"><div class="label-ar">رقم الضريبة</div><div class="label-en">VAT REG NO.</div><div class="value mono">${invoiceRefEscape(recipientTaxNumber)}</div></div>
-      <div class="bill-cell bill-to"><div class="label-ar">الفواتير إلى</div><div class="label-en">BILLED TO</div><div class="value">${invoiceRefEscape(recipientName || "—")}</div>${data.recipientPhone ? `<div class="value mono" style="font-size:9.5px;font-weight:600">${invoiceRefEscape(data.recipientPhone)}</div>` : custom.contact ? `<div class="value" style="font-size:9.5px;font-weight:600">${invoiceRefEscape(custom.contact)}</div>` : ""}<div class="value" style="font-size:9px;font-weight:500">${invoiceRefEscape(billToAddress)}</div></div>
+      <div class="bill-cell">${arabicLabel("تاريخ الاستحقاق")}<div class="label-en">DUE DATE</div><div class="value mono">${invoiceRefEscape(dueDate)}</div></div>
+      <div class="bill-cell">${arabicLabel("السجل التجاري")}<div class="label-en">COMMERCIAL REG</div><div class="value mono">${invoiceRefEscape(recipientCommercialRegistration)}</div></div>
+      <div class="bill-cell">${arabicLabel("رقم الضريبة")}<div class="label-en">VAT REG NO.</div><div class="value mono">${invoiceRefEscape(recipientTaxNumber)}</div></div>
+      <div class="bill-cell bill-to">${arabicLabel("الفواتير إلى")}<div class="label-en">BILLED TO</div><div class="value">${invoiceRefEscape(recipientName || "—")}</div>${data.recipientPhone ? `<div class="value mono" style="font-size:9.5px;font-weight:600">${invoiceRefEscape(data.recipientPhone)}</div>` : custom.contact ? `<div class="value" style="font-size:9.5px;font-weight:600">${invoiceRefEscape(custom.contact)}</div>` : ""}<div class="value" style="font-size:9px;font-weight:500">${invoiceRefEscape(billToAddress)}</div></div>
     </section>
-    <table class="items"><thead><tr><th style="width:18mm">#</th><th>الوصف<br/><span class="label-en">DESCRIPTION</span></th><th style="width:26mm">الكمية<br/><span class="label-en">QTY</span></th><th style="width:38mm">السعر (ر.ع)<br/><span class="label-en">RATE</span></th><th style="width:32mm">الإجمالي (ر.ع)<br/><span class="label-en">TOTAL</span></th></tr></thead><tbody>${itemRows}</tbody></table>
+    <table class="items"><thead><tr><th style="width:18mm">#</th><th>${caption("الوصف")}<span class="label-en">DESCRIPTION</span></th><th style="width:26mm">${caption("الكمية")}<span class="label-en">QTY</span></th><th style="width:38mm">${caption("السعر (ر.ع)")}<span class="label-en">RATE</span></th><th style="width:32mm">${caption("الإجمالي (ر.ع)")}<span class="label-en">TOTAL</span></th></tr></thead><tbody>${itemRows}</tbody></table>
     <section class="summary-row">
       <div class="totals">
-        <div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(subtotal)}</span><span class="lbl">المبلغ قبل الضريبة<br/><span class="label-en">Subtotal</span></span></div>
-        <div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(vatAmount)}</span><span class="lbl">ضريبة القيمة المضافة (VAT)<br/><span class="label-en">VAT ${invoiceRefMoney(vatRate).replace(".000", "")}%</span></span></div>
+        <div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(subtotal)}</span><span class="lbl">${caption("المبلغ قبل الضريبة")}<span class="label-en">Subtotal</span></span></div>
+        <div class="total-line"><span class="cur">OMR</span><span class="amount">${invoiceRefMoney(vatAmount)}</span><span class="lbl">${caption("ضريبة القيمة المضافة (VAT)")}<span class="label-en">VAT ${invoiceRefMoney(vatRate).replace(".000", "")}%</span></span></div>
         <div class="separator"></div>
-        <div class="payable"><div class="amount">${invoiceRefMoney(total)} <span class="currency">(ر.ع)</span></div><div class="label">الإجمالي المستحق<br/><span class="label-en">TOTAL PAYABLE</span></div></div>
+        <div class="payable"><div class="amount">${invoiceRefMoney(total)} <span class="currency">${pdfLanguageLabel("(ر.ع)", "OMR", language)}</span></div><div class="label">${caption("الإجمالي المستحق")}<span class="label-en">TOTAL PAYABLE</span></div></div>
       </div>
       <div class="qr-wrap"><div class="qr-frame">${data.qrDataUrl ? `<img src="${invoiceRefEscape(data.qrDataUrl)}" alt="QR"/>` : "QR"}</div><div class="qr-caption">ZATCA TIN QR</div></div>
     </section>
     <section class="signature-row">
-      <div class="sig-box"><div class="sig-title">التوقيع<br/><span class="label-en">SIGNATURE</span></div><div class="sig-line">${signatureHtml}</div></div>
-      <div class="stamp-box"><div class="stamp-title">ختم الشركة<br/><span class="label-en">COMPANY STAMP</span></div><div class="stamp-frame">${stampHtml}</div></div>
+      <div class="sig-box"><div class="sig-title">${caption("التوقيع")}<span class="label-en">SIGNATURE</span></div><div class="sig-line">${signatureHtml}</div></div>
+      <div class="stamp-box"><div class="stamp-title">${caption("ختم الشركة")}<span class="label-en">COMPANY STAMP</span></div><div class="stamp-frame">${stampHtml}</div></div>
     </section>
-    <footer class="footer"><div class="thanks"><span>شكراً لتعاملكم معنا</span><span>THANK YOU FOR YOUR BUSINESS</span></div></footer>
+    <footer class="footer"><div class="thanks">${language === "en" ? "" : "<span>شكراً لتعاملكم معنا</span>"}<span>THANK YOU FOR YOUR BUSINESS</span></div></footer>
   </div>`;
-  return wrapHtml(`Tax Invoice ${data.invoiceNumber}`, styles, body);
+  return wrapHtml(`Tax Invoice ${data.invoiceNumber}`, styles, body, language);
 }
 
 /**
@@ -1783,8 +1805,8 @@ export function getCashInvoiceInsuranceStyleHtml(data: CashInvoiceInsuranceStyle
   });
 }
 
-export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData): string {
-  return renderInsuranceTaxInvoiceAlwafaReference(data);
+export function getInsuranceTaxInvoiceHtml(data: InsuranceTaxInvoiceData, language?: PdfDocumentLanguage): string {
+  return renderInsuranceTaxInvoiceAlwafaReference(data, language);
   const custom = tryCustomTemplate("insurance_tax_invoice", { ...data, ...getTemplateSettings() }, `InsuranceTaxInvoice ${(data as any).invoiceNumber || ""}`);
   if (custom) return custom;
   const s = getTemplateSettings();

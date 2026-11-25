@@ -7,6 +7,27 @@ import {
 } from "@/lib/vehicleTechnicalDeclaration";
 
 describe("vehicle technical declaration", () => {
+  it("uses English-only display labels or Arabic RTL for new email copies without changing signed values", () => {
+    const form = { ...emptyVehicleTechnicalDeclaration, cranking: "yes" as const, authorized_person: "Signed Author", signer_role: "report_author" as const, engine_other_remarks: "Saved inspection", signature_data_url: "data:image/png;base64,aGVsbG8=" };
+    const frozen = JSON.stringify(form);
+    const english = buildVehicleTechnicalDeclarationHtml(form, "en");
+    const arabic = buildVehicleTechnicalDeclarationHtml(form, "ar");
+    expect(english.includes('lang="en" dir="ltr"')).toBe(true);
+    expect(english.includes("Engine Status:")).toBe(true);
+    expect(english.includes("حالة المحرك:")).toBe(false);
+    expect(english.includes('aria-label="Checked"')).toBe(true);
+    expect(arabic.includes('lang="ar" dir="rtl"')).toBe(true);
+    expect(arabic.includes("حالة المحرك:")).toBe(true);
+    expect(arabic.includes("Engine Status:")).toBe(false);
+    expect(arabic.includes("نعم")).toBe(true);
+    for (const html of [english, arabic]) {
+      expect(html.includes(form.signature_data_url)).toBe(true);
+      expect(html.includes("Signed Author")).toBe(true);
+      expect(html.includes("Saved inspection")).toBe(true);
+    }
+    expect(JSON.stringify(form)).toBe(frozen);
+    expect(buildVehicleTechnicalDeclarationHtml(form) === english).toBe(true);
+  });
   it("uses the available signer column for the complete report author without shrinking or truncating it", () => {
     const name = "TEMO Document Preview Tester";
     const html = buildVehicleTechnicalDeclarationHtml({...emptyVehicleTechnicalDeclaration, authorized_person:name});

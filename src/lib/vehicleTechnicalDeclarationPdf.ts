@@ -1,8 +1,8 @@
 import DOMPurify from "dompurify";
 import { buildVehicleTechnicalDeclarationHtml, TECHNICAL_GARAGE_NAME, type VehicleTechnicalDeclarationForm } from "./vehicleTechnicalDeclaration";
 
-function safeHtml(form: VehicleTechnicalDeclarationForm): string {
-  return DOMPurify.sanitize(buildVehicleTechnicalDeclarationHtml(form), {
+function safeHtml(form: VehicleTechnicalDeclarationForm, language?: "ar" | "en"): string {
+  return DOMPurify.sanitize(buildVehicleTechnicalDeclarationHtml(form, language), {
     WHOLE_DOCUMENT: true,
     ADD_TAGS: ["style", "meta"],
     ADD_ATTR: ["dir", "lang"],
@@ -31,7 +31,7 @@ function assertSingleA4Page(doc: Document): HTMLElement {
   if (!page) throw new Error("Technical declaration page unavailable");
   for (const element of Array.from(page.querySelectorAll<HTMLElement>(".top > div, .grid .write-line, .footer-row .write-line, .sign-row .write-line"))) {
     const lineHeight = Number.parseFloat(doc.defaultView?.getComputedStyle(element).lineHeight || "") || 18;
-    const garageLine = element.closest(".footer-row")?.querySelector("strong")?.textContent === "Garage Name";
+    const garageLine = element.classList.contains("garage-name");
     const allowedLines = garageLine ? 2 : 1;
     if (element.scrollHeight > lineHeight * (allowedLines + 0.5)) {
       throw new Error("أحد النصوص أطول من سطره في ورقة A4. اختصر النص ثم أعد المحاولة.");
@@ -43,7 +43,7 @@ function assertSingleA4Page(doc: Document): HTMLElement {
   return page;
 }
 
-async function prepareHiddenPage(form: VehicleTechnicalDeclarationForm): Promise<{ iframe: HTMLIFrameElement; page: HTMLElement }> {
+async function prepareHiddenPage(form: VehicleTechnicalDeclarationForm, language?: "ar" | "en"): Promise<{ iframe: HTMLIFrameElement; page: HTMLElement }> {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
   iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0";
@@ -52,7 +52,7 @@ async function prepareHiddenPage(form: VehicleTechnicalDeclarationForm): Promise
     const doc = iframe.contentDocument;
     if (!doc) throw new Error("PDF frame unavailable");
     doc.open();
-    doc.write(safeHtml(form));
+    doc.write(safeHtml(form, language));
     doc.close();
     await doc.fonts?.ready;
     await waitForImages(doc);
@@ -91,12 +91,12 @@ export async function printTechnicalDeclaration(form: VehicleTechnicalDeclaratio
   return true;
 }
 
-/** This fixed one-sheet template intentionally bypasses global PDF margin overrides. */
-export async function downloadTechnicalDeclarationPdf(form: VehicleTechnicalDeclarationForm, entryNumber: string): Promise<void> {
+/** The same fixed A4 renderer serves both the saved-form download and email attachment. */
+async function renderTechnicalDeclarationPdf(form: VehicleTechnicalDeclarationForm, entryNumber: string, language?: "ar" | "en"): Promise<import("jspdf").jsPDF> {
   const [{ default: html2canvas }, { default: JsPDF }] = await Promise.all([
     import("html2canvas"), import("jspdf"),
   ]);
-  const { iframe, page } = await prepareHiddenPage(form);
+  const { iframe, page } = await prepareHiddenPage(form, language);
   try {
     const embeddedFontStyle = page.querySelector('style[data-technical-font="embedded"]');
     if (!embeddedFontStyle) throw new Error("Embedded declaration font unavailable");
@@ -115,10 +115,23 @@ export async function downloadTechnicalDeclarationPdf(form: VehicleTechnicalDecl
       },
     });
     const pdf = new JsPDF({ unit: "mm", format: "a4", orientation: "portrait", compress: true });
-    pdf.setProperties({ title: `Vehicle Technical Declaration ${entryNumber}`, subject: "Vehicle Technical Declaration" });
+    const title = language === "ar" ? "الإقرار الفني للمركبة" : "Vehicle Technical Declaration";
+    pdf.setProperties({ title: `${title} ${entryNumber}`, subject: title });
     pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, 210, 297, undefined, "FAST");
-    pdf.save(`Vehicle-Technical-Declaration-${entryNumber.replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`);
+    return pdf;
   } finally {
     iframe.remove();
   }
+}
+
+/** Returns a separate attachment without changing the saved declaration or its signature. */
+export async function buildTechnicalDeclarationPdfBlob(form: VehicleTechnicalDeclarationForm, entryNumber: string, language?: "ar" | "en"): Promise<Blob> {
+  const pdf = await renderTechnicalDeclarationPdf(form, entryNumber, language);
+  return pdf.output("blob");
+}
+
+/** This fixed one-sheet template intentionally bypasses global PDF margin overrides. */
+export async function downloadTechnicalDeclarationPdf(form: VehicleTechnicalDeclarationForm, entryNumber: string): Promise<void> {
+  const pdf = await renderTechnicalDeclarationPdf(form, entryNumber);
+  pdf.save(`Vehicle-Technical-Declaration-${entryNumber.replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`);
 }

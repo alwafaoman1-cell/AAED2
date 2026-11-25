@@ -87,6 +87,7 @@ try {
     create table public.job_orders(id uuid primary key default gen_random_uuid(),tenant_id uuid,deleted_at timestamptz,claim_id uuid,status text default 'received',inferred_claim_id uuid,metadata jsonb default '{}');
     grant select,insert,update on public.insurance_claims,public.job_orders to authenticated;`);
   await db.exec(await fs.readFile(path.join(root,'supabase/migrations/20261123141053_workflow_requirement_claim_gates.sql'),'utf8'));
+  await db.exec(await fs.readFile(path.join(root,'supabase/migrations/20261124143324_defer_claim_order_approval_guard.sql'),'utf8'));
   await actor(1);
   await db.query('insert into public.insurance_claims(id,tenant_id,status,estimated_amount) values($1,$2,$3,0)',[id(601),id(101),'pending']);
   await check('stale relaxed wizard provenance cannot bypass newly restored server completeness',()=>fails(
@@ -184,7 +185,7 @@ try {
     await db.query("update public.job_orders set status='completed',metadata='{\"closingReview\":{\"status\":\"جاهز للتسليم\"}}' where id=$1",[id(707)]);
     assert.equal((await completionAudit(id(707))).length,0);assert.equal((await completionAudit(id(704))).length,1);
   });
-  const out=path.join(root,'output/workflow-requirements');await fs.mkdir(out,{recursive:true});
+  const out=path.resolve(root,process.env.AAED_WORKFLOW_REQUIREMENTS_PROOF_DIR||'output/workflow-requirements');await fs.mkdir(out,{recursive:true});
   await fs.writeFile(path.join(out,'database-verification.json'),JSON.stringify({engine:'PGlite 0.6.0 (local PostgreSQL/WASM)',scope:'isolated synthetic schema; no hosted connection',passed:checks.length,failed:0,checks},null,2));
   console.log(`PASS ${checks.length} isolated PostgreSQL checks`);
 } catch(error) {

@@ -11,6 +11,9 @@ import {
   getTemplateSettingsAsync,
   getTemplateSettings,
   type PdfTemplateSettings,
+  type PdfDocumentLanguage,
+  pdfLanguageLabel,
+  pdfLanguageStyles,
 } from "./pdfGenerator";
 import { buildZatcaQrDataUrl } from "./zatcaQr";
 import { renderWithCustomTemplate } from "./printTemplates/resolver";
@@ -195,8 +198,8 @@ function baseStyles(s: PdfTemplateSettings) {
   `;
 }
 
-function wrapHtml(title: string, styles: string, body: string) {
-  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>${toEnglishDigits(title)}</title><style>${styles}</style></head><body>${toEnglishDigits(body)}</body></html>`;
+function wrapHtml(title: string, styles: string, body: string, language?: PdfDocumentLanguage) {
+  return `<!DOCTYPE html><html lang="${language === "en" ? "en" : "ar"}" dir="${language === "en" ? "ltr" : "rtl"}"><head><meta charset="UTF-8"/><title>${toEnglishDigits(title)}</title><style>${styles}${pdfLanguageStyles(language)}</style></head><body>${toEnglishDigits(body)}</body></html>`;
 }
 
 function money3(value: number): string {
@@ -471,7 +474,7 @@ function renderReferenceInsuranceInvoice(p: {
   return wrapHtml(`Tax Invoice ${p.invoiceNumber}`, referenceInsuranceInvoiceStyles(), body);
 }
 
-function headerHtml(s: PdfTemplateSettings, labelAr: string, labelEn: string, num: string, date: string) {
+function headerHtml(s: PdfTemplateSettings, labelAr: string, labelEn: string, num: string, date: string, language?: PdfDocumentLanguage) {
   const logo = s.logoUrl
     ? `<img src="${s.logoUrl}" alt="logo" style="max-height:62px;max-width:140px;object-fit:contain;margin-bottom:8px;display:block;" />`
     : "";
@@ -479,17 +482,17 @@ function headerHtml(s: PdfTemplateSettings, labelAr: string, labelEn: string, nu
     <div class="header">
       <div class="company-info">
         ${logo}
-        <h1>${s.companyName}</h1>
-        <div class="en-name">${s.companyNameEn}</div>
+        <h1>${language === "en" ? s.companyNameEn : s.companyName}</h1>
+        ${language === "en" ? "" : `<div class="en-name">${s.companyNameEn}</div>`}
         <div class="details">
-          السجل التجاري / CR: ${s.commercialReg}<br/>
-          الرقم الضريبي / VAT: ${s.vatNumber}<br/>
+          ${pdfLanguageLabel("السجل التجاري / CR:", "CR:", language)} ${s.commercialReg}<br/>
+          ${pdfLanguageLabel("الرقم الضريبي / VAT:", "VAT:", language)} ${s.vatNumber}<br/>
           ${s.phone} • ${s.email}<br/>
-          ${s.address}
+          ${language === "en" ? (s.addressEn || "") : s.address}
         </div>
       </div>
       <div class="doc-badge">
-        <div class="label-ar">${labelAr}</div>
+        ${language === "en" ? "" : `<div class="label-ar">${labelAr}</div>`}
         <div class="label-en">${labelEn}</div>
         <div class="number">${num}</div>
         <div class="date">${date}</div>
@@ -497,12 +500,12 @@ function headerHtml(s: PdfTemplateSettings, labelAr: string, labelEn: string, nu
     </div>`;
 }
 
-function insuranceBanner(insuranceCompany: string, claimNumber: string, policyNumber?: string | null) {
+function insuranceBanner(insuranceCompany: string, claimNumber: string, policyNumber?: string | null, language?: PdfDocumentLanguage) {
   return `
     <div class="insurance-banner">
       <div class="icon">🛡️</div>
       <div class="info">
-        <div class="label">شركة التأمين / Insurance Provider</div>
+        <div class="label">${pdfLanguageLabel("شركة التأمين / Insurance Provider", "Insurance Provider", language)}</div>
         <div class="name">${e(insuranceCompany)}</div>
       </div>
       <div class="meta">
@@ -512,26 +515,26 @@ function insuranceBanner(insuranceCompany: string, claimNumber: string, policyNu
     </div>`;
 }
 
-function vehicleCard(v: ClaimVehicleInfo) {
+function vehicleCard(v: ClaimVehicleInfo, language?: PdfDocumentLanguage) {
   const title = [v.make, v.model].filter(Boolean).join(" ") || "—";
   return `
     <div class="vehicle-card">
       <div class="left">
-        <div class="lbl">المركبة / Vehicle</div>
+        <div class="lbl">${pdfLanguageLabel("المركبة / Vehicle", "Vehicle", language)}</div>
         <div class="val">${e(title)} ${v.year ? `· ${e(v.year)}` : ""}</div>
-        ${v.color ? `<div style="margin-top:4px;font-size:11px;color:#8a6d3b">اللون: <b>${e(v.color)}</b></div>` : ""}
+        ${v.color ? `<div style="margin-top:4px;font-size:11px;color:#8a6d3b">${pdfLanguageLabel("اللون:", "Color:", language)} <b>${e(v.color)}</b></div>` : ""}
         ${v.vin ? `<div style="margin-top:2px;font-size:10px;color:#8a6d3b;direction:ltr;text-align:right">VIN: <b>${e(v.vin)}</b></div>` : ""}
       </div>
       <div class="right">
-        <div class="k">رقم اللوحة</div>
+        <div class="k">${pdfLanguageLabel("رقم اللوحة", "Plate Number", language)}</div>
         <div class="v"><span class="vehicle-plate">${e(v.plate || "—")}</span></div>
       </div>
     </div>`;
 }
 
 
-function footerHtml(s: PdfTemplateSettings) {
-  return `<div class="footer">${s.companyName} • ${s.companyNameEn} • © ${new Date().getFullYear()}</div>`;
+function footerHtml(s: PdfTemplateSettings, language?: PdfDocumentLanguage) {
+  return `<div class="footer">${language === "en" ? "" : `${s.companyName} • `}${s.companyNameEn} • © ${new Date().getFullYear()}</div>`;
 }
 
 function stampBlock(s: PdfTemplateSettings, on: boolean) {
@@ -542,10 +545,11 @@ function stampBlock(s: PdfTemplateSettings, on: boolean) {
 // ─────────────────────────────────────────────────────────────────
 // 1) تقدير المطالبة
 // ─────────────────────────────────────────────────────────────────
-export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
+export function getClaimEstimateHtml(p: ClaimEstimatePayload, language?: PdfDocumentLanguage): string {
   // ملاحظة: تم تعطيل القالب المخصص لتقدير المطالبة لتوحيد الشكل الجديد
   // لكلا النوعين LUMP SUM و UPL مع الحفاظ على الختم لكل واحد.
   const s = getTemplateSettings();
+  const text = (legacy: string, english: string) => pdfLanguageLabel(legacy, english, language);
   const styles = `${baseStyles(s)}
     .claim-estimate-page{padding:8mm 10mm 9mm;display:flex;flex-direction:column;min-height:297mm;color:#0f172a;font-size:11.5px;font-weight:500;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
     .claim-estimate-page .header{padding-bottom:6px;margin-bottom:7px;border-bottom-width:2px;align-items:flex-start}
@@ -590,20 +594,20 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
   const documentNumber = p.estimateNumber || p.claimNumber;
   const estimateTypeLabel =
     p.estimationType === "upl"
-      ? "بنود التقدير (UPL)"
+      ? text("بنود التقدير (UPL)", "Estimate Items (UPL)")
       : p.estimationType === "lump_sum"
-        ? "التقدير الإجمالي (Lump Sum)"
-        : "تقدير أولي تلقائي / Initial Estimate";
+        ? text("التقدير الإجمالي (Lump Sum)", "Lump Sum Estimate")
+        : text("تقدير أولي تلقائي / Initial Estimate", "Initial Estimate");
   const estimateBadge =
     p.estimationType === "upl" ? "UPL" : p.estimationType === "lump_sum" ? "LUMP SUM" : "INITIAL";
   const showEstimateBadge = (p.showEstimateBadge ?? true) && (p.estimationType === "upl" || p.estimationType === "lump_sum");
   const showStampAndSignature = showEstimateBadge;
   const estimateSectionTitle =
     p.estimationType === "upl"
-      ? "بنود التقدير (UPL)"
+      ? text("بنود التقدير (UPL)", "Estimate Items (UPL)")
       : p.estimationType === "lump_sum"
-        ? "التقدير الإجمالي (Lump Sum)"
-        : "تقدير أولي تلقائي / Initial Estimate";
+        ? text("التقدير الإجمالي (Lump Sum)", "Lump Sum Estimate")
+        : text("تقدير أولي تلقائي / Initial Estimate", "Initial Estimate");
 
   let itemsHtml = "";
   let subtotal = 0;
@@ -614,10 +618,10 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
         <thead>
           <tr>
             <th style="width:8%">#</th>
-            <th>البند / Item</th>
-            <th style="width:12%">الكمية</th>
-            <th style="width:18%">سعر الوحدة</th>
-            <th style="width:18%">الإجمالي</th>
+            <th>${text("البند / Item", "Item")}</th>
+            <th style="width:12%">${text("الكمية", "Qty")}</th>
+            <th style="width:18%">${text("سعر الوحدة", "Unit Price")}</th>
+            <th style="width:18%">${text("الإجمالي", "Total")}</th>
           </tr>
         </thead>
         <tbody>
@@ -639,11 +643,11 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
   } else {
     subtotal = p.lumpSumAmount || 0;
     const lineDescription = p.estimationType === "auto"
-      ? `تقدير أولي تلقائي حسب المبلغ المدخل<br/><span style="color:#888;font-size:10px">Initial automatic estimate based on the entered amount. Not stamped until converted to UPL or Lump Sum.</span>`
-      : `تقدير شامل لإصلاح أضرار المركبة بناءً على المعاينة الفنية<br/><span style="color:#888;font-size:10px">Lump-sum estimation based on technical inspection</span>`;
+      ? `${language === "en" ? "" : "تقدير أولي تلقائي حسب المبلغ المدخل<br/>"}<span style="color:#888;font-size:10px">Initial automatic estimate based on the entered amount. Not stamped until converted to UPL or Lump Sum.</span>`
+      : `${language === "en" ? "" : "تقدير شامل لإصلاح أضرار المركبة بناءً على المعاينة الفنية<br/>"}<span style="color:#888;font-size:10px">Lump-sum estimation based on technical inspection</span>`;
     itemsHtml = `
       <table>
-        <thead><tr><th>الوصف / Description</th><th style="width:25%">الإجمالي / Total</th></tr></thead>
+        <thead><tr><th>${text("الوصف / Description", "Description")}</th><th style="width:25%">${text("الإجمالي / Total", "Total")}</th></tr></thead>
         <tbody>
           <tr>
             <td>${lineDescription}</td>
@@ -659,55 +663,63 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
   const body = `
     <div class="page claim-estimate-page">
       ${s.showWatermark ? `<div class="watermark">ESTIMATE</div>` : ""}
-      ${headerHtml(s, "تقدير مطالبة", "CLAIM ESTIMATE", p.claimNumber, p.date)}
+      ${headerHtml(s, "تقدير مطالبة", "CLAIM ESTIMATE", p.claimNumber, p.date, language)}
       <div class="info-row" style="justify-content:flex-end;margin:-6px 0 8px;font-family:'Inter',sans-serif;direction:ltr"><span class="label">Estimate No</span><span class="value">${e(documentNumber)}</span><span style="display:none">${e(estimateTypeLabel)} ${e(estimateBadge)}</span></div>
-      ${insuranceBanner(p.insuranceCompany, p.claimNumber, p.policyNumber)}
-      ${vehicleCard(p.vehicle)}
+      ${insuranceBanner(p.insuranceCompany, p.claimNumber, p.policyNumber, language)}
+      ${vehicleCard(p.vehicle, language)}
 
-      <div class="section-title">بيانات الحادث / Incident Information</div>
+      <div class="section-title">${text("بيانات الحادث / Incident Information", "Incident Information")}</div>
       <div class="info-grid">
-        ${p.incidentDate ? `<div class="info-row"><span class="label">تاريخ التقدير</span><span class="value">${p.incidentDate}</span></div>` : ""}
-        ${p.incidentLocation ? `<div class="info-row"><span class="label">موقع الحادث</span><span class="value">${p.incidentLocation}</span></div>` : ""}
-        ${p.policyExpiry ? `<div class="info-row"><span class="label">انتهاء الوثيقة</span><span class="value">${p.policyExpiry}</span></div>` : ""}
-        ${p.adjusterName ? `<div class="info-row"><span class="label">المُسوِّي</span><span class="value">${p.adjusterName} ${p.adjusterPhone ? `(${p.adjusterPhone})` : ""}</span></div>` : ""}
-        ${p.customerName ? `<div class="info-row"><span class="label">مالك المركبة</span><span class="value">${p.customerName} ${p.customerPhone ? `(${p.customerPhone})` : ""}</span></div>` : ""}
+        ${p.incidentDate ? `<div class="info-row"><span class="label">${text("تاريخ التقدير", "Estimate Date")}</span><span class="value">${p.incidentDate}</span></div>` : ""}
+        ${p.incidentLocation ? `<div class="info-row"><span class="label">${text("موقع الحادث", "Incident Location")}</span><span class="value">${p.incidentLocation}</span></div>` : ""}
+        ${p.policyExpiry ? `<div class="info-row"><span class="label">${text("انتهاء الوثيقة", "Policy Expiry")}</span><span class="value">${p.policyExpiry}</span></div>` : ""}
+        ${p.adjusterName ? `<div class="info-row"><span class="label">${text("المُسوِّي", "Adjuster")}</span><span class="value">${p.adjusterName} ${p.adjusterPhone ? `(${p.adjusterPhone})` : ""}</span></div>` : ""}
+        ${p.customerName ? `<div class="info-row"><span class="label">${text("مالك المركبة", "Vehicle Owner")}</span><span class="value">${p.customerName} ${p.customerPhone ? `(${p.customerPhone})` : ""}</span></div>` : ""}
       </div>
-      ${p.incidentDescription ? `<div class="notes-box"><b>وصف الحادث:</b> ${p.incidentDescription}</div>` : ""}
+      ${p.incidentDescription ? `<div class="notes-box"><b>${text("وصف الحادث:", "Incident Description:")}</b> ${p.incidentDescription}</div>` : ""}
 
       <div class="section-title">${estimateSectionTitle}</div>
-      ${p.estimationType === "auto" ? `<div class="notes-box"><b>Initial Estimate:</b> تقدير أولي تلقائي حسب المبلغ المدخل، ولا يحمل ختم الورشة حتى يتم تحويله إلى UPL أو Lump Sum.</div>` : ""}
+      ${p.estimationType === "auto" ? `<div class="notes-box"><b>Initial Estimate:</b> ${text("تقدير أولي تلقائي حسب المبلغ المدخل، ولا يحمل ختم الورشة حتى يتم تحويله إلى UPL أو Lump Sum.", "Based on the entered amount. Not stamped until converted to UPL or Lump Sum.")}</div>` : ""}
       ${itemsHtml}
 
       <div class="totals-box">
-        <div class="totals-row"><span>الإجمالي المقدّر / Estimated</span><span class="amount">${subtotal.toFixed(3)} OMR</span></div>
-        ${deductible > 0 ? `<div class="totals-row"><span>التحمّل / Deductible</span><span class="amount">- ${deductible.toFixed(3)}</span></div>` : ""}
-        ${p.approvedAmount != null ? `<div class="totals-row"><span>المعتمد من التأمين / Approved</span><span class="amount" style="color:#2e7d32">${Number(p.approvedAmount).toFixed(3)}</span></div>` : ""}
-        <div class="totals-row total"><span>الصافي المستحق / Net Due</span><span class="amount">${netAmount.toFixed(3)} OMR</span></div>
+        <div class="totals-row"><span>${text("الإجمالي المقدّر / Estimated", "Estimated")}</span><span class="amount">${subtotal.toFixed(3)} OMR</span></div>
+        ${deductible > 0 ? `<div class="totals-row"><span>${text("التحمّل / Deductible", "Deductible")}</span><span class="amount">- ${deductible.toFixed(3)}</span></div>` : ""}
+        ${p.approvedAmount != null ? `<div class="totals-row"><span>${text("المعتمد من التأمين / Approved", "Approved")}</span><span class="amount" style="color:#2e7d32">${Number(p.approvedAmount).toFixed(3)}</span></div>` : ""}
+        <div class="totals-row total"><span>${text("الصافي المستحق / Net Due", "Net Due")}</span><span class="amount">${netAmount.toFixed(3)} OMR</span></div>
       </div>
       ${showEstimateBadge ? `<div class="estimation-badge"><span>${p.estimationType === "upl" ? "UPL" : "LUMP SUM"}</span></div>` : ""}
 
-      ${p.notes ? `<div class="notes-box"><b>ملاحظات:</b> ${p.notes}</div>` : ""}
+      ${p.notes ? `<div class="notes-box"><b>${text("ملاحظات:", "Notes:")}</b> ${p.notes}</div>` : ""}
 
       ${showStampAndSignature ? `<div class="signature-area">
         <div class="sig">
-          <div class="name">المُقدِّر / Estimator</div>
+          <div class="name">${text("المُقدِّر / Estimator", "Estimator")}</div>
           <div class="area">${s.signatureUrl ? `<img src="${s.signatureUrl}" alt="signature"/>` : ""}</div>
-          <div class="lbl">${s.responsibleName || "اسم المسؤول"}</div>
+          <div class="lbl">${s.responsibleName || text("اسم المسؤول", "Responsible person")}</div>
         </div>
         <div class="sig">
-          <div class="name">ختم الورشة / Workshop Stamp</div>
+          <div class="name">${text("ختم الورشة / Workshop Stamp", "Workshop Stamp")}</div>
           <div class="area">${s.stampUrl ? `<img src="${s.stampUrl}" alt="stamp"/>` : ""}</div>
-          <div class="lbl">${s.companyName}</div>
+          <div class="lbl">${language === "en" ? s.companyNameEn : s.companyName}</div>
         </div>
         <div class="sig">
-          <div class="name">مندوب التأمين / Insurance Rep</div>
+          <div class="name">${text("مندوب التأمين / Insurance Rep", "Insurance Rep")}</div>
           <div class="area"></div>
-          <div class="lbl">التوقيع والختم</div>
+          <div class="lbl">${text("التوقيع والختم", "Signature and stamp")}</div>
         </div>
       </div>` : ""}
-      ${footerHtml(s)}
+      ${footerHtml(s, language)}
     </div>`;
-  return wrapHtml(`تقدير ${p.claimNumber}`, styles, body);
+  // Fixed A4 pagination and global signature sizing can exhaust this column's
+  // flex space. A clipped flex item otherwise has a zero automatic minimum and
+  // can hide every amount. Keep new explicit-language summaries at content size;
+  // the shared paginator can move content to another page instead of losing it.
+  const financialSummaryStyles = language === "ar" || language === "en" ? `
+    .claim-estimate-page > .totals-box{flex:0 0 auto;min-height:min-content;overflow:visible}
+    .claim-estimate-page > .signature-area{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  ` : "";
+  return wrapHtml(`${text("تقدير", "Estimate")} ${p.claimNumber}`, styles + financialSummaryStyles, body, language);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -715,7 +727,7 @@ export function getClaimEstimateHtml(p: ClaimEstimatePayload): string {
 //    تصميم Slate موحّد — مستند محاسبي هادئ بلون واحد + رمادي محايد.
 //    أنماط الفاتورة معزولة في كتلة CSS خاصة بها ولا تعتمد على baseStyles.
 // ─────────────────────────────────────────────────────────────────
-export async function getClaimTaxInvoiceHtml(p: ClaimTaxInvoicePayload): Promise<string> {
+export async function getClaimTaxInvoiceHtml(p: ClaimTaxInvoicePayload, language?: PdfDocumentLanguage): Promise<string> {
   const s = await getTemplateSettingsAsync();
   const vatRate = (p.vatRate ?? s.vatRate ?? 5) / 100;
 
@@ -791,7 +803,7 @@ export async function getClaimTaxInvoiceHtml(p: ClaimTaxInvoicePayload): Promise
     total,
     notes: p.notes || undefined,
     qrDataUrl,
-  });
+  }, language);
 
   const logoBlock = s.logoUrl
     ? `<img src="${s.logoUrl}" alt="logo" class="logo" />`

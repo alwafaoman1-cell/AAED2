@@ -43,6 +43,14 @@ const LOCALE_VALUE_TRANSLATIONS = buildLocaleValueTranslations(
 );
 
 const CURATED_AR_TO_EN: Record<string, string> = {
+  "نماذج إرسال المهندس": "Engineer email templates",
+  "إغلاق المعاينة": "Close preview",
+  "تنزيل نسخة المعاينة": "Download preview copy",
+  "إرسال اختبار حقيقي للمالك": "Send real owner test",
+  "تحديث الحزمة": "Refresh packet",
+  "إرسال إلى المهندس": "Send to engineer",
+  "إرسال مستندات المهندس": "Send engineer documents",
+  "إعادة تحميل الإعدادات": "Reload settings",
   "إزالة المرفق": "Remove attachment",
   "إزالة مرفق هوية المستلم": "Remove recipient ID attachment",
   "فتح ملف المركبة": "Open vehicle file",

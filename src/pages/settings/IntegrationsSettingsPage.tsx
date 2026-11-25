@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   ArrowRight,
   CheckCircle2,
@@ -22,6 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { getFunctionErrorMessage } from "@/lib/functionErrors";
+import { invokeGmailSettings } from "@/lib/gmailSettings";
 import { toast } from "sonner";
 
 type Provider = "twilio_whatsapp" | "meta_whatsapp" | "gmail";
@@ -35,6 +37,7 @@ interface IntegrationRow {
   last_test_status?: string | null;
   last_test_error?: string | null;
   hasSecrets: Record<string, boolean>;
+  updated_at?: string | null;
 }
 
 interface EmailProviderStatus {
@@ -92,6 +95,9 @@ async function loadEmailProviderStatus(): Promise<EmailProviderStatus> {
 
 export default function IntegrationsSettingsPage() {
   const { profile } = useAuth();
+  const { i18n } = useTranslation();
+  const english = i18n.language.startsWith("en");
+  const [gmailStatusReady, setGmailStatusReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState<Provider | null>(null);
@@ -113,6 +119,16 @@ export default function IntegrationsSettingsPage() {
   });
   const loadVersion = useRef(0);
   const tenantId = profile?.tenant_id;
+  const identityKey = [profile?.user_id || "", tenantId || "", profile?.role || ""].join("|");
+  const currentIdentity = useRef(identityKey);
+  currentIdentity.current = identityKey;
+  const gmailSaveVersion = useRef(0);
+  const gmailStatusIdentity = useRef("");
+
+  useEffect(() => {
+    gmailSaveVersion.current += 1;
+    setSaving(value => value === "gmail" ? null : value);
+  }, [identityKey]);
 
   const canManageEmailProvider =
     profile?.role === "admin" ||
@@ -131,8 +147,11 @@ export default function IntegrationsSettingsPage() {
   }, []);
 
   const load = useCallback(async () => {
+    if (currentIdentity.current !== identityKey) return;
     const version = ++loadVersion.current;
+    const isCurrent = () => version === loadVersion.current && currentIdentity.current === identityKey;
     setLoading(true);
+    setGmailStatusReady(false);
     setLoadError("");
     setData({
       twilio_whatsapp: EMPTY("twilio_whatsapp"),
@@ -149,7 +168,7 @@ export default function IntegrationsSettingsPage() {
         .eq("tenant_id", tenantId)
         .in("provider", ["twilio_whatsapp", "meta_whatsapp", "gmail"]);
       if (error) throw error;
-      if (version !== loadVersion.current) return;
+      if (!isCurrent()) return;
 
       const next: Record<Provider, IntegrationRow> = {
         twilio_whatsapp: EMPTY("twilio_whatsapp"),
@@ -171,9 +190,26 @@ export default function IntegrationsSettingsPage() {
       });
       setData(next);
 
+      if (profile?.role === "admin") {
+        try {
+          const status = await invokeGmailSettings({ action: "status", tenant_id: tenantId });
+          if (!isCurrent()) return;
+          const confirmedGmail: IntegrationRow = { ...next.gmail, enabled: !!status.enabled,
+            config: { from_email: status.fromEmail || "", client_id: status.clientId || "" }, secrets: {},
+            hasSecrets: { client_secret: !!status.hasClientSecret, refresh_token: !!status.hasRefreshToken }, updated_at: status.updatedAt };
+          setData({ ...next, gmail: confirmedGmail });
+          gmailStatusIdentity.current = identityKey;
+          setGmailStatusReady(true);
+        } catch {
+          if (isCurrent()) setLoadError(i18n.language.startsWith("en")
+            ? "Gmail settings could not be confirmed. Reload before saving."
+            : "تعذر تأكيد إعدادات Gmail. أعد القراءة قبل الحفظ.");
+        }
+      }
+
       try {
         const status = await loadEmailProviderStatus();
-        if (version !== loadVersion.current) return;
+        if (!isCurrent()) return;
         setEmailStatus(status);
         setEmailForm({
           enabled: !!status.enabled,
@@ -183,17 +219,17 @@ export default function IntegrationsSettingsPage() {
           domain: status.domain || "",
         });
       } catch (emailError: any) {
-        if (version === loadVersion.current) {
+        if (isCurrent()) {
           setEmailStatus(DEFAULT_EMAIL_STATUS);
           setLoadError(emailError?.message || "تعذر تحميل حالة مزود البريد");
         }
       }
     } catch (error: any) {
-      if (version === loadVersion.current) setLoadError(error?.message || "تعذر تحميل إعدادات التكاملات");
+      if (isCurrent()) setLoadError(error?.message || "تعذر تحميل إعدادات التكاملات");
     } finally {
-      if (version === loadVersion.current) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [tenantId, loadEmailProviderStatus]);
+  }, [tenantId, profile?.role, loadEmailProviderStatus, i18n, identityKey]);
 
   useEffect(() => {
     void load();
@@ -254,7 +290,53 @@ export default function IntegrationsSettingsPage() {
     }
   }
 
+  function showSaveError(provider: Provider, error: unknown) {
+    const gmailErrors: Record<string, [string, string]> = {
+      gmail_credentials_incomplete: ["أكمل بريد المرسل ومعرف عميل Google وسر العميل والتفويض قبل التفعيل.", "Complete the sender email, Google client ID, client secret and authorization before enabling Gmail."],
+      gmail_settings_stale: ["تغيرت إعدادات Gmail في جلسة أخرى. أعد تحميلها قبل الحفظ.", "Gmail settings changed in another session. Reload before saving."],
+      gmail_settings_tenant_changed: ["تغيرت الورشة الحالية. أعد فتح الإعدادات.", "The current workshop changed. Reopen settings."],
+      gmail_settings_invalid_fields: ["راجع بريد المرسل ومعرف عميل Google والحقول المدخلة.", "Check the sender email, Google client ID and entered fields."],
+      gmail_oauth_client_changed_requires_credentials: ["تغيير عميل Google يحتاج سرًا وتفويضًا جديدين لهذا العميل.", "Changing the Google application requires its new client secret and authorization."],
+      gmail_settings_admin_required: ["إعداد Gmail متاح لمدير النظام فقط.", "Only an administrator can configure Gmail."],
+      gmail_settings_save_failed: ["لم يتأكد حفظ إعدادات Gmail. أعد قراءتها قبل المحاولة.", "Gmail settings could not be saved. Reload before retrying."],
+      gmail_settings_unavailable: ["تعذر تأكيد إعدادات Gmail. أعد القراءة قبل الحفظ.", "Gmail settings could not be confirmed. Reload before saving."],
+      gmail_settings_unauthorized: ["انتهت جلسة الدخول. سجّل الدخول مجددًا قبل تعديل Gmail.", "Your session expired. Sign in again before changing Gmail settings."],
+    };
+    const code = error instanceof Error ? error.message : "";
+    const translation = provider === "gmail" ? gmailErrors[code] || gmailErrors.gmail_settings_unavailable : undefined;
+    toast.error(translation ? translation[english ? 1 : 0] : code || "فشل الحفظ");
+  }
+
+  async function saveGmail() {
+    if (currentIdentity.current !== identityKey) return;
+    const request = ++gmailSaveVersion.current;
+    let expectedLoadVersion = loadVersion.current;
+    const ownsSave = () => request === gmailSaveVersion.current && currentIdentity.current === identityKey;
+    const isCurrent = () => ownsSave() && loadVersion.current === expectedLoadVersion;
+    setSaving("gmail");
+    try {
+      if (!gmailStatusReady || gmailStatusIdentity.current !== identityKey || profile?.role !== "admin" || !tenantId) throw new Error("gmail_settings_unavailable");
+      const row = data.gmail;
+      await invokeGmailSettings({
+        action: "save", tenant_id: tenantId, expected_updated_at: row.updated_at ?? null,
+        enabled: row.enabled, from_email: row.config.from_email || "", client_id: row.config.client_id || "",
+        client_secret: row.secrets.client_secret || "", refresh_token: row.secrets.refresh_token || "",
+      });
+      if (!isCurrent()) return;
+      toast.success(english ? "Gmail settings saved." : "تم حفظ إعدادات Gmail.");
+      expectedLoadVersion += 1;
+      await load();
+    } catch (error) {
+      if (isCurrent()) showSaveError("gmail", error);
+    } finally {
+      // A fresh read invalidates this response's data, but it must not leave
+      // its own spinner stuck. Identity/request ownership protects newer saves.
+      if (ownsSave()) setSaving(value => value === "gmail" ? null : value);
+    }
+  }
+
   async function save(provider: Provider) {
+    if (provider === "gmail") return saveGmail();
     setSaving(provider);
     try {
       const user = (await supabase.auth.getUser()).data.user;
@@ -289,7 +371,7 @@ export default function IntegrationsSettingsPage() {
       toast.success("تم الحفظ");
       await load();
     } catch (error: any) {
-      toast.error(error?.message || "فشل الحفظ");
+      showSaveError(provider, error);
     } finally {
       setSaving(null);
     }
@@ -321,6 +403,7 @@ export default function IntegrationsSettingsPage() {
         <h1 className="text-xl font-bold flex items-center gap-2">
           <Plug size={20} className="text-primary" /> التكاملات والمزامنة
         </h1>
+        <Button variant="outline" className="ms-auto min-h-11" disabled={!!saving || !!testing || emailBusy || emailTesting} onClick={() => void load()}>{english ? "Reload settings" : "إعادة تحميل الإعدادات"}</Button>
       </div>
 
       {loadError && (
@@ -498,6 +581,8 @@ export default function IntegrationsSettingsPage() {
 
       <ProviderCard
         title="Gmail (Google)"
+        english={english}
+        disabled={!gmailStatusReady || gmailStatusIdentity.current !== identityKey || profile?.role !== "admin" || saving === "gmail"}
         icon={<Mail size={18} className="text-destructive" />}
         row={data.gmail}
         onToggle={(value) => update("gmail", { enabled: value })}
@@ -506,9 +591,9 @@ export default function IntegrationsSettingsPage() {
         saving={saving === "gmail"}
         testing={testing === "gmail"}
         helpUrl="https://console.cloud.google.com/apis/credentials"
-        helpText="Google Cloud OAuth Client مع refresh_token. إن لم يكن مضبوطًا استخدم Email Provider أعلاه."
+        helpText={english ? "Google OAuth with gmail.send permission and the account owner's consent. Blank secrets preserve the saved values. Engineer documents are sent as individual attachments in one email." : "يتطلب تفويض Google بصلاحية gmail.send وموافقة صاحب الحساب. الأسرار الفارغة تحتفظ بالقيم المحفوظة. تُرسل مستندات المهندس كمرفقات مستقلة في رسالة واحدة."}
         fields={[
-          { key: "from_email", label: "البريد المرسل (From)", placeholder: "you@yourdomain.com", isSecret: false },
+          { key: "from_email", label: english ? "Sender email (From)" : "البريد المرسل (From)", placeholder: "you@yourdomain.com", isSecret: false },
           { key: "client_id", label: "OAuth Client ID", placeholder: "xxxxx.apps.googleusercontent.com", isSecret: false },
           { key: "client_secret", label: "OAuth Client Secret", placeholder: "********", isSecret: true },
           { key: "refresh_token", label: "Refresh Token", placeholder: "1//0g...", isSecret: true },
@@ -545,8 +630,11 @@ function ProviderCard(props: {
   onTest: () => void;
   saving: boolean;
   testing: boolean;
+  english?: boolean;
+  disabled?: boolean;
 }) {
   const { row } = props;
+  const label = (ar: string, en: string) => props.english ? en : ar;
   return (
     <Card className="p-4 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -555,25 +643,25 @@ function ProviderCard(props: {
           <h2 className="font-semibold">{props.title}</h2>
           {row.last_test_status === "success" && (
             <Badge variant="outline" className="border-success/40 text-success gap-1">
-              <CheckCircle2 size={11} /> متصل
+              <CheckCircle2 size={11} /> {label("متصل", "Connected")}
             </Badge>
           )}
           {row.last_test_status === "failed" && (
             <Badge variant="outline" className="border-destructive/40 text-destructive gap-1">
-              <XCircle size={11} /> فشل
+              <XCircle size={11} /> {label("فشل", "Failed")}
             </Badge>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Label className="text-xs">تفعيل</Label>
-          <Switch checked={row.enabled} onCheckedChange={props.onToggle} />
+          <Label className="text-xs">{label("تفعيل", "Enable")}</Label>
+          <Switch checked={row.enabled} onCheckedChange={props.onToggle} disabled={props.disabled} />
         </div>
       </div>
 
       <p className="text-xs text-muted-foreground inline-flex items-center gap-1">
         {props.helpText}
         <a href={props.helpUrl} target="_blank" rel="noreferrer" className="underline inline-flex items-center gap-0.5 text-primary">
-          فتح لوحة المزود <ExternalLink size={10} />
+          {label("فتح لوحة المزود", "Open provider settings")} <ExternalLink size={10} />
         </a>
       </p>
 
@@ -584,13 +672,14 @@ function ProviderCard(props: {
           return (
             <div key={field.key}>
               <Label className="text-xs">
-                {field.label} {field.isSecret && stored && <span className="text-success">(محفوظ)</span>}
+                {field.label} {field.isSecret && stored && <span className="text-success">({label("محفوظ", "Saved")})</span>}
               </Label>
               <Input
                 dir="ltr"
                 type={field.isSecret ? "password" : "text"}
                 value={value}
-                placeholder={field.isSecret && stored ? "اتركه فارغًا للإبقاء على الحالي" : field.placeholder}
+                disabled={props.disabled}
+                placeholder={field.isSecret && stored ? label("اتركه فارغًا للإبقاء على الحالي", "Leave blank to keep the saved value") : field.placeholder}
                 onChange={(event) => props.onChange(field.key, event.target.value, field.isSecret)}
               />
             </div>
@@ -600,21 +689,21 @@ function ProviderCard(props: {
 
       {row.last_test_error && (
         <div className="text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded p-2">
-          آخر خطأ: {row.last_test_error}
+          {label("آخر خطأ", "Last error")}: {row.last_test_error}
         </div>
       )}
       {row.last_test_at && (
         <div className="text-[10px] text-muted-foreground">
-          آخر اختبار: {new Date(row.last_test_at).toLocaleString("en-GB")}
+          {label("آخر اختبار", "Last test")}: {new Date(row.last_test_at).toLocaleString("en-GB")}
         </div>
       )}
 
       <div className="flex gap-2 flex-wrap">
-        <Button onClick={props.onSave} disabled={props.saving} className="gap-2">
-          <Save size={14} /> {props.saving ? "جارِ الحفظ…" : "حفظ"}
+        <Button onClick={props.onSave} disabled={props.saving || props.disabled} className="gap-2">
+          <Save size={14} /> {props.saving ? label("جارِ الحفظ…", "Saving…") : label("حفظ", "Save")}
         </Button>
-        <Button onClick={props.onTest} disabled={props.testing} variant="outline" className="gap-2">
-          <Send size={14} /> {props.testing ? "جارِ الاختبار…" : "اختبار الاتصال"}
+        <Button onClick={props.onTest} disabled={props.testing || props.disabled} variant="outline" className="gap-2">
+          <Send size={14} /> {props.testing ? label("جارِ الاختبار…", "Testing…") : label("اختبار الاتصال", "Test connection")}
         </Button>
       </div>
     </Card>

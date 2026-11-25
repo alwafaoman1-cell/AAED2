@@ -1,9 +1,13 @@
+import { handleClaimEngineerEmailAction, type ClaimEngineerResolver } from "./claimEngineerEmail.ts";
+import { ClaimEmailError, CLAIM_EMAIL_REQUEST_BYTES, readBoundedMessageJson } from "./gmailAttachments.ts";
+
 export interface MessageDependencies {
   createClient: (url: string, key: string, options?: any) => any;
   env: (name: string) => string | undefined;
   request?: typeof fetch;
+  resolveClaimEngineerPacket?: ClaimEngineerResolver;
 }
-export function createUnifiedMessageHandler({ createClient, env, request = fetch }: MessageDependencies) {
+export function createUnifiedMessageHandler({ createClient, env, request = fetch, resolveClaimEngineerPacket }: MessageDependencies) {
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -186,7 +190,7 @@ async function findExistingMessageLog(admin: any, tenantId: string, idempotencyK
 return async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok:false,error:"method_not_allowed" },405);
-  if (Number(req.headers.get("content-length")||0)>65536) return json({ok:false,error:"payload_too_large"},413);
+  if (Number(req.headers.get("content-length")||0)>CLAIM_EMAIL_REQUEST_BYTES) return json({ok:false,error:"payload_too_large"},413);
   let adminForFailure: any = null;
   let messageLogIdForFailure: string | null = null;
   try {
@@ -205,7 +209,12 @@ return async (req: Request) => {
     if (profileError || profile?.user_id !== userData.user.id || !profile?.tenant_id || profile.account_status !== "active" || profile.disabled_at
       || !["admin","manager","supervisor","insurance","technician","accountant"].includes(profile.role)) return json({ ok: false, error: "active_profile_required" },403);
 
-    const body = await req.json().catch(() => null);
+    const parsed = await readBoundedMessageJson(req);
+    const body = parsed.body;
+    if (body && typeof body === "object" && !Array.isArray(body) && ["prepare_claim_engineer_email", "send_claim_engineer_email"].includes(body.action)) {
+      return json(await handleClaimEngineerEmailAction({ admin, caller, profile, userId: userData.user.id, body, request, resolvePacket: resolveClaimEngineerPacket, rateAllowed: recipient => checkRateLimit(admin, profile.tenant_id, userData.user.id, "email", recipient) }));
+    }
+    if (parsed.byteLength>65536 || Number(req.headers.get("content-length")||0)>65536) return json({ok:false,error:"payload_too_large"},413);
     if (!body || typeof body !== "object" || Array.isArray(body) || (body.dry_run !== undefined && typeof body.dry_run !== "boolean")) return json({ok:false,error:"invalid_request"},400);
     const channel = String(body.channel || "");
     if (!["whatsapp", "email", "phone"].includes(channel)) return json({ ok: false, error: "unsupported_channel", message: userError("unsupported_channel") }, 200);
@@ -364,6 +373,7 @@ return async (req: Request) => {
     if (savedStatus.error) return json({ok:false,status:"unconfirmed",error:"message_status_persistence_unconfirmed",logId,providerMessageId});
     return json({ ok: !!ok, status: ok ? "sent" : "failed", error: ok ? null : failure, message: ok ? null : userError(failure), logId, providerMessageId });
   } catch (error) {
+    if (error instanceof ClaimEmailError) return json({ ok:false,error:error.code },error.code === "payload_too_large" ? 413 : 400);
     const msg = error instanceof Error ? error.message : String(error || "server_function_failed");
     if (adminForFailure && messageLogIdForFailure) {
       await adminForFailure.from("message_logs").update({

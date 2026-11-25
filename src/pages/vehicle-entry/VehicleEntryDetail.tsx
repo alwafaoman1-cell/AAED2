@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ClipboardList, Download, Edit, ExternalLink, FileText, Loader2, Printer, QrCode, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowRight, ClipboardList, Download, Edit, ExternalLink, FileText, Loader2, Mail, Printer, QrCode, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,8 @@ import { vehicleEntryArrivalTime } from "@/lib/vehicleEntryArrival";
 import VehicleIntakeReceiptPanel from "@/components/vehicle-entry/VehicleIntakeReceiptPanel";
 import VehicleCustomerPortalPanel from "@/components/vehicle-entry/VehicleCustomerPortalPanel";
 import { getVehicleEntryPrintSource } from "@/lib/vehicleEntryPrintSource";
+import ClaimEngineerEmailDialog from "@/components/insurance/ClaimEngineerEmailDialog";
+import { persistedEntryClaimId } from "@/lib/claimEngineerEmail";
 
 function fmtDateTime(value?: string | null) {
   if (!value) return "—";
@@ -45,6 +47,7 @@ export default function VehicleEntryDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user, hasRole } = useAuth();
+  const canEmailEngineer = hasRole("admin", "manager", "insurance", "supervisor");
   const { i18n, t } = useTranslation();
   const english = i18n.language.startsWith("en");
   const cardTitle = (ar: string, en: string) => <div><h2 className="text-lg font-bold">{english ? en : ar}</h2>{!english && <p className="text-xs uppercase tracking-wide text-muted-foreground">{en}</p>}</div>;
@@ -52,6 +55,7 @@ export default function VehicleEntryDetail() {
   const [previewing, setPreviewing] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [printingSticker, setPrintingSticker] = useState(false);
+  const [showEngineerEmail, setShowEngineerEmail] = useState(false);
 
   const detail = useQuery({
     queryKey: queryKeys.vehicleEntries.detail(id),
@@ -173,6 +177,7 @@ export default function VehicleEntryDetail() {
   const presence = getVehicleEntryPresence(entry);
   const purpose = getVehicleEntryVisitPurpose(entry);
   const statusKey = vehicleEntryStatusKey(entry.status);
+  const engineerClaimId = persistedEntryClaimId(entry);
 
   return (
     <div className="p-6 space-y-5 max-w-7xl mx-auto" dir={i18n.language.startsWith("ar") ? "rtl" : "ltr"}>
@@ -205,9 +210,12 @@ export default function VehicleEntryDetail() {
             </Button>
           )}
           {hasRole("admin", "manager", "insurance", "supervisor", "technician") && <Button variant="outline" onClick={() => navigate(`/vehicle-entry/${entry.id}/technical-declaration`)} className="gap-2"><ClipboardList size={16} /> {i18n.language.startsWith("ar") ? "الإقرار الفني للمركبة" : "Vehicle Technical Declaration"}</Button>}
+          {canEmailEngineer && <div className="min-w-0"><Button variant="outline" disabled={!engineerClaimId} onClick={() => setShowEngineerEmail(true)} className="min-h-11 gap-2 whitespace-normal"><Mail size={16} className="shrink-0" />{english ? "Engineer email templates" : "نماذج إرسال المهندس"}</Button>{!engineerClaimId && <p className="mt-1 text-xs text-muted-foreground">{english ? "A single saved claim must be linked to this visit first." : "يجب ربط هذه الزيارة بمطالبة محفوظة واحدة أولًا."}</p>}</div>}
           <Button onClick={() => navigate(`/vehicle-entry/${entry.id}/edit`)} className="gap-2"><Edit size={16} /> تعديل</Button>
         </div>
       </div>
+
+      {canEmailEngineer && engineerClaimId && <ClaimEngineerEmailDialog open={showEngineerEmail} onOpenChange={setShowEngineerEmail} claimId={engineerClaimId} entryId={entry.id} allowOwnerTest={hasRole("admin")} />}
 
       {presence === "needs_review" && <Card className="border-warning/50 p-4 text-sm text-warning">{t("vehicleEntry.reviewDescription")}</Card>}
       {purpose === "inspection" && presence === "in_workshop" && <Card className="border-info/40 bg-info/5 p-4 text-sm">{t("vehicleEntry.inspectionNextStep")}</Card>}

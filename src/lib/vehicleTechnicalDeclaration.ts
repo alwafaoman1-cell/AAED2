@@ -253,22 +253,26 @@ function line(value: unknown, className = ""): string {
   return `<span class="write-line ${className}">${escapeHtml(value) || "&nbsp;"}</span>`;
 }
 
-function marked(selected: boolean): string {
-  return selected ? '[<span class="tick" role="img" aria-label="Checked"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8L6 12L14 3" fill="none" stroke="#14532d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>]' : "[ ]";
+function marked(selected: boolean, language: "ar" | "en" = "en"): string {
+  return selected ? `[<span class="tick" role="img" aria-label="${language === "ar" ? "محدد" : "Checked"}"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8L6 12L14 3" fill="none" stroke="#14532d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>]` : "[ ]";
 }
-function yesNo(value: TechnicalChoice): string {
-  return `Yes ${marked(value === "yes")} / No ${marked(value === "no")}`;
+function yesNo(value: TechnicalChoice, language: "ar" | "en" = "en"): string {
+  return `${language === "ar" ? "نعم" : "Yes"} ${marked(value === "yes", language)} / ${language === "ar" ? "لا" : "No"} ${marked(value === "no", language)}`;
 }
 function bulletLines(value: string, count: number): string {
   const lines = value.split(/\r?\n/);
   return Array.from({ length: count }, (_, index) => `<div class="bullet">• ${line(lines[index] || "", "bullet-line")}</div>`).join("");
 }
 
-/** The source sheet is English-only, A4 portrait, with its wording preserved verbatim. */
-export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDeclarationForm): string {
+/** Default preserves the official English source sheet; explicit language only
+ * changes display labels on a newly generated copy, never saved form values. */
+export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDeclarationForm, language: "ar" | "en" = "en"): string {
   validateTechnicalDeclarationForm(form);
-  return `<!doctype html><html lang="en" dir="ltr"><head><meta charset="utf-8" />
-  <title>VEHICLE TECHNICAL DECLARATION</title><style>
+  const t = (ar: string, en: string) => language === "ar" ? ar : en;
+  const answer = (value: TechnicalChoice) => yesNo(value, language);
+  const mark = (selected: boolean) => marked(selected, language);
+  return `<!doctype html><html lang="${language}" dir="${language === "ar" ? "rtl" : "ltr"}"><head><meta charset="utf-8" />
+  <title>${t("الإقرار الفني للمركبة", "VEHICLE TECHNICAL DECLARATION")}</title><style>
   @page{size:A4 portrait;margin:0}
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:#fff;color:#111}
@@ -306,48 +310,48 @@ export function buildVehicleTechnicalDeclarationHtml(form: VehicleTechnicalDecla
   .sign-row .date-line{width:55mm}
   .date-label{margin-left:8mm}
   @media screen{body{background:#e9e9e9}.page{box-shadow:0 2px 10px #999}}
-  @media print{html,body{background:#fff}.page{box-shadow:none;margin:0;break-after:page}}
+  @media print{html,body{background:#fff}.page{box-shadow:none;margin:0;break-after:page}}${language === "ar" ? '\n  body{font-family:Arial,sans-serif;font-size:10pt;direction:rtl}.heading{white-space:normal}.date-label{margin-left:0;margin-inline-start:8mm}' : ""}
   </style></head><body><div class="page">
     <style data-technical-font="embedded">@font-face{font-family:TemoTechnicalArabic;src:url("${technicalArabicFontData}") format("woff");font-style:normal;font-weight:700;font-display:block}</style>
-    <h1>VEHICLE TECHNICAL DECLARATION</h1><div class="rule"></div>
-    <div class="top"><div>Claim Number: ${line(form.claim_number,"vehicle-data")}</div><div>Registration Number: ${line(form.registration_number,"right-line vehicle-data")}</div>
-      <div>Make &amp; Model: ${line(form.make_model,"vehicle-data")}</div><div>Non GCC Vehicle: ${yesNo(form.non_gcc_vehicle)} Towing : ${yesNo(form.towing)}</div></div>
+    <h1>${t("الإقرار الفني للمركبة", "VEHICLE TECHNICAL DECLARATION")}</h1><div class="rule"></div>
+    <div class="top"><div>${t("رقم المطالبة:", "Claim Number:")} ${line(form.claim_number,"vehicle-data")}</div><div>${t("رقم التسجيل:", "Registration Number:")} ${line(form.registration_number,"right-line vehicle-data")}</div>
+      <div>${t("الصانع والطراز:", "Make &amp; Model:")} ${line(form.make_model,"vehicle-data")}</div><div>${t("غير خليجية:", "Non GCC Vehicle:")} ${answer(form.non_gcc_vehicle)} ${t("سحب :", "Towing :")} ${answer(form.towing)}</div></div>
     <div class="rule top-rule"></div>
     <div class="grid">
-      <section class="section"><div class="heading">1. Engine Status:</div>
-        <div class="row">(a) Cranking: &nbsp;&nbsp;&nbsp; ${yesNo(form.cranking)}</div>
-        <div class="row">(b) Engine Oil Level: OK ${marked(form.engine_oil_level === "ok")} / No ${marked(form.engine_oil_level === "no")}</div>
-        <div class="row">(c) Radiator Coolant: ${yesNo(form.radiator_coolant)}</div>
-        <div class="row">(d) Other Remarks: ${line(form.engine_other_remarks)}</div></section>
-      <section class="section"><div class="heading">2. Gear Box Status</div>
-        <div class="row">(a) Any Body crack Observed ${yesNo(form.gear_body_crack)}</div>
-        <div class="row">(b) Any oil leak observed ${yesNo(form.gear_oil_leak)}</div>
-        <div class="row">(c) Other Remarks: ${line(form.gear_other_remarks)}</div></section>
-      <section class="section"><div class="heading">3. Previous Improper Repairs Observed: ${yesNo(form.previous_improper_repairs)}</div>
-        <div>(a) If Yes, Details:</div>${bulletLines(form.previous_improper_details,3)}</section>
-      <section class="section"><div class="heading">4.Dash board warning lamp</div>
-        <div class="row">(a) Air bag warning: &nbsp; ${yesNo(form.airbag_warning)}</div>
-        <div class="row">(b) Engine warning: &nbsp; ${yesNo(form.engine_warning)}</div>
-        <div class="row">(c) ATM warning: &nbsp;&nbsp; ${yesNo(form.atm_warning)}</div>
-        <div class="row">(d) Other: ${line(form.warning_other)}</div></section>
-      <section class="section"><div class="heading">5. Chassis Status Observation:</div>
-        <div class="row">(a) Chassis Status: OK ${marked(form.chassis_status === "ok")} / Deformed ${marked(form.chassis_status === "deformed")}</div>
-        <div class="row">(b) Chassis Damages Area Details: LH ${marked(form.chassis_damage_lh)} / RH ${marked(form.chassis_damage_rh)}</div>
-        <div class="row">(c)Chassis recommend replace : LH ${marked(form.chassis_replace_lh)} / RH ${marked(form.chassis_replace_rh)}</div>
+      <section class="section"><div class="heading">${t("1. حالة المحرك:", "1. Engine Status:")}</div>
+        <div class="row">${t("(أ) دوران المحرك:", "(a) Cranking:")} &nbsp;&nbsp;&nbsp; ${answer(form.cranking)}</div>
+        <div class="row">${t("(ب) مستوى زيت المحرك:", "(b) Engine Oil Level:")} ${t("سليم", "OK")} ${mark(form.engine_oil_level === "ok")} / ${t("لا", "No")} ${mark(form.engine_oil_level === "no")}</div>
+        <div class="row">${t("(ج) سائل التبريد:", "(c) Radiator Coolant:")} ${answer(form.radiator_coolant)}</div>
+        <div class="row">${t("(د) ملاحظات أخرى:", "(d) Other Remarks:")} ${line(form.engine_other_remarks)}</div></section>
+      <section class="section"><div class="heading">${t("2. حالة ناقل الحركة", "2. Gear Box Status")}</div>
+        <div class="row">${t("(أ) وجود تشققات بالهيكل", "(a) Any Body crack Observed")} ${answer(form.gear_body_crack)}</div>
+        <div class="row">${t("(ب) وجود تسريب زيت", "(b) Any oil leak observed")} ${answer(form.gear_oil_leak)}</div>
+        <div class="row">${t("(ج) ملاحظات أخرى:", "(c) Other Remarks:")} ${line(form.gear_other_remarks)}</div></section>
+      <section class="section"><div class="heading">${t("3. إصلاحات سابقة غير سليمة:", "3. Previous Improper Repairs Observed:")} ${answer(form.previous_improper_repairs)}</div>
+        <div>${t("(أ) إذا نعم، التفاصيل:", "(a) If Yes, Details:")}</div>${bulletLines(form.previous_improper_details,3)}</section>
+      <section class="section"><div class="heading">${t("4. أضواء تحذير لوحة العدادات", "4.Dash board warning lamp")}</div>
+        <div class="row">${t("(أ) تحذير الوسادة الهوائية:", "(a) Air bag warning:")} &nbsp; ${answer(form.airbag_warning)}</div>
+        <div class="row">${t("(ب) تحذير المحرك:", "(b) Engine warning:")} &nbsp; ${answer(form.engine_warning)}</div>
+        <div class="row">${t("(ج) تحذير ناقل الحركة:", "(c) ATM warning:")} &nbsp;&nbsp; ${answer(form.atm_warning)}</div>
+        <div class="row">${t("(د) أخرى:", "(d) Other:")} ${line(form.warning_other)}</div></section>
+      <section class="section"><div class="heading">${t("5. ملاحظات حالة الشاصي:", "5. Chassis Status Observation:")}</div>
+        <div class="row">${t("(أ) حالة الشاصي:", "(a) Chassis Status:")} ${t("سليم", "OK")} ${mark(form.chassis_status === "ok")} / ${t("متضرر", "Deformed")} ${mark(form.chassis_status === "deformed")}</div>
+        <div class="row">${t("(ب) منطقة ضرر الشاصي:", "(b) Chassis Damages Area Details:")} ${t("يسار", "LH")} ${mark(form.chassis_damage_lh)} / ${t("يمين", "RH")} ${mark(form.chassis_damage_rh)}</div>
+        <div class="row">${t("(ج) يوصى باستبدال الشاصي :", "(c)Chassis recommend replace :")} ${t("يسار", "LH")} ${mark(form.chassis_replace_lh)} / ${t("يمين", "RH")} ${mark(form.chassis_replace_rh)}</div>
         <div class="bullet">• ${line(form.chassis_notes,"bullet-line")}</div></section>
-      <section class="section"><div class="heading">6. Body&amp;Floor Deformation Observed:</div>
-        <div class="row">(a) Floor deformation: ${yesNo(form.floor_deformation)}</div>
-        <div class="row">(b) Body Deformation: ${yesNo(form.body_deformation)}</div>
-        <div class="row">(c) If Yes, Details:</div>
+      <section class="section"><div class="heading">${t("6. تشوهات الهيكل والأرضية:", "6. Body&amp;Floor Deformation Observed:")}</div>
+        <div class="row">${t("(أ) تشوه الأرضية:", "(a) Floor deformation:")} ${answer(form.floor_deformation)}</div>
+        <div class="row">${t("(ب) تشوه الهيكل:", "(b) Body Deformation:")} ${answer(form.body_deformation)}</div>
+        <div class="row">${t("(ج) إذا نعم، التفاصيل:", "(c) If Yes, Details:")}</div>
         <div class="bullet">• ${line(form.body_floor_details,"bullet-line")}</div></section>
-      <section class="section wide"><div class="heading">7. Any extra accessories/Modification: ${yesNo(form.accessories_modification)} PPE: ${yesNo(form.ppe)}</div>
-        <div>(a) If Yes, Details: ${line(form.accessories_details)}</div></section>
-      <section class="section wide"><div class="heading">8. Other Observations and Remarks:</div>
+      <section class="section wide"><div class="heading">${t("7. إضافات أو تعديلات:", "7. Any extra accessories/Modification:")} ${answer(form.accessories_modification)} ${t("معدات الحماية:", "PPE:")} ${answer(form.ppe)}</div>
+        <div>${t("(أ) إذا نعم، التفاصيل:", "(a) If Yes, Details:")} ${line(form.accessories_details)}</div></section>
+      <section class="section wide"><div class="heading">${t("8. ملاحظات ومشاهدات أخرى:", "8. Other Observations and Remarks:")}</div>
         <div class="remarks">${bulletLines(form.other_observations,3)}</div></section>
     </div>
     <div class="rule signature-rule"></div>
-    <div class="footer-row"><strong>Garage Name</strong><span>:</span>${line(TECHNICAL_GARAGE_NAME,"garage-name")}</div>
-    <div class="footer-row"><div><strong>Authorized Person</strong>${form.signer_role ? `<small class="signer-role">${form.signer_role === "technician" ? "Technician" : "Report Author"}</small>` : ""}</div><span>:</span>${line(form.authorized_person)}</div>
-    <div class="sign-row"><strong>Signature</strong><span>:</span><span class="signature-box">${form.signature_data_url ? `<img src="${escapeHtml(form.signature_data_url)}" alt="Authorized person signature" />` : ""}</span><span class="date-label">Date:</span>${line(form.date,"date-line")}</div>
+    <div class="footer-row"><strong>${t("اسم الورشة", "Garage Name")}</strong><span>:</span>${line(TECHNICAL_GARAGE_NAME,"garage-name")}</div>
+    <div class="footer-row"><div><strong>${t("الشخص المخوّل", "Authorized Person")}</strong>${form.signer_role ? `<small class="signer-role">${form.signer_role === "technician" ? t("الفني", "Technician") : t("معد التقرير", "Report Author")}</small>` : ""}</div><span>:</span>${line(form.authorized_person)}</div>
+    <div class="sign-row"><strong>${t("التوقيع", "Signature")}</strong><span>:</span><span class="signature-box">${form.signature_data_url ? `<img src="${escapeHtml(form.signature_data_url)}" alt="${t("توقيع الشخص المخوّل", "Authorized person signature")}" />` : ""}</span><span class="date-label">${t("التاريخ:", "Date:")}</span>${line(form.date,"date-line")}</div>
   </div></body></html>`;
 }

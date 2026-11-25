@@ -1,4 +1,4 @@
-import { getActiveLang } from "@/i18n";
+import i18n from "i18next";
 
 type ControlledPdfField = "workOrderStatus" | "inspectionStatus" | "paymentMethod" | "claimStatus" | "stage" | "arrivalMethod" | "vehicleLocation" | "fuelLevel";
 // Display aliases only, taken from the existing workshop/status/payment UI.
@@ -25,6 +25,8 @@ const EN: Record<ControlledPdfField, Record<string, string>> = {
   stage: { "استلام": "Received", "فحص": "Inspection", "تحت الإصلاح": "In Progress", "ضبط الجودة": "Quality Check", "تسليم": "Delivery" },
 };
 
-export function pdfControlledLabel(value: string, field: ControlledPdfField, language = getActiveLang()): string {
+// Read the initialized singleton without importing the React/app bootstrap.
+// This helper is also used by lazily loaded and standalone PDF renderers.
+export function pdfControlledLabel(value: string, field: ControlledPdfField, language: "ar" | "en" = (i18n.language || "ar").slice(0, 2) === "en" ? "en" : "ar"): string {
   return language === "en" ? EN[field][value] || value : value;
 }

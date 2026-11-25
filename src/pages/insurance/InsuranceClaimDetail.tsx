@@ -82,6 +82,7 @@ import InlineWorkOrderSummary from "@/components/insurance/InlineWorkOrderSummar
 import { XCircle } from "lucide-react";
 import QuickEmailButton from "@/components/QuickEmailButton";
 import SendInsuranceEmailDialog from "@/components/insurance/SendInsuranceEmailDialog";
+import ClaimEngineerEmailDialog from "@/components/insurance/ClaimEngineerEmailDialog";
 import { useClaimDocuments } from "@/hooks/useClaimDocuments";
 import type { ClaimGeneratedDoc } from "@/hooks/useClaimDocuments";
 import { useClaimMedia, useDeleteClaimMedia, useUploadClaimMedia } from "@/hooks/useClaimMedia";
@@ -173,6 +174,7 @@ export default function InsuranceClaimDetail() {
   const workspaceText = (ar: string, en: string) => isEnglish ? en : ar;
   const amountText = (value: number | null | undefined) => value != null && Number.isFinite(value) ? `${value.toFixed(3)} OMR` : "—";
   const { hasRole } = useAuth();
+  const canEmailEngineer = hasRole("admin", "manager", "insurance", "supervisor");
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -281,6 +283,7 @@ export default function InsuranceClaimDetail() {
   const [taxInvoiceHtml, setTaxInvoiceHtml] = useState<string>("");
   const [taxInvoiceNumber, setTaxInvoiceNumber] = useState<string>("");
   const [showSendEmail, setShowSendEmail] = useState(false);
+  const [showEngineerEmail, setShowEngineerEmail] = useState(false);
 
   const findMediaByUrl = (url: string) =>
     claimMedia.find((item) => [item.url, item.public_url, item.storage_path].filter(Boolean).includes(url));
@@ -2672,6 +2675,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
         </div>
         <Button onClick={handleSave} disabled={createClaim.isPending || updateClaim.isPending || uploading} className="min-h-11 gap-2 whitespace-normal"><Save size={16} className="shrink-0" />{workspaceText("حفظ", "Save")}</Button>
         {!isNew && <Button variant="outline" size="sm" className="min-h-11 gap-2 whitespace-normal" onClick={() => setShowSendEmail(true)}><Send size={15} className="shrink-0" />{workspaceText("التواصل", "Communication")}</Button>}
+        {!isNew && canEmailEngineer && <div className="min-w-0"><Button variant="outline" size="sm" className="min-h-11 gap-2 whitespace-normal" disabled={hasUnsavedChanges || !existing?.id} onClick={() => setShowEngineerEmail(true)}><Mail size={15} className="shrink-0" />{workspaceText("نماذج إرسال المهندس", "Engineer email templates")}</Button>{hasUnsavedChanges && <p className="mt-1 text-xs text-muted-foreground">{workspaceText("احفظ تعديلات المطالبة قبل تحضير مستندات المهندس.", "Save claim changes before preparing engineer documents.")}</p>}</div>}
         {!isNew && <DropdownMenu dir={isEnglish ? "ltr" : "rtl"}>
           <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="min-h-11 gap-2"><MoreHorizontal size={17} />{workspaceText("المزيد", "More")}</Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
@@ -3679,6 +3683,7 @@ th { background:#f0f4ff; color:#1e3a8a; font-weight:700; }
       </Dialog>
 
       {/* Send Insurance Email Dialog */}
+      {!isNew && canEmailEngineer && existing?.id && <ClaimEngineerEmailDialog open={showEngineerEmail && !hasUnsavedChanges} onOpenChange={setShowEngineerEmail} claimId={existing.id} allowOwnerTest={hasRole("admin")} />}
       {!isNew && id && (
         <SendInsuranceEmailDialog
           open={showSendEmail}
