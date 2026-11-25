@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ capture: vi.fn(), addImage: vi.fn(), output: vi.fn(), paginate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ capture: vi.fn(), addImage: vi.fn(), addPage: vi.fn(), output: vi.fn(), paginate: vi.fn() }));
 vi.mock("html2canvas", () => ({ default: mocks.capture }));
 vi.mock("jspdf", () => ({ default: class {
   internal = { pageSize: { getWidth: () => 210, getHeight: () => 297 } };
   setProperties() {}
-  addPage() {}
+  addPage = mocks.addPage;
   addImage = mocks.addImage;
   output = mocks.output;
 } }));
@@ -72,6 +72,32 @@ beforeEach(() => {
 afterEach(() => { document.body.replaceChildren(); restoreFonts(); restoreFonts = () => {}; vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("offscreen PDF rendering", () => {
+  it("embeds the entire near-fit vehicle intake canvas once, centered and bounded, before any trimming or slicing", async () => {
+    const canvas = document.createElement("canvas"); canvas.width = 1961; canvas.height = 2803;
+    const fullImage = vi.spyOn(canvas, "toDataURL").mockReturnValue("data:image/jpeg;base64,FULL_SAVED_FORM_AND_FOOTER");
+    mocks.capture.mockResolvedValueOnce(canvas);
+    const pending = generatePdfFromHtml({ htmlContent: '<html><body><main class="page" data-pdf-fixed-form="vehicle-entry">Saved signed intake</main></body></html>', fileName: "intake", download: false });
+    await vi.advanceTimersByTimeAsync(100); await pending;
+    expect(fullImage).toHaveBeenCalledExactlyOnceWith("image/jpeg", 0.95);
+    expect(mocks.addImage).toHaveBeenCalledOnce(); expect(mocks.addPage).not.toHaveBeenCalled();
+    const [image, format, x, y, width, height] = mocks.addImage.mock.calls[0];
+    expect(image).toBe("data:image/jpeg;base64,FULL_SAVED_FORM_AND_FOOTER"); expect(format).toBe("JPEG");
+    expect(x).toBeGreaterThan(0); expect(y).toBe(0); expect(x + width).toBeLessThanOrEqual(210); expect(y + height).toBeLessThanOrEqual(297);
+    expect(width / height).toBeCloseTo(1961 / 2803, 12);
+    expect(mocks.paginate).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ["", 1961, 2803],
+    ['data-pdf-fixed-form="another-form"', 1961, 2803],
+    ['data-pdf-fixed-form="vehicle-entry"', 1941, 2832],
+    ['data-pdf-fixed-form="vehicle-entry"', 1961, 4000],
+  ])("keeps existing raster pagination for non-intake or genuine overflow (%s, %i×%i)", async (marker, width, height) => {
+    const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+    mocks.capture.mockResolvedValueOnce(canvas);
+    const pending = generatePdfFromHtml({ htmlContent: `<html><body><main class="page" ${marker}>Complete overflow content</main></body></html>`, fileName: "overflow", download: false });
+    await vi.advanceTimersByTimeAsync(100); await pending;
+    expect(mocks.addPage).toHaveBeenCalled(); expect(mocks.addImage.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
   it.each([
     ['data-pdf-fixed-form="vehicle-entry"', "1.2mm"],
     ["", "7mm"],

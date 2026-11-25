@@ -222,6 +222,18 @@ export function pdfCaptureScale(width: number, height: number): number {
   return Math.max(1.5, Math.min(2.5, Math.sqrt(5_500_000 / Math.max(1, width * height))));
 }
 
+/** A near-fit intake sheet may exceed A4 slightly after browser rasterization.
+ * Fit the complete image uniformly; never absorb extra pixels at a height that
+ * extends beyond the physical page or remove a footer/signature from the tail.
+ * Longer content deliberately returns null and keeps normal pagination. */
+export function fixedVehicleEntryCanvasPlacement(canvasWidth: number, canvasHeight: number, pageWidthMm: number, pageHeightMm: number) {
+  if (![canvasWidth, canvasHeight, pageWidthMm, pageHeightMm].every(value => Number.isFinite(value) && value > 0)) return null;
+  const naturalHeightMm = canvasHeight * pageWidthMm / canvasWidth;
+  if (naturalHeightMm <= pageHeightMm || naturalHeightMm > pageHeightMm * 1.02) return null;
+  const width = canvasWidth * pageHeightMm / canvasHeight;
+  return { x: (pageWidthMm - width) / 2, y: 0, width, height: pageHeightMm };
+}
+
 const fmtTimestamp = (d = new Date()) => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -392,6 +404,14 @@ export async function generatePdfFromHtml(opts: HtmlToPdfOpts): Promise<Blob> {
         // Do not crop `.page` captures: the white A4 edges are the configured margins,
         // and cropping them makes downloaded PDFs differ from the on-screen preview.
         const canvas = await renderEl(pageEls[i]);
+        const placement = pageEls.length === 1 && pageEls[i].matches('[data-pdf-fixed-form="vehicle-entry"]') && footer?.enabled !== true
+          ? fixedVehicleEntryCanvasPlacement(canvas.width, canvas.height, pageWmm, usableHmm) : null;
+        if (placement) {
+          // Use the entire original canvas, before blank-tail trimming/slicing.
+          // Both axes share one scale and every corner remains inside A4.
+          pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", placement.x, placement.y, placement.width, placement.height, undefined, "FAST");
+          continue;
+        }
         await addSlicedCanvas(canvas, pageWmm, usableHmm, 0, 0, i === 0);
       }
     } else {
