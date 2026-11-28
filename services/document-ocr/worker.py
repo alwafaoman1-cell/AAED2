@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from threading import Event, Thread
 from urllib.parse import urlparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import requests
@@ -30,9 +30,10 @@ MAX_SECONDS = 270
 # Drain supported live requests from older clients as well as the new version.
 # Their requested version stays immutable; only unfinalized jobs are claimed,
 # and the actual English-only processing policy is recorded separately.
-ENGLISH_ENGINE_VERSION = "1.0.7-en-worker"
-LEGACY_ENGINE_VERSIONS = {"1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker", "1.0.4-worker", "1.0.5-worker", "1.0.6-worker"}
+ENGLISH_ENGINE_VERSION = "1.0.8-en-worker"
+LEGACY_ENGINE_VERSIONS = {"1.0.0-worker", "1.0.1-worker", "1.0.2-worker", "1.0.3-worker", "1.0.4-worker", "1.0.5-worker", "1.0.6-worker", "1.0.7-en-worker"}
 ENGINE_VERSIONS = [*sorted(LEGACY_ENGINE_VERSIONS), ENGLISH_ENGINE_VERSION]
+SERIALIZED_CLAIM_LOCK = 763332108
 
 
 def provider_for_version(provider_name: str, engine_version: str | None = None):
@@ -87,8 +88,24 @@ class Config:
         return cls(dsn, url, secret, ref, provider, warm_reuse)
 
 
-def claim_next(connection: psycopg.Connection) -> dict | None:
+def claim_next(connection: psycopg.Connection, extraction_id: str | None = None, *, serialized: bool = False) -> dict | None:
+    if extraction_id is not None:
+        extraction_id = str(UUID(extraction_id))
     with connection.transaction():
+        if serialized:
+            locked = connection.execute("select pg_try_advisory_xact_lock(%s)", (SERIALIZED_CLAIM_LOCK,)).fetchone()
+            if not locked or locked[0] is not True:
+                return None
+            # The transaction lock serializes this check and the subsequent
+            # claim. The processing row remains the global reservation after
+            # commit, including when the connection uses a transaction pooler.
+            active = connection.execute("""
+              select exists (select 1 from public.document_extractions
+                where engine_version = any(%s) and status = 'processing'
+                  and processing_started_at >= now() - interval '6 minutes')
+            """, (ENGINE_VERSIONS,)).fetchone()
+            if not active or active[0] is not False:
+                return None
         # A container may die after claiming a lease. Do not strand its job
         # forever, and do not revive a job that exhausted its attempt budget.
         connection.execute("""
@@ -97,20 +114,22 @@ def claim_next(connection: psycopg.Connection) -> dict | None:
               lease_token = null, next_attempt_at = null
           where engine_version = any(%s) and status = 'processing' and attempt_count >= %s
             and processing_started_at < now() - interval '6 minutes'
-        """, (ENGINE_VERSIONS, MAX_ATTEMPTS))
+             and (%s::uuid is null or id = %s::uuid)
+        """, (ENGINE_VERSIONS, MAX_ATTEMPTS, extraction_id, extraction_id))
         row = connection.execute("""
           select e.id, e.tenant_id, e.file_id, e.attempt_count,
                  f.storage_bucket, f.storage_path, f.mime_type, f.sha256, f.original_file_name, e.engine_version
           from public.document_extractions e
           join public.document_files f on f.tenant_id = e.tenant_id and f.id = e.file_id
           where e.engine_version = any(%s) and e.attempt_count < %s and
-            ((e.status in ('queued', 'retryable_failed') and
+             (%s::uuid is null or e.id = %s::uuid) and
+             ((e.status in ('queued', 'retryable_failed') and
               (e.next_attempt_at is null or e.next_attempt_at <= now()))
              or (e.status = 'processing' and
                  e.processing_started_at < now() - interval '6 minutes'))
           order by e.created_at
           for update of e skip locked limit 1
-        """, (ENGINE_VERSIONS, MAX_ATTEMPTS)).fetchone()
+        """, (ENGINE_VERSIONS, MAX_ATTEMPTS, extraction_id, extraction_id)).fetchone()
         if not row:
             return None
         lease = str(uuid4())
@@ -123,18 +142,21 @@ def claim_next(connection: psycopg.Connection) -> dict | None:
         return dict(zip(("id", "tenant_id", "file_id", "attempt_count", "bucket", "path", "mime", "sha256", "filename", "engine_version"), row)) | {"lease": lease}
 
 
-def download(config: Config, job: dict) -> bytes:
+def download(config: Config, job: dict, *, max_seconds: float | None = None) -> bytes:
     if job["bucket"] != "temo-documents" or not job["path"].startswith(str(job["tenant_id"]) + "/"):
         raise InvalidDocument("DOCUMENT_STORAGE_SCOPE_INVALID")
     url = f"{config.supabase_url}/functions/v1/document-worker-download"
+    started = time.monotonic() if max_seconds is not None else None
     with requests.post(url, headers={"X-Worker-Secret": config.download_secret},
                        json={"extraction_id": str(job["id"]), "tenant_id": str(job["tenant_id"]), "lease_token": job["lease"]},
-                       timeout=(5, 25), stream=True, allow_redirects=False) as response:
+                       timeout=(5, 5 if max_seconds is not None else 25), stream=True, allow_redirects=False) as response:
         if response.status_code != 200:
             raise RuntimeError("DOCUMENT_STORAGE_DOWNLOAD_FAILED")
         response.raise_for_status()
         chunks = []; total = 0
         for chunk in response.iter_content(64 * 1024):
+            if max_seconds is not None and time.monotonic() - started > max_seconds:
+                raise RuntimeError("DOCUMENT_STORAGE_DOWNLOAD_TIMEOUT")
             total += len(chunk)
             if total > MAX_BYTES:
                 raise InvalidDocument("DOCUMENT_SIZE_INVALID")
@@ -163,12 +185,23 @@ def _run_ocr(raw: bytes, job: dict, provider_name: str, connection):
         connection.close()
 
 
-def process_isolated(raw: bytes, job: dict, provider_name: str) -> tuple[str, dict | str]:
-    parent, child = mp.Pipe(duplex=False)
-    process = mp.Process(target=_run_ocr, args=(raw, job, provider_name, child), daemon=True)
-    process.start(); child.close()
+def process_isolated(raw: bytes, job: dict, provider_name: str, *, context=None,
+                     timeout_seconds: float = MAX_SECONDS) -> tuple[str, dict | str]:
+    context = context or mp
+    parent, child = context.Pipe(duplex=False)
+    process = None
     try:
-        if parent.poll(MAX_SECONDS):
+        process = context.Process(target=_run_ocr, args=(raw, job, provider_name, child), daemon=True)
+        process.start()
+    except BaseException:
+        parent.close()
+        child.close()
+        if process is not None:
+            process.close()
+        raise
+    child.close()
+    try:
+        if parent.poll(max(0, min(MAX_SECONDS, timeout_seconds))):
             return parent.recv()
         return "retry", "DOCUMENT_OCR_TIMEOUT"
     except EOFError:
@@ -454,6 +487,9 @@ def finalize(connection: psycopg.Connection, job: dict, result: dict):
             metrics[target] = value
     if result.get("worker_mode") in {"isolated", "warm"}:
         metrics["workerMode"] = result["worker_mode"]
+    profile = result.get("preprocessing_profile")
+    if isinstance(profile, str) and re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,95}", profile):
+        metrics["preprocessingProfile"] = profile
     with connection.transaction():
         row = connection.execute("""
           select status from public.document_extractions
@@ -493,20 +529,32 @@ def fail_job(connection: psycopg.Connection, job: dict, code: str, retry: bool):
         """, (next_status, safe_code, next_status, 2 ** int(job["attempt_count"]), job["id"], job["tenant_id"], job["lease"]))
 
 
-def process_one(config: Config, connection: psycopg.Connection, ocr_runner: WarmOCRProcess | None = None) -> bool:
+def process_one(config: Config, connection: psycopg.Connection, ocr_runner: WarmOCRProcess | None = None, *,
+                extraction_id: str | None = None, serialized: bool = False, process_context=None,
+                deadline: float | None = None) -> bool:
+    if ocr_runner is not None and (process_context is not None or deadline is not None):
+        raise ValueError("DOCUMENT_HTTP_WARM_REUSE_UNSUPPORTED")
     if ocr_runner is not None and (not config.warm_reuse or config.project_ref != "rrhyglrnlveygyiandhs"):
         raise RuntimeError("DOCUMENT_WORKER_WARM_REUSE_DEVELOPMENT_ONLY")
-    job = claim_next(connection)
+    if deadline is not None and time.monotonic() >= deadline - 20:
+        return False  # Leave the durable job untouched for another invocation.
+    job = claim_next(connection, extraction_id, serialized=serialized) if extraction_id is not None or serialized else claim_next(connection)
     if not job:
         return False
     stage = "download"
     try:
         started = time.monotonic()
-        raw = download(config, job)
+        raw = download(config, job, max_seconds=30) if deadline is not None else download(config, job)
         download_ms = round((time.monotonic() - started) * 1000)
         stage = "ocr"
         started = time.monotonic()
-        outcome, result = ocr_runner.process(raw, job) if ocr_runner is not None else process_isolated(raw, job, config.provider)
+        if deadline is not None or process_context is not None:
+            remaining = MAX_SECONDS if deadline is None else max(0, deadline - time.monotonic() - 20)
+            outcome, result = process_isolated(raw, job, config.provider, context=process_context,
+                                              timeout_seconds=min(MAX_SECONDS, remaining)) if remaining > 0 else \
+                ("retry", "DOCUMENT_OCR_TIMEOUT")
+        else:
+            outcome, result = ocr_runner.process(raw, job) if ocr_runner is not None else process_isolated(raw, job, config.provider)
         if outcome == "success":
             result.setdefault("worker_process_ms", round((time.monotonic() - started) * 1000))
             result["download_ms"] = download_ms

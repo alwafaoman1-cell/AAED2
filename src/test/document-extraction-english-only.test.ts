@@ -27,9 +27,11 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("English-only extraction is a new immutable policy", () => {
   it("uses a separate queue version while recognizing old versions as historical", () => {
-    expect(DOCUMENT_ENGINE_VERSION).toBe("1.0.7-en");
+    expect(DOCUMENT_ENGINE_VERSION).toBe("1.0.8-en");
     expect(VEHICLE_ENTRY_AUTO_ENGINE_VERSION).toBe(DOCUMENT_ENGINE_VERSION);
     expect(isEnglishExtractionVersion(`${DOCUMENT_ENGINE_VERSION}-worker`)).toBe(true);
+    expect(isEnglishExtractionVersion("1.0.7-en")).toBe(true);
+    expect(isEnglishExtractionVersion("1.0.7-en-worker")).toBe(true);
     expect(isEnglishExtractionVersion("1.0.6-worker")).toBe(false);
   });
 
@@ -124,7 +126,7 @@ describe("English-only extraction is a new immutable policy", () => {
       policy: { allowAiFallback: true, aiFallbackBelow: 1 },
       aiFallback: async () => ({ owner_name: "أحمد ALI", claim_number: "C/004/01/26/9999/00001" }),
     });
-    expect(result.engineVersion).toBe("1.0.7-en");
+    expect(result.engineVersion).toBe("1.0.8-en");
     expect(result.ocrModelVersion).toBe("eng");
     expect(result.pages[0].text).toBe("");
     expect(result.fields.owner_name).toBeUndefined();

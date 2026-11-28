@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import io
 import datetime
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -17,6 +18,11 @@ from typing import Any, Callable
 MAX_BYTES = 12 * 1024 * 1024
 MAX_PAGES = 8
 MAX_PIXELS = 32_000_000
+# Processing bounds do not change the accepted document limits above. Keep
+# the whole page, and map OCR evidence back to its original coordinate space.
+OCR_MAX_SIDE = 1800
+OCR_MAX_PROCESSING_PIXELS = 2_000_000
+PREPROCESSING_PROFILE = "bounded-pages-1800-2mp-v2"
 SIGNATURES = {
     ".pdf": ("application/pdf", lambda b: b.startswith(b"%PDF-")),
     ".jpg": ("image/jpeg", lambda b: b.startswith(b"\xff\xd8\xff")),
@@ -157,6 +163,16 @@ def validate_document(raw: bytes, filename: str, declared_mime: str, expected_sh
     return ValidatedDocument(declared_mime, digest, pages, len(raw))
 
 
+def _bounded_scale(width: int, height: int) -> float:
+    return min(1.0, OCR_MAX_SIDE / max(width, height),
+               math.sqrt(OCR_MAX_PROCESSING_PIXELS / (width * height)))
+
+
+def _bounded_size(width: int, height: int) -> tuple[int, int]:
+    scale = _bounded_scale(width, height)
+    return max(1, int(width * scale)), max(1, int(height * scale))
+
+
 def _image_pages(raw: bytes, mime: str):
     from PIL import Image, ImageOps
     if mime == "application/pdf":
@@ -174,25 +190,106 @@ def _image_pages(raw: bytes, mime: str):
                 if len(re.sub(r"\s", "", native)) >= 45 and not has_document_image:
                     yield number, None, native, int(page.rect.width), int(page.rect.height)
                     continue
-                pixels = page.get_pixmap(matrix=pymupdf.Matrix(2.5, 2.5), alpha=False)
-                if pixels.width * pixels.height > MAX_PIXELS:
+                # Preserve the old 2.5x raster geometry and rejection behavior,
+                # but reject it before allocating a potentially huge pixmap.
+                original_rect = (page.rect * pymupdf.Matrix(2.5, 2.5)).irect
+                width, height = original_rect.width, original_rect.height
+                if width * height > MAX_PIXELS:
                     raise InvalidDocument("DOCUMENT_IMAGE_PIXEL_LIMIT")
-                image = Image.open(io.BytesIO(pixels.tobytes("png"))).convert("RGB")
-                yield number, image, native, image.width, image.height
+                render_scale = 2.5 * _bounded_scale(width, height)
+                pixels = page.get_pixmap(matrix=pymupdf.Matrix(render_scale, render_scale),
+                                         colorspace=pymupdf.csRGB, alpha=False)
+                try:
+                    # Raw RGB avoids PNG encoding, a PNG buffer, and decoding.
+                    image = Image.frombytes("RGB", (pixels.width, pixels.height), pixels.samples,
+                                            "raw", "RGB", pixels.stride, 1)
+                finally:
+                    pixels = None
+                # Raster rounding can exceed the side or area bound slightly.
+                bounded = _bounded_size(*image.size)
+                if image.size != bounded:
+                    resized = image.resize(bounded, Image.Resampling.LANCZOS)
+                    image.close()
+                    image = resized
+                try:
+                    yield number, image, native, width, height
+                finally:
+                    image.close()
+                    image = None
     else:
-        image = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
-        yield 1, image, "", image.width, image.height
+        with Image.open(io.BytesIO(raw)) as source:
+            original_width, original_height = source.size
+            orientation = source.getexif().get(274)
+            if orientation in (5, 6, 7, 8):
+                original_width, original_height = original_height, original_width
+            target = _bounded_size(*source.size)
+            # JPEG draft decoding can avoid allocating the full-resolution RGB
+            # image. PNG/WebP still decode once, before any model is created.
+            source.draft(source.mode, target)
+            if source.mode not in ("RGB", "L") and source.size != target:
+                # Preserve RGB conversion semantics before downsampling: some
+                # modes force nearest-neighbor, alpha resampling premultiplies,
+                # and high-bit/color modes clamp or transform during conversion.
+                # This transient buffer is released before OCR model startup.
+                converted = source.convert("RGB")
+                try:
+                    prepared = converted.resize(target, Image.Resampling.LANCZOS)
+                finally:
+                    converted.close()
+            else:
+                prepared = source.resize(target, Image.Resampling.LANCZOS) if source.size != target else source.copy()
+        try:
+            oriented = ImageOps.exif_transpose(prepared)
+            try:
+                image = oriented.convert("RGB")
+            finally:
+                oriented.close()
+        finally:
+            prepared.close()
+        try:
+            yield 1, image, "", original_width, original_height
+        finally:
+            image.close()
 
 
 def _variants(image: Any):
     import cv2
     import numpy as np
     source = np.asarray(image)
-    yield "original", source
-    lab = cv2.cvtColor(source, cv2.COLOR_RGB2LAB)
-    light, a, b = cv2.split(lab)
-    enhanced = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8)).apply(light)
-    yield "local_contrast", cv2.cvtColor(cv2.merge((enhanced, a, b)), cv2.COLOR_LAB2RGB)
+    contrast = lab = enhanced = None
+    try:
+        yield "original", source
+        lab = cv2.cvtColor(source, cv2.COLOR_RGB2LAB)
+        enhanced = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8)).apply(lab[:, :, 0])
+        lab[:, :, 0] = enhanced
+        contrast = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        # No LAB/channel/enhancement buffers survive into model inference.
+        lab = enhanced = None
+        yield "local_contrast", contrast
+    finally:
+        source = contrast = lab = enhanced = None
+
+
+def _scale_segments(segments: list[dict[str, Any]], scale_x: float, scale_y: float) -> list[dict[str, Any]]:
+    if scale_x == 1 and scale_y == 1:
+        return segments
+    mapped = []
+    for segment in segments:
+        box = segment.get("box")
+        mapped.append({**segment, "box": {
+            "x": box.get("x", 0) * scale_x, "y": box.get("y", 0) * scale_y,
+            "width": box.get("width", 0) * scale_x, "height": box.get("height", 0) * scale_y,
+        }} if box is not None else {**segment})
+    return mapped
+
+
+def _enlarge_recovery_crop(crop: Any, factor: float):
+    import cv2
+    height, width = crop.shape[:2]
+    scale = min(factor, OCR_MAX_SIDE / max(width, height))
+    target_width, target_height = max(1, int(width * scale)), max(1, int(height * scale))
+    enlarged = cv2.resize(crop, (target_width, target_height), interpolation=cv2.INTER_CUBIC)
+    return enlarged, target_width / width, target_height / height
 
 
 def _line(text: str, confidence: float, box: list[float]) -> dict[str, Any]:
@@ -248,7 +345,8 @@ class TesseractProvider:
         import pytesseract
         from pytesseract import Output
         from PIL import Image
-        data = pytesseract.image_to_data(Image.fromarray(image), lang=self.languages, config="--psm 3", output_type=Output.DICT)
+        with Image.fromarray(image) as frame:
+            data = pytesseract.image_to_data(frame, lang=self.languages, config="--psm 3", output_type=Output.DICT)
         lines: dict[tuple[int, int, int], list[tuple[str, float, list[float]]]] = {}
         for index, raw in enumerate(data["text"]):
             text = raw.strip()
@@ -310,7 +408,8 @@ class PaddleProvider:
     def _segments(results: Any) -> list[dict[str, Any]]:
         segments = []
         for item in results:
-            payload = item.json.get("res", item.json)
+            serialized = item.json
+            payload = serialized.get("res", serialized)
             texts = payload.get("rec_texts", []); scores = payload.get("rec_scores", [])
             polygons = payload.get("rec_polys", [])
             for index, text in enumerate(texts):
@@ -322,6 +421,12 @@ class PaddleProvider:
                     box = [0, 0, 0, 0]
                 segments.append(_line(text, float(scores[index]) if index < len(scores) else 0, box))
         return segments
+
+    def _predict_segments(self, pipeline: Any, image: Any) -> list[dict[str, Any]]:
+        # The default min-side resize can inflate a thin recovery row to a
+        # very wide detector tensor. Preserve our prepared/crop resolution.
+        return self._segments(pipeline.predict(image, text_det_limit_type="max",
+                                               text_det_limit_side_len=OCR_MAX_SIDE))
 
     @staticmethod
     def _result(segments: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]], float]:
@@ -463,16 +568,19 @@ class PaddleProvider:
                     continue
                 attempts += 1
                 crop = np.ascontiguousarray(image[top:bottom, left:right])
-                enlarged = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-                candidates = self._segments(self._english_pipeline.predict(enlarged))
+                enlarged, scale_x, scale_y = _enlarge_recovery_crop(crop, 2)
+                try:
+                    candidates = self._predict_segments(self._english_pipeline, enlarged)
+                finally:
+                    crop = enlarged = None
                 matches = [candidate for candidate in candidates if candidate["confidence"] >= .80 and
                            re.search(value, candidate["text"], re.I)]
                 if matches:
                     winner = max(matches, key=lambda candidate: candidate["confidence"])
-                    winner["box"] = {"x": left + winner["box"]["x"] / 2,
-                                     "y": top + winner["box"]["y"] / 2,
-                                     "width": winner["box"]["width"] / 2,
-                                     "height": winner["box"]["height"] / 2}
+                    winner["box"] = {"x": left + winner["box"]["x"] / scale_x,
+                                     "y": top + winner["box"]["y"] / scale_y,
+                                     "width": winner["box"]["width"] / scale_x,
+                                     "height": winner["box"]["height"] / scale_y}
                     recovered.append(winner)
                     break
                 if attempts >= 3:
@@ -486,7 +594,7 @@ class PaddleProvider:
         # path, so existing Arabic recovery cases remain independently tested.
         if not getattr(self, "_english_first", False):
             return self._recognize_arabic(image)
-        english_segments = self._segments(self._english_pipeline.predict(image))
+        english_segments = self._predict_segments(self._english_pipeline, image)
         if not self.complete_document(english_segments, self._result(english_segments)[2]):
             english_segments = self._recover_english_rows(image, english_segments)
         english = self._result(english_segments)
@@ -502,7 +610,7 @@ class PaddleProvider:
         return english if english_score >= arabic_score else arabic
 
     def _recognize_arabic(self, image: Any, english_segments: list[dict[str, Any]] | None = None) -> tuple[str, list[dict[str, Any]], float]:
-        segments = self._segments(self._pipeline.predict(image))
+        segments = self._predict_segments(self._pipeline, image)
         # On bilingual gate passes a dense "Year / السنة : 2021" cell may be
         # recognized as only "21السنة". Re-read that cell at higher resolution,
         # anchored to the vehicle row, rather than guessing a year from the
@@ -533,17 +641,20 @@ class PaddleProvider:
                 if right - left < 30 or bottom - top < 20:
                     continue
                 crop = np.ascontiguousarray(image[top:bottom, left:right])
-                enlarged = cv2.resize(crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-                recovered = [candidate for candidate in self._segments(self._pipeline.predict(enlarged))
-                             if candidate["confidence"] >= 0.90 and
-                             re.fullmatch(r"(?:19|20)\d{2}", candidate["text"].strip())]
+                enlarged, scale_x, scale_y = _enlarge_recovery_crop(crop, 3)
+                try:
+                    recovered = [candidate for candidate in self._predict_segments(self._pipeline, enlarged)
+                                 if candidate["confidence"] >= 0.90 and
+                                 re.fullmatch(r"(?:19|20)\d{2}", candidate["text"].strip())]
+                finally:
+                    crop = enlarged = None
                 if len({candidate["text"].strip() for candidate in recovered}) != 1:
                     continue
                 candidate = max(recovered, key=lambda item: item["confidence"])
-                candidate["box"] = {"x": left + candidate["box"]["x"] / 3,
-                                    "y": top + candidate["box"]["y"] / 3,
-                                    "width": candidate["box"]["width"] / 3,
-                                    "height": candidate["box"]["height"] / 3}
+                candidate["box"] = {"x": left + candidate["box"]["x"] / scale_x,
+                                     "y": top + candidate["box"]["y"] / scale_y,
+                                     "width": candidate["box"]["width"] / scale_x,
+                                     "height": candidate["box"]["height"] / scale_y}
                 segments.append(candidate)
                 break
         # Whole-line Arabic recognition can retain a label but drop a compact
@@ -585,7 +696,11 @@ class PaddleProvider:
                 # eight digits before accepting a separator-free date.
                 for offset in ([0, 2, 10, 12] if label_text == "تاريخ الحادث" else [0]):
                     crop = np.ascontiguousarray(image[top:bottom, left:min(image.shape[1], right + offset)])
-                    for candidate in self._segments(self._pipeline.predict(crop)):
+                    try:
+                        candidates = self._predict_segments(self._pipeline, crop)
+                    finally:
+                        crop = None
+                    for candidate in candidates:
                         value = candidate["text"].strip()
                         valid_format = (re.fullmatch(digit + r"{2,7}", value) if label_text == "رقم اللوحة"
                                         else date_pattern.fullmatch(value) or unambiguous_compact_date(value))
@@ -622,7 +737,7 @@ class PaddleProvider:
         if labels and not any(reference.search(segment["text"]) for segment in segments):
             if english_segments is None:
                 self.warm_english_model()
-                english_segments = self._segments(self._english_pipeline.predict(image))
+                english_segments = self._predict_segments(self._english_pipeline, image)
             for candidate in english_segments:
                 if candidate["confidence"] < 0.75 or not reference.search(candidate["text"]):
                     continue
@@ -636,7 +751,7 @@ class PaddleProvider:
 
 class PaddleEnglishProvider(PaddleProvider):
     """English inference only; no Arabic model, fallback or Arabic row pass."""
-    version = "PP-OCRv5-en-only-1.0.7"
+    version = "PP-OCRv5-en-only-1.0.8"
     english_only = True
 
     def warm_arabic_model(self):
@@ -646,7 +761,7 @@ class PaddleEnglishProvider(PaddleProvider):
         raise RuntimeError("DOCUMENT_ENGLISH_ONLY")
 
     def recognize(self, image: Any) -> tuple[str, list[dict[str, Any]], float]:
-        segments = self._segments(self._english_pipeline.predict(image))
+        segments = self._predict_segments(self._english_pipeline, image)
         text, segments, confidence = _english_result(*self._result(segments))
         if not self.complete_document(segments, confidence):
             segments = self._recover_english_rows(image, segments)
@@ -689,47 +804,70 @@ def process_document(raw: bytes, filename: str, declared_mime: str, provider: An
     english_only = getattr(provider_metadata, "english_only", False) is True
     output = []
     issues = []
-    for number, image, native_text, width, height in _image_pages(raw, validation.mime):
-        if english_only:
-            native_text = sanitize_english_text(native_text)
-        if image is None:
-            output.append({"number": number, "text": native_text[:200_000], "method": "native_pdf",
-                           "confidence": 0.0 if english_only and not native_text.strip() else 0.99,
-                           "width": width, "height": height, "segments": []})
-            continue
-        if provider is None:
-            if provider_factory is None:
-                raise ValueError("DOCUMENT_OCR_PROVIDER_REQUIRED")
-            initialization_started = time.monotonic()
-            provider = provider_factory()
-            provider_init_seconds = time.monotonic() - initialization_started
-            if provider is None:
-                raise ValueError("DOCUMENT_OCR_PROVIDER_REQUIRED")
-        best = ("", [], 0.0, "original")
-        best_structured_complete = False
-        for name, variant in _variants(image):
-            text, segments, confidence = provider.recognize(variant)
-            if english_only:
-                text, segments, confidence = _english_result(text, segments, confidence)
-            complete_document = getattr(provider, "complete_document", None)
-            structured_complete = bool(complete_document(segments, confidence)) if complete_document else False
-            if (structured_complete and not best_structured_complete) or \
-               (structured_complete == best_structured_complete and
-                _ocr_score(text, confidence) > _ocr_score(best[0], best[2])):
-                best = (text, segments, confidence, name)
-                best_structured_complete = structured_complete
-            stop_after_variant = getattr(provider, "should_stop_after_variant", None)
-            if (stop_after_variant(text, segments, confidence, height) if stop_after_variant else
-                    _probably_complete_ocr(text, segments, confidence, height)):
-                break
-        merged = _merge_pdf_text(native_text, best[0]) if native_text else best[0]
-        if not best[0].strip():
-            issues.append({"code": "OCR_NO_TEXT", "severity": "warning",
-                           "message": f"Page {number} contains an image but OCR found no readable text; review it manually."})
-        method = "ocr" if best[0].strip() or not native_text.strip() else "native_pdf"
-        output.append({"number": number, "text": merged[:200_000], "method": method,
-                       "confidence": round(best[2] if method == "ocr" else 0.95, 3), "width": width, "height": height,
-                       "segments": best[1][:1000], "variant": best[3]})
+    pages = _image_pages(raw, validation.mime)
+    try:
+        for number, image, native_text, width, height in pages:
+            variants = None
+            variant = None
+            try:
+                if english_only:
+                    native_text = sanitize_english_text(native_text)
+                if image is None:
+                    output.append({"number": number, "text": native_text[:200_000], "method": "native_pdf",
+                                   "confidence": 0.0 if english_only and not native_text.strip() else 0.99,
+                                   "width": width, "height": height, "segments": []})
+                    continue
+                processing_width, processing_height = getattr(image, "size", (width, height))
+                if provider is None:
+                    if provider_factory is None:
+                        raise ValueError("DOCUMENT_OCR_PROVIDER_REQUIRED")
+                    initialization_started = time.monotonic()
+                    provider = provider_factory()
+                    provider_init_seconds = time.monotonic() - initialization_started
+                    if provider is None:
+                        raise ValueError("DOCUMENT_OCR_PROVIDER_REQUIRED")
+                best = ("", [], 0.0, "original")
+                best_structured_complete = False
+                variants = _variants(image)
+                for name, variant in variants:
+                    text, segments, confidence = provider.recognize(variant)
+                    if english_only:
+                        text, segments, confidence = _english_result(text, segments, confidence)
+                    complete_document = getattr(provider, "complete_document", None)
+                    structured_complete = bool(complete_document(segments, confidence)) if complete_document else False
+                    if (structured_complete and not best_structured_complete) or \
+                       (structured_complete == best_structured_complete and
+                         _ocr_score(text, confidence) > _ocr_score(best[0], best[2])):
+                        best = (text, segments, confidence, name)
+                        best_structured_complete = structured_complete
+                    stop_after_variant = getattr(provider, "should_stop_after_variant", None)
+                    if (stop_after_variant(text, segments, confidence, processing_height) if stop_after_variant else
+                            _probably_complete_ocr(text, segments, confidence, processing_height)):
+                        break
+                    variant = None
+                merged = _merge_pdf_text(native_text, best[0]) if native_text else best[0]
+                if not best[0].strip():
+                    issues.append({"code": "OCR_NO_TEXT", "severity": "warning",
+                                   "message": f"Page {number} contains an image but OCR found no readable text; review it manually."})
+                method = "ocr" if best[0].strip() or not native_text.strip() else "native_pdf"
+                output.append({"number": number, "text": merged[:200_000], "method": method,
+                               "confidence": round(best[2] if method == "ocr" else 0.95, 3), "width": width, "height": height,
+                               "segments": _scale_segments(best[1][:1000], width / processing_width, height / processing_height),
+                               "variant": best[3], "processing_width": processing_width, "processing_height": processing_height})
+            finally:
+                variant = None
+                close_variants = getattr(variants, "close", None)
+                if close_variants:
+                    close_variants()
+                if image is not None:
+                    close_image = getattr(image, "close", None)
+                    if close_image:
+                        close_image()
+                    image = None
+    finally:
+        close_pages = getattr(pages, "close", None)
+        if close_pages:
+            close_pages()
     if english_only and not any(page["text"].strip() for page in output):
         issues.append({"code": "ENGLISH_TEXT_NOT_FOUND", "severity": "warning",
                        "message": "No reliable English document text was found; enter the data manually."})
@@ -740,4 +878,5 @@ def process_document(raw: bytes, filename: str, declared_mime: str, provider: An
             "pages": output, "issues": issues,
             "duration_ms": round((finished - started - provider_init_seconds) * 1000),
             "provider_init_ms": round(provider_init_seconds * 1000),
-            "total_duration_ms": round((finished - total_started) * 1000), "ai_used": False}
+            "total_duration_ms": round((finished - total_started) * 1000), "ai_used": False,
+            "preprocessing_profile": PREPROCESSING_PROFILE}

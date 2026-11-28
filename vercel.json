@@ -4,15 +4,59 @@
       "codex/finance-security-development": false
     }
   },
-  "daemons": {
-    "temo-document-ocr": {
-      "root": "services/document-ocr/",
-      "entrypoint": "Dockerfile",
-      "instances": { "syd1": 1 },
-      "resources": { "requests": { "memory": "2Gi" } },
-      "terminationGracePeriodSeconds": 180
+  "services": {
+    "frontend": {
+      "root": ".",
+      "framework": "vite",
+      "buildCommand": "npm run build",
+      "outputDirectory": "dist",
+      "rewrites": [
+        {
+          "source": "/((?!assets/|sw\\.js$|workbox-|manifest\\.json$|icon-).*)",
+          "destination": "/index.html"
+        }
+      ]
+    },
+    "ocr-dispatch": {
+      "root": "services/document-ocr-dispatch",
+      "framework": "hono",
+      "runtime": "nodejs24.x",
+      "entrypoint": "index.ts",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "ocr",
+          "env": "OCR_INTERNAL_URL",
+          "format": "url"
+        }
+      ],
+      "functions": {
+        "**": {
+          "maxDuration": 360,
+          "maxConcurrency": 1,
+          "regions": ["syd1"]
+        }
+      }
+    },
+    "ocr": {
+      "root": "services/document-ocr",
+      "runtime": "container",
+      "entrypoint": "Dockerfile.http",
+      "functions": {
+        "**": {
+          "maxDuration": 360,
+          "maxConcurrency": 1,
+          "regions": ["syd1"]
+        }
+      }
     }
   },
+  "crons": [
+    {
+      "path": "/api/internal/document-ocr/sweep",
+      "schedule": "* * * * *"
+    }
+  ],
   "build": {
     "env": {
       "VITE_ACCOUNTING_SETUP_ENABLED": "true",
@@ -63,8 +107,12 @@
   ],
   "rewrites": [
     {
-      "source": "/((?!assets/|sw\\.js$|workbox-|manifest\\.json$|icon-).*)",
-      "destination": "/index.html"
+      "source": "/api/internal/document-ocr/(.*)",
+      "destination": { "service": "ocr-dispatch" }
+    },
+    {
+      "source": "/(.*)",
+      "destination": { "service": "frontend" }
     }
   ]
 }

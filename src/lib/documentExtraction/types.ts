@@ -140,12 +140,13 @@ export const DEFAULT_EXTRACTION_POLICY: Readonly<ExtractionPolicy> = Object.free
 
 // A parser revision must get a new immutable extraction for the same file.
 // Previously reviewed OCR evidence is never rewritten in place.
-export const ENGLISH_DOCUMENT_ENGINE_VERSION = "1.0.7-en";
+export const ENGLISH_DOCUMENT_ENGINE_VERSION = "1.0.8-en";
 export const DOCUMENT_ENGINE_VERSION = ENGLISH_DOCUMENT_ENGINE_VERSION;
 // All new extraction flows share the English-only policy. Historical rows keep
 // their original version and are never rewritten when this default changes.
 export const VEHICLE_ENTRY_AUTO_ENGINE_VERSION = ENGLISH_DOCUMENT_ENGINE_VERSION;
 
 export function isEnglishExtractionVersion(version?: string): boolean {
-  return version === ENGLISH_DOCUMENT_ENGINE_VERSION || version === `${ENGLISH_DOCUMENT_ENGINE_VERSION}-worker`;
+  return version === ENGLISH_DOCUMENT_ENGINE_VERSION || version === `${ENGLISH_DOCUMENT_ENGINE_VERSION}-worker` ||
+    version === "1.0.7-en" || version === "1.0.7-en-worker";
 }

@@ -1,12 +1,15 @@
 import hashlib
 import io
 import unittest
+import weakref
 from unittest.mock import patch
 
 from PIL import Image
 
 from ocr_core import (ARABIC_SCRIPT, InvalidDocument, PaddleEnglishProvider, PaddleProvider,
-                      TesseractEnglishProvider, _probably_complete_ocr, process_document,
+                      TesseractEnglishProvider, OCR_MAX_SIDE, OCR_MAX_PROCESSING_PIXELS, PREPROCESSING_PROFILE,
+                      _bounded_size, _enlarge_recovery_crop, _image_pages, _scale_segments, _variants,
+                      _probably_complete_ocr, process_document,
                       sanitize_english_segments, sanitize_english_text, validate_document)
 
 
@@ -16,7 +19,7 @@ class FakePipeline:
                                 "rec_polys": [[[0, y], [500, y], [500, y + 40], [0, y + 40]]
                                               for y in y_positions]}}
 
-    def predict(self, _image):
+    def predict(self, _image, **_kwargs):
         return [type("Result", (), {"json": self.payload})()]
 
 
@@ -25,10 +28,249 @@ class SequencePipeline:
         self.pipelines = pipelines
         self.calls = 0
 
-    def predict(self, image):
+    def predict(self, image, **kwargs):
         selected = self.pipelines[self.calls]
         self.calls += 1
-        return selected.predict(image)
+        return selected.predict(image, **kwargs)
+
+
+class BoundedPreprocessingTests(unittest.TestCase):
+    @staticmethod
+    def png(size=(100, 100)):
+        with Image.new("RGB", size, "white") as image:
+            target = io.BytesIO()
+            image.save(target, format="PNG")
+            return target.getvalue()
+
+    @staticmethod
+    def provider():
+        class GeometryProvider:
+            name = "geometry-test"
+            version = "1"
+
+            def recognize(self, image):
+                height, width = image.shape[:2]
+                if max(width, height) > OCR_MAX_SIDE or width * height > OCR_MAX_PROCESSING_PIXELS:
+                    raise AssertionError("Unbounded pixels reached the provider")
+                return "Claim No: TEST-1234", [{"text": "TEST-1234", "confidence": .9,
+                    "box": {"x": width / 4, "y": height / 3, "width": width / 2, "height": height / 5}}], .9
+
+            def should_stop_after_variant(self, *_args):
+                return True
+        return GeometryProvider()
+
+    def test_bounds_preserve_aspect_and_never_upscale(self):
+        self.assertEqual(_bounded_size(1700, 1150), (1700, 1150))
+        self.assertEqual(_bounded_size(1, 1), (1, 1))
+        for width, height in ((6400, 5000), (5000, 6400), (1801, 17), (17, 1801)):
+            processed = _bounded_size(width, height)
+            self.assertLessEqual(max(processed), OCR_MAX_SIDE)
+            self.assertLessEqual(processed[0] * processed[1], OCR_MAX_PROCESSING_PIXELS)
+            self.assertLessEqual(abs(processed[0] / width - processed[1] / height), 1 / min(width, height))
+
+    def test_area_bound_reduces_a4_but_leaves_reference_png_unchanged(self):
+        self.assertEqual(_bounded_size(1700, 1150), (1700, 1150))
+        for width, height in ((1488, 2105), (2105, 1488), (1800, 1800), (1415, 1415)):
+            processed = _bounded_size(width, height)
+            self.assertLessEqual(processed[0] * processed[1], OCR_MAX_PROCESSING_PIXELS)
+            self.assertLessEqual(max(processed), OCR_MAX_SIDE)
+            self.assertLessEqual(abs(processed[0] / width - processed[1] / height), 1 / min(width, height))
+        # The A4 cap reduces both axes proportionally; it never crops away text.
+        self.assertEqual(_bounded_size(1488, 2105), (1189, 1682))
+
+    def test_non_rgb_image_modes_remain_accepted_and_keep_original_rgb_semantics(self):
+        from PIL import ImageDraw
+        for mode, background, foreground, fmt, mime in (
+                ("I;16", 512, 0, "PNG", "image/png"),
+                ("RGBA", (255, 255, 255, 0), (0, 0, 0, 0), "PNG", "image/png"),
+                ("LA", (255, 0), (0, 0), "PNG", "image/png"),
+                ("CMYK", (0, 0, 0, 0), (0, 0, 0, 255), "JPEG", "image/jpeg")):
+            with self.subTest(mode=mode):
+                with Image.new(mode, (2000, 1200), background) as source:
+                    # A thin mark near the edge must survive in the original
+                    # RGB interpretation, including transparent source pixels.
+                    ImageDraw.Draw(source).rectangle((1940, 200, 1943, 1000), fill=foreground)
+                    output = io.BytesIO(); source.save(output, format=fmt)
+                raw = output.getvalue()
+                suffix = "jpg" if fmt == "JPEG" else "png"
+                validate_document(raw, "mode." + suffix, mime)
+                with Image.open(io.BytesIO(raw)) as source:
+                    with source.convert("RGB") as rgb:
+                        with rgb.resize(_bounded_size(*rgb.size), Image.Resampling.LANCZOS) as expected:
+                            expected_pixels = expected.tobytes()
+                pages = _image_pages(raw, mime)
+                try:
+                    _, prepared, _, width, height = next(pages)
+                    self.assertEqual((width, height), (2000, 1200))
+                    self.assertEqual(prepared.mode, "RGB")
+                    self.assertEqual(prepared.tobytes(), expected_pixels)
+                finally:
+                    pages.close()
+
+    def test_large_image_is_bounded_and_evidence_maps_to_original_geometry(self):
+        result = process_document(self.png((3600, 2400)), "large.png", "image/png", self.provider())
+        page = result["pages"][0]
+        self.assertEqual((page["width"], page["height"]), (3600, 2400))
+        self.assertEqual((page["processing_width"], page["processing_height"]), _bounded_size(3600, 2400))
+        for coordinate, expected in {"x": 900, "y": 800, "width": 1800, "height": 480}.items():
+            self.assertAlmostEqual(page["segments"][0]["box"][coordinate], expected)
+        self.assertEqual(result["preprocessing_profile"], PREPROCESSING_PROFILE)
+
+    def test_exif_rotation_keeps_original_oriented_geometry(self):
+        with Image.new("RGB", (1200, 2400), "white") as image:
+            exif = image.getexif(); exif[274] = 6
+            target = io.BytesIO(); image.save(target, format="JPEG", exif=exif)
+        result = process_document(target.getvalue(), "rotated.jpg", "image/jpeg", self.provider())
+        page = result["pages"][0]
+        self.assertEqual((page["width"], page["height"]), (2400, 1200))
+        self.assertEqual((page["processing_width"], page["processing_height"]), (1800, 900))
+        self.assertEqual(page["segments"][0]["box"], {"x": 600, "y": 400, "width": 1200, "height": 240})
+
+    def test_pdf_uses_raw_rgb_without_png_roundtrip_and_keeps_old_raster_dimensions(self):
+        import pymupdf
+        with pymupdf.open() as pdf:
+            page = pdf.new_page()
+            page.insert_image(page.rect, stream=self.png())
+            expected = (page.rect * pymupdf.Matrix(2.5, 2.5)).irect
+            raw = pdf.tobytes()
+        with patch.object(pymupdf.Pixmap, "tobytes", side_effect=AssertionError("No PNG encoding")), \
+                patch("PIL.Image.open", side_effect=AssertionError("No PNG decoding")):
+            result = process_document(raw, "scan.pdf", "application/pdf", self.provider())
+        extracted = result["pages"][0]
+        self.assertEqual((extracted["width"], extracted["height"]), (expected.width, expected.height))
+        self.assertLessEqual(max(extracted["processing_width"], extracted["processing_height"]), OCR_MAX_SIDE)
+        self.assertLessEqual(extracted["processing_width"] * extracted["processing_height"], OCR_MAX_PROCESSING_PIXELS)
+        self.assertAlmostEqual(extracted["segments"][0]["box"]["x"], expected.width / 4)
+
+    def test_pdf_area_bound_applies_to_pixmap_before_ocr_and_keeps_edge_evidence(self):
+        import pymupdf
+        requested = []
+        original_get_pixmap = pymupdf.Page.get_pixmap
+
+        def checked_get_pixmap(page, *args, **kwargs):
+            raster = (page.rect * kwargs["matrix"]).irect
+            requested.append((raster.width, raster.height))
+            # PyMuPDF can round each edge upward by one pixel. The direct
+            # allocation must still be near 2MP, before the final strict clamp.
+            self.assertLessEqual(raster.width * raster.height,
+                                 OCR_MAX_PROCESSING_PIXELS + raster.width + raster.height + 1)
+            return original_get_pixmap(page, *args, **kwargs)
+
+        with pymupdf.open() as pdf:
+            page = pdf.new_page()
+            page.insert_image(page.rect, stream=self.png())
+            original = (page.rect * pymupdf.Matrix(2.5, 2.5)).irect
+            raw = pdf.tobytes()
+
+        class EdgeProvider:
+            name = "full-page-geometry-test"
+            version = "1"
+
+            def recognize(self, image):
+                height, width = image.shape[:2]
+                return "Claim No: EDGE-1234", [{"text": "EDGE-1234", "confidence": .9,
+                    "box": {"x": width - 2, "y": height - 3, "width": 2, "height": 3}}], .9
+
+            def should_stop_after_variant(self, *_args):
+                return True
+
+        with patch.object(pymupdf.Page, "get_pixmap", new=checked_get_pixmap):
+            result = process_document(raw, "a4.pdf", "application/pdf", EdgeProvider())
+        self.assertEqual(len(requested), 1)
+        extracted = result["pages"][0]
+        self.assertLessEqual(extracted["processing_width"] * extracted["processing_height"], OCR_MAX_PROCESSING_PIXELS)
+        box = extracted["segments"][0]["box"]
+        self.assertAlmostEqual(box["x"] + box["width"], original.width)
+        self.assertAlmostEqual(box["y"] + box["height"], original.height)
+
+    def test_pdf_original_pixel_limit_is_checked_before_rendering(self):
+        import pymupdf
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=3000, height=3000)
+            page.insert_image(page.rect, stream=self.png())
+            raw = pdf.tobytes()
+        with patch.object(pymupdf.Page, "get_pixmap", side_effect=AssertionError("Oversized raster must not allocate")):
+            with self.assertRaisesRegex(InvalidDocument, "DOCUMENT_IMAGE_PIXEL_LIMIT"):
+                process_document(raw, "oversized.pdf", "application/pdf", self.provider())
+
+    def test_contrast_is_pixel_equivalent_without_split_channel_retention(self):
+        import cv2
+        import numpy as np
+        pixels = np.random.default_rng(42).integers(0, 256, (80, 120, 3), dtype=np.uint8)
+        lab = cv2.cvtColor(pixels, cv2.COLOR_RGB2LAB)
+        light, a, b = cv2.split(lab)
+        enhanced = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8)).apply(light)
+        expected = cv2.cvtColor(cv2.merge((enhanced, a, b)), cv2.COLOR_LAB2RGB)
+        with Image.fromarray(pixels) as image:
+            variants = _variants(image)
+            self.assertEqual(next(variants)[0], "original")
+            name, actual = next(variants)
+            self.assertEqual(name, "local_contrast")
+            np.testing.assert_array_equal(actual, expected)
+            variants.close()
+
+    def test_recovery_upscale_is_bounded_and_uses_actual_axis_scales(self):
+        import numpy as np
+        enlarged, sx, sy = _enlarge_recovery_crop(np.zeros((101, 1400, 3), dtype=np.uint8), 2)
+        self.assertEqual(enlarged.shape[1], OCR_MAX_SIDE)
+        self.assertEqual(sx, enlarged.shape[1] / 1400)
+        self.assertEqual(sy, enlarged.shape[0] / 101)
+        original = [{"text": "VIN", "box": {"x": 10, "y": 20, "width": 30, "height": 40}}]
+        mapped = _scale_segments(original, 2, 3)
+        self.assertEqual(mapped[0]["box"], {"x": 20, "y": 60, "width": 60, "height": 120})
+        self.assertEqual(original[0]["box"]["x"], 10)
+
+    def test_every_paddle_prediction_explicitly_caps_detector_instead_of_min_side_upscale(self):
+        calls = []
+        class Pipeline:
+            def predict(self, image, **kwargs):
+                calls.append(kwargs)
+                return []
+        provider = PaddleProvider.__new__(PaddleProvider)
+        self.assertEqual(provider._predict_segments(Pipeline(), object()), [])
+        self.assertEqual(calls, [{"text_det_limit_type": "max", "text_det_limit_side_len": OCR_MAX_SIDE}])
+
+    def test_paddle_result_json_is_materialized_only_once(self):
+        calls = []
+        class Result:
+            @property
+            def json(self):
+                calls.append(True)
+                return {"res": {"rec_texts": ["VIN"], "rec_scores": [.9], "rec_polys": []}}
+        self.assertEqual(PaddleProvider._segments([Result()])[0]["text"], "VIN")
+        self.assertEqual(len(calls), 1)
+
+    def test_page_image_and_variant_release_before_next_page_and_on_provider_error(self):
+        import numpy as np
+        raw = self.png()
+        for fail in (False, True):
+            finalized, refs, images = [], [], []
+            def image_pages(*_args):
+                try:
+                    for number in (1, 2):
+                        if images:
+                            with self.assertRaises(ValueError): images[-1].getpixel((0, 0))
+                            self.assertIsNone(refs[-1]())
+                        image = Image.new("RGB", (20, 20)); images.append(image)
+                        yield number, image, "", 20, 20
+                finally:
+                    finalized.append("pages")
+            def variants(_image):
+                buffer = np.zeros((20, 20, 3), dtype=np.uint8); refs.append(weakref.ref(buffer))
+                try: yield "original", buffer
+                finally: finalized.append("variant")
+            provider = self.provider()
+            if fail:
+                provider.recognize = lambda _image: (_ for _ in ()).throw(RuntimeError("synthetic failure"))
+            with patch("ocr_core._image_pages", side_effect=image_pages), patch("ocr_core._variants", side_effect=variants):
+                if fail:
+                    with self.assertRaisesRegex(RuntimeError, "synthetic failure"):
+                        process_document(raw, "cleanup.png", "image/png", provider)
+                else:
+                    process_document(raw, "cleanup.png", "image/png", provider)
+            self.assertEqual(finalized.count("variant"), 1 if fail else 2)
+            self.assertEqual(finalized[-1], "pages")
+            with self.assertRaises(ValueError): images[-1].getpixel((0, 0))
 
 
 class FileSafetyTests(unittest.TestCase):

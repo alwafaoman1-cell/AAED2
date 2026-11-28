@@ -76,6 +76,19 @@ export async function enqueueDocumentProcessing(fileId: string, engineVersion = 
   if (error) throw error;
   const queued = data?.[0];
   if (!queued) throw new Error("DOCUMENT_WORKER_ENQUEUE_FAILED");
+  if (["queued", "retryable_failed"].includes(queued.processing_status)) {
+    // The committed cloud row is the durable task. A failed wakeup never
+    // relabels that task as failed; the server cron will pick it up again.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const kicked = await supabase.functions.invoke("document-worker-dispatch", {
+        body: { extraction_id: queued.extraction_id }, signal: controller.signal,
+      });
+      if (kicked.error) console.warn("DOCUMENT_WORKER_DISPATCH_DEFERRED");
+    } catch { console.warn("DOCUMENT_WORKER_DISPATCH_DEFERRED"); }
+    finally { clearTimeout(timer); }
+  }
   return { extractionId: queued.extraction_id, status: queued.processing_status as ProcessingStatus };
 }
 

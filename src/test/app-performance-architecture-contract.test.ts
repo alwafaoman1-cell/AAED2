@@ -43,8 +43,12 @@ describe("app performance architecture contract", () => {
   it("does not rewrite missing hashed assets to the SPA HTML shell", () => {
     const vercel = JSON.parse(read("vercel.json")) as {
       rewrites: Array<{ source: string; destination: string }>;
+      services?: { frontend?: { rewrites: Array<{ source: string; destination: string }> } };
     };
-    const spaRewrite = vercel.rewrites.find((rewrite) => rewrite.destination === "/index.html");
+    // With Services the SPA fallback belongs to the frontend service. The
+    // project-level rewrites select services before this asset exclusion runs.
+    const frontendRewrites = vercel.services?.frontend?.rewrites ?? vercel.rewrites;
+    const spaRewrite = frontendRewrites.find((rewrite) => rewrite.destination === "/index.html");
     expect(spaRewrite).toBeDefined();
 
     const matchesSpaRewrite = (path: string) => new RegExp(`^${spaRewrite!.source}$`).test(path);

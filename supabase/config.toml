@@ -19,5 +19,10 @@ verify_jwt = false
 [functions.document-worker-download]
 verify_jwt = false
 
+# Verify the user with Auth and read the extraction under caller-scoped RLS.
+# No service-role credential is used by this wakeup bridge.
+[functions.document-worker-dispatch]
+verify_jwt = false
+
 [functions.gmail-settings]
 verify_jwt = true
